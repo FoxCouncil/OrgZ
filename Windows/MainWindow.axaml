@@ -1,0 +1,130 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+		xmlns:i="https://github.com/projektanker/icons.avalonia"
+		xmlns:converters="clr-namespace:OrgZ.Converters"
+		mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+		x:Class="OrgZ.MainWindow"
+		Title="OrgZ"
+		x:CompileBindings="False">
+	<Window.Resources>
+		<converters:FileSizeConverter x:Key="FileSizeConverter" />
+	</Window.Resources>
+
+	<Window.Styles>
+		<Style Selector="Slider:horizontal">
+			<Setter Property="MinHeight" Value="14" />
+			<Setter Property="Margin" Value="0,-2,0,0" />
+			<Setter Property="Padding" Value="0" />
+
+			<!-- Track background -->
+			<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+
+			<Style Selector="^ Track">
+				<Setter Property="Height" Value="14" />
+				<Setter Property="Margin" Value="0" />
+
+				<!-- Playback head -->
+				<Style Selector="^ Thumb">
+					<Setter Property="Width" Value="14" />
+					<Setter Property="Height" Value="14" />
+					<Setter Property="CornerRadius" Value="0" />
+					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+					<Setter Property="BorderBrush" Value="{DynamicResource SystemControlHighlightAccentBrush}" />
+					<Setter Property="BorderThickness" Value="1" />
+					<Setter Property="Margin" Value="0" />
+					<Setter Property="Padding" Value="0" />
+				</Style>
+			</Style>
+		</Style>
+	</Window.Styles>
+
+	<Grid RowDefinitions="*,Auto,8*,Auto" ColumnDefinitions="*,*,*,*">
+		<Grid.Styles>
+			<Style Selector="ContentPresenter, TextBlock, TextBox">
+				<Setter Property="TextElement.FontFamily" Value="Consolas"/>
+			</Style>
+		</Grid.Styles>
+
+		<!-- Four equal boxes in the first row -->
+		<Border Grid.Row="0" Grid.Column="0" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Spacing="-14" Orientation="Vertical" VerticalAlignment="Center">
+				<TextBlock Text="{Binding TotalArtists}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="72" FontWeight="Bold"/>
+				<TextBlock Text="Artists" Foreground="{DynamicResource SystemControlForegroundBaseLowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" />
+			</StackPanel>
+		</Border>
+		<Border Grid.Row="0" Grid.Column="1" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Spacing="-14" Orientation="Vertical" VerticalAlignment="Center">
+				<TextBlock Text="{Binding TotalAlbums}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="72" FontWeight="Bold"/>
+				<TextBlock Text="Albums" Foreground="{DynamicResource SystemControlForegroundBaseLowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" />
+			</StackPanel>
+		</Border>
+		<Border Grid.Row="0" Grid.Column="2" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Spacing="-14" Orientation="Vertical" VerticalAlignment="Center">
+				<TextBlock Text="{Binding TotalSongs}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="72" FontWeight="Bold"/>
+				<TextBlock Text="Songs" Foreground="{DynamicResource SystemControlForegroundBaseLowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" />
+			</StackPanel>
+		</Border>
+		<Border Grid.Row="0" Grid.Column="3" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Spacing="-8" Orientation="Vertical" VerticalAlignment="Center">
+				<TextBlock Text="{Binding TotalDuration}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="24" FontWeight="Bold"/>
+				<TextBlock Text="dd:hh:mm:ss" Foreground="{DynamicResource SystemControlForegroundBaseLowBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="24" />
+			</StackPanel>
+		</Border>
+
+		<Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
+				<StackPanel.Styles>
+					<Style Selector="Button">
+						<Setter Property="TextElement.FontSize" Value="42"/>
+					</Style>
+				</StackPanel.Styles>
+				<Button i:Attached.Icon="fa-solid fa-backward-fast" Click="ButtonBackTrack" IsEnabled="{Binding IsBackTrackButtonEnabled}"></Button>
+				<Button i:Attached.Icon="fa-solid fa-play" Click="ButtonPlay" IsEnabled="{Binding IsPlayButtonEnabled}"></Button>
+				<Button i:Attached.Icon="fa-solid fa-pause" Click="ButtonPause" IsEnabled="{Binding IsPauseButtonEnabled}"></Button>
+				<Button i:Attached.Icon="fa-solid fa-stop" Click="ButtonStop" IsEnabled="{Binding IsStopButtonEnabled}"></Button>
+				<Button i:Attached.Icon="fa-solid fa-forward-fast" Click="ButtonNextTrack" IsEnabled="{Binding IsNextTrackButtonEnabled}"></Button>
+			</StackPanel>
+		</Border>
+		<Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+				<TextBlock Text="{Binding CurrentTrackArtist}" FontSize="16" FontWeight="Bold" />
+				<TextBlock Text=" - " FontSize="16" FontWeight="Bold" />
+				<TextBlock Text="{Binding CurrentTrackTitle}" FontSize="16" FontWeight="Bold" />
+			</StackPanel>
+		</Border>
+		<Border Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Margin="4">
+			<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+				<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
+				<Slider Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" VerticalAlignment="Center" Width="420" />
+				<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="16" FontWeight="Bold" />
+			</StackPanel>
+		</Border>
+
+		<!-- DataGrid across full second row -->
+		<DataGrid Grid.Row="2" Grid.ColumnSpan="4" Margin="4"
+				DoubleTapped="DoubleClickSongRow"
+				ItemsSource="{Binding AudioFiles}"
+				GridLinesVisibility="All"
+				IsReadOnly="True"
+				AutoGenerateColumns="False">
+			<DataGrid.Columns>
+				<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
+				<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
+				<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
+				<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />				
+				<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
+				<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
+				<DataGridTextColumn Header="Size"
+									Binding="{Binding FileSize, Converter={StaticResource FileSizeConverter}}"
+									Width="Auto" />
+				<DataGridTextColumn Header="Path" Binding="{Binding FilePath}" Width="2*" />
+			</DataGrid.Columns>
+		</DataGrid>
+
+		<StackPanel Grid.Row="3" Grid.ColumnSpan="4" Orientation="Horizontal" Spacing="12">
+			<TextBlock Text="{Binding MainStatus}" />
+		</StackPanel>
+	</Grid>
+</Window>

@@ -1,0 +1,9 @@
+root = true
+
+[*.cs]
+# Require braces
+csharp_prefer_braces = true:warning
+
+# Or use more specific rules
+dotnet_diagnostic.IDE0011.severity = warning  # Add braces
+csharp_prefer_simple_using_statement = false:warning
