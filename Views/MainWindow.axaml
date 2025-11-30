@@ -1,0 +1,148 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+		xmlns:i="https://github.com/projektanker/icons.avalonia"
+		xmlns:controls="using:OrgZ.Controls"
+		xmlns:converters="clr-namespace:OrgZ.Converters"
+		mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="450"
+		x:Class="OrgZ.Views.MainWindow"
+		Title="OrgZ"
+		x:CompileBindings="False">
+	<Window.Resources>
+		<converters:FileSizeConverter x:Key="FileSizeConverter" />
+		<LinearGradientBrush x:Key="BrushedSteelBrush" StartPoint="0,0.5" EndPoint="1,0.5">
+			<!-- Dark edge for depth -->
+			<GradientStop Color="#4A4A4A" Offset="0"/>
+			<!-- First highlight strip -->
+			<GradientStop Color="#B0B0B0" Offset="0.08"/>
+			<GradientStop Color="#C5C5C5" Offset="0.12"/>
+			<!-- Mid-tone valley -->
+			<GradientStop Color="#6B6B6B" Offset="0.18"/>
+			<GradientStop Color="#5A5A5A" Offset="0.25"/>
+			<!-- Second highlight strip -->
+			<GradientStop Color="#A8A8A8" Offset="0.32"/>
+			<GradientStop Color="#BEBEBE" Offset="0.37"/>
+			<!-- Deep shadow -->
+			<GradientStop Color="#555555" Offset="0.43"/>
+			<GradientStop Color="#484848" Offset="0.50"/>
+			<!-- Bright center highlight -->
+			<GradientStop Color="#D0D0D0" Offset="0.55"/>
+			<GradientStop Color="#E0E0E0" Offset="0.58"/>
+			<GradientStop Color="#D5D5D5" Offset="0.62"/>
+			<!-- Mid-tone -->
+			<GradientStop Color="#707070" Offset="0.68"/>
+			<GradientStop Color="#5F5F5F" Offset="0.75"/>
+			<!-- Highlight strip -->
+			<GradientStop Color="#B5B5B5" Offset="0.82"/>
+			<GradientStop Color="#A0A0A0" Offset="0.88"/>
+			<!-- Dark edge for depth -->
+			<GradientStop Color="#4A4A4A" Offset="1"/>
+		</LinearGradientBrush>
+	</Window.Resources>
+
+	<Window.Styles>
+		<Style Selector="Slider:horizontal">
+			<Setter Property="MinHeight" Value="14" />
+			<Setter Property="Margin" Value="0,-2,0,0" />
+			<Setter Property="Padding" Value="0" />
+
+			<!-- Track background -->
+			<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+
+			<Style Selector="^ Track">
+				<Setter Property="Height" Value="14" />
+				<Setter Property="Margin" Value="0" />
+
+				<!-- Playback head -->
+				<Style Selector="^ Thumb">
+					<Setter Property="Width" Value="14" />
+					<Setter Property="Height" Value="14" />
+					<Setter Property="CornerRadius" Value="0" />
+					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+					<Setter Property="BorderBrush" Value="{DynamicResource SystemControlHighlightAccentBrush}" />
+					<Setter Property="BorderThickness" Value="1" />
+					<Setter Property="Margin" Value="0" />
+					<Setter Property="Padding" Value="0" />
+				</Style>
+			</Style>
+		</Style>
+	</Window.Styles>
+
+	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,*,Auto" Background="{StaticResource BrushedSteelBrush}">
+		<Grid.Styles>
+			<Style Selector="ContentPresenter, TextBlock, TextBox">
+				<Setter Property="TextElement.FontFamily" Value="Consolas"/>
+			</Style>
+		</Grid.Styles>
+
+		<Border Grid.Row="0" Grid.Column="0" Margin="25,4,4,4" >
+			<StackPanel HorizontalAlignment="Center">
+				<StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
+					<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
+					<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" FontSize="38" CornerRadius="100" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}"></Button>
+					<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
+				</StackPanel>
+				<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,5">
+					<i:Icon Value="fa-solid fa-volume-low" Margin="0,0,5,0" />
+					<Slider Minimum="0" Maximum="100" Value="{Binding CurrentVolume, Mode=TwoWay}" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" Width="80" Height="18" Padding="0,-9,0,0" />
+					<i:Icon Value="fa-solid fa-volume-high" Margin="5,0,0,0" />
+				</StackPanel>
+			</StackPanel>
+		</Border>
+		<Border Grid.Row="0" Grid.Column="1" Margin="4"></Border>
+		<Border Grid.Row="0" Grid.Column="2" Margin="4">
+			<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="15" Height="75">
+				<StackPanel VerticalAlignment="Center">
+					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,5">
+						<TextBlock Text="{Binding CurrentTrackMetadata}" FontSize="16" FontWeight="Bold" />
+					</StackPanel>
+					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,5,10,0" Spacing="12">
+						<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
+						<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" VerticalAlignment="Center" Width="420" Height="14" Padding="0,-12,0,0" />
+						<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="16" FontWeight="Bold" />
+					</StackPanel>
+				</StackPanel>
+			</Border>
+		</Border>
+		<Border Grid.Row="0" Grid.Column="3" Margin="4"></Border>
+		<Border Grid.Row="0" Grid.Column="4" Margin="4,4,25,4">
+			<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+				<i:Icon Value="fa-solid fa-search" Margin="10,10,5,10" />
+				<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,10,10" />
+			</StackPanel>
+		</Border>
+
+		<DataGrid Grid.Row="1" Grid.ColumnSpan="5" Margin="4"
+				DoubleTapped="DataGrid_DoubleTapped"
+				SelectedItem="{Binding SelectedAudioFile, Mode=TwoWay}"
+				ItemsSource="{Binding AudioFiles}"
+				GridLinesVisibility="All"
+				IsReadOnly="True"
+				AutoGenerateColumns="False"
+				Background="{DynamicResource SystemAltHighColor}">
+			<DataGrid.Styles>
+				<Style Selector="DataGridRow">
+					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+				</Style>
+				<Style Selector="DataGridRow:nth-child(odd)">
+					<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+				</Style>
+			</DataGrid.Styles>
+			<DataGrid.Columns>
+				<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
+				<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
+				<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
+				<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />				
+				<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
+				<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
+				<DataGridTextColumn Header="Size"
+									Binding="{Binding FileSize, Converter={StaticResource FileSizeConverter}}"
+									Width="Auto" />
+				<DataGridTextColumn Header="Path" Binding="{Binding FilePath}" Width="2*" />
+			</DataGrid.Columns>
+		</DataGrid>
+
+		<controls:StatusBar Grid.Row="2" Grid.ColumnSpan="5" DataContext="{Binding StatusBar}" />
+	</Grid>
+</Window>

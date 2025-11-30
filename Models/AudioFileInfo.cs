@@ -1,9 +1,5 @@
 // Copyright (c) 2025 Fox Diller
 
-using CommunityToolkit.Mvvm.ComponentModel;
-using System;
-using System.Collections.Generic;
-
 namespace OrgZ.Models;
 
 /// <summary>

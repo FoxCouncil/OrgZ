@@ -6,16 +6,20 @@
 		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+		<ImplicitUsings>enable</ImplicitUsings>
 	</PropertyGroup>
+	<ItemGroup>
+		<AvaloniaResource Include="Assets\**" />
+	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Avalonia" Version="11.3.8" />
-		<PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.8" />
-		<PackageReference Include="Avalonia.Desktop" Version="11.3.8" />
-		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.8" />
-		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.8" />
+		<PackageReference Include="Avalonia" Version="11.3.9" />
+		<PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.9" />
+		<PackageReference Include="Avalonia.Desktop" Version="11.3.9" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.9" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.9" />
 		<!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
-		<PackageReference Include="Avalonia.Diagnostics" Version="11.3.8">
+		<PackageReference Include="Avalonia.Diagnostics" Version="11.3.9">
 			<IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
 			<PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
 		</PackageReference>
@@ -25,5 +29,25 @@
 		<PackageReference Include="Projektanker.Icons.Avalonia.FontAwesome" Version="9.6.2" />
 		<PackageReference Include="TagLibSharp" Version="2.3.0" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Compile Update="Controls\StatusBar.axaml.cs">
+	    <DependentUpon>StatusBar.axaml</DependentUpon>
+	  </Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Using Include="Avalonia.Threading" />
+	  <Using Include="CommunityToolkit.Mvvm.ComponentModel" />
+	  <Using Include="OrgZ.Controls" />
+	  <Using Include="OrgZ.Models" />
+	  <Using Include="OrgZ.Services" />
+	  <Using Include="OrgZ.Views" />
+	  <Using Include="System.Collections.ObjectModel" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Assets\" />
 	</ItemGroup>
 </Project>

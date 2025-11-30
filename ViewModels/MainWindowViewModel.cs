@@ -1,28 +1,27 @@
 ﻿// Copyright (c) 2025 Fox Diller
 
-using Avalonia.Threading;
-using CommunityToolkit.Mvvm.ComponentModel;
 using LibVLCSharp.Shared;
-using OrgZ.Models;
-using OrgZ.Services;
-using System;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace OrgZ.ViewModels;
 
 internal partial class MainWindowViewModel : ObservableObject, IDisposable
 {
+    private const string ICON_PLAY = "fa-solid fa-play";
+
+    private const string ICON_PAUSE = "fa-solid fa-pause";
+
     private readonly MainWindow _window;
 
-    private readonly LibVLC _vlc = new();
+    private readonly LibVLC _vlc;
 
-    private readonly MediaPlayer? _player;
+    private readonly MediaPlayer _player;
 
-    private AudioFileInfo _currentFile;
+    private AudioFileInfo? _currentFile;
+
+    private bool isSeeking = false;
+
+    [ObservableProperty]
+    private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
     private string _totalArtists = "-";
@@ -36,41 +35,41 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _totalDuration = "00:00:00:00";
 
+
     [ObservableProperty]
     private bool _isBackTrackButtonEnabled = false;
 
     [ObservableProperty]
-    private bool _isPlayButtonEnabled = true;
-
-    [ObservableProperty]
-    private bool _isPauseButtonEnabled = false;
-
-    [ObservableProperty]
-    private bool _isStopButtonEnabled = false;
+    private bool _isButtonPlayPauseEnabled = true;
 
     [ObservableProperty]
     private bool _isNextTrackButtonEnabled = false;
+
+
+    [ObservableProperty]
+    private string _buttonPlayPauseIcon = ICON_PLAY;
+
 
     [ObservableProperty]
     private long _currentTrackTimeNumber = 0;
 
     [ObservableProperty]
-    private string _currentTrackTime = "";
+    private string _currentTrackTime = "00:00";
 
     [ObservableProperty]
-    private string _currentTrackArtist = string.Empty;
+    private string _currentTrackMetadata = string.Empty;
 
     [ObservableProperty]
-    private string _currentTrackTitle = string.Empty;
-
-    [ObservableProperty]
-    private string _currentTrackDuration = "";
+    private string _currentTrackDuration = "00:00";
 
     [ObservableProperty]
     private long _currentTrackDurationNumber = 0;
 
     [ObservableProperty]
-    private string _mainStatus = "Ready";
+    private uint _currentVolume = 100;
+
+    [ObservableProperty]
+    private AudioFileInfo? _selectedAudioFile;
 
     internal ObservableCollection<AudioFileInfo> AudioFiles { get; } = [];
 
@@ -84,52 +83,53 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _player = new(_vlc);
 
         IsBackTrackButtonEnabled = false;
-        IsPlayButtonEnabled = false;
-        IsPauseButtonEnabled = false;
-        IsStopButtonEnabled = false;
         IsNextTrackButtonEnabled = false;
 
         _player.EndReached += (s, e) => UI(() =>
         {
             // Handle end of playback if needed
-            IsPlayButtonEnabled = true;
-            IsPauseButtonEnabled = false;
-            IsStopButtonEnabled = false;
+            ButtonPlayPauseIcon = ICON_PLAY;
+
+            UpdateMainStatus("Finished");
         });
 
         _player.Paused += (s, e) => UI(() =>
         {
-            IsPlayButtonEnabled = true;
-            IsPauseButtonEnabled = false;
-            IsStopButtonEnabled = true;
+            ButtonPlayPauseIcon = ICON_PLAY;
+
+            UpdateMainStatus("Paused");
         });
 
         _player.Playing += (s, e) => UI(() =>
         {
-            IsPlayButtonEnabled = false;
-            IsPauseButtonEnabled = true;
-            IsStopButtonEnabled = true;
+            ButtonPlayPauseIcon = ICON_PAUSE;
+
+            UpdateMainStatus("Playing");
         });
 
         _player.TimeChanged += (s, e) => UI(() =>
         {
             CurrentTrackTime = TimeSpan.FromMilliseconds(e.Time).ToString("mm\\:ss");
-            CurrentTrackTimeNumber = e.Time;
+            if (!isSeeking)
+            {
+                CurrentTrackTimeNumber = e.Time;
+            }
         });
 
         _player.Stopped += (s, e) => UI(() =>
         {
-            IsPlayButtonEnabled = true;
-            IsPauseButtonEnabled = false;
-            IsStopButtonEnabled = false;
+            ButtonPlayPauseIcon = ICON_PLAY;
+
+            UpdateMainStatus("Stopped");
         });
 
         _player.MediaChanged += (s, e) => UI(async () =>
         {
             if (e.Media == null)
             {
-                CurrentTrackArtist = string.Empty;
-                CurrentTrackTitle = string.Empty;
+                CurrentTrackMetadata = string.Empty;
+
+                UpdateMainStatus("Ready");
 
                 return;
             }
@@ -142,10 +142,78 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString("mm\\:ss");
             CurrentTrackDurationNumber = e.Media.Duration;
 
-            CurrentTrackArtist = _currentFile?.Artist ?? "Unknown Artist";
-            CurrentTrackTitle = _currentFile?.Title ?? "Unknown Title";
+            CurrentTrackMetadata = (_currentFile?.Artist ?? "Unknown Artist") + " - " + (_currentFile?.Title ?? "Unknown Title");
         });
     }
+
+    #region UI Events
+
+    public void ButtonPreviousTrack()
+    {
+
+    }
+
+    public void ButtonPlayPause()
+    {
+        UI(() =>
+        {
+            if (_player == null)
+            {
+                return;
+            }
+
+            if (_currentFile == null)
+            {
+                if (SelectedAudioFile != null)
+                {
+                    PlayAudioFile(SelectedAudioFile);
+                }
+
+                return;
+            }
+
+            if (_player.IsPlaying)
+            {
+                Pause();
+            }
+            else
+            {
+                Play();
+            }
+        });
+    }
+
+    public void ButtonNextTrack()
+    {
+
+    }
+
+    public void DataGridRowDoubleClick()
+    {
+        if (SelectedAudioFile != null)
+        {
+            PlayAudioFile(SelectedAudioFile);
+        }
+    }
+
+    internal void CurrentVolumeChanged()
+    {
+        _player.Volume = (int)CurrentVolume;
+    }
+
+    internal void CurrentTrackTimeNumberPointerPressed()
+    {
+        isSeeking = true;
+    }
+
+    internal void CurrentTrackTimeNumberPointerReleased()
+    {
+        isSeeking = false;
+        _player.Time = CurrentTrackTimeNumber;
+    }
+
+    #endregion
+
 
     #region Playback Controls
 
@@ -240,14 +308,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             foreach (AudioFileInfo audioFile in AudioFiles)
             {
-                UpdateData();
-
                 AudioFileAnalyzer.AnalyzeFile(audioFile);
 
                 UpdateMainStatus($"Analyzing file {++idx} of {AudioFiles.Count}");
             }
 
             UpdateMainStatus($"Analyzing file {idx} of {AudioFiles.Count} | COMPLETE!");
+
+            UpdateData();
         });
     }
 
@@ -273,21 +341,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         TimeSpan totalDuration = TimeSpan.FromTicks(AudioFiles.Sum(x => x.Duration?.Ticks ?? 0));
 
-        Dispatcher.UIThread.Post(() =>
+        UI(() =>
         {
-            TotalArtists = totalArtists.ToString();
+            StatusBar.TotalArtists = totalArtists.ToString();
 
-            TotalAlbums = totalAlbums.ToString();
+            StatusBar.TotalAlbums = totalAlbums.ToString();
 
-            TotalSongs = totalSongs.ToString();
+            StatusBar.TotalSongs = totalSongs.ToString();
 
-            TotalDuration = totalDuration.ToString(@"dd\:hh\:mm\:ss");
+            StatusBar.TotalDuration = totalDuration.ToString(@"dd\:hh\:mm\:ss");
         });
     }
 
     internal void UpdateTitle()
     {
-        Dispatcher.UIThread.Post(() =>
+        UI(() =>
         {
             string sep = " - ";
 
@@ -307,9 +375,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void UpdateMainStatus(string status)
     {
-        Dispatcher.UIThread.Post(() =>
+        UI(() =>
         {
-            MainStatus = status;
+            StatusBar.MainStatus = status;
         });
     }
 
@@ -317,7 +385,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #region Utils
 
-    private void UI(Action action)
+    private static void UI(Action action)
     {
         Dispatcher.UIThread.Post(action);
     }

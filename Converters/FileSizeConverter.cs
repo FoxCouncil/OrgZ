@@ -1,7 +1,6 @@
 // Copyright (c) 2025 Fox Diller
 
 using Avalonia.Data.Converters;
-using System;
 using System.Globalization;
 
 namespace OrgZ.Converters;

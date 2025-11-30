@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="using:OrgZ.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="20"
+             x:Class="OrgZ.Controls.StatusBar"
+             x:DataType="vm:StatusBarViewModel">
+    <Design.DataContext>
+        <vm:StatusBarViewModel/>
+    </Design.DataContext>
+
+    <Border Background="{DynamicResource SystemAltHighColor}">
+        <Border.Styles>
+            <Style Selector="Border">
+                <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
+                <Setter Property="BorderThickness" Value="0,1,0,0"/>
+            </Style>
+        </Border.Styles>
+
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+            <Grid.Styles>
+                <Style Selector="Grid > Border">
+                    <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
+                    <Setter Property="BorderThickness" Value="0,0,1,0"/>
+                    <Setter Property="Padding" Value="4,0"/>
+                </Style>
+
+                <Style Selector="Grid > Border:last-child">
+                    <Setter Property="BorderThickness" Value="0"/>
+                </Style>
+            </Grid.Styles>
+
+	        <Border Grid.Column="0">
+                <TextBlock Text="{Binding MainStatus}" />
+            </Border>
+
+            <Border Grid.Column="1">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding TotalArtists}" />
+                    <TextBlock Text="artists" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="2">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding TotalAlbums}" />
+                    <TextBlock Text="albums" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="3">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding TotalSongs}" />
+                    <TextBlock Text="songs" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="4">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding TotalDuration}" />
+                    <TextBlock Text="time" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+
+</UserControl>
