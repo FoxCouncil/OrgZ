@@ -10,7 +10,7 @@
         <vm:StatusBarViewModel/>
     </Design.DataContext>
 
-    <Border Background="{DynamicResource SystemAltHighColor}">
+    <Border>
         <Border.Styles>
             <Style Selector="Border">
                 <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>

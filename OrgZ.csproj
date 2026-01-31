@@ -7,9 +7,13 @@
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 		<ImplicitUsings>enable</ImplicitUsings>
+		<ApplicationIcon>Assets\app.ico</ApplicationIcon>
 	</PropertyGroup>
 	<ItemGroup>
 		<AvaloniaResource Include="Assets\**" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Content Include="Assets\app.ico" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -45,9 +49,5 @@
 	  <Using Include="OrgZ.Services" />
 	  <Using Include="OrgZ.Views" />
 	  <Using Include="System.Collections.ObjectModel" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="Assets\" />
 	</ItemGroup>
 </Project>
