@@ -11,37 +11,13 @@
 		x:CompileBindings="False">
 	<Window.Resources>
 		<converters:FileSizeConverter x:Key="FileSizeConverter" />
-		<LinearGradientBrush x:Key="BrushedSteelBrush" StartPoint="0,0.5" EndPoint="1,0.5">
-			<!-- Dark edge for depth -->
-			<GradientStop Color="#4A4A4A" Offset="0"/>
-			<!-- First highlight strip -->
-			<GradientStop Color="#B0B0B0" Offset="0.08"/>
-			<GradientStop Color="#C5C5C5" Offset="0.12"/>
-			<!-- Mid-tone valley -->
-			<GradientStop Color="#6B6B6B" Offset="0.18"/>
-			<GradientStop Color="#5A5A5A" Offset="0.25"/>
-			<!-- Second highlight strip -->
-			<GradientStop Color="#A8A8A8" Offset="0.32"/>
-			<GradientStop Color="#BEBEBE" Offset="0.37"/>
-			<!-- Deep shadow -->
-			<GradientStop Color="#555555" Offset="0.43"/>
-			<GradientStop Color="#484848" Offset="0.50"/>
-			<!-- Bright center highlight -->
-			<GradientStop Color="#D0D0D0" Offset="0.55"/>
-			<GradientStop Color="#E0E0E0" Offset="0.58"/>
-			<GradientStop Color="#D5D5D5" Offset="0.62"/>
-			<!-- Mid-tone -->
-			<GradientStop Color="#707070" Offset="0.68"/>
-			<GradientStop Color="#5F5F5F" Offset="0.75"/>
-			<!-- Highlight strip -->
-			<GradientStop Color="#B5B5B5" Offset="0.82"/>
-			<GradientStop Color="#A0A0A0" Offset="0.88"/>
-			<!-- Dark edge for depth -->
-			<GradientStop Color="#4A4A4A" Offset="1"/>
-		</LinearGradientBrush>
 	</Window.Resources>
 
 	<Window.Styles>
+		<Style Selector="Button">
+			<Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}"/>
+		</Style>
+
 		<Style Selector="Slider:horizontal">
 			<Setter Property="MinHeight" Value="14" />
 			<Setter Property="Margin" Value="0,-2,0,0" />
@@ -69,7 +45,10 @@
 		</Style>
 	</Window.Styles>
 
-	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,*,Auto" Background="{StaticResource BrushedSteelBrush}">
+	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,*,Auto">
+		<Grid.Background>
+			<ImageBrush Source="avares://Orgz/Assets/metal.png" Opacity=".7" TileMode="Tile" Stretch="Fill" AlignmentX="Left" AlignmentY="Top" DestinationRect="0,0,128,128" />
+		</Grid.Background>
 		<Grid.Styles>
 			<Style Selector="ContentPresenter, TextBlock, TextBox">
 				<Setter Property="TextElement.FontFamily" Value="Consolas"/>
@@ -79,9 +58,9 @@
 		<Border Grid.Row="0" Grid.Column="0" Margin="25,4,4,4" >
 			<StackPanel HorizontalAlignment="Center">
 				<StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
-					<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
-					<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" FontSize="38" CornerRadius="100" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}"></Button>
-					<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
+					<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
+					<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" Width="64" Height="64" FontSize="42" CornerRadius="100" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}" Padding="{Binding ButtonPlayPausePadding}"></Button>
+					<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
 				</StackPanel>
 				<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,5">
 					<i:Icon Value="fa-solid fa-volume-low" Margin="0,0,5,0" />

@@ -1,5 +1,6 @@
 ﻿// Copyright (c) 2025 Fox Diller
 
+using Avalonia;
 using LibVLCSharp.Shared;
 
 namespace OrgZ.ViewModels;
@@ -8,7 +9,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const string ICON_PLAY = "fa-solid fa-play";
 
+    private readonly Thickness ICON_PLAY_PADDING = new(4, 0, 0, 0);
+
     private const string ICON_PAUSE = "fa-solid fa-pause";
+
+    private readonly Thickness ICON_PAUSE_PADDING = new(0, 0, 0, 0);
 
     private readonly MainWindow _window;
 
@@ -49,6 +54,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _buttonPlayPauseIcon = ICON_PLAY;
 
+    [ObservableProperty]
+    private Thickness _buttonPlayPausePadding;
+
 
     [ObservableProperty]
     private long _currentTrackTimeNumber = 0;
@@ -80,15 +88,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _window = window;
 
         _vlc = new();
+        _vlc.SetAppId("org.foxdiller.orgz", "0.1", "Assets/app.ico");
+        _vlc.SetUserAgent("OrgZ 0.1", "orgz0.1/player");
+
         _player = new(_vlc);
 
         IsBackTrackButtonEnabled = false;
         IsNextTrackButtonEnabled = false;
 
+        ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
         _player.EndReached += (s, e) => UI(() =>
         {
             // Handle end of playback if needed
             ButtonPlayPauseIcon = ICON_PLAY;
+            ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
             UpdateMainStatus("Finished");
         });
@@ -96,6 +110,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _player.Paused += (s, e) => UI(() =>
         {
             ButtonPlayPauseIcon = ICON_PLAY;
+            ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
             UpdateMainStatus("Paused");
         });
@@ -103,6 +118,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _player.Playing += (s, e) => UI(() =>
         {
             ButtonPlayPauseIcon = ICON_PAUSE;
+            ButtonPlayPausePadding = ICON_PAUSE_PADDING;
 
             UpdateMainStatus("Playing");
         });
@@ -119,6 +135,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _player.Stopped += (s, e) => UI(() =>
         {
             ButtonPlayPauseIcon = ICON_PLAY;
+            ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
             UpdateMainStatus("Stopped");
         });
