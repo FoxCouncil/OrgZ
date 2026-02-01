@@ -95,7 +95,7 @@
 		<DataGrid Grid.Row="1" Grid.ColumnSpan="5" Margin="4"
 				DoubleTapped="DataGrid_DoubleTapped"
 				SelectedItem="{Binding SelectedAudioFile, Mode=TwoWay}"
-				ItemsSource="{Binding AudioFiles}"
+				ItemsSource="{Binding FilteredAudioFiles}"
 				GridLinesVisibility="All"
 				IsReadOnly="True"
 				AutoGenerateColumns="False"
