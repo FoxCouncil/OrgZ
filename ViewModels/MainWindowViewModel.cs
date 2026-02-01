@@ -79,9 +79,47 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private AudioFileInfo? _selectedAudioFile;
 
+    [ObservableProperty]
+    private string _searchText = string.Empty;
+
     internal ObservableCollection<AudioFileInfo> AudioFiles { get; } = [];
 
+    internal ObservableCollection<AudioFileInfo> FilteredAudioFiles { get; } = [];
+
     internal bool IsMediaLoaded => _player?.Media != null;
+
+    partial void OnSearchTextChanged(string value)
+    {
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        FilteredAudioFiles.Clear();
+
+        var searchText = SearchText?.Trim() ?? string.Empty;
+
+        IEnumerable<AudioFileInfo> filtered;
+
+        if (string.IsNullOrEmpty(searchText))
+        {
+            filtered = AudioFiles;
+        }
+        else
+        {
+            filtered = AudioFiles.Where(file =>
+                (file.Artist?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (file.Album?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (file.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (file.FileName?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (file.Year?.ToString().Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        foreach (var file in filtered)
+        {
+            FilteredAudioFiles.Add(file);
+        }
+    }
 
     public MainWindowViewModel(MainWindow window)
     {
@@ -292,6 +330,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             AudioFiles.Add(file);
         }
+
+        ApplyFilter();
 
         UpdateTitle();
 
