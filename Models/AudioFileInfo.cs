@@ -28,6 +28,11 @@ public partial class AudioFileInfo : ObservableObject
     public long FileSize { get; init; }
 
     /// <summary>
+    /// Last modified time (UTC) from filesystem
+    /// </summary>
+    public DateTime LastModified { get; init; }
+
+    /// <summary>
     /// Whether the file has been analyzed with TagLib
     /// </summary>
     [ObservableProperty]

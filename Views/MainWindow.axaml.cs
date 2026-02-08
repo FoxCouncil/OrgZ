@@ -54,4 +54,10 @@ public partial class MainWindow : Window
     {
         _viewModel.CurrentTrackTimeNumberPointerReleased();
     }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _viewModel.Dispose();
+        base.OnClosed(e);
+    }
 }
