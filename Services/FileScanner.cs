@@ -57,7 +57,8 @@ public class FileScanner
                             FilePath = filePath,
                             FileName = fileInfo.Name,
                             Extension = extension,
-                            FileSize = fileInfo.Length
+                            FileSize = fileInfo.Length,
+                            LastModified = fileInfo.LastWriteTimeUtc
                         });
                     }
                 }
