@@ -21,6 +21,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly MediaPlayer _player;
 
+    private Media? _currentMedia;
+
     private AudioFileInfo? _currentFile;
 
     private bool isSeeking = false;
@@ -119,6 +121,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             FilteredAudioFiles.Add(file);
         }
+
+        UpdateNavigationButtons();
     }
 
     public MainWindowViewModel(MainWindow window)
@@ -131,18 +135,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player = new(_vlc);
 
-        IsBackTrackButtonEnabled = false;
-        IsNextTrackButtonEnabled = false;
-
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
         _player.EndReached += (s, e) => UI(() =>
         {
-            // Handle end of playback if needed
+            if (_currentFile != null && FilteredAudioFiles.Count > 0)
+            {
+                int index = FilteredAudioFiles.IndexOf(_currentFile);
+                if (index >= 0 && index < FilteredAudioFiles.Count - 1)
+                {
+                    PlayAudioFile(FilteredAudioFiles[index + 1]);
+                    return;
+                }
+            }
+
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
             UpdateMainStatus("Finished");
+            UpdateNavigationButtons();
         });
 
         _player.Paused += (s, e) => UI(() =>
@@ -205,7 +216,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void ButtonPreviousTrack()
     {
+        if (_currentFile == null || FilteredAudioFiles.Count == 0) return;
 
+        int index = FilteredAudioFiles.IndexOf(_currentFile);
+        if (index > 0)
+        {
+            PlayAudioFile(FilteredAudioFiles[index - 1]);
+        }
     }
 
     public void ButtonPlayPause()
@@ -240,7 +257,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void ButtonNextTrack()
     {
+        if (_currentFile == null || FilteredAudioFiles.Count == 0) return;
 
+        int index = FilteredAudioFiles.IndexOf(_currentFile);
+        if (index >= 0 && index < FilteredAudioFiles.Count - 1)
+        {
+            PlayAudioFile(FilteredAudioFiles[index + 1]);
+        }
     }
 
     public void DataGridRowDoubleClick()
@@ -282,10 +305,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         UI(() =>
         {
             _currentFile = file;
+            SelectedAudioFile = file;
 
-            Media media = new(_vlc, _currentFile.FilePath, FromType.FromPath);
+            _currentMedia?.Dispose();
+            _currentMedia = new Media(_vlc, _currentFile.FilePath, FromType.FromPath);
 
-            _ = _player.Play(media);
+            _ = _player.Play(_currentMedia);
+
+            UpdateNavigationButtons();
         });
     }
 
@@ -322,20 +349,66 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        List<AudioFileInfo> audioFiles = await FileScanner.ScanDirectoryAsync(App.FolderPath, recursive: true);
+        LibraryCache.EnsureCreated();
+
+        UpdateMainStatus("Scanning files...");
+
+        List<AudioFileInfo> diskFiles = await FileScanner.ScanDirectoryAsync(App.FolderPath, recursive: true);
+
+        UpdateMainStatus("Loading cache...");
+
+        var cache = await Task.Run(() => LibraryCache.LoadAll());
+
+        // Build diff: cached unchanged, new/modified, deleted
+        var cachedFiles = new List<AudioFileInfo>();
+        var filesToAnalyze = new List<AudioFileInfo>();
+        var diskPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var diskFile in diskFiles)
+        {
+            diskPaths.Add(diskFile.FilePath);
+
+            if (cache.TryGetValue(diskFile.FilePath, out var cached)
+                && cached.LastModified == diskFile.LastModified
+                && cached.File.FileSize == diskFile.FileSize)
+            {
+                // Cache hit — use cached entry directly
+                cachedFiles.Add(cached.File);
+            }
+            else
+            {
+                // New or modified — needs analysis
+                filesToAnalyze.Add(diskFile);
+            }
+        }
+
+        var deletedPaths = cache.Keys.Where(p => !diskPaths.Contains(p)).ToList();
 
         AudioFiles.Clear();
 
-        foreach (AudioFileInfo file in audioFiles)
+        // Add cached (already analyzed) files first for instant display
+        foreach (var file in cachedFiles)
+        {
+            AudioFiles.Add(file);
+        }
+
+        // Add new/modified files (not yet analyzed)
+        foreach (var file in filesToAnalyze)
         {
             AudioFiles.Add(file);
         }
 
         ApplyFilter();
-
         UpdateTitle();
 
-        await AnalyzeAllFilesAsync();
+        // Only analyze the delta
+        await AnalyzeAllFilesAsync(filesToAnalyze);
+
+        // Clean up deleted entries from cache
+        if (deletedPaths.Count > 0)
+        {
+            await Task.Run(() => LibraryCache.RemoveFiles(deletedPaths));
+        }
 
         UpdateData();
     }
@@ -357,20 +430,28 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return [.. AudioFiles.Where(AudioFileAnalyzer.Filters.IsMp3File)];
     }
 
-    private async Task AnalyzeAllFilesAsync()
+    private async Task AnalyzeAllFilesAsync(List<AudioFileInfo> filesToAnalyze)
     {
+        if (filesToAnalyze.Count == 0)
+        {
+            UpdateMainStatus("Ready (loaded from cache)");
+            return;
+        }
+
         await Task.Run(() =>
         {
             int idx = 0;
 
-            foreach (AudioFileInfo audioFile in AudioFiles)
+            foreach (AudioFileInfo audioFile in filesToAnalyze)
             {
                 AudioFileAnalyzer.AnalyzeFile(audioFile);
 
-                UpdateMainStatus($"Analyzing file {++idx} of {AudioFiles.Count}");
+                LibraryCache.UpsertFile(audioFile, audioFile.LastModified);
+
+                UpdateMainStatus($"Analyzing file {++idx} of {filesToAnalyze.Count}");
             }
 
-            UpdateMainStatus($"Analyzing file {idx} of {AudioFiles.Count} | COMPLETE!");
+            UpdateMainStatus($"Analyzing file {idx} of {filesToAnalyze.Count} | COMPLETE!");
 
             UpdateData();
         });
@@ -430,6 +511,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
+    internal void UpdateNavigationButtons()
+    {
+        if (_currentFile == null || FilteredAudioFiles.Count == 0)
+        {
+            IsBackTrackButtonEnabled = false;
+            IsNextTrackButtonEnabled = false;
+            return;
+        }
+
+        int index = FilteredAudioFiles.IndexOf(_currentFile);
+        IsBackTrackButtonEnabled = index > 0;
+        IsNextTrackButtonEnabled = index >= 0 && index < FilteredAudioFiles.Count - 1;
+    }
+
     internal void UpdateMainStatus(string status)
     {
         UI(() =>
@@ -451,6 +546,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _currentMedia?.Dispose();
         _player?.Dispose();
         _vlc?.Dispose();
     }
