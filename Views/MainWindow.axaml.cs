@@ -45,6 +45,11 @@ public partial class MainWindow : Window
         _viewModel.CurrentVolumeChanged();
     }
 
+    private void ContextMenu_Play(object? sender, RoutedEventArgs e)
+    {
+        _viewModel.DataGridRowDoubleClick();
+    }
+
     private void Slider_PointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
         _viewModel.CurrentTrackTimeNumberPointerPressed();
@@ -53,6 +58,40 @@ public partial class MainWindow : Window
     private void Slider_PointerReleased(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
     {
         _viewModel.CurrentTrackTimeNumberPointerReleased();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        // Don't intercept when typing in the search box
+        if (FocusManager?.GetFocusedElement() is TextBox)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Space:
+                _viewModel.ButtonPlayPause();
+                e.Handled = true;
+                break;
+        }
+
+        if (e.KeyModifiers == KeyModifiers.Control)
+        {
+            switch (e.Key)
+            {
+                case Key.Left:
+                    _viewModel.ButtonPreviousTrack();
+                    e.Handled = true;
+                    break;
+                case Key.Right:
+                    _viewModel.ButtonNextTrack();
+                    e.Handled = true;
+                    break;
+            }
+        }
     }
 
     protected override void OnClosed(EventArgs e)

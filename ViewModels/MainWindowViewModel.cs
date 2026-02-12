@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025 Fox Diller
 
 using Avalonia;
+using Avalonia.Media.Imaging;
 using LibVLCSharp.Shared;
 
 namespace OrgZ.ViewModels;
@@ -76,7 +77,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private long _currentTrackDurationNumber = 0;
 
     [ObservableProperty]
-    private uint _currentVolume = 100;
+    private uint _currentVolume = (uint)Settings.Get("OrgZ.Volume", 100);
+
+    [ObservableProperty]
+    private Bitmap? _currentAlbumArt;
 
     [ObservableProperty]
     private AudioFileInfo? _selectedAudioFile;
@@ -130,10 +134,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _window = window;
 
         _vlc = new();
-        _vlc.SetAppId("org.foxdiller.orgz", "0.1", "Assets/app.ico");
-        _vlc.SetUserAgent("OrgZ 0.1", "orgz0.1/player");
+        _vlc.SetAppId("org.foxdiller.orgz", App.Version, "Assets/app.ico");
+        _vlc.SetUserAgent($"OrgZ {App.Version}", $"orgz{App.Version}/player");
 
         _player = new(_vlc);
+        _player.Volume = (int)CurrentVolume;
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
@@ -148,6 +153,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     return;
                 }
             }
+
+            if (_currentFile != null)
+            {
+                _currentFile.IsPlaying = false;
+                _currentFile = null;
+            }
+
+            CurrentAlbumArt?.Dispose();
+            CurrentAlbumArt = null;
 
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
@@ -277,6 +291,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal void CurrentVolumeChanged()
     {
         _player.Volume = (int)CurrentVolume;
+        Settings.Set("OrgZ.Volume", (int)CurrentVolume);
+        Settings.Save();
     }
 
     internal void CurrentTrackTimeNumberPointerPressed()
@@ -304,8 +320,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
+            if (_currentFile != null)
+            {
+                _currentFile.IsPlaying = false;
+            }
+
             _currentFile = file;
+            _currentFile.IsPlaying = true;
             SelectedAudioFile = file;
+
+            CurrentAlbumArt?.Dispose();
+            CurrentAlbumArt = ExtractAlbumArt(_currentFile.FilePath);
 
             _currentMedia?.Dispose();
             _currentMedia = new Media(_vlc, _currentFile.FilePath, FromType.FromPath);
@@ -499,7 +524,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             List<string> parts = [];
 
-            parts.Add("OrgZ");
+            parts.Add($"OrgZ v{App.Version}");
             parts.Add(App.FolderPath);
 
             if (AudioFiles.Count > 0)
@@ -540,6 +565,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private static void UI(Action action)
     {
         Dispatcher.UIThread.Post(action);
+    }
+
+    private static Bitmap? ExtractAlbumArt(string filePath)
+    {
+        try
+        {
+            using var file = TagLib.File.Create(filePath);
+            if (file.Tag.Pictures?.Length > 0)
+            {
+                var picture = file.Tag.Pictures[0];
+                using var stream = new MemoryStream(picture.Data.Data);
+                return new Bitmap(stream);
+            }
+        }
+        catch
+        {
+            // Silently fail - no album art is fine
+        }
+
+        return null;
     }
 
     #endregion

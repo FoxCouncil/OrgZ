@@ -33,6 +33,12 @@ public partial class AudioFileInfo : ObservableObject
     public DateTime LastModified { get; init; }
 
     /// <summary>
+    /// Whether this file is currently playing
+    /// </summary>
+    [ObservableProperty]
+    private bool _isPlaying;
+
+    /// <summary>
     /// Whether the file has been analyzed with TagLib
     /// </summary>
     [ObservableProperty]
