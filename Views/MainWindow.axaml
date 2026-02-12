@@ -45,7 +45,7 @@
 		</Style>
 	</Window.Styles>
 
-	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,*,Auto">
+	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
 		<Grid.Background>
 			<ImageBrush Source="avares://Orgz/Assets/metal.png" Opacity=".7" TileMode="Tile" Stretch="Fill" AlignmentX="Left" AlignmentY="Top" DestinationRect="0,0,128,128" />
 		</Grid.Background>
@@ -69,8 +69,15 @@
 				</StackPanel>
 			</StackPanel>
 		</Border>
-		<Border Grid.Row="0" Grid.Column="1" Margin="4"></Border>
-		<Border Grid.Row="0" Grid.Column="2" Margin="4">
+		<Border Grid.Row="0" Grid.Column="2" Margin="4" VerticalAlignment="Center">
+			<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="6" Width="75" Height="75" ClipToBounds="True">
+				<Panel>
+					<Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}" />
+					<i:Icon Value="fa-solid fa-music" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNull}}" Opacity="0.4" />
+				</Panel>
+			</Border>
+		</Border>
+		<Border Grid.Row="0" Grid.Column="3" Margin="4">
 			<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="15" Height="75">
 				<StackPanel VerticalAlignment="Center">
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,5">
@@ -84,22 +91,48 @@
 				</StackPanel>
 			</Border>
 		</Border>
-		<Border Grid.Row="0" Grid.Column="3" Margin="4"></Border>
-		<Border Grid.Row="0" Grid.Column="4" Margin="4,4,25,4">
+		<Border Grid.Row="0" Grid.Column="5" Margin="4,4,25,4">
 			<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
 				<i:Icon Value="fa-solid fa-search" Margin="10,10,5,10" />
 				<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,10,10" />
 			</StackPanel>
 		</Border>
 
-		<DataGrid Grid.Row="1" Grid.ColumnSpan="5" Margin="4"
+		<DataGrid x:Name="MainDataGrid" Grid.Row="1" Grid.ColumnSpan="6" Margin="4"
 				DoubleTapped="DataGrid_DoubleTapped"
 				SelectedItem="{Binding SelectedAudioFile, Mode=TwoWay}"
 				ItemsSource="{Binding FilteredAudioFiles}"
 				GridLinesVisibility="All"
 				IsReadOnly="True"
 				AutoGenerateColumns="False"
+				CanUserSortColumns="True"
+				SelectionMode="Single"
 				Background="{DynamicResource SystemAltHighColor}">
+			<DataGrid.ContextMenu>
+				<ContextMenu>
+					<MenuItem Header="{Binding #MainDataGrid.SelectedItem.Title, FallbackValue='(No Title)'}" FontWeight="Bold" IsHitTestVisible="False" />
+					<MenuItem Header="{Binding #MainDataGrid.SelectedItem.Artist, FallbackValue='(No Artist)'}" IsHitTestVisible="False" FontStyle="Italic" />
+					<Separator />
+					<MenuItem Header="Play" Click="ContextMenu_Play" />
+					<MenuItem Header="Play Next" IsEnabled="False" />
+					<MenuItem Header="Add to Queue" IsEnabled="False" />
+					<Separator />
+					<MenuItem Header="Get Info" IsEnabled="False" />
+					<MenuItem Header="Rating" IsEnabled="False">
+						<MenuItem Header="1 Star" IsEnabled="False" />
+						<MenuItem Header="2 Stars" IsEnabled="False" />
+						<MenuItem Header="3 Stars" IsEnabled="False" />
+						<MenuItem Header="4 Stars" IsEnabled="False" />
+						<MenuItem Header="5 Stars" IsEnabled="False" />
+					</MenuItem>
+					<MenuItem Header="Add to Playlist" IsEnabled="False">
+						<MenuItem Header="New Playlist..." IsEnabled="False" />
+					</MenuItem>
+					<Separator />
+					<MenuItem Header="Show in Explorer" IsEnabled="False" />
+					<MenuItem Header="Remove from Library" IsEnabled="False" />
+				</ContextMenu>
+			</DataGrid.ContextMenu>
 			<DataGrid.Styles>
 				<Style Selector="DataGridRow">
 					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
@@ -107,21 +140,27 @@
 				<Style Selector="DataGridRow:nth-child(odd)">
 					<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
 				</Style>
+				<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
+					<Setter Property="IsVisible" Value="False" />
+				</Style>
 			</DataGrid.Styles>
 			<DataGrid.Columns>
+				<DataGridTemplateColumn Header="" Width="30" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
+					<DataGridTemplateColumn.CellTemplate>
+						<DataTemplate>
+							<i:Icon Value="fa-solid fa-play" FontSize="14" IsVisible="{Binding IsPlaying}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#0096FF" />
+						</DataTemplate>
+					</DataGridTemplateColumn.CellTemplate>
+				</DataGridTemplateColumn>
+				<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
 				<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
-				<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
 				<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
-				<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />				
-				<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
+				<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
 				<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
-				<DataGridTextColumn Header="Size"
-									Binding="{Binding FileSize, Converter={StaticResource FileSizeConverter}}"
-									Width="Auto" />
-				<DataGridTextColumn Header="Path" Binding="{Binding FilePath}" Width="2*" />
+				<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
 			</DataGrid.Columns>
 		</DataGrid>
 
-		<controls:StatusBar Grid.Row="2" Grid.ColumnSpan="5" DataContext="{Binding StatusBar}" />
+		<controls:StatusBar Grid.Row="2" Grid.ColumnSpan="6" DataContext="{Binding StatusBar}" />
 	</Grid>
 </Window>

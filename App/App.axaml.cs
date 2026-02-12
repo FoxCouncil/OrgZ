@@ -9,6 +9,8 @@ namespace OrgZ;
 
 public partial class App : Application
 {
+    internal const string Version = "0.2";
+
     private const string SettingKey_FolderPath = "OrgZ.FolderPath";
 
     internal static string FolderPath = Settings.Get<string>(SettingKey_FolderPath) ?? string.Empty;
@@ -35,8 +37,8 @@ public partial class App : Application
             }
 
             desktop.MainWindow.Title = FolderPath != string.Empty
-                ? $"OrgZ - {FolderPath}"
-                : "OrgZ - [No folder selected]";
+                ? $"OrgZ v{Version} - {FolderPath}"
+                : $"OrgZ v{Version} - [No folder selected]";
         }
 
         base.OnFrameworkInitializationCompleted();
