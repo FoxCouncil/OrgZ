@@ -22,6 +22,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly MediaPlayer _player;
 
+    private SmtcService? _smtcService;
+
+    private TaskbarThumbBarService? _thumbBarService;
+
     private Media? _currentMedia;
 
     private AudioFileInfo? _currentFile;
@@ -134,7 +138,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _window = window;
 
         _vlc = new();
-        _vlc.SetAppId("org.foxdiller.orgz", App.Version, "Assets/app.ico");
+        _vlc.SetAppId("com.foxcouncil.orgz", App.Version, "Assets/app.ico");
         _vlc.SetUserAgent($"OrgZ {App.Version}", $"orgz{App.Version}/player");
 
         _player = new(_vlc);
@@ -166,6 +170,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
+            _thumbBarService?.SetPlayingState(false);
+
             UpdateMainStatus("Finished");
             UpdateNavigationButtons();
         });
@@ -175,6 +182,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Paused);
+            _thumbBarService?.SetPlayingState(false);
+
             UpdateMainStatus("Paused");
         });
 
@@ -182,6 +192,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             ButtonPlayPauseIcon = ICON_PAUSE;
             ButtonPlayPausePadding = ICON_PAUSE_PADDING;
+
+            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Playing);
+            _thumbBarService?.SetPlayingState(true);
 
             UpdateMainStatus("Playing");
         });
@@ -199,6 +212,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
+            _thumbBarService?.SetPlayingState(false);
 
             UpdateMainStatus("Stopped");
         });
@@ -226,11 +242,47 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
+    internal void InitializeSmtc(IntPtr hwnd)
+    {
+        _smtcService = new SmtcService();
+        if (!_smtcService.Initialize(hwnd))
+        {
+            UpdateMainStatus(_smtcService.InitDiagnostics ?? "SMTC: Init failed (unknown)");
+            _smtcService.Dispose();
+            _smtcService = null;
+            return;
+        }
+
+        UpdateMainStatus(_smtcService.InitDiagnostics ?? "SMTC: OK");
+
+        _smtcService.PlayPauseRequested += ButtonPlayPause;
+        _smtcService.NextRequested += ButtonNextTrack;
+        _smtcService.PreviousRequested += ButtonPreviousTrack;
+    }
+
+    internal void InitializeThumbBar(IntPtr hwnd)
+    {
+        _thumbBarService = new TaskbarThumbBarService();
+        if (!_thumbBarService.Initialize(hwnd))
+        {
+            _thumbBarService.Dispose();
+            _thumbBarService = null;
+            return;
+        }
+
+        _thumbBarService.PlayPauseRequested += ButtonPlayPause;
+        _thumbBarService.NextRequested += ButtonNextTrack;
+        _thumbBarService.PreviousRequested += ButtonPreviousTrack;
+    }
+
     #region UI Events
 
     public void ButtonPreviousTrack()
     {
-        if (_currentFile == null || FilteredAudioFiles.Count == 0) return;
+        if (_currentFile == null || FilteredAudioFiles.Count == 0)
+        {
+            return;
+        }
 
         int index = FilteredAudioFiles.IndexOf(_currentFile);
         if (index > 0)
@@ -254,6 +306,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 {
                     PlayAudioFile(SelectedAudioFile);
                 }
+                else if (FilteredAudioFiles.Count > 0)
+                {
+                    PlayAudioFile(FilteredAudioFiles[0]);
+                }
 
                 return;
             }
@@ -271,7 +327,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void ButtonNextTrack()
     {
-        if (_currentFile == null || FilteredAudioFiles.Count == 0) return;
+        if (_currentFile == null || FilteredAudioFiles.Count == 0)
+        {
+            return;
+        }
 
         int index = FilteredAudioFiles.IndexOf(_currentFile);
         if (index >= 0 && index < FilteredAudioFiles.Count - 1)
@@ -330,7 +389,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             SelectedAudioFile = file;
 
             CurrentAlbumArt?.Dispose();
-            CurrentAlbumArt = ExtractAlbumArt(_currentFile.FilePath);
+            var artBytes = ExtractAlbumArtBytes(_currentFile.FilePath);
+            CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
+
+            _smtcService?.UpdateMetadata(
+                _currentFile.Title, _currentFile.Artist,
+                _currentFile.Album, artBytes);
 
             _currentMedia?.Dispose();
             _currentMedia = new Media(_vlc, _currentFile.FilePath, FromType.FromPath);
@@ -542,12 +606,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             IsBackTrackButtonEnabled = false;
             IsNextTrackButtonEnabled = false;
+            _smtcService?.SetNavigationEnabled(false, false);
+            _thumbBarService?.SetNavigationEnabled(false, false);
             return;
         }
 
         int index = FilteredAudioFiles.IndexOf(_currentFile);
         IsBackTrackButtonEnabled = index > 0;
         IsNextTrackButtonEnabled = index >= 0 && index < FilteredAudioFiles.Count - 1;
+        _smtcService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
+        _thumbBarService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
     }
 
     internal void UpdateMainStatus(string status)
@@ -567,22 +635,29 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         Dispatcher.UIThread.Post(action);
     }
 
-    private static Bitmap? ExtractAlbumArt(string filePath)
+    private static byte[]? ExtractAlbumArtBytes(string filePath)
     {
         try
         {
             using var file = TagLib.File.Create(filePath);
             if (file.Tag.Pictures?.Length > 0)
             {
-                var picture = file.Tag.Pictures[0];
-                using var stream = new MemoryStream(picture.Data.Data);
-                return new Bitmap(stream);
+                return file.Tag.Pictures[0].Data.Data;
             }
         }
-        catch
+        catch { }
+
+        return null;
+    }
+
+    private static Bitmap? BitmapFromBytes(byte[] bytes)
+    {
+        try
         {
-            // Silently fail - no album art is fine
+            using var stream = new MemoryStream(bytes);
+            return new Bitmap(stream);
         }
+        catch { }
 
         return null;
     }
@@ -591,6 +666,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _thumbBarService?.Dispose();
+        _smtcService?.Dispose();
         _currentMedia?.Dispose();
         _player?.Dispose();
         _vlc?.Dispose();
