@@ -166,7 +166,10 @@ public static class LibraryCache
     public static void RemoveFiles(IEnumerable<string> filePaths)
     {
         var paths = filePaths.ToList();
-        if (paths.Count == 0) return;
+        if (paths.Count == 0)
+        {
+            return;
+        }
 
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();

@@ -9,7 +9,7 @@ namespace OrgZ;
 
 public partial class App : Application
 {
-    internal const string Version = "0.2";
+    internal const string Version = "0.3";
 
     private const string SettingKey_FolderPath = "OrgZ.FolderPath";
 

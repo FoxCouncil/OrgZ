@@ -32,7 +32,17 @@ public partial class MainWindow : Window
         DataContext = _viewModel = new MainWindowViewModel(this);
 
         // Load files asynchronously after window is loaded
-        Loaded += async (s, e) => await _viewModel.LoadAsync();
+        Loaded += async (s, e) =>
+        {
+            var handle = TryGetPlatformHandle();
+            if (handle != null)
+            {
+                _viewModel.InitializeSmtc(handle.Handle);
+                _viewModel.InitializeThumbBar(handle.Handle);
+            }
+
+            await _viewModel.LoadAsync();
+        };
     }
 
     private void DataGrid_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
