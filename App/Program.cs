@@ -14,6 +14,12 @@ internal class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
+            ShortcutInstaller.EnsureShortcut();
+        }
+
         _ = BuildAvaloniaApp()
         .StartWithClassicDesktopLifetime(args);
     }
