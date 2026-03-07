@@ -20,7 +20,7 @@
 			<MenuItem Header="Play Next" IsEnabled="False" />
 			<MenuItem Header="Add to Queue" IsEnabled="False" />
 			<Separator />
-			<MenuItem Header="Get Info" IsEnabled="False" />
+			<MenuItem Header="Get Info" Click="ContextMenu_GetInfo" />
 			<MenuItem Header="Rating" IsEnabled="False">
 				<MenuItem Header="1 Star" IsEnabled="False" />
 				<MenuItem Header="2 Stars" IsEnabled="False" />
@@ -42,6 +42,8 @@
 			<MenuItem Header="Play" Click="ContextMenu_Play" />
 			<MenuItem Header="Toggle Favorite" Click="ContextMenu_Favorite" />
 			<Separator />
+			<MenuItem Header="Get Info" Click="ContextMenu_GetInfo" />
+			<Separator />
 			<MenuItem Header="Copy Stream URL" Click="ContextMenu_CopyUrl" />
 			<MenuItem Header="Visit Homepage" Click="ContextMenu_Homepage" />
 		</ContextMenu>
@@ -52,6 +54,8 @@
 			<NativeMenuItem Header="File">
 				<NativeMenu>
 					<NativeMenuItem Header="Change Library Folder..." Command="{Binding ChangeLibraryFolderCommand}" />
+					<NativeMenuItemSeparator />
+					<NativeMenuItem Header="Settings..." Command="{Binding ShowSettingsCommand}" />
 					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Exit" Command="{Binding ExitApplicationCommand}" Gesture="Ctrl+Q" />
 				</NativeMenu>

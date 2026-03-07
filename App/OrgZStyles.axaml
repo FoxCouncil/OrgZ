@@ -1,0 +1,108 @@
+<Styles xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+	<Styles.Resources>
+		<!-- Colors -->
+		<Color x:Key="OrgZDialogBackground">#1A1A1A</Color>
+		<Color x:Key="OrgZTextForeground">#E0E0E0</Color>
+		<Color x:Key="OrgZInputBackground">#111111</Color>
+		<Color x:Key="OrgZReadonlyBackground">#222222</Color>
+		<Color x:Key="OrgZButtonBackground">#333333</Color>
+		<Color x:Key="OrgZBorderColor">#444444</Color>
+		<Color x:Key="OrgZAccentBlue">#4A9EFF</Color>
+		<Color x:Key="OrgZMutedText">#999999</Color>
+
+		<!-- Brushes -->
+		<SolidColorBrush x:Key="OrgZDialogBackgroundBrush" Color="{StaticResource OrgZDialogBackground}" />
+		<SolidColorBrush x:Key="OrgZTextForegroundBrush" Color="{StaticResource OrgZTextForeground}" />
+		<SolidColorBrush x:Key="OrgZInputBackgroundBrush" Color="{StaticResource OrgZInputBackground}" />
+		<SolidColorBrush x:Key="OrgZReadonlyBackgroundBrush" Color="{StaticResource OrgZReadonlyBackground}" />
+		<SolidColorBrush x:Key="OrgZButtonBackgroundBrush" Color="{StaticResource OrgZButtonBackground}" />
+		<SolidColorBrush x:Key="OrgZBorderColorBrush" Color="{StaticResource OrgZBorderColor}" />
+		<SolidColorBrush x:Key="OrgZAccentBlueBrush" Color="{StaticResource OrgZAccentBlue}" />
+		<SolidColorBrush x:Key="OrgZMutedTextBrush" Color="{StaticResource OrgZMutedText}" />
+
+		<!-- Font -->
+		<FontFamily x:Key="OrgZMonoFont">Consolas</FontFamily>
+	</Styles.Resources>
+
+	<!-- Dialog window background -->
+	<Style Selector="Window.orgzDialog">
+		<Setter Property="Background" Value="{StaticResource OrgZDialogBackgroundBrush}" />
+	</Style>
+
+	<!-- TextBlock -->
+	<Style Selector="Window.orgzDialog TextBlock">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+	</Style>
+
+	<!-- TextBox -->
+	<Style Selector="Window.orgzDialog TextBox">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZBorderColorBrush}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+		<Setter Property="FontSize" Value="12" />
+	</Style>
+
+	<!-- TextBox readonly -->
+	<Style Selector="Window.orgzDialog TextBox:readonly">
+		<Setter Property="Background" Value="{StaticResource OrgZReadonlyBackgroundBrush}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZMutedTextBrush}" />
+	</Style>
+
+	<!-- CheckBox -->
+	<Style Selector="Window.orgzDialog CheckBox">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+	</Style>
+
+	<!-- RadioButton -->
+	<Style Selector="Window.orgzDialog RadioButton">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+	</Style>
+
+	<!-- ComboBox -->
+	<Style Selector="Window.orgzDialog ComboBox">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+	</Style>
+
+	<!-- Button -->
+	<Style Selector="Window.orgzDialog Button">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Background" Value="{StaticResource OrgZButtonBackgroundBrush}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+	</Style>
+
+	<!-- TabItem -->
+	<Style Selector="Window.orgzDialog TabItem">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="FontSize" Value="12" />
+	</Style>
+
+	<!-- Slider -->
+	<Style Selector="Window.orgzDialog Slider">
+		<Setter Property="Foreground" Value="{StaticResource OrgZAccentBlueBrush}" />
+	</Style>
+
+	<!-- Link button -->
+	<Style Selector="Window.orgzDialog Button.link">
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="BorderThickness" Value="0" />
+		<Setter Property="Padding" Value="0" />
+		<Setter Property="Cursor" Value="Hand" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZAccentBlueBrush}" />
+	</Style>
+	<Style Selector="Window.orgzDialog Button.link:pointerover /template/ ContentPresenter">
+		<Setter Property="Background" Value="Transparent" />
+	</Style>
+
+	<!-- ListBox (for MessageLogDialog pattern) -->
+	<Style Selector="Window.orgzDialog ListBox">
+		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZButtonBackgroundBrush}" />
+		<Setter Property="BorderThickness" Value="1" />
+	</Style>
+</Styles>

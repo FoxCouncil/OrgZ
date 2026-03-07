@@ -10,42 +10,31 @@
 		Width="500" Height="350"
 		CanResize="True"
 		WindowStartupLocation="CenterOwner"
-		Background="#1A1A1A">
+		Classes="orgzDialog">
 	<Window.Styles>
-		<Style Selector="TextBlock">
-			<Setter Property="FontFamily" Value="Consolas" />
-			<Setter Property="Foreground" Value="#E0E0E0" />
-		</Style>
-		<Style Selector="ListBox">
-			<Setter Property="Background" Value="#111" />
-			<Setter Property="BorderBrush" Value="#333" />
-			<Setter Property="BorderThickness" Value="1" />
-		</Style>
 		<Style Selector="ListBoxItem">
-			<Setter Property="FontFamily" Value="Consolas" />
+			<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 			<Setter Property="FontSize" Value="12" />
 			<Setter Property="Padding" Value="8,4" />
 			<Setter Property="MinHeight" Value="0" />
 		</Style>
 		<Style Selector="ListBoxItem:nth-child(odd)">
-			<Setter Property="Background" Value="#1A1A1A" />
+			<Setter Property="Background" Value="{StaticResource OrgZDialogBackgroundBrush}" />
 		</Style>
 	</Window.Styles>
 
 	<DockPanel Margin="16">
 		<!-- Header -->
 		<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,12">
-			<i:Icon x:Name="HeaderIcon" Value="fa-solid fa-circle-info" FontSize="18" Foreground="#4A9EFF" />
+			<i:Icon x:Name="HeaderIcon" Value="fa-solid fa-circle-info" FontSize="18" Foreground="{StaticResource OrgZAccentBlueBrush}" />
 			<TextBlock x:Name="HeaderText" Text="Messages" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" />
 			<TextBlock x:Name="CountText" Text="" FontSize="12" Opacity="0.5" VerticalAlignment="Center" />
 		</StackPanel>
 
 		<!-- Close button -->
 		<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0" Spacing="8">
-			<Button x:Name="ClearButton" Content="Clear" Width="80" Click="ClearButton_Click"
-					Background="#333" Foreground="#E0E0E0" FontFamily="Consolas" />
-			<Button x:Name="CloseButton" Content="Close" Width="80" Click="CloseButton_Click"
-					Background="#333" Foreground="#E0E0E0" FontFamily="Consolas" />
+			<Button x:Name="ClearButton" Content="Clear" Width="80" Click="ClearButton_Click" />
+			<Button x:Name="CloseButton" Content="Close" Width="80" Click="CloseButton_Click" />
 		</StackPanel>
 
 		<!-- Message list -->

@@ -39,6 +39,13 @@ public partial class MainWindow : Window
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
 
+        // Initialize UI state for the already-selected sidebar item
+        // (PropertyChanged fired during constructor before handler was attached)
+        var initialKind = _viewModel.SelectedSidebarItem?.Kind;
+        UpdateColumnVisibility(initialKind);
+        UpdateContextMenu(initialKind);
+        UpdateFilterPanelVisibility(initialKind);
+
         var radioFilterPanel = this.FindControl<Controls.RadioFilterPanel>("RadioFilterPanel")!;
         radioFilterPanel.SyncRequested += () => _viewModel.LaunchRadioSync();
 
@@ -147,6 +154,11 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ContextMenu_GetInfo(object? sender, RoutedEventArgs e)
+    {
+        await _viewModel.ShowMediaInfo();
+    }
+
     private void ContextMenu_Homepage(object? sender, RoutedEventArgs e)
     {
         if (_viewModel.SelectedItem?.HomepageUrl != null)
@@ -191,6 +203,13 @@ public partial class MainWindow : Window
             case Key.Space:
             {
                 _viewModel.ButtonPlayPause();
+                e.Handled = true;
+                break;
+            }
+
+            case Key.I when e.KeyModifiers == KeyModifiers.Control:
+            {
+                _ = _viewModel.ShowMediaInfo();
                 e.Handled = true;
                 break;
             }

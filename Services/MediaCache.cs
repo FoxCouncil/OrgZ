@@ -46,6 +46,15 @@ public static class MediaCache
                     HasAlbumArt             INTEGER,
                     FileNameMatchesHeaders  INTEGER,
                     MimeType                TEXT,
+                    Genre                   TEXT,
+                    Composer                TEXT,
+                    Comment                 TEXT,
+                    BPM                     INTEGER,
+                    AudioBitrate            INTEGER,
+                    SampleRate              INTEGER,
+                    AudioChannels           INTEGER,
+                    EncoderSettings         TEXT,
+                    CodecDescription        TEXT,
                     Issues                  TEXT,
 
                     StreamUrl               TEXT,
@@ -64,7 +73,14 @@ public static class MediaCache
                     IsHls                   INTEGER NOT NULL DEFAULT 0,
 
                     Rating                  INTEGER,
-                    PlayCount               INTEGER NOT NULL DEFAULT 0
+                    PlayCount               INTEGER NOT NULL DEFAULT 0,
+
+                    VolumeAdjustment        INTEGER NOT NULL DEFAULT 0,
+                    EqPreset                TEXT,
+                    StartTime               INTEGER,
+                    StopTime                INTEGER,
+                    UseStartTime            INTEGER NOT NULL DEFAULT 0,
+                    UseStopTime             INTEGER NOT NULL DEFAULT 0
                 )
                 """;
             cmd.ExecuteNonQuery();
@@ -166,8 +182,27 @@ public static class MediaCache
 
     private static void MigrateAddColumns(SqliteConnection connection)
     {
-        // Idempotent: ADD COLUMN is a no-op if column already exists (SQLite ignores duplicate)
-        var columns = new[] { "Rating INTEGER", "PlayCount INTEGER NOT NULL DEFAULT 0" };
+        // Idempotent: ADD COLUMN throws if column already exists, which we catch
+        var columns = new[]
+        {
+            "Rating INTEGER",
+            "PlayCount INTEGER NOT NULL DEFAULT 0",
+            "Genre TEXT",
+            "Composer TEXT",
+            "Comment TEXT",
+            "BPM INTEGER",
+            "AudioBitrate INTEGER",
+            "SampleRate INTEGER",
+            "AudioChannels INTEGER",
+            "EncoderSettings TEXT",
+            "CodecDescription TEXT",
+            "VolumeAdjustment INTEGER NOT NULL DEFAULT 0",
+            "EqPreset TEXT",
+            "StartTime INTEGER",
+            "StopTime INTEGER",
+            "UseStartTime INTEGER NOT NULL DEFAULT 0",
+            "UseStopTime INTEGER NOT NULL DEFAULT 0",
+        };
 
         foreach (var col in columns)
         {
@@ -304,27 +339,9 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        var where = new List<string> { "Kind = 'Radio'" };
+        var whereClause = BuildRadioWhereClause(cmd, query, country, genre);
 
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            where.Add("(Title LIKE @Query OR Tags LIKE @Query OR Country LIKE @Query)");
-            cmd.Parameters.AddWithValue("@Query", $"%{query}%");
-        }
-
-        if (!string.IsNullOrWhiteSpace(country) && country != "All")
-        {
-            where.Add("(Country = @Country OR CountryCode = @Country)");
-            cmd.Parameters.AddWithValue("@Country", country);
-        }
-
-        if (!string.IsNullOrWhiteSpace(genre) && genre != "All")
-        {
-            where.Add("Tags LIKE @Genre");
-            cmd.Parameters.AddWithValue("@Genre", $"%{genre}%");
-        }
-
-        cmd.CommandText = $"SELECT * FROM Media WHERE {string.Join(" AND ", where)} ORDER BY Title";
+        cmd.CommandText = $"SELECT * FROM Media WHERE {whereClause} ORDER BY Title";
 
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -341,6 +358,14 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
+        var whereClause = BuildRadioWhereClause(cmd, query, country, genre);
+
+        cmd.CommandText = $"SELECT COUNT(*) FROM Media WHERE {whereClause}";
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    private static string BuildRadioWhereClause(SqliteCommand cmd, string? query, string? country, string? genre)
+    {
         var where = new List<string> { "Kind = 'Radio'" };
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -361,8 +386,7 @@ public static class MediaCache
             cmd.Parameters.AddWithValue("@Genre", $"%{genre}%");
         }
 
-        cmd.CommandText = $"SELECT COUNT(*) FROM Media WHERE {string.Join(" AND ", where)}";
-        return Convert.ToInt32(cmd.ExecuteScalar());
+        return string.Join(" AND ", where);
     }
 
     public static void UpsertRadioStations(IEnumerable<MediaItem> stations)
@@ -539,20 +563,28 @@ public static class MediaCache
                 (Id, Kind, Title, Artist, Album, Duration, IsFavorite, LastPlayed, DateAdded,
                  FilePath, FileName, Extension, FileSize, LastModified,
                  Year, Track, TotalTracks, Disc, TotalDiscs,
-                 HasAlbumArt, FileNameMatchesHeaders, MimeType, Issues,
+                 HasAlbumArt, FileNameMatchesHeaders, MimeType,
+                 Genre, Composer, Comment, BPM, AudioBitrate, SampleRate, AudioChannels,
+                 EncoderSettings, CodecDescription,
+                 Issues,
                  StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                  Country, CountryCode, Tags, Codec, Bitrate,
                  Votes, ClickCount, ListenerCount, IsHls,
-                 Rating, PlayCount)
+                 Rating, PlayCount,
+                 VolumeAdjustment, EqPreset, StartTime, StopTime, UseStartTime, UseStopTime)
             VALUES
                 (@Id, @Kind, @Title, @Artist, @Album, @Duration, @IsFavorite, @LastPlayed, @DateAdded,
                  @FilePath, @FileName, @Extension, @FileSize, @LastModified,
                  @Year, @Track, @TotalTracks, @Disc, @TotalDiscs,
-                 @HasAlbumArt, @FileNameMatchesHeaders, @MimeType, @Issues,
+                 @HasAlbumArt, @FileNameMatchesHeaders, @MimeType,
+                 @Genre, @Composer, @Comment, @BPM, @AudioBitrate, @SampleRate, @AudioChannels,
+                 @EncoderSettings, @CodecDescription,
+                 @Issues,
                  @StreamUrl, @Source, @SourceId, @HomepageUrl, @FaviconUrl,
                  @Country, @CountryCode, @Tags, @Codec, @Bitrate,
                  @Votes, @ClickCount, @ListenerCount, @IsHls,
-                 @Rating, @PlayCount)
+                 @Rating, @PlayCount,
+                 @VolumeAdjustment, @EqPreset, @StartTime, @StopTime, @UseStartTime, @UseStopTime)
             ON CONFLICT(Id) DO UPDATE SET
                 Title = excluded.Title,
                 Artist = excluded.Artist,
@@ -571,6 +603,15 @@ public static class MediaCache
                 HasAlbumArt = excluded.HasAlbumArt,
                 FileNameMatchesHeaders = excluded.FileNameMatchesHeaders,
                 MimeType = excluded.MimeType,
+                Genre = excluded.Genre,
+                Composer = excluded.Composer,
+                Comment = excluded.Comment,
+                BPM = excluded.BPM,
+                AudioBitrate = excluded.AudioBitrate,
+                SampleRate = excluded.SampleRate,
+                AudioChannels = excluded.AudioChannels,
+                EncoderSettings = excluded.EncoderSettings,
+                CodecDescription = excluded.CodecDescription,
                 Issues = excluded.Issues,
                 StreamUrl = excluded.StreamUrl,
                 Source = excluded.Source,
@@ -587,7 +628,13 @@ public static class MediaCache
                 ListenerCount = excluded.ListenerCount,
                 IsHls = excluded.IsHls,
                 Rating = excluded.Rating,
-                PlayCount = excluded.PlayCount
+                PlayCount = excluded.PlayCount,
+                VolumeAdjustment = excluded.VolumeAdjustment,
+                EqPreset = excluded.EqPreset,
+                StartTime = excluded.StartTime,
+                StopTime = excluded.StopTime,
+                UseStartTime = excluded.UseStartTime,
+                UseStopTime = excluded.UseStopTime
             """;
 
         cmd.Parameters.AddWithValue("@Id", item.Id);
@@ -614,6 +661,15 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@HasAlbumArt", item.HasAlbumArt.HasValue ? (object)(item.HasAlbumArt.Value ? 1 : 0) : DBNull.Value);
         cmd.Parameters.AddWithValue("@FileNameMatchesHeaders", item.FileNameMatchesHeaders.HasValue ? (object)(item.FileNameMatchesHeaders.Value ? 1 : 0) : DBNull.Value);
         cmd.Parameters.AddWithValue("@MimeType", (object?)item.MimeType ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Genre", (object?)item.Genre ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Composer", (object?)item.Composer ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@Comment", (object?)item.Comment ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@BPM", item.Bpm.HasValue && item.Bpm.Value > 0 ? (object)(long)item.Bpm.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@AudioBitrate", item.AudioBitrate.HasValue ? (object)item.AudioBitrate.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@SampleRate", item.SampleRate.HasValue ? (object)item.SampleRate.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@AudioChannels", item.AudioChannels.HasValue ? (object)item.AudioChannels.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@EncoderSettings", (object?)item.EncoderSettings ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@CodecDescription", (object?)item.CodecDescription ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@Issues", item.Issues.Count > 0 ? JsonSerializer.Serialize(item.Issues) : DBNull.Value);
 
         cmd.Parameters.AddWithValue("@StreamUrl", (object?)item.StreamUrl ?? DBNull.Value);
@@ -632,6 +688,12 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@IsHls", item.IsHls ? 1 : 0);
         cmd.Parameters.AddWithValue("@Rating", item.Rating.HasValue ? (object)item.Rating.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@PlayCount", item.PlayCount);
+        cmd.Parameters.AddWithValue("@VolumeAdjustment", item.VolumeAdjustment);
+        cmd.Parameters.AddWithValue("@EqPreset", (object?)item.EqPreset ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@StartTime", item.StartTime.HasValue ? (object)item.StartTime.Value.Ticks : DBNull.Value);
+        cmd.Parameters.AddWithValue("@StopTime", item.StopTime.HasValue ? (object)item.StopTime.Value.Ticks : DBNull.Value);
+        cmd.Parameters.AddWithValue("@UseStartTime", item.UseStartTime ? 1 : 0);
+        cmd.Parameters.AddWithValue("@UseStopTime", item.UseStopTime ? 1 : 0);
 
         cmd.ExecuteNonQuery();
     }
@@ -725,6 +787,15 @@ public static class MediaCache
         item.HasAlbumArt = GetNullableBool(reader, "HasAlbumArt");
         item.FileNameMatchesHeaders = GetNullableBool(reader, "FileNameMatchesHeaders");
         item.MimeType = GetNullableString(reader, "MimeType");
+        item.Genre = GetNullableString(reader, "Genre");
+        item.Composer = GetNullableString(reader, "Composer");
+        item.Comment = GetNullableString(reader, "Comment");
+        item.Bpm = GetNullableUint(reader, "BPM");
+        item.AudioBitrate = GetNullableInt(reader, "AudioBitrate");
+        item.SampleRate = GetNullableInt(reader, "SampleRate");
+        item.AudioChannels = GetNullableInt(reader, "AudioChannels");
+        item.EncoderSettings = GetNullableString(reader, "EncoderSettings");
+        item.CodecDescription = GetNullableString(reader, "CodecDescription");
 
         var issuesOrd = reader.GetOrdinal("Issues");
         if (!reader.IsDBNull(issuesOrd))
@@ -741,6 +812,18 @@ public static class MediaCache
 
         item.Rating = GetNullableInt(reader, "Rating");
         item.PlayCount = reader.GetInt32(reader.GetOrdinal("PlayCount"));
+
+        item.VolumeAdjustment = GetNullableInt(reader, "VolumeAdjustment") ?? 0;
+        item.EqPreset = GetNullableString(reader, "EqPreset");
+
+        var startTimeOrd = reader.GetOrdinal("StartTime");
+        item.StartTime = reader.IsDBNull(startTimeOrd) ? null : TimeSpan.FromTicks(reader.GetInt64(startTimeOrd));
+
+        var stopTimeOrd = reader.GetOrdinal("StopTime");
+        item.StopTime = reader.IsDBNull(stopTimeOrd) ? null : TimeSpan.FromTicks(reader.GetInt64(stopTimeOrd));
+
+        item.UseStartTime = (GetNullableInt(reader, "UseStartTime") ?? 0) != 0;
+        item.UseStopTime = (GetNullableInt(reader, "UseStopTime") ?? 0) != 0;
 
         if (kind == MediaKind.Music)
         {
