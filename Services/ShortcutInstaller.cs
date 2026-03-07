@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
@@ -14,13 +14,17 @@ internal static class ShortcutInstaller
     internal static void EnsureShortcut()
     {
         if (!OperatingSystem.IsWindows())
+        {
             return;
+        }
 
         try
         {
             var exePath = Environment.ProcessPath;
             if (string.IsNullOrEmpty(exePath))
+            {
                 return;
+            }
 
             var programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
             var lnkPath = Path.Combine(programs, "OrgZ.lnk");

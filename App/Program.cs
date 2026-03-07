@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025 Fox Diller
+﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
 using Projektanker.Icons.Avalonia;
@@ -20,18 +20,13 @@ internal class Program
             ShortcutInstaller.EnsureShortcut();
         }
 
-        _ = BuildAvaloniaApp()
-        .StartWithClassicDesktopLifetime(args);
+        _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
     {
-        return AppBuilder.Configure<App>()
-                .UsePlatformDetect()
-                .WithInterFont()
-                .WithIcons()
-                .LogToTrace();
+        return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().WithIcons().LogToTrace();
     }
 }
 

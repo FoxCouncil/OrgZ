@@ -1,65 +1,49 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 namespace OrgZ.Services;
 
-/// <summary>
-/// Service for analyzing audio files using TagLib
-/// </summary>
 public class AudioFileAnalyzer
 {
-    /// <summary>
-    /// Analyzes an audio file and populates metadata information
-    /// </summary>
-    /// <param name="audioFile">The audio file info to analyze</param>
-    public static void AnalyzeFile(AudioFileInfo audioFile)
+    public static void AnalyzeFile(MediaItem item)
     {
-        if (audioFile.IsAnalyzed)
+        if (item.Kind != MediaKind.Music || item.IsAnalyzed || string.IsNullOrEmpty(item.FilePath))
         {
             return;
         }
 
         try
         {
-            using TagLib.File file = TagLib.File.Create(audioFile.FilePath);
+            using TagLib.File file = TagLib.File.Create(item.FilePath);
 
-            // Extract metadata
+            item.Artist = file.Tag.FirstPerformer;
+            item.Year = file.Tag.Year;
+            item.Album = file.Tag.Album;
+            item.Title = file.Tag.Title;
+            item.Duration = file.Properties.Duration;
 
-            audioFile.Artist = file.Tag.FirstPerformer;
-            audioFile.Year = file.Tag.Year;
-            audioFile.Album = file.Tag.Album;
-            audioFile.Title = file.Tag.Title;
-            audioFile.Duration = file.Properties.Duration;
+            item.Track = file.Tag.Track;
+            item.TotalTracks = file.Tag.TrackCount;
+            item.Disc = file.Tag.Disc;
+            item.TotalDiscs = file.Tag.DiscCount;
 
+            item.HasAlbumArt = file.Tag.Pictures?.Length > 0;
 
-            audioFile.Track = file.Tag.Track;
-            audioFile.TotalTracks = file.Tag.TrackCount;
-            audioFile.Disc = file.Tag.Disc;
-            audioFile.TotalDiscs = file.Tag.DiscCount;
+            item.FileNameMatchesHeaders = CheckFileNameMatchesHeaders(item, file);
 
-            // Check for album art
-            audioFile.HasAlbumArt = file.Tag.Pictures?.Length > 0;
+            IdentifyIssues(item);
 
-            // Check if filename matches headers (extension match)
-            audioFile.FileNameMatchesHeaders = CheckFileNameMatchesHeaders(audioFile, file);
-
-            // Identify issues
-            IdentifyIssues(audioFile);
-
-            audioFile.IsAnalyzed = true;
+            item.IsAnalyzed = true;
         }
         catch (Exception ex)
         {
-            audioFile.Issues.Add($"Failed to analyze: {ex.Message}");
-            audioFile.IsAnalyzed = true;
+            item.Issues.Add($"Failed to analyze: {ex.Message}");
+            item.IsAnalyzed = true;
         }
     }
 
-    /// <summary>
-    /// Checks if the file extension matches the actual audio format
-    /// </summary>
-    private static bool CheckFileNameMatchesHeaders(AudioFileInfo audioFile, TagLib.File file)
+    private static bool CheckFileNameMatchesHeaders(MediaItem item, TagLib.File file)
     {
-        string extension = audioFile.Extension.ToLowerInvariant();
+        string extension = (item.Extension ?? "").ToLowerInvariant();
         string mimeType = file.MimeType.ToLowerInvariant();
 
         return extension switch
@@ -73,76 +57,68 @@ public class AudioFileAnalyzer
             ".wma" => mimeType.Contains("asf") || mimeType.Contains("wma"),
             ".ape" => mimeType.Contains("ape"),
             ".opus" => mimeType.Contains("opus"),
-            _ => true // Unknown format, assume it's fine
+            _ => true
         };
     }
 
-    /// <summary>
-    /// Identifies common issues with audio files
-    /// </summary>
-    private static void IdentifyIssues(AudioFileInfo audioFile)
+    private static void IdentifyIssues(MediaItem item)
     {
-        if (audioFile.FileNameMatchesHeaders == false)
+        if (item.FileNameMatchesHeaders == false)
         {
-            audioFile.Issues.Add("File extension doesn't match audio format");
+            item.Issues.Add("File extension doesn't match audio format");
         }
 
-        if (audioFile.HasAlbumArt == false)
+        if (item.HasAlbumArt == false)
         {
-            audioFile.Issues.Add("No album art found");
+            item.Issues.Add("No album art found");
         }
 
-        if (string.IsNullOrWhiteSpace(audioFile.Title))
+        if (string.IsNullOrWhiteSpace(item.Title))
         {
-            audioFile.Issues.Add("Missing title tag");
+            item.Issues.Add("Missing title tag");
         }
 
-        if (string.IsNullOrWhiteSpace(audioFile.Artist))
+        if (string.IsNullOrWhiteSpace(item.Artist))
         {
-            audioFile.Issues.Add("Missing artist tag");
+            item.Issues.Add("Missing artist tag");
         }
 
-        if (string.IsNullOrWhiteSpace(audioFile.Album))
+        if (string.IsNullOrWhiteSpace(item.Album))
         {
-            audioFile.Issues.Add("Missing album tag");
+            item.Issues.Add("Missing album tag");
         }
     }
 
-    /// <summary>
-    /// Filters audio files based on specific criteria
-    /// </summary>
     public static class Filters
     {
-        public static bool HasMissingAlbumArt(AudioFileInfo file)
+        public static bool HasMissingAlbumArt(MediaItem file)
         {
             return file.IsAnalyzed && file.HasAlbumArt == false;
         }
 
-        public static bool HasExtensionMismatch(AudioFileInfo file)
+        public static bool HasExtensionMismatch(MediaItem file)
         {
             return file.IsAnalyzed && file.FileNameMatchesHeaders == false;
         }
 
-        public static bool IsFlacFile(AudioFileInfo file)
+        public static bool IsFlacFile(MediaItem file)
         {
-            return file.Extension.Equals(".flac", StringComparison.OrdinalIgnoreCase);
+            return (file.Extension ?? "").Equals(".flac", StringComparison.OrdinalIgnoreCase);
         }
 
-        public static bool IsMp3File(AudioFileInfo file)
+        public static bool IsMp3File(MediaItem file)
         {
-            return file.Extension.Equals(".mp3", StringComparison.OrdinalIgnoreCase);
+            return (file.Extension ?? "").Equals(".mp3", StringComparison.OrdinalIgnoreCase);
         }
 
-        public static bool HasAnyIssues(AudioFileInfo file)
+        public static bool HasAnyIssues(MediaItem file)
         {
             return file.IsAnalyzed && file.Issues.Count > 0;
         }
 
-        public static bool HasMissingTags(AudioFileInfo file)
+        public static bool HasMissingTags(MediaItem file)
         {
-            return file.IsAnalyzed && (string.IsNullOrWhiteSpace(file.Title) ||
-                               string.IsNullOrWhiteSpace(file.Artist) ||
-                               string.IsNullOrWhiteSpace(file.Album));
+            return file.IsAnalyzed && (string.IsNullOrWhiteSpace(file.Title) || string.IsNullOrWhiteSpace(file.Artist) || string.IsNullOrWhiteSpace(file.Album));
         }
     }
 }

@@ -11,7 +11,65 @@
 		x:CompileBindings="False">
 	<Window.Resources>
 		<converters:FileSizeConverter x:Key="FileSizeConverter" />
+
+		<ContextMenu x:Key="MusicContextMenu">
+			<MenuItem Header="{Binding SelectedItem.Title, FallbackValue='(No Title)'}" FontWeight="Bold" IsHitTestVisible="False" />
+			<MenuItem Header="{Binding SelectedItem.Artist, FallbackValue='(No Artist)'}" IsHitTestVisible="False" FontStyle="Italic" />
+			<Separator />
+			<MenuItem Header="Play" Click="ContextMenu_Play" />
+			<MenuItem Header="Play Next" IsEnabled="False" />
+			<MenuItem Header="Add to Queue" IsEnabled="False" />
+			<Separator />
+			<MenuItem Header="Get Info" IsEnabled="False" />
+			<MenuItem Header="Rating" IsEnabled="False">
+				<MenuItem Header="1 Star" IsEnabled="False" />
+				<MenuItem Header="2 Stars" IsEnabled="False" />
+				<MenuItem Header="3 Stars" IsEnabled="False" />
+				<MenuItem Header="4 Stars" IsEnabled="False" />
+				<MenuItem Header="5 Stars" IsEnabled="False" />
+			</MenuItem>
+			<MenuItem Header="Add to Playlist" IsEnabled="False">
+				<MenuItem Header="New Playlist..." IsEnabled="False" />
+			</MenuItem>
+			<Separator />
+			<MenuItem Header="Show in Explorer" IsEnabled="False" />
+			<MenuItem Header="Remove from Library" IsEnabled="False" />
+		</ContextMenu>
+
+		<ContextMenu x:Key="RadioContextMenu">
+			<MenuItem Header="{Binding SelectedItem.Title, FallbackValue='(No Station)'}" FontWeight="Bold" IsHitTestVisible="False" />
+			<Separator />
+			<MenuItem Header="Play" Click="ContextMenu_Play" />
+			<MenuItem Header="Toggle Favorite" Click="ContextMenu_Favorite" />
+			<Separator />
+			<MenuItem Header="Copy Stream URL" Click="ContextMenu_CopyUrl" />
+			<MenuItem Header="Visit Homepage" Click="ContextMenu_Homepage" />
+		</ContextMenu>
 	</Window.Resources>
+
+	<NativeMenu.Menu>
+		<NativeMenu>
+			<NativeMenuItem Header="File">
+				<NativeMenu>
+					<NativeMenuItem Header="Change Library Folder..." Command="{Binding ChangeLibraryFolderCommand}" />
+					<NativeMenuItemSeparator />
+					<NativeMenuItem Header="Exit" Command="{Binding ExitApplicationCommand}" Gesture="Ctrl+Q" />
+				</NativeMenu>
+			</NativeMenuItem>
+			<NativeMenuItem Header="Playback">
+				<NativeMenu>
+					<NativeMenuItem Header="Play / Pause" Command="{Binding ButtonPlayPauseCommand}" />
+					<NativeMenuItem Header="Previous Track" Command="{Binding ButtonPreviousTrackCommand}" Gesture="Ctrl+Left" />
+					<NativeMenuItem Header="Next Track" Command="{Binding ButtonNextTrackCommand}" Gesture="Ctrl+Right" />
+				</NativeMenu>
+			</NativeMenuItem>
+			<NativeMenuItem Header="Help">
+				<NativeMenu>
+					<NativeMenuItem Header="About OrgZ" Command="{Binding ShowAboutCommand}" />
+				</NativeMenu>
+			</NativeMenuItem>
+		</NativeMenu>
+	</NativeMenu.Menu>
 
 	<Window.Styles>
 		<Style Selector="Button">
@@ -45,6 +103,8 @@
 		</Style>
 	</Window.Styles>
 
+	<DockPanel>
+	<NativeMenuBar DockPanel.Dock="Top" />
 	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
 		<Grid.Background>
 			<ImageBrush Source="avares://Orgz/Assets/metal.png" Opacity=".7" TileMode="Tile" Stretch="Fill" AlignmentX="Left" AlignmentY="Top" DestinationRect="0,0,128,128" />
@@ -81,11 +141,11 @@
 			<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="15" Height="75">
 				<StackPanel VerticalAlignment="Center">
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,5">
-						<TextBlock Text="{Binding CurrentTrackMetadata}" FontSize="16" FontWeight="Bold" />
+						<TextBlock Text="{Binding CurrentTrackMetadata}" FontSize="16" FontWeight="Bold" MaxWidth="420" TextTrimming="CharacterEllipsis" />
 					</StackPanel>
 					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,5,10,0" Spacing="12">
 						<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
-						<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" VerticalAlignment="Center" Width="420" Height="14" Padding="0,-12,0,0" />
+						<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" VerticalAlignment="Center" Width="420" Height="14" Padding="0,-12,0,0" />
 						<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="16" FontWeight="Bold" />
 					</StackPanel>
 				</StackPanel>
@@ -98,69 +158,98 @@
 			</StackPanel>
 		</Border>
 
-		<DataGrid x:Name="MainDataGrid" Grid.Row="1" Grid.ColumnSpan="6" Margin="4"
-				DoubleTapped="DataGrid_DoubleTapped"
-				SelectedItem="{Binding SelectedAudioFile, Mode=TwoWay}"
-				ItemsSource="{Binding FilteredAudioFiles}"
-				GridLinesVisibility="All"
-				IsReadOnly="True"
-				AutoGenerateColumns="False"
-				CanUserSortColumns="True"
-				SelectionMode="Single"
-				Background="{DynamicResource SystemAltHighColor}">
-			<DataGrid.ContextMenu>
-				<ContextMenu>
-					<MenuItem Header="{Binding #MainDataGrid.SelectedItem.Title, FallbackValue='(No Title)'}" FontWeight="Bold" IsHitTestVisible="False" />
-					<MenuItem Header="{Binding #MainDataGrid.SelectedItem.Artist, FallbackValue='(No Artist)'}" IsHitTestVisible="False" FontStyle="Italic" />
-					<Separator />
-					<MenuItem Header="Play" Click="ContextMenu_Play" />
-					<MenuItem Header="Play Next" IsEnabled="False" />
-					<MenuItem Header="Add to Queue" IsEnabled="False" />
-					<Separator />
-					<MenuItem Header="Get Info" IsEnabled="False" />
-					<MenuItem Header="Rating" IsEnabled="False">
-						<MenuItem Header="1 Star" IsEnabled="False" />
-						<MenuItem Header="2 Stars" IsEnabled="False" />
-						<MenuItem Header="3 Stars" IsEnabled="False" />
-						<MenuItem Header="4 Stars" IsEnabled="False" />
-						<MenuItem Header="5 Stars" IsEnabled="False" />
-					</MenuItem>
-					<MenuItem Header="Add to Playlist" IsEnabled="False">
-						<MenuItem Header="New Playlist..." IsEnabled="False" />
-					</MenuItem>
-					<Separator />
-					<MenuItem Header="Show in Explorer" IsEnabled="False" />
-					<MenuItem Header="Remove from Library" IsEnabled="False" />
-				</ContextMenu>
-			</DataGrid.ContextMenu>
-			<DataGrid.Styles>
-				<Style Selector="DataGridRow">
-					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-				</Style>
-				<Style Selector="DataGridRow:nth-child(odd)">
-					<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-				</Style>
-				<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
-					<Setter Property="IsVisible" Value="False" />
-				</Style>
-			</DataGrid.Styles>
-			<DataGrid.Columns>
-				<DataGridTemplateColumn Header="" Width="30" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
-					<DataGridTemplateColumn.CellTemplate>
-						<DataTemplate>
-							<i:Icon Value="fa-solid fa-play" FontSize="14" IsVisible="{Binding IsPlaying}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#0096FF" />
-						</DataTemplate>
-					</DataGridTemplateColumn.CellTemplate>
-				</DataGridTemplateColumn>
-				<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
-				<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
-				<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
-				<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
-				<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
-				<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
-			</DataGrid.Columns>
-		</DataGrid>
+		<!-- Sidebar + Content side by side in the middle row -->
+		<Grid Grid.Row="1" Grid.ColumnSpan="6" ColumnDefinitions="Auto,*" Margin="4">
+			<controls:Sidebar Grid.Column="0" DataContext="{Binding}" Margin="0,0,4,0" />
 
-		<controls:StatusBar Grid.Row="2" Grid.ColumnSpan="6" DataContext="{Binding StatusBar}" />
+			<Border Grid.Column="1" CornerRadius="8" ClipToBounds="True">
+				<DockPanel>
+					<controls:RadioFilterPanel x:Name="RadioFilterPanel"
+						DockPanel.Dock="Bottom"
+						DataContext="{Binding}"
+						IsVisible="False" />
+
+					<DataGrid x:Name="MainDataGrid"
+						DoubleTapped="DataGrid_DoubleTapped"
+						SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+						ItemsSource="{Binding FilteredItems}"
+						GridLinesVisibility="All"
+						IsReadOnly="True"
+						AutoGenerateColumns="False"
+						CanUserSortColumns="True"
+						SelectionMode="Single"
+						Background="{DynamicResource SystemAltHighColor}">
+						<DataGrid.Styles>
+							<Style Selector="DataGridRow">
+								<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+							</Style>
+							<Style Selector="DataGridRow:nth-child(odd)">
+								<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+							</Style>
+							<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
+								<Setter Property="IsVisible" Value="False" />
+							</Style>
+						</DataGrid.Styles>
+						<DataGrid.Columns>
+							<!-- Always visible -->
+							<DataGridTemplateColumn Header="" Width="30" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
+								<DataGridTemplateColumn.CellTemplate>
+									<DataTemplate>
+										<i:Icon Value="fa-solid fa-play" FontSize="14" IsVisible="{Binding IsPlaying}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#0096FF" />
+									</DataTemplate>
+								</DataGridTemplateColumn.CellTemplate>
+							</DataGridTemplateColumn>
+
+							<!-- Radio only: Source label -->
+							<DataGridTextColumn Binding="{Binding SourceLabel}" Width="45" CanUserResize="False" IsVisible="False" />
+
+							<!-- Always visible -->
+							<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
+
+							<!-- Music only -->
+							<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
+							<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
+
+							<!-- Radio only -->
+							<DataGridTextColumn Header="Country" Binding="{Binding Country}" Width="Auto" IsVisible="False" />
+							<DataGridTextColumn Header="Tags" Binding="{Binding Tags}" Width="*" IsVisible="False" />
+
+							<!-- Music only -->
+							<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
+
+							<!-- Radio only -->
+							<DataGridTemplateColumn Header="Codec" Width="60" IsVisible="False">
+								<DataGridTemplateColumn.CellTemplate>
+									<DataTemplate>
+										<TextBlock Text="{Binding CodecLabel}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+									</DataTemplate>
+								</DataGridTemplateColumn.CellTemplate>
+							</DataGridTemplateColumn>
+
+							<!-- Music only -->
+							<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
+
+							<!-- Radio only -->
+							<DataGridTemplateColumn Header="Bitrate" Width="Auto" IsVisible="False">
+								<DataGridTemplateColumn.CellTemplate>
+									<DataTemplate>
+										<TextBlock Text="{Binding BitrateLabel}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0" />
+									</DataTemplate>
+								</DataGridTemplateColumn.CellTemplate>
+							</DataGridTemplateColumn>
+
+							<!-- Music only -->
+							<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
+
+							<!-- Radio only -->
+							<DataGridTextColumn Header="Listeners" Binding="{Binding ListenerCountLabel}" Width="Auto" IsVisible="False" />
+						</DataGrid.Columns>
+					</DataGrid>
+				</DockPanel>
+			</Border>
+		</Grid>
+
+		<controls:StatusBar x:Name="MainStatusBar" Grid.Row="2" Grid.ColumnSpan="6" DataContext="{Binding StatusBar}" />
 	</Grid>
+	</DockPanel>
 </Window>
