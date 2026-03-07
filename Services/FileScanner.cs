@@ -1,10 +1,7 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 namespace OrgZ.Services;
 
-/// <summary>
-/// Service for scanning directories and loading audio files
-/// </summary>
 public class FileScanner
 {
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -20,18 +17,16 @@ public class FileScanner
         ".opus"
     };
 
-    /// <summary>
-    /// Scans a directory and returns all audio files
-    /// </summary>
-    /// <param name="directoryPath">Path to the directory to scan</param>
-    /// <param name="recursive">Whether to scan subdirectories</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of audio file information</returns>
-    public static async Task<List<AudioFileInfo>> ScanDirectoryAsync(string directoryPath, bool recursive = true, CancellationToken cancellationToken = default)
+    public static async Task<List<MediaItem>> ScanDirectoryAsync(string directoryPath, bool recursive = true, CancellationToken cancellationToken = default)
     {
-        return string.IsNullOrEmpty(directoryPath) || !Directory.Exists(directoryPath) ? [] : await Task.Run(() =>
+        if (string.IsNullOrEmpty(directoryPath) || !Directory.Exists(directoryPath))
         {
-            List<AudioFileInfo> audioFiles = [];
+            return [];
+        }
+
+        return await Task.Run(() =>
+        {
+            List<MediaItem> audioFiles = [];
 
             var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
 
@@ -52,8 +47,10 @@ public class FileScanner
                     {
                         FileInfo fileInfo = new(filePath);
 
-                        audioFiles.Add(new AudioFileInfo
+                        audioFiles.Add(new MediaItem
                         {
+                            Id = filePath,
+                            Kind = MediaKind.Music,
                             FilePath = filePath,
                             FileName = fileInfo.Name,
                             Extension = extension,
@@ -69,7 +66,6 @@ public class FileScanner
             }
             catch (Exception)
             {
-                // Log or handle other exceptions as needed
                 throw;
             }
 
@@ -77,9 +73,6 @@ public class FileScanner
         }, cancellationToken);
     }
 
-    /// <summary>
-    /// Gets the total count of audio files in a directory
-    /// </summary>
     public static int CountAudioFiles(string directoryPath, bool recursive = true)
     {
         if (string.IsNullOrEmpty(directoryPath) || !Directory.Exists(directoryPath))
@@ -91,8 +84,7 @@ public class FileScanner
 
         try
         {
-            return Directory.GetFiles(directoryPath, "*.*", searchOption)
-                .Count(file => SupportedExtensions.Contains(Path.GetExtension(file)));
+            return Directory.GetFiles(directoryPath, "*.*", searchOption).Count(file => SupportedExtensions.Contains(Path.GetExtension(file)));
         }
         catch
         {
@@ -100,9 +92,6 @@ public class FileScanner
         }
     }
 
-    /// <summary>
-    /// Checks if a file extension is supported
-    /// </summary>
     public static bool IsSupportedExtension(string filePath)
     {
         var extension = Path.GetExtension(filePath);

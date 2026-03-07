@@ -41,11 +41,15 @@
 	  <Compile Update="Controls\StatusBar.axaml.cs">
 	    <DependentUpon>StatusBar.axaml</DependentUpon>
 	  </Compile>
+	  <Compile Update="Controls\RadioFilterPanel.axaml.cs">
+	    <DependentUpon>RadioFilterPanel.axaml</DependentUpon>
+	  </Compile>
 	</ItemGroup>
 
 	<ItemGroup>
 	  <Using Include="Avalonia.Threading" />
 	  <Using Include="CommunityToolkit.Mvvm.ComponentModel" />
+	  <Using Include="CommunityToolkit.Mvvm.Input" />
 	  <Using Include="OrgZ.Controls" />
 	  <Using Include="OrgZ.Models" />
 	  <Using Include="OrgZ.Services" />

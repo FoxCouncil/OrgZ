@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -196,25 +196,19 @@ internal static class SmtcNativeMethods
     internal static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
     [DllImport("api-ms-win-core-winrt-l1-1-0.dll")]
-    internal static extern int RoGetActivationFactory(
-        IntPtr activatableClassId, ref Guid iid, out IntPtr factory);
+    internal static extern int RoGetActivationFactory(IntPtr activatableClassId, ref Guid iid, out IntPtr factory);
 
     [DllImport("api-ms-win-core-winrt-string-l1-1-0.dll", CharSet = CharSet.Unicode)]
-    internal static extern int WindowsCreateString(
-        string sourceString, int length, out IntPtr hstring);
+    internal static extern int WindowsCreateString(string sourceString, int length, out IntPtr hstring);
 
     [DllImport("api-ms-win-core-winrt-string-l1-1-0.dll")]
     internal static extern int WindowsDeleteString(IntPtr hstring);
 
     [DllImport("ole32.dll")]
-    internal static extern int CreateStreamOnHGlobal(
-        IntPtr hGlobal,
-        [MarshalAs(UnmanagedType.Bool)] bool fDeleteOnRelease,
-        out IStream ppstm);
+    internal static extern int CreateStreamOnHGlobal(IntPtr hGlobal, [MarshalAs(UnmanagedType.Bool)] bool fDeleteOnRelease, out IStream ppstm);
 
     [DllImport("shcore.dll")]
-    internal static extern int CreateRandomAccessStreamOverStream(
-        IStream stream, uint options, ref Guid riid, out IntPtr ppv);
+    internal static extern int CreateRandomAccessStreamOverStream(IStream stream, uint options, ref Guid riid, out IntPtr ppv);
 
     [DllImport("api-ms-win-core-winrt-l1-1-0.dll")]
     internal static extern int RoInitialize(int initType);
@@ -312,7 +306,9 @@ internal static unsafe class ButtonPressedHandlerFactory
         finally
         {
             if (rcw != null)
+            {
                 Marshal.ReleaseComObject(rcw);
+            }
         }
     }
 }
@@ -347,10 +343,7 @@ internal sealed class SmtcService : IDisposable
             int roHr = SmtcNativeMethods.RoInitialize(0); // RO_INIT_SINGLETHREADED
             System.Diagnostics.Debug.WriteLine($"SMTC: RoInitialize hr=0x{roHr:X8}");
 
-            int hr = SmtcNativeMethods.WindowsCreateString(
-                "Windows.Media.SystemMediaTransportControls",
-                "Windows.Media.SystemMediaTransportControls".Length,
-                out IntPtr hClassName);
+            int hr = SmtcNativeMethods.WindowsCreateString("Windows.Media.SystemMediaTransportControls", "Windows.Media.SystemMediaTransportControls".Length, out IntPtr hClassName);
             if (hr < 0)
             {
                 InitDiagnostics = $"SMTC: WindowsCreateString failed hr=0x{hr:X8}";
@@ -520,13 +513,19 @@ internal sealed class SmtcService : IDisposable
                         try
                         {
                             if (!string.IsNullOrEmpty(title))
+                            {
                                 SmtcNativeMethods.WindowsCreateString(title, title.Length, out hsTitle);
+                            }
 
                             if (!string.IsNullOrEmpty(artist))
+                            {
                                 SmtcNativeMethods.WindowsCreateString(artist, artist.Length, out hsArtist);
+                            }
 
                             if (!string.IsNullOrEmpty(album))
+                            {
                                 SmtcNativeMethods.WindowsCreateString(album, album.Length, out hsAlbum);
+                            }
 
                             music.put_Title(hsTitle);
                             music.put_Artist(hsArtist);
@@ -541,11 +540,17 @@ internal sealed class SmtcService : IDisposable
                         finally
                         {
                             if (hsTitle != IntPtr.Zero)
+                            {
                                 SmtcNativeMethods.WindowsDeleteString(hsTitle);
+                            }
                             if (hsArtist != IntPtr.Zero)
+                            {
                                 SmtcNativeMethods.WindowsDeleteString(hsArtist);
+                            }
                             if (hsAlbum != IntPtr.Zero)
+                            {
                                 SmtcNativeMethods.WindowsDeleteString(hsAlbum);
+                            }
                         }
                     }
                     finally
@@ -573,7 +578,9 @@ internal sealed class SmtcService : IDisposable
     {
         int hr = SmtcNativeMethods.CreateStreamOnHGlobal(IntPtr.Zero, true, out IStream stream);
         if (hr < 0)
+        {
             return;
+        }
 
         try
         {
@@ -584,23 +591,26 @@ internal sealed class SmtcService : IDisposable
             var rasIid = IID_IRandomAccessStream;
             hr = SmtcNativeMethods.CreateRandomAccessStreamOverStream(stream, 0, ref rasIid, out IntPtr rasPtr);
             if (hr < 0)
+            {
                 return;
+            }
 
             try
             {
-                hr = SmtcNativeMethods.WindowsCreateString(
-                    "Windows.Storage.Streams.RandomAccessStreamReference",
-                    "Windows.Storage.Streams.RandomAccessStreamReference".Length,
-                    out IntPtr hClassName);
+                hr = SmtcNativeMethods.WindowsCreateString("Windows.Storage.Streams.RandomAccessStreamReference", "Windows.Storage.Streams.RandomAccessStreamReference".Length, out IntPtr hClassName);
                 if (hr < 0)
+                {
                     return;
+                }
 
                 try
                 {
                     var statsIid = typeof(IRandomAccessStreamReferenceStatics).GUID;
                     hr = SmtcNativeMethods.RoGetActivationFactory(hClassName, ref statsIid, out IntPtr statsPtr);
                     if (hr < 0)
+                    {
                         return;
+                    }
 
                     var stats = (IRandomAccessStreamReferenceStatics)Marshal.GetObjectForIUnknown(statsPtr);
                     try

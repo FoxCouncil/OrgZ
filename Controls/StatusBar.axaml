@@ -2,13 +2,19 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
              xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:converters="clr-namespace:OrgZ.Converters"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="20"
              x:Class="OrgZ.Controls.StatusBar"
              x:DataType="vm:StatusBarViewModel">
     <Design.DataContext>
         <vm:StatusBarViewModel/>
     </Design.DataContext>
+
+    <UserControl.Resources>
+        <converters:MediaKindMatchConverter x:Key="MediaKindMatch" />
+    </UserControl.Resources>
 
     <Border>
         <Border.Styles>
@@ -18,51 +24,104 @@
             </Style>
         </Border.Styles>
 
-        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
-            <Grid.Styles>
-                <Style Selector="Grid > Border">
-                    <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
-                    <Setter Property="BorderThickness" Value="0,0,1,0"/>
-                    <Setter Property="Padding" Value="4,0"/>
-                </Style>
+        <Panel>
+            <!-- Music mode status -->
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto"
+                  IsVisible="{Binding ActiveKind, Converter={StaticResource MediaKindMatch}, ConverterParameter=Music}">
+                <Grid.Styles>
+                    <Style Selector="Grid > Border">
+                        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
+                        <Setter Property="BorderThickness" Value="0,0,1,0"/>
+                        <Setter Property="Padding" Value="4,0"/>
+                    </Style>
 
-                <Style Selector="Grid > Border:last-child">
-                    <Setter Property="BorderThickness" Value="0"/>
-                </Style>
-            </Grid.Styles>
+                    <Style Selector="Grid > Border:last-child">
+                        <Setter Property="BorderThickness" Value="0"/>
+                    </Style>
+                </Grid.Styles>
 
-	        <Border Grid.Column="0">
-                <TextBlock Text="{Binding MainStatus}" />
-            </Border>
+                <Border Grid.Column="0">
+                    <TextBlock Text="{Binding MainStatus}" />
+                </Border>
 
-            <Border Grid.Column="1">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding TotalArtists}" />
-                    <TextBlock Text="artists" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
-                </StackPanel>
-            </Border>
+                <Border Grid.Column="1">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding TotalArtists}" />
+                        <TextBlock Text="artists" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                    </StackPanel>
+                </Border>
 
-            <Border Grid.Column="2">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding TotalAlbums}" />
-                    <TextBlock Text="albums" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
-                </StackPanel>
-            </Border>
+                <Border Grid.Column="2">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding TotalAlbums}" />
+                        <TextBlock Text="albums" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                    </StackPanel>
+                </Border>
 
-            <Border Grid.Column="3">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding TotalSongs}" />
-                    <TextBlock Text="songs" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
-                </StackPanel>
-            </Border>
+                <Border Grid.Column="3">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding TotalSongs}" />
+                        <TextBlock Text="songs" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                    </StackPanel>
+                </Border>
 
-            <Border Grid.Column="4">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="{Binding TotalDuration}" />
-                    <TextBlock Text="time" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
-                </StackPanel>
-            </Border>
-        </Grid>
+                <Border Grid.Column="4">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding TotalDuration}" />
+                        <TextBlock Text="time" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="5" IsVisible="{Binding !!ErrorCount}">
+                    <Button x:Name="ErrorButtonMusic" Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />
+                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="OrangeRed" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Border>
+            </Grid>
+
+            <!-- Radio mode status -->
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                  IsVisible="{Binding ActiveKind, Converter={StaticResource MediaKindMatch}, ConverterParameter=Radio}">
+                <Grid.Styles>
+                    <Style Selector="Grid > Border">
+                        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
+                        <Setter Property="BorderThickness" Value="0,0,1,0"/>
+                        <Setter Property="Padding" Value="4,0"/>
+                    </Style>
+
+                    <Style Selector="Grid > Border:last-child">
+                        <Setter Property="BorderThickness" Value="0"/>
+                    </Style>
+                </Grid.Styles>
+
+                <Border Grid.Column="0">
+                    <TextBlock Text="{Binding MainStatus}" />
+                </Border>
+
+                <Border Grid.Column="1">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding StationCount}" />
+                        <TextBlock Text="stations" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" IsVisible="{Binding SyncStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="{Binding SyncStatus}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                </Border>
+
+                <Border Grid.Column="3" IsVisible="{Binding !!ErrorCount}">
+                    <Button x:Name="ErrorButtonRadio" Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />
+                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="OrangeRed" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Border>
+            </Grid>
+        </Panel>
     </Border>
 
 </UserControl>
