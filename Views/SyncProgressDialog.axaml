@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+		xmlns:i="https://github.com/projektanker/icons.avalonia"
+		mc:Ignorable="d" d:DesignWidth="420" d:DesignHeight="220"
+		x:Class="OrgZ.Views.SyncProgressDialog"
+		x:CompileBindings="False"
+		Title="Syncing Radio Stations"
+		Width="420" Height="220"
+		CanResize="False"
+		WindowStartupLocation="CenterOwner"
+		Background="#1A1A1A">
+	<Window.Styles>
+		<Style Selector="TextBlock">
+			<Setter Property="FontFamily" Value="Consolas" />
+			<Setter Property="Foreground" Value="#E0E0E0" />
+		</Style>
+	</Window.Styles>
+
+	<Border Margin="24" CornerRadius="4">
+		<DockPanel>
+			<!-- Header -->
+			<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,16">
+				<i:Icon Value="fa-solid fa-cloud-arrow-down" FontSize="22" Foreground="#4A9EFF" />
+				<TextBlock Text="Syncing Radio Stations" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
+			</StackPanel>
+
+			<!-- Cancel button at bottom -->
+			<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+				<Button x:Name="CancelButton" Content="Cancel" Width="80" Click="CancelButton_Click"
+						Background="#333" Foreground="#E0E0E0" FontFamily="Consolas" />
+			</StackPanel>
+
+			<!-- Progress area -->
+			<StackPanel Spacing="8">
+				<TextBlock x:Name="SourceLabel" Text="Preparing..." FontSize="13" />
+				<ProgressBar x:Name="ProgressBar" Minimum="0" Maximum="100" Value="0"
+							 Height="8" Foreground="#4A9EFF" Background="#333" />
+				<Grid ColumnDefinitions="*,Auto">
+					<TextBlock x:Name="DetailLabel" Grid.Column="0" Text="" FontSize="11" Opacity="0.6" />
+					<TextBlock x:Name="CountLabel" Grid.Column="1" Text="0 stations" FontSize="11" Opacity="0.6" />
+				</Grid>
+				<TextBlock x:Name="ElapsedLabel" Text="" FontSize="11" Opacity="0.4" />
+			</StackPanel>
+		</DockPanel>
+	</Border>
+</Window>

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -9,29 +9,42 @@ namespace OrgZ.Views;
 
 public partial class MainWindow : Window
 {
+    // Column indices matching the XAML definition order
+    private const int ColPlaying = 0;
+    private const int ColSource = 1;
+    private const int ColTitle = 2;
+    private const int ColArtist = 3;
+    private const int ColAlbum = 4;
+    private const int ColCountry = 5;
+    private const int ColTags = 6;
+    private const int ColYear = 7;
+    private const int ColCodec = 8;
+    private const int ColExtension = 9;
+    private const int ColBitrate = 10;
+    private const int ColHasAlbumArt = 11;
+    private const int ColListeners = 12;
+
     private readonly MainWindowViewModel _viewModel;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        Slider? slider = this.FindControl<Slider>("CurrentTimeSlider");
+        var slider = this.FindControl<Slider>("CurrentTimeSlider")!;
 
-        slider.AddHandler(
-            InputElement.PointerPressedEvent,
-            Slider_PointerPressed,
-            RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
-            handledEventsToo: true);
-
-        slider.AddHandler(
-            InputElement.PointerReleasedEvent,
-            Slider_PointerReleased,
-            RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
-            handledEventsToo: true);
+        slider.AddHandler(InputElement.PointerPressedEvent, Slider_PointerPressed, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
+        slider.AddHandler(InputElement.PointerReleasedEvent, Slider_PointerReleased, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
 
         DataContext = _viewModel = new MainWindowViewModel(this);
 
-        // Load files asynchronously after window is loaded
+        _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+        var radioFilterPanel = this.FindControl<Controls.RadioFilterPanel>("RadioFilterPanel")!;
+        radioFilterPanel.SyncRequested += () => _viewModel.LaunchRadioSync();
+
+        var statusBar = this.FindControl<Controls.StatusBar>("MainStatusBar")!;
+        statusBar.ErrorButtonClicked += async () => await _viewModel.ShowMessageLog();
+
         Loaded += async (s, e) =>
         {
             var handle = TryGetPlatformHandle();
@@ -45,7 +58,65 @@ public partial class MainWindow : Window
         };
     }
 
-    private void DataGrid_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
+    private async void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainWindowViewModel.SelectedSidebarItem))
+        {
+            return;
+        }
+
+        var kind = _viewModel.SelectedSidebarItem?.Kind;
+
+        UpdateColumnVisibility(kind);
+        UpdateContextMenu(kind);
+        UpdateFilterPanelVisibility(kind);
+
+        // First-run only: if DB had no radio stations, fetch popular ones
+        if (kind == MediaKind.Radio && _viewModel.FilteredItems.Count == 0 && !_viewModel.IsLoading)
+        {
+            await _viewModel.FetchPopularStationsAsync();
+        }
+    }
+
+    private void UpdateColumnVisibility(MediaKind? kind)
+    {
+        var cols = MainDataGrid.Columns;
+        bool music = kind == MediaKind.Music;
+        bool radio = kind == MediaKind.Radio;
+
+        // Always visible
+        cols[ColPlaying].IsVisible = true;
+        cols[ColTitle].IsVisible = true;
+
+        // Radio only
+        cols[ColSource].IsVisible = radio;
+        cols[ColCountry].IsVisible = radio;
+        cols[ColTags].IsVisible = radio;
+        cols[ColBitrate].IsVisible = radio;
+        cols[ColCodec].IsVisible = radio;
+        cols[ColListeners].IsVisible = radio;
+
+        // Music only
+        cols[ColArtist].IsVisible = music;
+        cols[ColAlbum].IsVisible = music;
+        cols[ColYear].IsVisible = music;
+        cols[ColExtension].IsVisible = music;
+        cols[ColHasAlbumArt].IsVisible = music;
+    }
+
+    private void UpdateContextMenu(MediaKind? kind)
+    {
+        MainDataGrid.ContextMenu = kind == MediaKind.Radio
+            ? (ContextMenu)Resources["RadioContextMenu"]!
+            : (ContextMenu)Resources["MusicContextMenu"]!;
+    }
+
+    private void UpdateFilterPanelVisibility(MediaKind? kind)
+    {
+        RadioFilterPanel.IsVisible = kind == MediaKind.Radio;
+    }
+
+    private void DataGrid_DoubleTapped(object? sender, TappedEventArgs e)
     {
         _viewModel.DataGridRowDoubleClick();
     }
@@ -60,12 +131,48 @@ public partial class MainWindow : Window
         _viewModel.DataGridRowDoubleClick();
     }
 
-    private void Slider_PointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    private void ContextMenu_Favorite(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem != null)
+        {
+            _viewModel.ToggleFavorite(_viewModel.SelectedItem);
+        }
+    }
+
+    private async void ContextMenu_CopyUrl(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem?.StreamUrl != null && Clipboard != null)
+        {
+            await Clipboard.SetTextAsync(_viewModel.SelectedItem.StreamUrl);
+        }
+    }
+
+    private void ContextMenu_Homepage(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedItem?.HomepageUrl != null)
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = _viewModel.SelectedItem.HomepageUrl,
+                    UseShellExecute = true
+                };
+                System.Diagnostics.Process.Start(psi);
+            }
+            catch
+            {
+                // Invalid URL
+            }
+        }
+    }
+
+    private void Slider_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         _viewModel.CurrentTrackTimeNumberPointerPressed();
     }
 
-    private void Slider_PointerReleased(object? sender, Avalonia.Input.PointerReleasedEventArgs e)
+    private void Slider_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         _viewModel.CurrentTrackTimeNumberPointerReleased();
     }
@@ -74,7 +181,6 @@ public partial class MainWindow : Window
     {
         base.OnKeyDown(e);
 
-        // Don't intercept when typing in the search box
         if (FocusManager?.GetFocusedElement() is TextBox)
         {
             return;
@@ -83,23 +189,10 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Space:
+            {
                 _viewModel.ButtonPlayPause();
                 e.Handled = true;
                 break;
-        }
-
-        if (e.KeyModifiers == KeyModifiers.Control)
-        {
-            switch (e.Key)
-            {
-                case Key.Left:
-                    _viewModel.ButtonPreviousTrack();
-                    e.Handled = true;
-                    break;
-                case Key.Right:
-                    _viewModel.ButtonNextTrack();
-                    e.Handled = true;
-                    break;
             }
         }
     }

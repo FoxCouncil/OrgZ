@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2025 Fox Diller
+﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using System.Runtime.InteropServices;
 
@@ -133,7 +133,9 @@ internal sealed class TaskbarThumbBarService : IDisposable
     internal bool Initialize(IntPtr hwnd)
     {
         if (!OperatingSystem.IsWindows())
+        {
             return false;
+        }
 
         try
         {
@@ -141,10 +143,16 @@ internal sealed class TaskbarThumbBarService : IDisposable
 
             _taskbar = (ITaskbarList3)new TaskbarListClass();
             int hr = _taskbar.HrInit();
-            if (hr < 0) return false;
+            if (hr < 0)
+            {
+                return false;
+            }
 
             int iconSize = ThumbBarNativeMethods.GetSystemMetrics(ThumbBarNativeMethods.SM_CXSMICON);
-            if (iconSize <= 0) iconSize = 16;
+            if (iconSize <= 0)
+            {
+                iconSize = 16;
+            }
 
             _iconPrev = CreatePrevIcon(iconSize);
             _iconPlay = CreatePlayIcon(iconSize);
@@ -164,7 +172,10 @@ internal sealed class TaskbarThumbBarService : IDisposable
             };
 
             hr = MarshalAndAddButtons(buttons);
-            if (hr < 0) return false;
+            if (hr < 0)
+            {
+                return false;
+            }
 
             _initialized = true;
             return true;
@@ -190,7 +201,10 @@ internal sealed class TaskbarThumbBarService : IDisposable
 
     private void UpdateAllButtons()
     {
-        if (!_initialized || _taskbar == null) return;
+        if (!_initialized || _taskbar == null)
+        {
+            return;
+        }
 
         try
         {
@@ -214,13 +228,17 @@ internal sealed class TaskbarThumbBarService : IDisposable
         try
         {
             for (int i = 0; i < buttons.Length; i++)
+            {
                 Marshal.StructureToPtr(buttons[i], ptr + i * size, false);
+            }
             return _taskbar!.ThumbBarAddButtons(_hwnd, (uint)buttons.Length, ptr);
         }
         finally
         {
             for (int i = 0; i < buttons.Length; i++)
+            {
                 Marshal.DestroyStructure<THUMBBUTTON>(ptr + i * size);
+            }
             Marshal.FreeHGlobal(ptr);
         }
     }
@@ -232,13 +250,17 @@ internal sealed class TaskbarThumbBarService : IDisposable
         try
         {
             for (int i = 0; i < buttons.Length; i++)
+            {
                 Marshal.StructureToPtr(buttons[i], ptr + i * size, false);
+            }
             return _taskbar!.ThumbBarUpdateButtons(_hwnd, (uint)buttons.Length, ptr);
         }
         finally
         {
             for (int i = 0; i < buttons.Length; i++)
+            {
                 Marshal.DestroyStructure<THUMBBUTTON>(ptr + i * size);
+            }
             Marshal.FreeHGlobal(ptr);
         }
     }
@@ -259,14 +281,20 @@ internal sealed class TaskbarThumbBarService : IDisposable
                 switch ((uint)loWord)
                 {
                     case BTN_PREV:
+                    {
                         PreviousRequested?.Invoke();
                         return IntPtr.Zero;
+                    }
                     case BTN_PLAY_PAUSE:
+                    {
                         PlayPauseRequested?.Invoke();
                         return IntPtr.Zero;
+                    }
                     case BTN_NEXT:
+                    {
                         NextRequested?.Invoke();
                         return IntPtr.Zero;
+                    }
                 }
             }
         }
@@ -289,14 +317,21 @@ internal sealed class TaskbarThumbBarService : IDisposable
             float halfH = s * 0.32f;
 
             for (int y = 0; y < s; y++)
+            {
                 for (int x = 0; x < s; x++)
                 {
                     float dy = Math.Abs(y - cy);
-                    if (dy > halfH) continue;
+                    if (dy > halfH)
+                    {
+                        continue;
+                    }
                     float maxX = left + (right - left) * (1.0f - dy / halfH);
                     if (x >= left && x <= maxX)
+                    {
                         pixels[y * s + x] = 0xFFFFFFFF;
+                    }
                 }
+            }
         });
     }
 
@@ -304,7 +339,7 @@ internal sealed class TaskbarThumbBarService : IDisposable
     {
         return CreateArgbIcon(size, (pixels, s) =>
         {
-            // Two vertical bars ❚❚
+            // Two vertical bars
             int top = (int)(s * 0.2f);
             int bottom = (int)(s * 0.8f);
             int bar1Left = (int)(s * 0.25f);
@@ -313,12 +348,15 @@ internal sealed class TaskbarThumbBarService : IDisposable
             int bar2Right = (int)(s * 0.75f);
 
             for (int y = top; y <= bottom; y++)
+            {
                 for (int x = 0; x < s; x++)
                 {
-                    if ((x >= bar1Left && x <= bar1Right) ||
-                        (x >= bar2Left && x <= bar2Right))
+                    if ((x >= bar1Left && x <= bar1Right) || (x >= bar2Left && x <= bar2Right))
+                    {
                         pixels[y * s + x] = 0xFFFFFFFF;
+                    }
                 }
+            }
         });
     }
 
@@ -326,7 +364,7 @@ internal sealed class TaskbarThumbBarService : IDisposable
     {
         return CreateArgbIcon(size, (pixels, s) =>
         {
-            // Bar + left-pointing triangle |◀
+            // Bar + left-pointing triangle
             int top = (int)(s * 0.2f);
             int bottom = (int)(s * 0.8f);
             int barLeft = (int)(s * 0.12f);
@@ -334,8 +372,12 @@ internal sealed class TaskbarThumbBarService : IDisposable
 
             // Bar
             for (int y = top; y <= bottom; y++)
+            {
                 for (int x = barLeft; x <= barRight; x++)
+                {
                     pixels[y * s + x] = 0xFFFFFFFF;
+                }
+            }
 
             // Left-pointing triangle
             float triRight = s * 0.82f;
@@ -344,14 +386,21 @@ internal sealed class TaskbarThumbBarService : IDisposable
             float halfH = s * 0.32f;
 
             for (int y = 0; y < s; y++)
+            {
                 for (int x = 0; x < s; x++)
                 {
                     float dy = Math.Abs(y - cy);
-                    if (dy > halfH) continue;
+                    if (dy > halfH)
+                    {
+                        continue;
+                    }
                     float minX = triRight - (triRight - triLeft) * (1.0f - dy / halfH);
                     if (x >= minX && x <= triRight)
+                    {
                         pixels[y * s + x] = 0xFFFFFFFF;
+                    }
                 }
+            }
         });
     }
 
@@ -359,7 +408,7 @@ internal sealed class TaskbarThumbBarService : IDisposable
     {
         return CreateArgbIcon(size, (pixels, s) =>
         {
-            // Right-pointing triangle + bar ▶|
+            // Right-pointing triangle + bar
             float triLeft = s * 0.18f;
             float triRight = s * 0.70f;
             float cy = s * 0.5f;
@@ -367,14 +416,21 @@ internal sealed class TaskbarThumbBarService : IDisposable
 
             // Triangle
             for (int y = 0; y < s; y++)
+            {
                 for (int x = 0; x < s; x++)
                 {
                     float dy = Math.Abs(y - cy);
-                    if (dy > halfH) continue;
+                    if (dy > halfH)
+                    {
+                        continue;
+                    }
                     float maxX = triLeft + (triRight - triLeft) * (1.0f - dy / halfH);
                     if (x >= triLeft && x <= maxX)
+                    {
                         pixels[y * s + x] = 0xFFFFFFFF;
+                    }
                 }
+            }
 
             // Bar
             int top = (int)(s * 0.2f);
@@ -383,8 +439,12 @@ internal sealed class TaskbarThumbBarService : IDisposable
             int barRight = (int)(s * 0.88f);
 
             for (int y = top; y <= bottom; y++)
+            {
                 for (int x = barLeft; x <= barRight; x++)
+                {
                     pixels[y * s + x] = 0xFFFFFFFF;
+                }
+            }
         });
     }
 
@@ -427,8 +487,14 @@ internal sealed class TaskbarThumbBarService : IDisposable
         finally
         {
             colorHandle.Free();
-            if (colorBmp != IntPtr.Zero) ThumbBarNativeMethods.DeleteObject(colorBmp);
-            if (maskBmp != IntPtr.Zero) ThumbBarNativeMethods.DeleteObject(maskBmp);
+            if (colorBmp != IntPtr.Zero)
+            {
+                ThumbBarNativeMethods.DeleteObject(colorBmp);
+            }
+            if (maskBmp != IntPtr.Zero)
+            {
+                ThumbBarNativeMethods.DeleteObject(maskBmp);
+            }
         }
     }
 
@@ -436,7 +502,10 @@ internal sealed class TaskbarThumbBarService : IDisposable
 
     public void Dispose()
     {
-        if (!_initialized) return;
+        if (!_initialized)
+        {
+            return;
+        }
         _initialized = false;
 
         if (_subclassProc != null && _hwnd != IntPtr.Zero)

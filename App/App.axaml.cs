@@ -1,9 +1,10 @@
-// Copyright (c) 2025 Fox Diller
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using OrgZ.ViewModels;
 
 namespace OrgZ;
 
@@ -36,12 +37,27 @@ public partial class App : Application
                 Settings.Save();
             }
 
-            desktop.MainWindow.Title = FolderPath != string.Empty
-                ? $"OrgZ v{Version} - {FolderPath}"
-                : $"OrgZ v{Version} - [No folder selected]";
+            desktop.MainWindow.Title = FolderPath != string.Empty ? $"OrgZ v{Version} - {FolderPath}" : $"OrgZ v{Version} - [No folder selected]";
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private async void AboutMenuItem_Click(object? sender, EventArgs e)
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow?.DataContext is MainWindowViewModel vm)
+        {
+            await vm.ShowAbout();
+        }
+    }
+
+    private void QuitMenuItem_Click(object? sender, EventArgs e)
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
     }
 
     private static IStorageFolder? AskForDirectory(IClassicDesktopStyleApplicationLifetime desktop)
@@ -53,12 +69,13 @@ public partial class App : Application
 
         IStorageProvider storage = desktop.MainWindow.StorageProvider;
 
-        IReadOnlyList<IStorageFolder> selectedFolders = storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Select OrgZ Folder",
-            AllowMultiple = false,
-        }).GetAwaiter().GetResult();
+        IReadOnlyList<IStorageFolder> selectedFolders = storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select OrgZ Folder", AllowMultiple = false }).GetAwaiter().GetResult();
 
-        return selectedFolders == null ? null : selectedFolders.Count == 0 ? null : selectedFolders[0];
+        if (selectedFolders == null || selectedFolders.Count == 0)
+        {
+            return null;
+        }
+
+        return selectedFolders[0];
     }
 }
