@@ -171,7 +171,7 @@ internal sealed class TaskbarThumbBarService : IDisposable
                 new() { dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS, iId = BTN_NEXT, hIcon = _iconNext, szTip = "Next", dwFlags = THBF_DISABLED },
             };
 
-            hr = MarshalAndAddButtons(buttons);
+            hr = MarshalButtons(buttons, add: true);
             if (hr < 0)
             {
                 return false;
@@ -214,14 +214,14 @@ internal sealed class TaskbarThumbBarService : IDisposable
                 new() { dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS, iId = BTN_PLAY_PAUSE, hIcon = _isPlaying ? _iconPause : _iconPlay, szTip = _isPlaying ? "Pause" : "Play", dwFlags = THBF_ENABLED },
                 new() { dwMask = THB_ICON | THB_TOOLTIP | THB_FLAGS, iId = BTN_NEXT, hIcon = _iconNext, szTip = "Next", dwFlags = _nextEnabled ? THBF_ENABLED : THBF_DISABLED },
             };
-            MarshalAndUpdateButtons(buttons);
+            MarshalButtons(buttons, add: false);
         }
         catch { }
     }
 
     #region Marshal Helpers
 
-    private int MarshalAndAddButtons(THUMBBUTTON[] buttons)
+    private int MarshalButtons(THUMBBUTTON[] buttons, bool add)
     {
         int size = Marshal.SizeOf<THUMBBUTTON>();
         IntPtr ptr = Marshal.AllocHGlobal(size * buttons.Length);
@@ -231,29 +231,9 @@ internal sealed class TaskbarThumbBarService : IDisposable
             {
                 Marshal.StructureToPtr(buttons[i], ptr + i * size, false);
             }
-            return _taskbar!.ThumbBarAddButtons(_hwnd, (uint)buttons.Length, ptr);
-        }
-        finally
-        {
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                Marshal.DestroyStructure<THUMBBUTTON>(ptr + i * size);
-            }
-            Marshal.FreeHGlobal(ptr);
-        }
-    }
-
-    private int MarshalAndUpdateButtons(THUMBBUTTON[] buttons)
-    {
-        int size = Marshal.SizeOf<THUMBBUTTON>();
-        IntPtr ptr = Marshal.AllocHGlobal(size * buttons.Length);
-        try
-        {
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                Marshal.StructureToPtr(buttons[i], ptr + i * size, false);
-            }
-            return _taskbar!.ThumbBarUpdateButtons(_hwnd, (uint)buttons.Length, ptr);
+            return add
+                ? _taskbar!.ThumbBarAddButtons(_hwnd, (uint)buttons.Length, ptr)
+                : _taskbar!.ThumbBarUpdateButtons(_hwnd, (uint)buttons.Length, ptr);
         }
         finally
         {

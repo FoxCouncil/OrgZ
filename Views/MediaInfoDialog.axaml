@@ -1,0 +1,259 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+		mc:Ignorable="d" d:DesignWidth="560" d:DesignHeight="500"
+		x:Class="OrgZ.Views.MediaInfoDialog"
+		x:CompileBindings="False"
+		Title="Media Info"
+		Width="560" Height="500"
+		CanResize="False"
+		WindowStartupLocation="CenterOwner"
+		Classes="orgzDialog">
+
+	<DockPanel Margin="16">
+		<!-- Bottom buttons: Previous / Next (left) and OK / Cancel (right) -->
+		<Grid DockPanel.Dock="Bottom" Margin="0,12,0,0" ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+			<Button Grid.Column="0" x:Name="PreviousButton" Content="Previous" Width="80" Click="PreviousButton_Click" Margin="0,0,8,0" />
+			<Button Grid.Column="1" x:Name="NextButton" Content="Next" Width="80" Click="NextButton_Click" />
+			<Button Grid.Column="3" x:Name="OkButton" Content="OK" Width="80" Click="OkButton_Click" Margin="0,0,8,0" />
+			<Button Grid.Column="4" x:Name="CancelButton" Content="Cancel" Width="80" Click="CancelButton_Click" />
+		</Grid>
+
+		<!-- Tabbed area -->
+		<TabControl x:Name="MainTabControl">
+			<!-- ===== Summary Tab ===== -->
+			<TabItem Header="Summary">
+				<ScrollViewer Margin="8,12">
+					<StackPanel Spacing="12">
+						<!-- Top section: art + basic info -->
+						<Grid ColumnDefinitions="100,*" Margin="0,0,0,8">
+							<Border Grid.Column="0" Background="#111" BorderBrush="#333" BorderThickness="1"
+									Width="90" Height="90" CornerRadius="4">
+								<Image x:Name="SummaryArt" Stretch="UniformToFill" />
+							</Border>
+							<StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="2">
+								<TextBlock x:Name="SummaryTitle" FontWeight="Bold" FontSize="14" TextWrapping="Wrap" />
+								<TextBlock x:Name="SummaryArtist" Opacity="0.7" />
+								<TextBlock x:Name="SummaryAlbum" Opacity="0.5" />
+							</StackPanel>
+						</Grid>
+
+						<!-- Metadata grid: 4 columns for short values -->
+						<Grid ColumnDefinitions="120,130,120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="4,0,0,0">
+							<TextBlock Grid.Row="0" Grid.Column="0" Text="Kind:" Opacity="0.6" />
+							<TextBlock Grid.Row="0" Grid.Column="1" x:Name="SummaryMediaKind" />
+							<TextBlock Grid.Row="0" Grid.Column="2" Text="Play Count:" Opacity="0.6" />
+							<TextBlock Grid.Row="0" Grid.Column="3" x:Name="SummaryPlayCount" />
+
+							<TextBlock Grid.Row="1" Grid.Column="0" Text="Size:" Opacity="0.6" />
+							<TextBlock Grid.Row="1" Grid.Column="1" x:Name="SummarySize" />
+							<TextBlock Grid.Row="1" Grid.Column="2" x:Name="SummaryR1C2Label" Opacity="0.6" />
+							<TextBlock Grid.Row="1" Grid.Column="3" x:Name="SummaryR1C2Value" />
+
+							<TextBlock Grid.Row="2" Grid.Column="0" x:Name="SummaryR2C0Label" Opacity="0.6" />
+							<TextBlock Grid.Row="2" Grid.Column="1" x:Name="SummaryR2C0Value" />
+							<TextBlock Grid.Row="2" Grid.Column="2" x:Name="SummaryR2C2Label" Opacity="0.6" />
+							<TextBlock Grid.Row="2" Grid.Column="3" x:Name="SummaryR2C2Value" />
+
+							<TextBlock Grid.Row="3" Grid.Column="0" x:Name="SummaryR3C0Label" Opacity="0.6" />
+							<TextBlock Grid.Row="3" Grid.Column="1" x:Name="SummaryR3C0Value" />
+							<TextBlock Grid.Row="3" Grid.Column="2" Text="Type:" Opacity="0.6" />
+							<TextBlock Grid.Row="3" Grid.Column="3" x:Name="SummaryKind" />
+
+							<TextBlock Grid.Row="4" Grid.Column="0" x:Name="SummaryR4C0Label" Opacity="0.6" />
+							<TextBlock Grid.Row="4" Grid.Column="1" x:Name="SummaryR4C0Value" TextWrapping="Wrap" />
+							<TextBlock Grid.Row="4" Grid.Column="2" x:Name="SummaryR4C2Label" Opacity="0.6" />
+							<TextBlock Grid.Row="4" Grid.Column="3" x:Name="SummaryR4C2Value" TextWrapping="Wrap" />
+						</Grid>
+
+						<!-- Dates: Played, Added, Modified -->
+						<Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto" Margin="4,4,0,0">
+							<TextBlock Grid.Row="0" Grid.Column="0" Text="Last Played:" Opacity="0.6" />
+							<TextBlock Grid.Row="0" Grid.Column="1" x:Name="SummaryLastPlayed" />
+
+							<TextBlock Grid.Row="1" Grid.Column="0" Text="Date Added:" Opacity="0.6" />
+							<TextBlock Grid.Row="1" Grid.Column="1" x:Name="SummaryDateAdded" />
+
+							<TextBlock Grid.Row="2" Grid.Column="0" Text="Date Modified:" Opacity="0.6" />
+							<TextBlock Grid.Row="2" Grid.Column="1" x:Name="SummaryDateModified" />
+						</Grid>
+
+						<!-- Where / Stream URL -->
+						<Border BorderBrush="#333" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,4,0,0">
+							<StackPanel Spacing="2">
+								<TextBlock x:Name="SummaryWhereLabel" Text="Where:" FontWeight="Bold" FontSize="11" Opacity="0.6" />
+								<TextBlock x:Name="SummaryWherePath" FontSize="11" TextWrapping="Wrap" Opacity="0.5" />
+							</StackPanel>
+						</Border>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<!-- ===== Info Tab ===== -->
+			<TabItem Header="Info">
+				<ScrollViewer Margin="8,12">
+					<!-- Music Info Panel -->
+					<StackPanel x:Name="MusicInfoPanel" Spacing="8">
+						<TextBlock Text="Name" FontSize="11" Opacity="0.6" />
+						<TextBox x:Name="InfoName" />
+
+						<Grid ColumnDefinitions="*,100" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Artist" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoArtist" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="Year" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoYear" MaxLength="4" />
+							</StackPanel>
+						</Grid>
+
+						<Grid ColumnDefinitions="*,60,20,60" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Composer" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoComposer" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="Track #" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoTrack" MaxLength="4" />
+							</StackPanel>
+							<TextBlock Grid.Column="2" Text="of" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,6" Opacity="0.5" />
+							<StackPanel Grid.Column="3" Spacing="2">
+								<TextBlock Text="" FontSize="11" />
+								<TextBox x:Name="InfoTotalTracks" MaxLength="4" />
+							</StackPanel>
+						</Grid>
+
+						<Grid ColumnDefinitions="*,60,20,60" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Album" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoAlbum" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="Disc #" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoDisc" MaxLength="3" />
+							</StackPanel>
+							<TextBlock Grid.Column="2" Text="of" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,6" Opacity="0.5" />
+							<StackPanel Grid.Column="3" Spacing="2">
+								<TextBlock Text="" FontSize="11" />
+								<TextBox x:Name="InfoTotalDiscs" MaxLength="3" />
+							</StackPanel>
+						</Grid>
+
+						<TextBlock Text="Comments" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="InfoComments" AcceptsReturn="True" Height="60" TextWrapping="Wrap" />
+
+						<Grid ColumnDefinitions="*,100" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Genre" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoGenre" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="BPM" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="InfoBPM" MaxLength="4" />
+							</StackPanel>
+						</Grid>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<!-- ===== Radio Info Tab (hidden by default, shown for radio items) ===== -->
+			<TabItem x:Name="RadioInfoTab" Header="Station" IsVisible="False">
+				<ScrollViewer Margin="8,12">
+					<StackPanel Spacing="8">
+						<TextBlock Text="Name" FontSize="11" Opacity="0.6" />
+						<TextBox x:Name="RadioInfoName" />
+
+						<TextBlock Text="Tags" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="RadioInfoTags" IsReadOnly="True" />
+
+						<TextBlock Text="Stream URL" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="RadioInfoStreamUrl" IsReadOnly="True" />
+
+						<Grid ColumnDefinitions="*,*" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Source" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="RadioInfoSource" IsReadOnly="True" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="Country" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="RadioInfoCountry" IsReadOnly="True" />
+							</StackPanel>
+						</Grid>
+
+						<TextBlock Text="Homepage" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="RadioInfoHomepage" IsReadOnly="True" />
+
+						<Grid ColumnDefinitions="*,*" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Codec" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="RadioInfoCodec" IsReadOnly="True" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="Bitrate" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="RadioInfoBitrate" IsReadOnly="True" />
+							</StackPanel>
+						</Grid>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<!-- ===== Options Tab ===== -->
+			<TabItem Header="Options">
+				<StackPanel Margin="8,12" Spacing="20">
+					<!-- Volume Adjustment -->
+					<StackPanel Spacing="6">
+						<TextBlock Text="Volume Adjustment:" />
+						<Grid ColumnDefinitions="*" RowDefinitions="Auto,Auto">
+							<Slider x:Name="VolumeAdjustmentSlider" Minimum="-100" Maximum="100" Value="0"
+									TickFrequency="10" IsSnapToTickEnabled="False" />
+							<Grid Grid.Row="1" ColumnDefinitions="*,*,*">
+								<TextBlock Grid.Column="0" Text="-100%" FontSize="10" Opacity="0.5" />
+								<TextBlock Grid.Column="1" Text="None" FontSize="10" Opacity="0.5" HorizontalAlignment="Center" />
+								<TextBlock Grid.Column="2" Text="+100%" FontSize="10" Opacity="0.5" HorizontalAlignment="Right" />
+							</Grid>
+						</Grid>
+					</StackPanel>
+
+					<!-- Equalizer Preset -->
+					<StackPanel Orientation="Horizontal" Spacing="12">
+						<TextBlock Text="Equalizer Preset:" VerticalAlignment="Center" />
+						<ComboBox x:Name="EqPresetCombo" Width="200" />
+					</StackPanel>
+
+					<!-- My Rating -->
+					<StackPanel Orientation="Horizontal" Spacing="12">
+						<TextBlock Text="My Rating:" VerticalAlignment="Center" />
+						<StackPanel x:Name="RatingPanel" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" />
+					</StackPanel>
+
+					<!-- Start / Stop Time (hidden for radio) -->
+					<StackPanel x:Name="StartStopPanel" Spacing="8">
+						<StackPanel Orientation="Horizontal" Spacing="8">
+							<CheckBox x:Name="UseStartTimeCheck" Content="Start Time:" Width="140" />
+							<TextBox x:Name="StartTimeBox" Width="100" Text="0:00" />
+						</StackPanel>
+						<StackPanel Orientation="Horizontal" Spacing="8">
+							<CheckBox x:Name="UseStopTimeCheck" Content="Stop Time:" Width="140" />
+							<TextBox x:Name="StopTimeBox" Width="100" Text="0:00" />
+						</StackPanel>
+					</StackPanel>
+				</StackPanel>
+			</TabItem>
+
+			<!-- ===== Artwork Tab (Music only) ===== -->
+			<TabItem x:Name="ArtworkTab" Header="Artwork">
+				<DockPanel Margin="8,12">
+					<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+						<Button x:Name="ArtworkAddButton" Content="Add..." Width="80" IsEnabled="False" />
+						<Button x:Name="ArtworkDeleteButton" Content="Delete" Width="80" IsEnabled="False" />
+					</StackPanel>
+					<Border Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+						<Image x:Name="ArtworkImage" Stretch="Uniform" Margin="8" />
+					</Border>
+				</DockPanel>
+			</TabItem>
+		</TabControl>
+	</DockPanel>
+</Window>

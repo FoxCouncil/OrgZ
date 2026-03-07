@@ -338,6 +338,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 CurrentTrackTimeNumber = e.Time;
             }
+
+            // Stop time check for per-track options
+            var playing = _currentMusicItem ?? _currentStation;
+            if (playing is { UseStopTime: true, StopTime: not null })
+            {
+                if (e.Time >= (long)playing.StopTime.Value.TotalMilliseconds)
+                {
+                    ButtonNextTrack();
+                }
+            }
         });
 
         _player.Stopped += (s, e) => UI(() =>
@@ -668,6 +678,97 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         await dialog.ShowDialog(_window);
     }
 
+    [RelayCommand]
+    internal async Task ShowMediaInfo()
+    {
+        if (SelectedItem == null)
+        {
+            return;
+        }
+
+        var dialog = new Views.MediaInfoDialog(SelectedItem, FilteredItems);
+        var result = await dialog.ShowDialog<bool?>(_window);
+
+        if (result == true && dialog.ItemChanged)
+        {
+            ApplyFilter();
+            UpdateData();
+        }
+    }
+
+    [RelayCommand]
+    internal async Task ShowSettings()
+    {
+        var dialog = new Views.SettingsDialog(_allItems);
+        var result = await dialog.ShowDialog<bool?>(_window);
+
+        if (result != true)
+        {
+            return;
+        }
+
+        if (dialog.SettingsReset)
+        {
+            Stop();
+            _window.Title = $"OrgZ v{App.Version} - [No folder selected]";
+            return;
+        }
+
+        if (dialog.FolderChanged)
+        {
+            Stop();
+
+            if (_currentMusicItem != null)
+            {
+                _currentMusicItem.IsPlaying = false;
+                _currentMusicItem = null;
+            }
+
+            _currentMedia?.Dispose();
+            _currentMedia = null;
+
+            CurrentAlbumArt?.Dispose();
+            CurrentAlbumArt = null;
+            CurrentTrackMetadata = string.Empty;
+            CurrentTrackTime = "00:00";
+            CurrentTrackDuration = "00:00";
+            CurrentTrackTimeNumber = 0;
+            CurrentTrackDurationNumber = 0;
+
+            ButtonPlayPauseIcon = ICON_PLAY;
+            ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
+            _thumbBarService?.SetPlayingState(false);
+
+            _allItems.RemoveAll(i => i.Kind == MediaKind.Music);
+            FilteredItems = [];
+            _lastMusicFilteredList = [];
+
+            _window.Title = App.FolderPath != string.Empty
+                ? $"OrgZ v{App.Version} - {App.FolderPath}"
+                : $"OrgZ v{App.Version} - [No folder selected]";
+
+            if (App.FolderPath != string.Empty)
+            {
+                await ScanAndAnalyzeMusicAsync();
+            }
+        }
+
+        if (dialog.RadioCacheCleared)
+        {
+            Services.MediaCache.RemoveRadioBySource("radiobrowser");
+            Services.MediaCache.RemoveRadioBySource("shoutcast");
+
+            _allItems.RemoveAll(i => i.Kind == MediaKind.Radio && !i.IsFavorite);
+
+            if (SelectedSidebarItem?.Kind == MediaKind.Radio)
+            {
+                ApplyFilter();
+            }
+        }
+    }
+
     internal async Task LaunchRadioSync()
     {
         if (IsSyncing)
@@ -768,6 +869,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             _ = _player.Play(_currentMedia);
 
+            ApplyPerTrackOptions(_currentMusicItem);
+
             _currentMusicItem.LastPlayed = DateTime.UtcNow;
             _currentMusicItem.PlayCount++;
             MediaCache.SetLastPlayed(_currentMusicItem.Id, _currentMusicItem.LastPlayed.Value);
@@ -849,6 +952,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             };
 
             _ = _player.Play(_currentMedia);
+
+            ApplyPerTrackOptions(station);
 
             station.LastPlayed = DateTime.UtcNow;
             station.PlayCount++;
@@ -1172,7 +1277,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             else
             {
                 var ago = DateTime.UtcNow - new[] { rbSync.Value.LastSync, scSync.Value.LastSync }.Min();
-                StatusBar.SyncStatus = $"Last synced: {FormatTimeAgo(ago)}";
+                StatusBar.SyncStatus = $"Last synced: {FormatHelper.FormatTimeAgo(ago)}";
             }
         }
         else
@@ -1395,6 +1500,50 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void ApplyPerTrackOptions(MediaItem item)
+    {
+        // Volume adjustment: multiplier on the current global volume
+        var multiplier = 1.0 + (item.VolumeAdjustment / 100.0);
+        var effectiveVolume = (int)Math.Clamp(CurrentVolume * multiplier, 0, 200);
+        _player.Volume = effectiveVolume;
+
+        // Equalizer preset
+        if (!string.IsNullOrEmpty(item.EqPreset))
+        {
+            try
+            {
+                using var tempEq = new Equalizer();
+                var count = tempEq.PresetCount;
+                for (uint i = 0; i < count; i++)
+                {
+                    if (tempEq.PresetName(i) == item.EqPreset)
+                    {
+                        _player.SetEqualizer(new Equalizer(i));
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+        else
+        {
+            try { _player.UnsetEqualizer(); } catch { }
+        }
+
+        // Start time: seek after a brief delay to let playback begin
+        if (item.UseStartTime && item.StartTime.HasValue)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(100);
+                if (_player.IsPlaying)
+                {
+                    _player.Time = (long)item.StartTime.Value.TotalMilliseconds;
+                }
+            });
+        }
+    }
+
     private static void UI(Action action)
     {
         Dispatcher.UIThread.Post(action);
@@ -1427,25 +1576,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return null;
     }
 
-    private static string FormatTimeAgo(TimeSpan ago)
-    {
-        if (ago.TotalMinutes < 1)
-        {
-            return "just now";
-        }
-
-        if (ago.TotalHours < 1)
-        {
-            return $"{(int)ago.TotalMinutes}m ago";
-        }
-
-        if (ago.TotalDays < 1)
-        {
-            return $"{(int)ago.TotalHours}h ago";
-        }
-
-        return $"{(int)ago.TotalDays}d ago";
-    }
 
     #endregion
 

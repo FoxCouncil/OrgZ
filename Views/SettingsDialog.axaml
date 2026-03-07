@@ -1,0 +1,214 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+		xmlns:i="https://github.com/projektanker/icons.avalonia"
+		mc:Ignorable="d" d:DesignWidth="560" d:DesignHeight="520"
+		x:Class="OrgZ.Views.SettingsDialog"
+		x:CompileBindings="False"
+		Title="OrgZ Settings"
+		Width="560" Height="520"
+		CanResize="False"
+		WindowStartupLocation="CenterOwner"
+		Classes="orgzDialog">
+
+	<DockPanel Margin="16">
+		<!-- OK / Cancel buttons at the bottom (iTunes style) -->
+		<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0" Spacing="8">
+			<Button x:Name="OkButton" Content="OK" Width="80" Click="OkButton_Click" />
+			<Button x:Name="CancelButton" Content="Cancel" Width="80" Click="CancelButton_Click" />
+		</StackPanel>
+
+		<!-- Tabbed settings area -->
+		<TabControl>
+			<!-- ===== General Tab ===== -->
+			<TabItem Header="General">
+				<StackPanel Margin="8,12" Spacing="16">
+					<!-- Music Library Folder Location (mirrors iTunes Advanced tab) -->
+					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<StackPanel Spacing="8">
+							<TextBlock Text="Music Library Folder Location" FontWeight="Bold" FontSize="13" />
+							<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+								<Border Grid.Row="0" Grid.Column="0" Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="2" Padding="8,6" Margin="0,0,8,0">
+									<TextBlock x:Name="FolderPathText" Text="" FontSize="11" TextWrapping="Wrap" MaxHeight="36" />
+								</Border>
+								<StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+									<Button x:Name="ChangeFolderButton" Content="Change ..." Width="90" Click="ChangeFolderButton_Click" />
+									<Button x:Name="ResetFolderButton" Content="Reset" Width="90" Click="ResetFolderButton_Click" />
+								</StackPanel>
+							</Grid>
+						</StackPanel>
+					</Border>
+
+					<CheckBox x:Name="MinimizeToTrayCheck" Content="Minimize to system tray on close" />
+					<CheckBox x:Name="RememberLastTrackCheck" Content="Remember last played track" />
+				</StackPanel>
+			</TabItem>
+
+			<!-- ===== Playback Tab ===== -->
+			<TabItem Header="Playback">
+				<StackPanel Margin="8,12" Spacing="16">
+					<!-- Streaming Buffer Size (like iTunes) -->
+					<StackPanel Orientation="Horizontal" Spacing="12">
+						<TextBlock Text="Streaming Buffer Size:" VerticalAlignment="Center" />
+						<ComboBox x:Name="BufferSizeCombo" Width="160" SelectedIndex="1">
+							<ComboBoxItem Content="Small" />
+							<ComboBoxItem Content="Medium" />
+							<ComboBoxItem Content="Large" />
+							<ComboBoxItem Content="Extra Large" />
+						</ComboBox>
+					</StackPanel>
+
+					<!-- Shuffle by (like iTunes) -->
+					<StackPanel Spacing="6">
+						<TextBlock Text="Shuffle by:" />
+						<StackPanel Orientation="Horizontal" Spacing="16" Margin="16,0,0,0">
+							<RadioButton x:Name="ShuffleSongRadio" Content="Song" GroupName="Shuffle" IsChecked="True" />
+							<RadioButton x:Name="ShuffleAlbumRadio" Content="Album" GroupName="Shuffle" />
+						</StackPanel>
+					</StackPanel>
+
+					<CheckBox x:Name="AutoAdvanceCheck" Content="Auto-advance to next track" IsChecked="True" />
+				</StackPanel>
+			</TabItem>
+
+			<!-- ===== Stats Tab ===== -->
+			<TabItem Header="Stats">
+				<ScrollViewer x:Name="StatsScrollViewer" Margin="8,12">
+					<StackPanel Spacing="16">
+						<!-- Library Overview -->
+						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="8">
+								<TextBlock Text="Library Overview" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="8,4,0,0">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Music Tracks:" Opacity="0.6" />
+									<Button Grid.Row="0" Grid.Column="1" x:Name="LinkMusicCount" Classes="link" Click="LinkMusicCount_Click">
+										<TextBlock x:Name="StatMusicCount" Text="0" Foreground="#4A9EFF" />
+									</Button>
+
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Radio Stations:" Opacity="0.6" />
+									<Button Grid.Row="1" Grid.Column="1" x:Name="LinkRadioCount" Classes="link" Click="LinkRadioCount_Click">
+										<TextBlock x:Name="StatRadioCount" Text="0" Foreground="#4A9EFF" />
+									</Button>
+
+									<TextBlock Grid.Row="2" Grid.Column="0" Text="Podcasts:" Opacity="0.6" />
+									<TextBlock Grid.Row="2" Grid.Column="1" Text="0" Opacity="0.4" />
+
+									<TextBlock Grid.Row="3" Grid.Column="0" Text="Audiobooks:" Opacity="0.6" />
+									<TextBlock Grid.Row="3" Grid.Column="1" Text="0" Opacity="0.4" />
+								</Grid>
+							</StackPanel>
+						</Border>
+
+						<!-- Music Stats -->
+						<Border x:Name="MusicStatsSection" BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Music" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" Margin="8,4,0,0">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Artists:" Opacity="0.6" />
+									<TextBlock Grid.Row="0" Grid.Column="1" x:Name="StatArtistCount" Text="0" />
+
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Albums:" Opacity="0.6" />
+									<TextBlock Grid.Row="1" Grid.Column="1" x:Name="StatAlbumCount" Text="0" />
+
+									<TextBlock Grid.Row="2" Grid.Column="0" Text="Songs:" Opacity="0.6" />
+									<TextBlock Grid.Row="2" Grid.Column="1" x:Name="StatSongCount" Text="0" />
+
+									<TextBlock Grid.Row="3" Grid.Column="0" Text="Favorites:" Opacity="0.6" />
+									<TextBlock Grid.Row="3" Grid.Column="1" x:Name="StatMusicFavorites" Text="0" />
+
+									<TextBlock Grid.Row="4" Grid.Column="0" Text="Total Duration:" Opacity="0.6" />
+									<TextBlock Grid.Row="4" Grid.Column="1" x:Name="StatTotalDuration" Text="00:00:00:00" />
+
+									<TextBlock Grid.Row="5" Grid.Column="0" Text="Total File Size:" Opacity="0.6" />
+									<TextBlock Grid.Row="5" Grid.Column="1" x:Name="StatTotalFileSize" Text="0 B" />
+								</Grid>
+
+								<!-- File Types inline -->
+								<TextBlock Text="File Types" FontWeight="Bold" FontSize="12" Opacity="0.8" Margin="0,4,0,0" />
+								<StackPanel x:Name="FileTypesPanel" Spacing="2" Margin="8,0,0,0" />
+							</StackPanel>
+						</Border>
+
+						<!-- Radio Stats -->
+						<Border x:Name="RadioStatsSection" BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Radio" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto" Margin="8,4,0,0">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Stations:" Opacity="0.6" />
+									<TextBlock Grid.Row="0" Grid.Column="1" x:Name="StatRadioStations" Text="0" />
+
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Favorites:" Opacity="0.6" />
+									<TextBlock Grid.Row="1" Grid.Column="1" x:Name="StatRadioFavorites" Text="0" />
+
+									<TextBlock Grid.Row="2" Grid.Column="0" Text="Countries:" Opacity="0.6" />
+									<TextBlock Grid.Row="2" Grid.Column="1" x:Name="StatRadioCountries" Text="0" />
+								</Grid>
+
+								<!-- Sources inline -->
+								<TextBlock Text="Sources" FontWeight="Bold" FontSize="12" Opacity="0.8" Margin="0,4,0,0" />
+								<StackPanel x:Name="RadioSourcesPanel" Spacing="2" Margin="8,0,0,0" />
+
+								<!-- Codecs inline -->
+								<TextBlock Text="Codecs" FontWeight="Bold" FontSize="12" Opacity="0.8" Margin="0,4,0,0" />
+								<StackPanel x:Name="RadioCodecsPanel" Spacing="2" Margin="8,0,0,0" />
+							</StackPanel>
+						</Border>
+
+						<!-- Podcasts placeholder -->
+						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12" Opacity="0.4">
+							<StackPanel Spacing="8">
+								<TextBlock Text="Podcasts" FontWeight="Bold" FontSize="13" />
+								<TextBlock Text="Coming soon" FontSize="11" Opacity="0.5" Margin="8,0,0,0" />
+							</StackPanel>
+						</Border>
+
+						<!-- Audiobooks placeholder -->
+						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12" Opacity="0.4">
+							<StackPanel Spacing="8">
+								<TextBlock Text="Audiobooks" FontWeight="Bold" FontSize="13" />
+								<TextBlock Text="Coming soon" FontSize="11" Opacity="0.5" Margin="8,0,0,0" />
+							</StackPanel>
+						</Border>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<!-- ===== Advanced Tab ===== -->
+			<TabItem Header="Advanced">
+				<StackPanel Margin="8,12" Spacing="16">
+					<!-- Database Location -->
+					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<StackPanel Spacing="8">
+							<TextBlock Text="Database Location" FontWeight="Bold" FontSize="13" />
+							<Border Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="2" Padding="8,6">
+								<TextBlock x:Name="DatabasePathText" Text="" FontSize="11" TextWrapping="Wrap" Opacity="0.7" />
+							</Border>
+						</StackPanel>
+					</Border>
+
+					<!-- Settings File Location -->
+					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<StackPanel Spacing="8">
+							<TextBlock Text="Settings File Location" FontWeight="Bold" FontSize="13" />
+							<Border Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="2" Padding="8,6">
+								<TextBlock x:Name="SettingsPathText" Text="" FontSize="11" TextWrapping="Wrap" Opacity="0.7" />
+							</Border>
+						</StackPanel>
+					</Border>
+
+					<!-- Danger zone -->
+					<Border BorderBrush="#663333" BorderThickness="1" CornerRadius="4" Padding="12">
+						<StackPanel Spacing="8">
+							<TextBlock Text="Maintenance" FontWeight="Bold" FontSize="13" Foreground="#FF8888" />
+							<StackPanel Orientation="Horizontal" Spacing="8">
+								<Button x:Name="ClearRadioCacheButton" Content="Clear Radio Cache" Click="ClearRadioCacheButton_Click" />
+								<Button x:Name="ResetSettingsButton" Content="Reset All Settings" Click="ResetSettingsButton_Click" />
+							</StackPanel>
+						</StackPanel>
+					</Border>
+				</StackPanel>
+			</TabItem>
+		</TabControl>
+	</DockPanel>
+</Window>

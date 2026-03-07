@@ -78,6 +78,50 @@ public partial class MediaItem : ObservableObject
     private string? _mimeType;
 
     [ObservableProperty]
+    private string? _genre;
+
+    [ObservableProperty]
+    private string? _composer;
+
+    [ObservableProperty]
+    private string? _comment;
+
+    [ObservableProperty]
+    private uint? _bpm;
+
+    public int? AudioBitrate { get; set; }
+
+    public int? SampleRate { get; set; }
+
+    public int? AudioChannels { get; set; }
+
+    public string? EncoderSettings { get; set; }
+
+    public string? CodecDescription { get; set; }
+
+    public string ChannelsLabel => AudioChannels switch
+    {
+        1 => "Mono",
+        2 => "Stereo",
+        var n when n > 2 => $"{n} channels",
+        _ => ""
+    };
+
+    public string KindLabel => Extension?.ToUpperInvariant() switch
+    {
+        ".MP3" => "MPEG audio file",
+        ".FLAC" => "FLAC audio file",
+        ".M4A" => "AAC audio file",
+        ".AAC" => "AAC audio file",
+        ".OGG" => "OGG Vorbis file",
+        ".WAV" => "WAV audio file",
+        ".WMA" => "WMA audio file",
+        ".APE" => "APE audio file",
+        ".OPUS" => "Opus audio file",
+        _ => MimeType ?? "Audio file"
+    };
+
+    [ObservableProperty]
     private bool _isAnalyzed;
 
     public List<string> Issues { get; init; } = [];
@@ -87,6 +131,16 @@ public partial class MediaItem : ObservableObject
     public string? StreamUrl { get; init; }
 
     public string? Source { get; init; }
+
+    public static string GetSourceDisplayName(string? source) => source switch
+    {
+        "radiobrowser" => "Radio Browser",
+        "shoutcast" => "SHOUTcast",
+        "user" => "User Added",
+        _ => source ?? ""
+    };
+
+    public string SourceDisplayName => GetSourceDisplayName(Source);
 
     public string SourceLabel => Source switch
     {
@@ -134,4 +188,24 @@ public partial class MediaItem : ObservableObject
     public string ListenerCountLabel => ListenerCount is > 0 ? $"{ListenerCount:N0}" : "";
 
     public bool IsHls { get; init; }
+
+    // -- Per-track playback options (DB only) --
+
+    [ObservableProperty]
+    private int _volumeAdjustment;
+
+    [ObservableProperty]
+    private string? _eqPreset;
+
+    [ObservableProperty]
+    private TimeSpan? _startTime;
+
+    [ObservableProperty]
+    private TimeSpan? _stopTime;
+
+    [ObservableProperty]
+    private bool _useStartTime;
+
+    [ObservableProperty]
+    private bool _useStopTime;
 }
