@@ -106,171 +106,194 @@
 				</Style>
 			</Style>
 		</Style>
+
+		<!-- GridSplitter style -->
+		<Style Selector="GridSplitter">
+			<Setter Property="Background" Value="Transparent" />
+		</Style>
+		<Style Selector="GridSplitter:pointerover">
+			<Setter Property="Background" Value="{DynamicResource SystemControlHighlightAccentBrush}" />
+			<Setter Property="Opacity" Value="0.3" />
+		</Style>
 	</Window.Styles>
 
 	<DockPanel>
-	<NativeMenuBar DockPanel.Dock="Top" />
-	<Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
-		<Grid.Background>
-			<ImageBrush Source="avares://Orgz/Assets/metal.png" Opacity=".7" TileMode="Tile" Stretch="Fill" AlignmentX="Left" AlignmentY="Top" DestinationRect="0,0,128,128" />
-		</Grid.Background>
-		<Grid.Styles>
+		<DockPanel.Styles>
 			<Style Selector="ContentPresenter, TextBlock, TextBox">
 				<Setter Property="TextElement.FontFamily" Value="Consolas"/>
 			</Style>
-		</Grid.Styles>
+		</DockPanel.Styles>
 
-		<Border Grid.Row="0" Grid.Column="0" Margin="25,4,4,4" >
-			<StackPanel HorizontalAlignment="Center">
-				<StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
-					<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
-					<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" Width="64" Height="64" FontSize="42" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}" Padding="{Binding ButtonPlayPausePadding}"></Button>
-					<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
-				</StackPanel>
-				<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,5">
-					<Button Command="{Binding MuteVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="0,0,5,0" VerticalAlignment="Center" Cursor="Hand">
-						<i:Icon Value="fa-solid fa-volume-low" FontSize="16" />
-					</Button>
-					<Slider Minimum="0" Maximum="100" Value="{Binding CurrentVolume, Mode=TwoWay}" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" Width="80" Height="18" Padding="0,-9,0,0" />
-					<Button Command="{Binding MaxVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="5,0,0,0" VerticalAlignment="Center" Cursor="Hand">
-						<i:Icon Value="fa-solid fa-volume-high" FontSize="16" />
-					</Button>
-				</StackPanel>
-			</StackPanel>
-		</Border>
-		<Border Grid.Row="0" Grid.Column="2" Margin="4" VerticalAlignment="Center">
-			<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="6" Width="75" Height="75" ClipToBounds="True">
-				<Panel>
-					<Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}" />
-					<i:Icon Value="fa-solid fa-music" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNull}}" Opacity="0.4" />
-				</Panel>
-			</Border>
-		</Border>
-		<Border Grid.Row="0" Grid.Column="3" Margin="4">
-			<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="15" Height="75">
-				<StackPanel VerticalAlignment="Center">
-					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,5">
-						<TextBlock Text="{Binding CurrentTrackMetadata}" FontSize="16" FontWeight="Bold" MaxWidth="420" TextTrimming="CharacterEllipsis" />
+		<NativeMenuBar DockPanel.Dock="Top" />
+
+		<!-- Everything below menu gets the metal texture -->
+		<Panel>
+			<Panel.Background>
+				<ImageBrush Source="avares://Orgz/Assets/metal.png" Opacity=".7" TileMode="Tile" Stretch="Fill" AlignmentX="Left" AlignmentY="Top" DestinationRect="0,0,128,128" />
+			</Panel.Background>
+
+		<DockPanel>
+
+		<!-- Top controls row -->
+		<Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
+				<Border Grid.Column="0" Margin="25,4,4,4">
+					<StackPanel HorizontalAlignment="Center">
+						<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
+							<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
+							<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" Width="64" Height="64" FontSize="42" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}" Padding="{Binding ButtonPlayPausePadding}"></Button>
+							<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
+						</StackPanel>
+						<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,5">
+							<Button Command="{Binding MuteVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="0,0,5,0" VerticalAlignment="Center" Cursor="Hand">
+								<i:Icon Value="fa-solid fa-volume-low" FontSize="16" />
+							</Button>
+							<Slider Minimum="0" Maximum="100" Value="{Binding CurrentVolume, Mode=TwoWay}" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" Width="80" Height="18" Padding="0,-9,0,0" />
+							<Button Command="{Binding MaxVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="5,0,0,0" VerticalAlignment="Center" Cursor="Hand">
+								<i:Icon Value="fa-solid fa-volume-high" FontSize="16" />
+							</Button>
+						</StackPanel>
 					</StackPanel>
-					<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,5,10,0" Spacing="12">
-						<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
-						<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" VerticalAlignment="Center" Width="420" Height="14" Padding="0,-12,0,0" />
-						<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="16" FontWeight="Bold" />
+				</Border>
+				<Border Grid.Column="2" Margin="4" VerticalAlignment="Center">
+					<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="6" Width="75" Height="75" ClipToBounds="True">
+						<Panel>
+							<Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}" />
+							<i:Icon Value="fa-solid fa-music" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNull}}" Opacity="0.4" />
+						</Panel>
+					</Border>
+				</Border>
+				<Border Grid.Column="3" Margin="4">
+					<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="15" Height="75">
+						<StackPanel VerticalAlignment="Center">
+							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,5">
+								<TextBlock Text="{Binding CurrentTrackMetadata}" FontSize="16" FontWeight="Bold" MaxWidth="420" TextTrimming="CharacterEllipsis" />
+							</StackPanel>
+							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,5,10,0" Spacing="12">
+								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
+								<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" VerticalAlignment="Center" Width="420" Height="14" Padding="0,-12,0,0" />
+								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="16" FontWeight="Bold" />
+							</StackPanel>
+						</StackPanel>
+					</Border>
+				</Border>
+				<Border Grid.Column="5" Margin="4,4,25,4">
+					<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+						<i:Icon Value="fa-solid fa-search" Margin="10,10,5,10" />
+						<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,10,10" />
 					</StackPanel>
-				</StackPanel>
-			</Border>
-		</Border>
-		<Border Grid.Row="0" Grid.Column="5" Margin="4,4,25,4">
-			<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-				<i:Icon Value="fa-solid fa-search" Margin="10,10,5,10" />
-				<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,10,10" />
-			</StackPanel>
-		</Border>
+				</Border>
+			</Grid>
 
-		<!-- Sidebar + Content side by side in the middle row -->
-		<Grid Grid.Row="1" Grid.ColumnSpan="6" ColumnDefinitions="Auto,*" Margin="4">
-			<controls:Sidebar Grid.Column="0" DataContext="{Binding}" Margin="0,0,4,0" />
+			<!-- Status bar at bottom -->
+			<controls:StatusBar DockPanel.Dock="Bottom" x:Name="MainStatusBar" DataContext="{Binding StatusBar}" />
 
-			<Border Grid.Column="1" CornerRadius="8" ClipToBounds="True">
-				<DockPanel>
-					<controls:RadioFilterPanel x:Name="RadioFilterPanel"
-						DockPanel.Dock="Bottom"
-						DataContext="{Binding}"
-						IsVisible="False" />
+			<!-- Sidebar + Content area with resizable splitter -->
+			<Grid ColumnDefinitions="200,4,*" Margin="4">
+				<controls:Sidebar Grid.Column="0" DataContext="{Binding}" />
 
-					<DataGrid x:Name="MainDataGrid"
-						DoubleTapped="DataGrid_DoubleTapped"
-						SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-						ItemsSource="{Binding FilteredItems}"
-						GridLinesVisibility="All"
-						IsReadOnly="True"
-						AutoGenerateColumns="False"
-						CanUserSortColumns="True"
-						SelectionMode="Single"
-						Background="{DynamicResource SystemAltHighColor}">
-						<DataGrid.Styles>
-							<Style Selector="DataGridRow">
-								<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-							</Style>
-							<Style Selector="DataGridRow:nth-child(odd)">
-								<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-							</Style>
-							<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
-								<Setter Property="IsVisible" Value="False" />
-							</Style>
-						</DataGrid.Styles>
-						<DataGrid.Columns>
-							<!-- Always visible -->
-							<DataGridTemplateColumn Header="" Width="30" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
-								<DataGridTemplateColumn.CellTemplate>
-									<DataTemplate>
-										<i:Icon Value="fa-solid fa-play" FontSize="14" IsVisible="{Binding IsPlaying}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#0096FF" />
-									</DataTemplate>
-								</DataGridTemplateColumn.CellTemplate>
-							</DataGridTemplateColumn>
+				<GridSplitter Grid.Column="1" ResizeDirection="Columns" />
 
-							<!-- Radio only: Source label -->
-							<DataGridTextColumn Binding="{Binding SourceLabel}" Width="45" CanUserResize="False" IsVisible="False" />
+				<Border Grid.Column="2" CornerRadius="8" ClipToBounds="True">
+					<DockPanel>
+						<controls:RadioFilterPanel x:Name="RadioFilterPanel"
+							DockPanel.Dock="Bottom"
+							DataContext="{Binding}"
+							IsVisible="False" />
 
-							<!-- Always visible -->
-							<DataGridTemplateColumn Header="Title" Width="*">
-								<DataGridTemplateColumn.CellTemplate>
-									<DataTemplate>
-										<StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="6" Margin="4,0">
-											<Panel Width="14" Height="14">
-												<i:Icon Value="fa-regular fa-star" FontSize="12" IsVisible="{Binding !IsFavorite}" Opacity="0.15" />
-												<i:Icon Value="fa-solid fa-star" FontSize="12" IsVisible="{Binding IsFavorite}" Foreground="Gold" />
-											</Panel>
-											<TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-										</StackPanel>
-									</DataTemplate>
-								</DataGridTemplateColumn.CellTemplate>
-							</DataGridTemplateColumn>
+						<DataGrid x:Name="MainDataGrid"
+							DoubleTapped="DataGrid_DoubleTapped"
+							SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+							ItemsSource="{Binding FilteredItems}"
+							GridLinesVisibility="All"
+							IsReadOnly="True"
+							AutoGenerateColumns="False"
+							CanUserSortColumns="True"
+							SelectionMode="Single"
+							Background="{DynamicResource SystemAltHighColor}"
+							HorizontalScrollBarVisibility="Auto"
+							VerticalScrollBarVisibility="Auto">
+							<DataGrid.Styles>
+								<Style Selector="DataGridRow">
+									<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+								</Style>
+								<Style Selector="DataGridRow:nth-child(odd)">
+									<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+								</Style>
+								<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
+									<Setter Property="IsVisible" Value="False" />
+								</Style>
+							</DataGrid.Styles>
+							<DataGrid.Columns>
+								<!-- Always visible -->
+								<DataGridTemplateColumn Header="" Width="30" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
+									<DataGridTemplateColumn.CellTemplate>
+										<DataTemplate>
+											<i:Icon Value="fa-solid fa-play" FontSize="14" IsVisible="{Binding IsPlaying}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#0096FF" />
+										</DataTemplate>
+									</DataGridTemplateColumn.CellTemplate>
+								</DataGridTemplateColumn>
 
-							<!-- Music only -->
-							<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
-							<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
+								<!-- Radio only: Source label -->
+								<DataGridTextColumn Binding="{Binding SourceLabel}" Width="45" CanUserResize="False" IsVisible="False" />
 
-							<!-- Radio only -->
-							<DataGridTextColumn Header="Country" Binding="{Binding Country}" Width="Auto" IsVisible="False" />
-							<DataGridTextColumn Header="Tags" Binding="{Binding Tags}" Width="*" IsVisible="False" />
+								<!-- Always visible -->
+								<DataGridTemplateColumn Header="Title" Width="*">
+									<DataGridTemplateColumn.CellTemplate>
+										<DataTemplate>
+											<StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="6" Margin="4,0">
+												<Panel Width="14" Height="14">
+													<i:Icon Value="fa-regular fa-star" FontSize="12" IsVisible="{Binding !IsFavorite}" Opacity="0.15" />
+													<i:Icon Value="fa-solid fa-star" FontSize="12" IsVisible="{Binding IsFavorite}" Foreground="Gold" />
+												</Panel>
+												<TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+											</StackPanel>
+										</DataTemplate>
+									</DataGridTemplateColumn.CellTemplate>
+								</DataGridTemplateColumn>
 
-							<!-- Music only -->
-							<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
+								<!-- Music only -->
+								<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
+								<DataGridTextColumn Header="Album" Binding="{Binding Album}" Width="*" />
 
-							<!-- Radio only -->
-							<DataGridTemplateColumn Header="Codec" Width="60" IsVisible="False">
-								<DataGridTemplateColumn.CellTemplate>
-									<DataTemplate>
-										<TextBlock Text="{Binding CodecLabel}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-									</DataTemplate>
-								</DataGridTemplateColumn.CellTemplate>
-							</DataGridTemplateColumn>
+								<!-- Radio only -->
+								<DataGridTextColumn Header="Country" Binding="{Binding Country}" Width="Auto" IsVisible="False" />
+								<DataGridTextColumn Header="Tags" Binding="{Binding Tags}" Width="*" IsVisible="False" />
 
-							<!-- Music only -->
-							<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
+								<!-- Music only -->
+								<DataGridTextColumn Header="Year" Binding="{Binding Year}" Width="Auto" />
 
-							<!-- Radio only -->
-							<DataGridTemplateColumn Header="Bitrate" Width="Auto" IsVisible="False">
-								<DataGridTemplateColumn.CellTemplate>
-									<DataTemplate>
-										<TextBlock Text="{Binding BitrateLabel}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0" />
-									</DataTemplate>
-								</DataGridTemplateColumn.CellTemplate>
-							</DataGridTemplateColumn>
+								<!-- Radio only -->
+								<DataGridTemplateColumn Header="Codec" Width="60" IsVisible="False">
+									<DataGridTemplateColumn.CellTemplate>
+										<DataTemplate>
+											<TextBlock Text="{Binding CodecLabel}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+										</DataTemplate>
+									</DataGridTemplateColumn.CellTemplate>
+								</DataGridTemplateColumn>
 
-							<!-- Music only -->
-							<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
+								<!-- Music only -->
+								<DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="Auto" />
 
-							<!-- Radio only -->
-							<DataGridTextColumn Header="Listeners" Binding="{Binding ListenerCountLabel}" Width="Auto" IsVisible="False" />
-						</DataGrid.Columns>
-					</DataGrid>
-				</DockPanel>
-			</Border>
-		</Grid>
+								<!-- Radio only -->
+								<DataGridTemplateColumn Header="Bitrate" Width="Auto" IsVisible="False">
+									<DataGridTemplateColumn.CellTemplate>
+										<DataTemplate>
+											<TextBlock Text="{Binding BitrateLabel}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8,0" />
+										</DataTemplate>
+									</DataGridTemplateColumn.CellTemplate>
+								</DataGridTemplateColumn>
 
-		<controls:StatusBar x:Name="MainStatusBar" Grid.Row="2" Grid.ColumnSpan="6" DataContext="{Binding StatusBar}" />
-	</Grid>
+								<!-- Music only -->
+								<DataGridCheckBoxColumn Header="Has Album Art" Binding="{Binding HasAlbumArt}" Width="Auto" />
+
+								<!-- Radio only -->
+								<DataGridTextColumn Header="Listeners" Binding="{Binding ListenerCountLabel}" Width="Auto" IsVisible="False" />
+							</DataGrid.Columns>
+						</DataGrid>
+					</DockPanel>
+				</Border>
+			</Grid>
+		</DockPanel>
+		</Panel>
 	</DockPanel>
 </Window>
