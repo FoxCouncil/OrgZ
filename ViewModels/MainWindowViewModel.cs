@@ -454,14 +454,60 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #region UI Events
 
-    [RelayCommand]
-    public void ButtonPreviousTrack()
+    private MediaKind? GetEffectiveKind()
     {
         var kind = SelectedSidebarItem?.Kind;
 
+        if (kind != null)
+        {
+            return kind;
+        }
+
+        // In Favorites or other mixed views, infer from what's playing or selected
+        if (_currentStation != null && _player?.IsPlaying == true)
+        {
+            return MediaKind.Radio;
+        }
+
+        if (_currentMusicItem != null && (_player?.IsPlaying == true || _player?.State == LibVLCSharp.Shared.VLCState.Paused))
+        {
+            return MediaKind.Music;
+        }
+
+        return SelectedItem?.Kind;
+    }
+
+    [RelayCommand]
+    public void ButtonPreviousTrack()
+    {
+        if (FilteredItems.Count == 0)
+        {
+            return;
+        }
+
+        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
+
+        if (isFavorites)
+        {
+            var currentItem = (MediaItem?)_currentStation ?? _currentMusicItem;
+            if (currentItem == null)
+            {
+                return;
+            }
+
+            int index = FilteredItems.IndexOf(currentItem);
+            if (index > 0)
+            {
+                PlayItem(FilteredItems[index - 1]);
+            }
+            return;
+        }
+
+        var kind = GetEffectiveKind();
+
         if (kind == MediaKind.Radio)
         {
-            if (_currentStation == null || FilteredItems.Count == 0)
+            if (_currentStation == null)
             {
                 return;
             }
@@ -474,7 +520,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (_currentMusicItem == null || FilteredItems.Count == 0)
+        if (_currentMusicItem == null)
         {
             return;
         }
@@ -496,7 +542,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            var kind = SelectedSidebarItem?.Kind;
+            var kind = GetEffectiveKind();
 
             if (kind == MediaKind.Radio)
             {
@@ -551,11 +597,35 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void ButtonNextTrack()
     {
-        var kind = SelectedSidebarItem?.Kind;
+        if (FilteredItems.Count == 0)
+        {
+            return;
+        }
+
+        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
+
+        if (isFavorites)
+        {
+            var currentItem = (MediaItem?)_currentStation ?? _currentMusicItem;
+            if (currentItem == null)
+            {
+                return;
+            }
+
+            int index = FilteredItems.IndexOf(currentItem);
+            if (index >= 0 && index < FilteredItems.Count - 1)
+            {
+                var next = FilteredItems[index + 1];
+                PlayItem(next);
+            }
+            return;
+        }
+
+        var kind = GetEffectiveKind();
 
         if (kind == MediaKind.Radio)
         {
-            if (_currentStation == null || FilteredItems.Count == 0)
+            if (_currentStation == null)
             {
                 return;
             }
@@ -568,7 +638,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (_currentMusicItem == null || FilteredItems.Count == 0)
+        if (_currentMusicItem == null)
         {
             return;
         }
@@ -812,6 +882,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         StatusBar.ErrorCount = Messages.Count;
     }
 
+    private void PlayItem(MediaItem item)
+    {
+        switch (item.Kind)
+        {
+            case MediaKind.Music:
+            {
+                PlayMusicItem(item);
+                break;
+            }
+
+            case MediaKind.Radio:
+            {
+                PlayRadioStation(item);
+                break;
+            }
+        }
+    }
+
     public void DataGridRowDoubleClick()
     {
         if (SelectedItem == null)
@@ -819,20 +907,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        switch (SelectedItem.Kind)
-        {
-            case MediaKind.Music:
-            {
-                PlayMusicItem(SelectedItem);
-                break;
-            }
-
-            case MediaKind.Radio:
-            {
-                PlayRadioStation(SelectedItem);
-                break;
-            }
-        }
+        PlayItem(SelectedItem);
     }
 
     internal void CurrentVolumeChanged()
@@ -1626,8 +1701,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void UpdateNavigationButtons()
     {
+        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
         var kind = SelectedSidebarItem?.Kind;
-        var currentItem = kind == MediaKind.Radio ? _currentStation : _currentMusicItem;
+        var currentItem = isFavorites
+            ? (MediaItem?)_currentStation ?? _currentMusicItem
+            : kind == MediaKind.Radio ? _currentStation : _currentMusicItem;
 
         if (currentItem == null || FilteredItems.Count == 0)
         {
