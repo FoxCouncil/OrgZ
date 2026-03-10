@@ -23,8 +23,10 @@
     <UserControl.Resources>
         <DataTemplate x:Key="SidebarItemTemplate" x:DataType="models:SidebarItem">
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <i:Icon Value="{Binding Icon}" FontSize="14" Width="18" />
-                <TextBlock Text="{Binding Name}" FontSize="13" VerticalAlignment="Center" />
+                <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
+                    <i:Icon Value="{Binding Icon}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="0,2,0,0" />
             </StackPanel>
         </DataTemplate>
         <ControlTheme x:Key="SidebarItemContainerTheme" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
@@ -55,7 +57,8 @@
                      Padding="0"
                      Margin="0,0,0,4"
                      ItemTemplate="{StaticResource SidebarItemTemplate}"
-                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}" />
+                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
+                     SelectionChanged="LibraryListBox_SelectionChanged" />
 
             <!-- Separator -->
             <Separator DockPanel.Dock="Top"
@@ -80,7 +83,8 @@
                      BorderThickness="0"
                      Padding="0"
                      ItemTemplate="{StaticResource SidebarItemTemplate}"
-                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}" />
+                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
+                     SelectionChanged="PlaylistListBox_SelectionChanged" />
 
             <!-- Fill remaining space -->
             <Border />

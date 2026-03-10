@@ -31,6 +31,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private TaskbarThumbBarService? _thumbBarService;
 
+    private MusicFolderWatcher? _folderWatcher;
+
     private Media? _currentMedia;
 
     private MediaItem? _currentMusicItem;
@@ -59,6 +61,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal ObservableCollection<SidebarItem> PlaylistItems { get; } =
     [
+        new() { Name = "Favorites", Icon = "fa-solid fa-star", Category = "PLAYLISTS", IsEnabled = true, IsFavorites = true },
         new() { Name = "New Playlist...", Icon = "fa-solid fa-plus", Category = "PLAYLISTS", IsEnabled = false },
     ];
 
@@ -96,6 +99,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private uint _currentVolume = (uint)Settings.Get("OrgZ.Volume", 100);
+
+    private uint _previousVolume;
 
     [ObservableProperty]
     private Bitmap? _currentAlbumArt;
@@ -189,9 +194,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ApplyFilter()
     {
+        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
         var kind = SelectedSidebarItem?.Kind;
 
-        IEnumerable<MediaItem> items = _allItems.Where(i => i.Kind == kind);
+        IEnumerable<MediaItem> items = isFavorites
+            ? _allItems.Where(i => i.IsFavorite)
+            : _allItems.Where(i => i.Kind == kind);
 
         // Radio-specific filters
         if (kind == MediaKind.Radio)
@@ -214,20 +222,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var searchText = SearchText?.Trim() ?? string.Empty;
         if (!string.IsNullOrEmpty(searchText))
         {
-            items = kind switch
+            if (isFavorites)
             {
-                MediaKind.Music => items.Where(file =>
-                    (file.Artist?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (file.Album?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (file.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (file.FileName?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (file.Year?.ToString().Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)),
-                MediaKind.Radio => items.Where(s =>
-                    (s.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (s.Tags?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (s.Country?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)),
-                _ => items
-            };
+                items = items.Where(item =>
+                    (item.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.Artist?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (item.Album?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+            else
+            {
+                items = kind switch
+                {
+                    MediaKind.Music => items.Where(file =>
+                        (file.Artist?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (file.Album?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (file.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (file.FileName?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (file.Year?.ToString().Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)),
+                    MediaKind.Radio => items.Where(s =>
+                        (s.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (s.Tags?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (s.Country?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)),
+                    _ => items
+                };
+            }
         }
 
         FilteredItems = items.ToList();
@@ -610,7 +628,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         FilteredItems = [];
         _lastMusicFilteredList = [];
 
+        _folderWatcher?.Stop();
         await ScanAndAnalyzeMusicAsync();
+        StartFolderWatcher();
     }
 
     [RelayCommand]
@@ -749,9 +769,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 ? $"OrgZ v{App.Version} - {App.FolderPath}"
                 : $"OrgZ v{App.Version} - [No folder selected]";
 
+            _folderWatcher?.Stop();
+
             if (App.FolderPath != string.Empty)
             {
                 await ScanAndAnalyzeMusicAsync();
+                StartFolderWatcher();
             }
         }
 
@@ -817,6 +840,29 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _player.Volume = (int)CurrentVolume;
         Settings.Set("OrgZ.Volume", (int)CurrentVolume);
         Settings.Save();
+    }
+
+    [RelayCommand]
+    internal void MuteVolume()
+    {
+        if (CurrentVolume > 0)
+        {
+            _previousVolume = CurrentVolume;
+            CurrentVolume = 0;
+        }
+        else
+        {
+            CurrentVolume = _previousVolume > 0 ? _previousVolume : 100;
+        }
+
+        CurrentVolumeChanged();
+    }
+
+    [RelayCommand]
+    internal void MaxVolume()
+    {
+        CurrentVolume = 100;
+        CurrentVolumeChanged();
     }
 
     internal void CurrentTrackTimeNumberPointerPressed()
@@ -1290,6 +1336,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // Scan and analyze music files
         await ScanAndAnalyzeMusicAsync();
+
+        // Start watching for file changes
+        StartFolderWatcher();
     }
 
     internal async Task ScanAndAnalyzeMusicAsync()
@@ -1352,6 +1401,142 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         UpdateData();
+    }
+
+    private void StartFolderWatcher()
+    {
+        _folderWatcher?.Stop();
+
+        if (string.IsNullOrEmpty(App.FolderPath))
+        {
+            return;
+        }
+
+        if (_folderWatcher == null)
+        {
+            _folderWatcher = new MusicFolderWatcher();
+
+            _folderWatcher.ChangesDetected += changeSet =>
+            {
+                UI(async () => await ProcessFileChangesAsync(changeSet));
+            };
+
+            _folderWatcher.FullRescanNeeded += () =>
+            {
+                UI(async () =>
+                {
+                    UpdateMainStatus("File watcher buffer overflow, rescanning...");
+                    await ScanAndAnalyzeMusicAsync();
+                });
+            };
+        }
+
+        _folderWatcher.Start(App.FolderPath);
+    }
+
+    private async Task ProcessFileChangesAsync(WatcherChangeSet changes)
+    {
+        var filesToAnalyze = new List<MediaItem>();
+
+        // Handle deleted files
+        if (changes.Deleted.Count > 0)
+        {
+            var deletedPaths = new HashSet<string>(changes.Deleted, StringComparer.OrdinalIgnoreCase);
+            var deletedItems = _allItems
+                .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && deletedPaths.Contains(i.FilePath))
+                .ToList();
+
+            foreach (var item in deletedItems)
+            {
+                _allItems.Remove(item);
+            }
+
+            if (deletedItems.Count > 0)
+            {
+                await Task.Run(() => MediaCache.RemoveMusic(deletedItems.Select(i => i.Id)));
+            }
+        }
+
+        // Handle created files
+        foreach (var path in changes.Created)
+        {
+            if (await WaitForFileReady(path))
+            {
+                var item = FileScanner.CreateMediaItemFromPath(path);
+
+                if (item != null)
+                {
+                    _allItems.Add(item);
+                    filesToAnalyze.Add(item);
+                }
+            }
+        }
+
+        // Handle changed files (modified in place)
+        foreach (var path in changes.Changed)
+        {
+            if (await WaitForFileReady(path))
+            {
+                var existing = _allItems.FirstOrDefault(
+                    i => i.Kind == MediaKind.Music && i.FilePath != null &&
+                    string.Equals(i.FilePath, path, StringComparison.OrdinalIgnoreCase));
+
+                var item = FileScanner.CreateMediaItemFromPath(path);
+
+                if (item != null)
+                {
+                    if (existing != null)
+                    {
+                        _allItems.Remove(existing);
+                    }
+
+                    _allItems.Add(item);
+                    filesToAnalyze.Add(item);
+                }
+            }
+        }
+
+        if (changes.Deleted.Count > 0 || filesToAnalyze.Count > 0)
+        {
+            ApplyFilter();
+            UpdateTitle();
+        }
+
+        if (filesToAnalyze.Count > 0)
+        {
+            await AnalyzeAllFilesAsync(filesToAnalyze);
+            UpdateData();
+        }
+        else if (changes.Deleted.Count > 0)
+        {
+            UpdateData();
+        }
+    }
+
+    private static async Task<bool> WaitForFileReady(string path, int maxAttempts = 10)
+    {
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                return false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+            catch (IOException)
+            {
+                await Task.Delay(300);
+            }
+        }
+
+        return false;
     }
 
     internal List<MediaItem> GetFlacFilesWithoutAlbumArt()
@@ -1581,6 +1766,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _folderWatcher?.Dispose();
         _thumbBarService?.Dispose();
         _smtcService?.Dispose();
         _currentMedia?.Dispose();

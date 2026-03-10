@@ -8,5 +8,6 @@ internal class SidebarItem
     public string Icon { get; init; } = string.Empty;
     public string Category { get; init; } = string.Empty;
     public bool IsEnabled { get; init; }
+    public bool IsFavorites { get; init; }
     public MediaKind? Kind { get; init; }
 }

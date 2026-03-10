@@ -41,22 +41,11 @@ public class FileScanner
                         break;
                     }
 
-                    var extension = Path.GetExtension(filePath);
+                    var item = CreateMediaItemFromPath(filePath);
 
-                    if (IsSupportedExtension(filePath))
+                    if (item != null)
                     {
-                        FileInfo fileInfo = new(filePath);
-
-                        audioFiles.Add(new MediaItem
-                        {
-                            Id = filePath,
-                            Kind = MediaKind.Music,
-                            FilePath = filePath,
-                            FileName = fileInfo.Name,
-                            Extension = extension,
-                            FileSize = fileInfo.Length,
-                            LastModified = fileInfo.LastWriteTimeUtc
-                        });
+                        audioFiles.Add(item);
                     }
                 }
             }
@@ -71,6 +60,32 @@ public class FileScanner
 
             return audioFiles;
         }, cancellationToken);
+    }
+
+    public static MediaItem? CreateMediaItemFromPath(string filePath)
+    {
+        if (!IsSupportedExtension(filePath))
+        {
+            return null;
+        }
+
+        var fileInfo = new FileInfo(filePath);
+
+        if (!fileInfo.Exists)
+        {
+            return null;
+        }
+
+        return new MediaItem
+        {
+            Id = filePath,
+            Kind = MediaKind.Music,
+            FilePath = filePath,
+            FileName = fileInfo.Name,
+            Extension = fileInfo.Extension,
+            FileSize = fileInfo.Length,
+            LastModified = fileInfo.LastWriteTimeUtc
+        };
     }
 
     public static int CountAudioFiles(string directoryPath, bool recursive = true)

@@ -20,6 +20,7 @@
 			<MenuItem Header="Play Next" IsEnabled="False" />
 			<MenuItem Header="Add to Queue" IsEnabled="False" />
 			<Separator />
+			<MenuItem Header="Toggle Favorite" Click="ContextMenu_Favorite" />
 			<MenuItem Header="Get Info" Click="ContextMenu_GetInfo" />
 			<MenuItem Header="Rating" IsEnabled="False">
 				<MenuItem Header="1 Star" IsEnabled="False" />
@@ -122,14 +123,18 @@
 		<Border Grid.Row="0" Grid.Column="0" Margin="25,4,4,4" >
 			<StackPanel HorizontalAlignment="Center">
 				<StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
-					<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
-					<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" Width="64" Height="64" FontSize="42" CornerRadius="100" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}" Padding="{Binding ButtonPlayPausePadding}"></Button>
-					<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
+					<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
+					<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" Width="64" Height="64" FontSize="42" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}" Padding="{Binding ButtonPlayPausePadding}"></Button>
+					<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
 				</StackPanel>
 				<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,5">
-					<i:Icon Value="fa-solid fa-volume-low" Margin="0,0,5,0" />
+					<Button Command="{Binding MuteVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="0,0,5,0" VerticalAlignment="Center" Cursor="Hand">
+						<i:Icon Value="fa-solid fa-volume-low" FontSize="16" />
+					</Button>
 					<Slider Minimum="0" Maximum="100" Value="{Binding CurrentVolume, Mode=TwoWay}" ValueChanged="Slider_ValueChanged" VerticalAlignment="Center" Width="80" Height="18" Padding="0,-9,0,0" />
-					<i:Icon Value="fa-solid fa-volume-high" Margin="5,0,0,0" />
+					<Button Command="{Binding MaxVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="5,0,0,0" VerticalAlignment="Center" Cursor="Hand">
+						<i:Icon Value="fa-solid fa-volume-high" FontSize="16" />
+					</Button>
 				</StackPanel>
 			</StackPanel>
 		</Border>
@@ -208,7 +213,19 @@
 							<DataGridTextColumn Binding="{Binding SourceLabel}" Width="45" CanUserResize="False" IsVisible="False" />
 
 							<!-- Always visible -->
-							<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
+							<DataGridTemplateColumn Header="Title" Width="*">
+								<DataGridTemplateColumn.CellTemplate>
+									<DataTemplate>
+										<StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="6" Margin="4,0">
+											<Panel Width="14" Height="14">
+												<i:Icon Value="fa-regular fa-star" FontSize="12" IsVisible="{Binding !IsFavorite}" Opacity="0.15" />
+												<i:Icon Value="fa-solid fa-star" FontSize="12" IsVisible="{Binding IsFavorite}" Foreground="Gold" />
+											</Panel>
+											<TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+										</StackPanel>
+									</DataTemplate>
+								</DataGridTemplateColumn.CellTemplate>
+							</DataGridTemplateColumn>
 
 							<!-- Music only -->
 							<DataGridTextColumn Header="Artist" Binding="{Binding Artist}" Width="*" />
