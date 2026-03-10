@@ -3,6 +3,7 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using OrgZ.Models;
 using OrgZ.ViewModels;
 
 namespace OrgZ.Views;
@@ -42,7 +43,8 @@ public partial class MainWindow : Window
         // Initialize UI state for the already-selected sidebar item
         // (PropertyChanged fired during constructor before handler was attached)
         var initialKind = _viewModel.SelectedSidebarItem?.Kind;
-        UpdateColumnVisibility(initialKind);
+        var initialFavorites = _viewModel.SelectedSidebarItem?.IsFavorites == true;
+        UpdateColumnVisibility(initialKind, initialFavorites);
         UpdateContextMenu(initialKind);
         UpdateFilterPanelVisibility(initialKind);
 
@@ -72,9 +74,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        var kind = _viewModel.SelectedSidebarItem?.Kind;
+        var sidebarItem = _viewModel.SelectedSidebarItem;
+        var kind = sidebarItem?.Kind;
+        var isFavorites = sidebarItem?.IsFavorites == true;
 
-        UpdateColumnVisibility(kind);
+        UpdateColumnVisibility(kind, isFavorites);
         UpdateContextMenu(kind);
         UpdateFilterPanelVisibility(kind);
 
@@ -85,10 +89,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateColumnVisibility(MediaKind? kind)
+    private void UpdateColumnVisibility(MediaKind? kind, bool isFavorites = false)
     {
         var cols = MainDataGrid.Columns;
-        bool music = kind == MediaKind.Music;
+        bool music = kind == MediaKind.Music || isFavorites;
         bool radio = kind == MediaKind.Radio;
 
         // Always visible
@@ -103,12 +107,12 @@ public partial class MainWindow : Window
         cols[ColCodec].IsVisible = radio;
         cols[ColListeners].IsVisible = radio;
 
-        // Music only
+        // Music only (and Favorites)
         cols[ColArtist].IsVisible = music;
         cols[ColAlbum].IsVisible = music;
-        cols[ColYear].IsVisible = music;
-        cols[ColExtension].IsVisible = music;
-        cols[ColHasAlbumArt].IsVisible = music;
+        cols[ColYear].IsVisible = music && !isFavorites;
+        cols[ColExtension].IsVisible = music && !isFavorites;
+        cols[ColHasAlbumArt].IsVisible = music && !isFavorites;
     }
 
     private void UpdateContextMenu(MediaKind? kind)
