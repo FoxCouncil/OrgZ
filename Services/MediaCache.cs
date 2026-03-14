@@ -7,7 +7,7 @@ namespace OrgZ.Services;
 
 public static class MediaCache
 {
-    private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ");
+    private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
     private static readonly string CacheFilePath = Path.Combine(CacheDirectory, "library.db");
     private static string ConnectionString => $"Data Source={CacheFilePath}";
 
