@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     strategy:
@@ -14,8 +17,6 @@ jobs:
             rid: win-x64
           - os: ubuntu-latest
             rid: linux-x64
-          - os: macos-latest
-            rid: osx-x64
           - os: macos-latest
             rid: osx-arm64
 
@@ -74,7 +75,7 @@ jobs:
           | Platform | Installer | Portable |
           |----------|-----------|----------|
           | Windows (x64) | [OrgZ-win-Setup.exe](${BASE}/OrgZ-win-Setup.exe) | [OrgZ-win-Portable.zip](${BASE}/OrgZ-win-Portable.zip) |
-          | macOS | [OrgZ-osx-Setup.pkg](${BASE}/OrgZ-osx-Setup.pkg) | [OrgZ-osx-Portable.zip](${BASE}/OrgZ-osx-Portable.zip) |
+          | macOS (Apple Silicon) | [OrgZ-osx-Setup.pkg](${BASE}/OrgZ-osx-Setup.pkg) | [OrgZ-osx-Portable.zip](${BASE}/OrgZ-osx-Portable.zip) |
           | Linux (x64) | [OrgZ.AppImage](${BASE}/OrgZ.AppImage) | - |
 
           <details><summary>Other files in this release are used by the auto-updater.</summary>
