@@ -2,13 +2,19 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
+		<Version>0.4.20</Version>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
-		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<ApplicationIcon>Assets\app.ico</ApplicationIcon>
+		<IsWindowsBuild Condition="$(RuntimeIdentifier.StartsWith('win')) OR ($([MSBuild]::IsOSPlatform('Windows')) AND '$(RuntimeIdentifier)' == '')">true</IsWindowsBuild>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(IsWindowsBuild)' == 'true'">
+		<DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
+		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
 	</PropertyGroup>
 	<ItemGroup>
 		<AvaloniaResource Include="Assets\**" />
@@ -34,7 +40,8 @@
 		<PackageReference Include="Projektanker.Icons.Avalonia.FontAwesome" Version="9.6.2" />
 		<PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.1" />
 		<PackageReference Include="TagLibSharp" Version="2.3.0" />
-		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" />
+		<PackageReference Include="Velopack" Version="0.0.1298" />
+		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" Condition="'$(IsWindowsBuild)' == 'true'" />
 	</ItemGroup>
 
 	<ItemGroup>

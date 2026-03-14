@@ -27,9 +27,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly MediaPlayer _player;
 
+#if WINDOWS
     private SmtcService? _smtcService;
-
     private TaskbarThumbBarService? _thumbBarService;
+#endif
 
     private MusicFolderWatcher? _folderWatcher;
 
@@ -290,8 +291,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 ButtonPlayPauseIcon = ICON_PLAY;
                 ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+#if WINDOWS
                 _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
                 _thumbBarService?.SetPlayingState(false);
+#endif
 
                 UpdateMainStatus("Stream ended");
                 UpdateNavigationButtons();
@@ -320,8 +323,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+#if WINDOWS
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
             _thumbBarService?.SetPlayingState(false);
+#endif
 
             UpdateMainStatus("Finished");
             UpdateNavigationButtons();
@@ -332,8 +337,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+#if WINDOWS
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Paused);
             _thumbBarService?.SetPlayingState(false);
+#endif
 
             UpdateMainStatus("Paused");
         });
@@ -343,8 +350,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PAUSE;
             ButtonPlayPausePadding = ICON_PAUSE_PADDING;
 
+#if WINDOWS
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Playing);
             _thumbBarService?.SetPlayingState(true);
+#endif
 
             UpdateMainStatus("Playing");
         });
@@ -373,8 +382,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+#if WINDOWS
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
             _thumbBarService?.SetPlayingState(false);
+#endif
 
             UpdateMainStatus("Stopped");
         });
@@ -419,6 +430,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
+#if WINDOWS
     internal void InitializeSmtc(IntPtr hwnd)
     {
         _smtcService = new SmtcService();
@@ -451,6 +463,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _thumbBarService.NextRequested += ButtonNextTrack;
         _thumbBarService.PreviousRequested += ButtonPreviousTrack;
     }
+#endif
 
     #region UI Events
 
@@ -687,8 +700,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ButtonPlayPauseIcon = ICON_PLAY;
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+#if WINDOWS
         _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
         _thumbBarService?.SetPlayingState(false);
+#endif
 
         App.FolderPath = folders[0].Path.LocalPath;
         Settings.Set("OrgZ.FolderPath", App.FolderPath);
@@ -828,8 +843,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+#if WINDOWS
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
             _thumbBarService?.SetPlayingState(false);
+#endif
 
             _allItems.RemoveAll(i => i.Kind == MediaKind.Music);
             FilteredItems = [];
@@ -983,7 +1000,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var artBytes = ExtractAlbumArtBytes(_currentMusicItem.FilePath!);
             CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
 
+#if WINDOWS
             _smtcService?.UpdateMetadata(_currentMusicItem.Title, _currentMusicItem.Artist, _currentMusicItem.Album, artBytes);
+#endif
 
             _currentMedia?.Dispose();
             _currentMedia = new Media(_vlc, _currentMusicItem.FilePath!, FromType.FromPath);
@@ -1028,7 +1047,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             CurrentAlbumArt?.Dispose();
             CurrentAlbumArt = null;
 
+#if WINDOWS
             _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
+#endif
 
             if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
             {
@@ -1068,7 +1089,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                         title = nowPlaying[(dashIdx + 3)..].Trim();
                     }
 
+#if WINDOWS
                     _smtcService?.UpdateMetadata(title, artist, _currentStation?.Title, null);
+#endif
                 });
             };
 
@@ -1711,16 +1734,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             IsBackTrackButtonEnabled = false;
             IsNextTrackButtonEnabled = false;
+#if WINDOWS
             _smtcService?.SetNavigationEnabled(false, false);
             _thumbBarService?.SetNavigationEnabled(false, false);
+#endif
             return;
         }
 
         int index = FilteredItems.IndexOf(currentItem);
         IsBackTrackButtonEnabled = index > 0;
         IsNextTrackButtonEnabled = index >= 0 && index < FilteredItems.Count - 1;
+#if WINDOWS
         _smtcService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
         _thumbBarService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
+#endif
     }
 
     internal void UpdateMainStatus(string status)
@@ -1753,7 +1780,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 {
                     CurrentAlbumArt?.Dispose();
                     CurrentAlbumArt = bitmap;
+#if WINDOWS
                     _smtcService?.UpdateMetadata(_currentStation?.Title, _currentStation?.Tags, "Internet Radio", bytes);
+#endif
                 });
             }
         }
@@ -1845,8 +1874,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _folderWatcher?.Dispose();
+#if WINDOWS
         _thumbBarService?.Dispose();
         _smtcService?.Dispose();
+#endif
         _currentMedia?.Dispose();
         _player?.Dispose();
         _vlc?.Dispose();

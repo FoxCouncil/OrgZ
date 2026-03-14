@@ -1,5 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+#if WINDOWS
+
 using System.Runtime.InteropServices;
 
 namespace OrgZ.Services;
@@ -515,3 +517,5 @@ internal sealed class TaskbarThumbBarService : IDisposable
         }
     }
 }
+
+#endif
