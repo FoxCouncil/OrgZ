@@ -28,7 +28,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          include-prerelease: true
 
       - name: Extract version from tag
         id: version
@@ -39,7 +38,7 @@ jobs:
         run: dotnet tool install -g vpk
 
       - name: Publish
-        run: dotnet publish -c Release -r ${{ matrix.rid }} --self-contained -o publish -p:Version=${{ steps.version.outputs.VERSION }}
+        run: dotnet publish OrgZ.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish -p:Version=${{ steps.version.outputs.VERSION }}
 
       - name: Pack with Velopack
         run: vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases
@@ -62,8 +61,31 @@ jobs:
         with:
           path: artifacts/
 
+      - name: Generate release body
+        id: body
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${GITHUB_REF_NAME}"
+          cat > body.md << EOF
+          ## Download OrgZ v${VERSION}
+
+          | Platform | Installer | Portable |
+          |----------|-----------|----------|
+          | Windows (x64) | [OrgZ-win-Setup.exe](${BASE}/OrgZ-win-Setup.exe) | [OrgZ-win-Portable.zip](${BASE}/OrgZ-win-Portable.zip) |
+          | macOS | [OrgZ-osx-Setup.pkg](${BASE}/OrgZ-osx-Setup.pkg) | [OrgZ-osx-Portable.zip](${BASE}/OrgZ-osx-Portable.zip) |
+          | Linux (x64) | [OrgZ.AppImage](${BASE}/OrgZ.AppImage) | - |
+
+          <details><summary>Other files in this release are used by the auto-updater.</summary>
+
+          The \`.nupkg\`, \`.json\`, and \`RELEASES\` files are consumed by OrgZ's built-in update mechanism. You don't need to download them manually.
+          </details>
+          EOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          generate_release_notes: true
+          body_path: body.md
+          fail_on_unmatched_files: false
