@@ -1,5 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+#if WINDOWS
+
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
@@ -126,3 +128,5 @@ internal static class ShortcutInstaller
 
     #endregion
 }
+
+#endif
