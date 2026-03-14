@@ -53,7 +53,7 @@ public partial class SettingsDialog : Window
         AutoAdvanceCheck.IsChecked = Settings.Get("OrgZ.AutoAdvance", true);
 
         // Advanced
-        var dbDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ");
+        var dbDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
         DatabasePathText.Text = Path.Combine(dbDir, "library.db");
         SettingsPathText.Text = Settings.GetSettingsFilePath();
     }
