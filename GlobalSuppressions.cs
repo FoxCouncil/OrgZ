@@ -9,6 +9,8 @@ using System.Diagnostics.CodeAnalysis;
 
 [assembly: SuppressMessage("Style", "IDE0130:Namespace does not match folder structure", Justification = "<Pending>", Scope = "namespace", Target = "~N:OrgZ")]
 
+#if WINDOWS
 [assembly: SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "Windows-only COM interop", Scope = "type", Target = "~T:OrgZ.Services.ButtonPressedHandlerFactory")]
 [assembly: SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "Windows-only COM interop", Scope = "type", Target = "~T:OrgZ.Services.SmtcService")]
 [assembly: SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "Windows-only COM interop", Scope = "type", Target = "~T:OrgZ.Services.TaskbarThumbBarService")]
+#endif

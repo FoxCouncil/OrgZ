@@ -5,12 +5,14 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using OrgZ.ViewModels;
+using Velopack;
+using Velopack.Sources;
 
 namespace OrgZ;
 
 public partial class App : Application
 {
-    internal const string Version = "0.3";
+    internal static string Version { get; } = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     private const string SettingKey_FolderPath = "OrgZ.FolderPath";
 
@@ -40,7 +42,34 @@ public partial class App : Application
             desktop.MainWindow.Title = FolderPath != string.Empty ? $"OrgZ v{Version} - {FolderPath}" : $"OrgZ v{Version} - [No folder selected]";
         }
 
+        _ = Task.Run(CheckForUpdatesAsync);
+
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var source = new GithubSource("https://github.com/FoxCouncil/OrgZ", null, false, null);
+            var mgr = new UpdateManager(source, null, null);
+
+            if (!mgr.IsInstalled)
+            {
+                return;
+            }
+
+            var update = await mgr.CheckForUpdatesAsync();
+
+            if (update != null)
+            {
+                await mgr.DownloadUpdatesAsync(update, null, default);
+            }
+        }
+        catch
+        {
+            // Update failures should never crash the app
+        }
     }
 
     private async void AboutMenuItem_Click(object? sender, EventArgs e)
