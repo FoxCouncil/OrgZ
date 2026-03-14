@@ -8,7 +8,7 @@ namespace OrgZ;
 internal static class Settings
 {
     private static readonly string SettingsFileName = "settings.json";
-    private static readonly string SettingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ");
+    private static readonly string SettingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
     private static readonly string SettingsFilePath = Path.Combine(SettingsDirectory, SettingsFileName);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
