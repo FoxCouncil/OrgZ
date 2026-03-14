@@ -56,12 +56,14 @@ public partial class MainWindow : Window
 
         Loaded += async (s, e) =>
         {
+#if WINDOWS
             var handle = TryGetPlatformHandle();
             if (handle != null)
             {
                 _viewModel.InitializeSmtc(handle.Handle);
                 _viewModel.InitializeThumbBar(handle.Handle);
             }
+#endif
 
             await _viewModel.LoadAsync();
         };

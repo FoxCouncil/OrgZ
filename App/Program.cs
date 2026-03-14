@@ -3,6 +3,7 @@
 using Avalonia;
 using Projektanker.Icons.Avalonia;
 using Projektanker.Icons.Avalonia.FontAwesome;
+using Velopack;
 
 namespace OrgZ;
 
@@ -14,11 +15,12 @@ internal class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
-            ShortcutInstaller.EnsureShortcut();
-        }
+        VelopackApp.Build().Run();
+
+#if WINDOWS
+        SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
+        ShortcutInstaller.EnsureShortcut();
+#endif
 
         _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }

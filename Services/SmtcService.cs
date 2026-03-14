@@ -1,5 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+#if WINDOWS
+
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using IStream = System.Runtime.InteropServices.ComTypes.IStream;
@@ -696,3 +698,5 @@ internal sealed class SmtcService : IDisposable
         }
     }
 }
+
+#endif
