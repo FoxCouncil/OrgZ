@@ -21,6 +21,10 @@
             <Style Selector="Border">
                 <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
                 <Setter Property="BorderThickness" Value="0,1,0,0"/>
+                <Setter Property="Background" Value="#1A1A1A" />
+            </Style>
+            <Style Selector="TextBlock.label">
+                <Setter Property="Foreground" Value="{DynamicResource SystemControlDisabledBaseMediumLowBrush}" />
             </Style>
         </Border.Styles>
 
@@ -47,28 +51,28 @@
                 <Border Grid.Column="1">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding TotalArtists}" />
-                        <TextBlock Text="artists" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                        <TextBlock Text="artists" FontSize="10" VerticalAlignment="Bottom" Classes="label"  />
                     </StackPanel>
                 </Border>
 
                 <Border Grid.Column="2">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding TotalAlbums}" />
-                        <TextBlock Text="albums" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                        <TextBlock Text="albums" FontSize="10" VerticalAlignment="Bottom" Classes="label"  />
                     </StackPanel>
                 </Border>
 
                 <Border Grid.Column="3">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding TotalSongs}" />
-                        <TextBlock Text="songs" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                        <TextBlock Text="songs" FontSize="10" VerticalAlignment="Bottom" Classes="label"  />
                     </StackPanel>
                 </Border>
 
                 <Border Grid.Column="4">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding TotalDuration}" />
-                        <TextBlock Text="time" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"  />
+                        <TextBlock Text="time" FontSize="10" VerticalAlignment="Bottom" Classes="label"  />
                     </StackPanel>
                 </Border>
 
@@ -104,7 +108,7 @@
                 <Border Grid.Column="1">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding StationCount}" />
-                        <TextBlock Text="stations" FontSize="10" VerticalAlignment="Bottom" Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}" />
+                        <TextBlock Text="stations" FontSize="10" VerticalAlignment="Bottom" Classes="label" />
                     </StackPanel>
                 </Border>
 
