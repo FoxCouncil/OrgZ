@@ -10,4 +10,5 @@ internal class SidebarItem
     public bool IsEnabled { get; init; }
     public bool IsFavorites { get; init; }
     public MediaKind? Kind { get; init; }
+    public string ViewConfigKey { get; init; } = string.Empty;
 }

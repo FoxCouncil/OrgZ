@@ -1,0 +1,49 @@
+site_name: OrgZ Manual
+site_url: https://foxcouncil.github.io/OrgZ/
+site_description: User manual for OrgZ — the music & radio organizer
+site_author: FoxCouncil
+repo_url: https://github.com/FoxCouncil/OrgZ
+repo_name: FoxCouncil/OrgZ
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue grey
+    accent: light blue
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - First Launch: getting-started/first-launch.md
+  - Features:
+    - Music Library: features/music-library.md
+    - Radio Stations: features/radio-stations.md
+    - Favorites: features/favorites.md
+    - Playback: features/playback.md
+    - Keyboard Shortcuts: features/keyboard-shortcuts.md
+  - Settings: settings.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.keys
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+extra:
+  version:
+    provider: mike
