@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrgZ — GATTA ORGANIzE</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .hero {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            text-align: center;
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1f2b 100%);
+        }
+
+        .hero h1 {
+            font-size: 4rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #58a6ff, #79c0ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero .tagline {
+            font-size: 1.25rem;
+            color: #8b949e;
+            margin-bottom: 2.5rem;
+            font-style: italic;
+        }
+
+        .hero .description {
+            font-size: 1.1rem;
+            color: #c9d1d9;
+            max-width: 600px;
+            line-height: 1.6;
+            margin-bottom: 3rem;
+        }
+
+        .latest-btn {
+            display: inline-block;
+            padding: 1rem 3rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #ffffff;
+            background: #238636;
+            border: none;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: background 0.2s;
+            margin-bottom: 1rem;
+        }
+
+        .latest-btn:hover {
+            background: #2ea043;
+        }
+
+        .latest-version {
+            font-size: 0.9rem;
+            color: #8b949e;
+            margin-bottom: 3rem;
+        }
+
+        .versions {
+            padding: 2rem;
+            text-align: center;
+            border-top: 1px solid #21262d;
+        }
+
+        .versions h2 {
+            font-size: 1rem;
+            color: #8b949e;
+            font-weight: 400;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .version-list {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .version-list a {
+            padding: 0.4rem 1rem;
+            font-size: 0.9rem;
+            color: #58a6ff;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            text-decoration: none;
+            font-family: "Consolas", "SFMono-Regular", monospace;
+            transition: border-color 0.2s, background 0.2s;
+        }
+
+        .version-list a:hover {
+            background: #1f2937;
+            border-color: #58a6ff;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 1.5rem;
+            color: #484f58;
+            font-size: 0.85rem;
+            border-top: 1px solid #21262d;
+        }
+
+        .footer a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <h1>OrgZ</h1>
+        <div class="tagline">GATTA ORGANIzE</div>
+        <div class="description">
+            A cross-platform music and radio player. Manage your local music library, discover internet radio stations, and organize it all in one place.
+        </div>
+        <a class="latest-btn" id="latest-link" href="./latest/">Read the Manual</a>
+        <div class="latest-version" id="latest-version">Loading versions...</div>
+    </div>
+
+    <div class="versions">
+        <h2>All Versions</h2>
+        <div class="version-list" id="version-list"></div>
+    </div>
+
+    <div class="footer">
+        <a href="https://github.com/FoxCouncil/OrgZ">GitHub</a>
+    </div>
+
+    <script>
+        fetch('./versions.json')
+            .then(r => r.json())
+            .then(versions => {
+                const list = document.getElementById('version-list');
+                const latestLabel = document.getElementById('latest-version');
+
+                const latest = versions.find(v => v.aliases && v.aliases.includes('latest'));
+                if (latest) {
+                    latestLabel.textContent = 'Latest: v' + latest.version;
+                }
+
+                versions.forEach(v => {
+                    if (v.aliases && v.aliases.includes('latest')) return;
+                    const a = document.createElement('a');
+                    a.href = './' + v.version + '/';
+                    a.textContent = 'v' + v.version;
+                    list.appendChild(a);
+                });
+
+                if (list.children.length === 0) {
+                    list.innerHTML = '<span style="color:#484f58">No previous versions yet</span>';
+                }
+            })
+            .catch(() => {
+                document.getElementById('latest-version').textContent = '';
+                document.getElementById('version-list').innerHTML = '<span style="color:#484f58">No version info available</span>';
+            });
+    </script>
+</body>
+</html>
