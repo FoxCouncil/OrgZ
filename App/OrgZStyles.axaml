@@ -24,6 +24,11 @@
 
 		<!-- Font -->
 		<FontFamily x:Key="OrgZMonoFont">Consolas</FontFamily>
+
+		<!-- Padding compensation for Consolas baseline offset in AccessText -->
+		<Thickness x:Key="OrgZMonoContentPadding">11,7,11,4</Thickness>
+		<Thickness x:Key="OrgZMonoCheckPadding">8,5,0,1</Thickness>
+		<Thickness x:Key="OrgZMonoComboBoxPadding">12,7,12,4</Thickness>
 	</Styles.Resources>
 
 	<!-- Dialog window background -->
@@ -43,7 +48,6 @@
 		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
 		<Setter Property="BorderBrush" Value="{StaticResource OrgZBorderColorBrush}" />
 		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
-		<Setter Property="FontSize" Value="12" />
 	</Style>
 
 	<!-- TextBox readonly -->
@@ -56,17 +60,20 @@
 	<Style Selector="Window.orgzDialog CheckBox">
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+		<Setter Property="Padding" Value="{StaticResource OrgZMonoCheckPadding}" />
 	</Style>
 
 	<!-- RadioButton -->
 	<Style Selector="Window.orgzDialog RadioButton">
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+		<Setter Property="Padding" Value="{StaticResource OrgZMonoCheckPadding}" />
 	</Style>
 
 	<!-- ComboBox -->
 	<Style Selector="Window.orgzDialog ComboBox">
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Padding" Value="{StaticResource OrgZMonoComboBoxPadding}" />
 	</Style>
 
 	<!-- Button -->
@@ -74,12 +81,12 @@
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 		<Setter Property="Background" Value="{StaticResource OrgZButtonBackgroundBrush}" />
 		<Setter Property="Foreground" Value="{StaticResource OrgZTextForegroundBrush}" />
+		<Setter Property="Padding" Value="{StaticResource OrgZMonoContentPadding}" />
 	</Style>
 
 	<!-- TabItem -->
 	<Style Selector="Window.orgzDialog TabItem">
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
-		<Setter Property="FontSize" Value="12" />
 	</Style>
 
 	<!-- Slider -->
@@ -104,5 +111,19 @@
 		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
 		<Setter Property="BorderBrush" Value="{StaticResource OrgZButtonBackgroundBrush}" />
 		<Setter Property="BorderThickness" Value="1" />
+	</Style>
+
+	<!-- ContextMenu + MenuItem — Consolas with baseline padding fix -->
+	<Style Selector="ContextMenu">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+	</Style>
+	<Style Selector="MenuItem">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="Padding" Value="{StaticResource OrgZMonoContentPadding}" />
+	</Style>
+
+	<!-- Menu (non-native platform menus) -->
+	<Style Selector="Menu">
+		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 	</Style>
 </Styles>

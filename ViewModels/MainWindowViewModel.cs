@@ -36,15 +36,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private Media? _currentMedia;
 
-    private MediaItem? _currentMusicItem;
-
-    private MediaItem? _currentStation;
+    private PlaybackContext? _playbackContext;
 
     private bool isSeeking = false;
 
     private List<MediaItem> _allItems = [];
 
-    private List<MediaItem> _lastMusicFilteredList = [];
+    private ListViewConfig? _activeViewConfig;
+
+    private MediaItem? CurrentPlayingItem => _playbackContext?.CurrentItem;
+
+    private MediaItem? CurrentMusicItem => CurrentPlayingItem?.Kind == MediaKind.Music ? CurrentPlayingItem : null;
+
+    private MediaItem? CurrentStation => CurrentPlayingItem?.Kind == MediaKind.Radio ? CurrentPlayingItem : null;
 
     [ObservableProperty]
     private StatusBarViewModel _statusBar = new();
@@ -54,15 +58,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal ObservableCollection<SidebarItem> LibraryItems { get; } =
     [
-        new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music },
-        new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio },
+        new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" },
+        new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" },
         new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = false },
         new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false },
     ];
 
     internal ObservableCollection<SidebarItem> PlaylistItems { get; } =
     [
-        new() { Name = "Favorites", Icon = "fa-solid fa-star", Category = "PLAYLISTS", IsEnabled = true, IsFavorites = true },
+        new() { Name = "Favorites", Icon = "fa-solid fa-star", Category = "PLAYLISTS", IsEnabled = true, IsFavorites = true, ViewConfigKey = "Favorites" },
         new() { Name = "New Playlist...", Icon = "fa-solid fa-plus", Category = "PLAYLISTS", IsEnabled = false },
     ];
 
@@ -90,7 +94,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _currentTrackTime = "00:00";
 
     [ObservableProperty]
-    private string _currentTrackMetadata = string.Empty;
+    private string _currentTrackLine1 = string.Empty;
+
+    [ObservableProperty]
+    private string _currentTrackLine2 = string.Empty;
 
     [ObservableProperty]
     private string _currentTrackDuration = "00:00";
@@ -115,7 +122,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private MediaItem? _selectedItem;
 
     [ObservableProperty]
-    private string _searchText = string.Empty;
+    private string _searchText = Settings.Get("OrgZ.SearchText", string.Empty);
 
     [ObservableProperty]
     private List<MediaItem> _filteredItems = [];
@@ -127,10 +134,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal ObservableCollection<string> Genres { get; } = [];
 
     [ObservableProperty]
-    private string _selectedCountry = "All";
+    private string _selectedCountry = Settings.Get("OrgZ.Radio.Country", "All");
 
     [ObservableProperty]
-    private string _selectedGenre = "All";
+    private string _selectedGenre = Settings.Get("OrgZ.Radio.Genre", "All");
 
     // -- Radio Management --
 
@@ -148,37 +155,90 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal bool IsMediaLoaded => _player?.Media != null;
 
+    internal Action? ScrollToSelectedRequested;
+    internal Func<double>? GetScrollOffset;
+    internal Action<double>? SetScrollOffset;
+
     // -- Change Handlers --
 
     partial void OnSearchTextChanged(string value)
     {
         ApplyFilter();
+        Settings.Set("OrgZ.SearchText", value);
+        Settings.Save();
+    }
+
+    [RelayCommand]
+    private void ClearSearch()
+    {
+        SearchText = string.Empty;
+    }
+
+    [RelayCommand]
+    internal void NavigateToPlaying()
+    {
+        var item = CurrentPlayingItem;
+        if (item == null)
+        {
+            return;
+        }
+
+        // Find the sidebar item that matches this media kind
+        SidebarItem? target = item.Kind switch
+        {
+            MediaKind.Music => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Music),
+            MediaKind.Radio => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Radio),
+            _ => null
+        };
+
+        if (target == null)
+        {
+            return;
+        }
+
+        // Clear search so the item is visible in the unfiltered list
+        SearchText = string.Empty;
+
+        // Switch view (this triggers ApplyFilter)
+        SelectedSidebarItem = target;
+
+        // Select the playing item and scroll to it
+        SelectedItem = item;
+        ScrollToSelectedRequested?.Invoke();
     }
 
     partial void OnSelectedCountryChanged(string value)
     {
         ApplyFilter();
+        Settings.Set("OrgZ.Radio.Country", value);
+        Settings.Save();
     }
 
     partial void OnSelectedGenreChanged(string value)
     {
         ApplyFilter();
+        Settings.Set("OrgZ.Radio.Genre", value);
+        Settings.Save();
     }
 
     partial void OnSelectedSidebarItemChanged(SidebarItem? value)
     {
         StatusBar.ActiveKind = value?.Kind;
 
+        _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
+
+        if (!string.IsNullOrEmpty(value?.ViewConfigKey))
+        {
+            Settings.Set("OrgZ.ActiveView", value.ViewConfigKey);
+            Settings.Save();
+        }
+
         ApplyFilter();
 
-        // Restore selection for the active tab
-        if (value?.Kind == MediaKind.Music && _currentMusicItem != null)
+        // Restore selection to the currently playing item if it's in this view
+        if (CurrentPlayingItem != null && FilteredItems.Contains(CurrentPlayingItem))
         {
-            SelectedItem = _currentMusicItem;
-        }
-        else if (value?.Kind == MediaKind.Radio && _currentStation != null)
-        {
-            SelectedItem = _currentStation;
+            SelectedItem = CurrentPlayingItem;
         }
         else
         {
@@ -195,15 +255,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ApplyFilter()
     {
-        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
-        var kind = SelectedSidebarItem?.Kind;
+        if (_activeViewConfig == null)
+        {
+            FilteredItems = [];
+            UpdateNavigationButtons();
+            return;
+        }
 
-        IEnumerable<MediaItem> items = isFavorites
-            ? _allItems.Where(i => i.IsFavorite)
-            : _allItems.Where(i => i.Kind == kind);
+        IEnumerable<MediaItem> items = _allItems.Where(_activeViewConfig.BaseFilter);
 
         // Radio-specific filters
-        if (kind == MediaKind.Radio)
+        if (_activeViewConfig.ShowRadioFilterPanel)
         {
             if (SelectedCountry != "All")
             {
@@ -223,42 +285,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var searchText = SearchText?.Trim() ?? string.Empty;
         if (!string.IsNullOrEmpty(searchText))
         {
-            if (isFavorites)
-            {
-                items = items.Where(item =>
-                    (item.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (item.Artist?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (item.Album?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false));
-            }
-            else
-            {
-                items = kind switch
-                {
-                    MediaKind.Music => items.Where(file =>
-                        (file.Artist?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                        (file.Album?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                        (file.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                        (file.FileName?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                        (file.Year?.ToString().Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)),
-                    MediaKind.Radio => items.Where(s =>
-                        (s.Title?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                        (s.Tags?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                        (s.Country?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)),
-                    _ => items
-                };
-            }
+            var search = searchText;
+            items = items.Where(item => _activeViewConfig.SearchFilter(item, search));
         }
 
         FilteredItems = items.ToList();
 
-        // Keep music list snapshot for auto-advance
-        if (kind == MediaKind.Music)
-        {
-            _lastMusicFilteredList = FilteredItems;
-        }
-
         // Update radio station count in status bar
-        if (kind == MediaKind.Radio)
+        if (_activeViewConfig.ShowRadioFilterPanel)
         {
             UI(() => StatusBar.StationCount = FilteredItems.Count.ToString());
         }
@@ -279,57 +313,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
-        SelectedSidebarItem = LibraryItems[0];
+        var savedView = Settings.Get("OrgZ.ActiveView", "Music");
+        SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
 
         _player.EndReached += (s, e) => UI(() =>
         {
-            if (_currentStation != null)
+            if (CurrentStation != null)
             {
-                _currentStation.IsPlaying = false;
-                _currentStation = null;
-
-                ButtonPlayPauseIcon = ICON_PLAY;
-                ButtonPlayPausePadding = ICON_PLAY_PADDING;
-
-#if WINDOWS
-                _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
-                _thumbBarService?.SetPlayingState(false);
-#endif
-
+                ClearPlayback();
                 UpdateMainStatus("Stream ended");
-                UpdateNavigationButtons();
                 return;
             }
 
-            if (_currentMusicItem != null && _lastMusicFilteredList.Count > 0)
+            if (_playbackContext != null && _playbackContext.HasNext)
             {
-                int index = _lastMusicFilteredList.IndexOf(_currentMusicItem);
-                if (index >= 0 && index < _lastMusicFilteredList.Count - 1)
-                {
-                    PlayMusicItem(_lastMusicFilteredList[index + 1]);
-                    return;
-                }
+                var next = _playbackContext.MoveNext()!;
+                ExecutePlayItem(next);
+                return;
             }
 
-            if (_currentMusicItem != null)
-            {
-                _currentMusicItem.IsPlaying = false;
-                _currentMusicItem = null;
-            }
-
-            CurrentAlbumArt?.Dispose();
-            CurrentAlbumArt = null;
-
-            ButtonPlayPauseIcon = ICON_PLAY;
-            ButtonPlayPausePadding = ICON_PLAY_PADDING;
-
-#if WINDOWS
-            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
-            _thumbBarService?.SetPlayingState(false);
-#endif
-
+            ClearPlayback();
             UpdateMainStatus("Finished");
-            UpdateNavigationButtons();
         });
 
         _player.Paused += (s, e) => UI(() =>
@@ -367,7 +371,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             // Stop time check for per-track options
-            var playing = _currentMusicItem ?? _currentStation;
+            var playing = CurrentPlayingItem;
             if (playing is { UseStopTime: true, StopTime: not null })
             {
                 if (e.Time >= (long)playing.StopTime.Value.TotalMilliseconds)
@@ -394,24 +398,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (e.Media == null)
             {
-                CurrentTrackMetadata = string.Empty;
+                CurrentTrackLine1 = string.Empty;
+                CurrentTrackLine2 = string.Empty;
 
                 UpdateMainStatus("Ready");
 
                 return;
             }
 
-            if (_currentStation != null)
+            if (CurrentStation != null)
             {
                 CurrentTrackDuration = "LIVE";
                 CurrentTrackDurationNumber = 0;
                 IsSeekEnabled = false;
 
-                CurrentTrackMetadata = _currentStation.Title ?? "Unknown Station";
-                if (!string.IsNullOrWhiteSpace(_currentStation.Tags))
-                {
-                    CurrentTrackMetadata += " - " + _currentStation.Tags;
-                }
+                CurrentTrackLine1 = CurrentStation.Title ?? "Unknown Station";
+                CurrentTrackLine2 = FormatTags(CurrentStation.Tags);
 
                 return;
             }
@@ -426,7 +428,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString("mm\\:ss");
             CurrentTrackDurationNumber = e.Media.Duration;
 
-            CurrentTrackMetadata = (_currentMusicItem?.Artist ?? "Unknown Artist") + " - " + (_currentMusicItem?.Title ?? "Unknown Title");
+            CurrentTrackLine1 = CurrentMusicItem?.Title ?? "Unknown Title";
+            var artist = CurrentMusicItem?.Artist ?? "Unknown Artist";
+            var album = CurrentMusicItem?.Album;
+            CurrentTrackLine2 = string.IsNullOrWhiteSpace(album) ? artist : $"{artist} \u2014 {album}";
         });
     }
 
@@ -477,14 +482,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         // In Favorites or other mixed views, infer from what's playing or selected
-        if (_currentStation != null && _player?.IsPlaying == true)
+        if (CurrentPlayingItem != null && (_player?.IsPlaying == true || _player?.State == LibVLCSharp.Shared.VLCState.Paused))
         {
-            return MediaKind.Radio;
-        }
-
-        if (_currentMusicItem != null && (_player?.IsPlaying == true || _player?.State == LibVLCSharp.Shared.VLCState.Paused))
-        {
-            return MediaKind.Music;
+            return CurrentPlayingItem.Kind;
         }
 
         return SelectedItem?.Kind;
@@ -493,56 +493,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void ButtonPreviousTrack()
     {
-        if (FilteredItems.Count == 0)
+        if (_playbackContext == null || !_playbackContext.HasPrevious)
         {
             return;
         }
 
-        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
-
-        if (isFavorites)
-        {
-            var currentItem = (MediaItem?)_currentStation ?? _currentMusicItem;
-            if (currentItem == null)
-            {
-                return;
-            }
-
-            int index = FilteredItems.IndexOf(currentItem);
-            if (index > 0)
-            {
-                PlayItem(FilteredItems[index - 1]);
-            }
-            return;
-        }
-
-        var kind = GetEffectiveKind();
-
-        if (kind == MediaKind.Radio)
-        {
-            if (_currentStation == null)
-            {
-                return;
-            }
-
-            int index = FilteredItems.IndexOf(_currentStation);
-            if (index > 0)
-            {
-                PlayRadioStation(FilteredItems[index - 1]);
-            }
-            return;
-        }
-
-        if (_currentMusicItem == null)
-        {
-            return;
-        }
-
-        int fileIndex = FilteredItems.IndexOf(_currentMusicItem);
-        if (fileIndex > 0)
-        {
-            PlayMusicItem(FilteredItems[fileIndex - 1]);
-        }
+        var prev = _playbackContext.MovePrevious()!;
+        ExecutePlayItem(prev);
     }
 
     [RelayCommand]
@@ -559,15 +516,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (kind == MediaKind.Radio)
             {
-                if (_currentStation != null && _player.IsPlaying)
+                if (CurrentStation != null && _player.IsPlaying)
                 {
                     Stop();
                     return;
                 }
 
-                if (_currentStation != null)
+                if (CurrentStation != null)
                 {
-                    PlayRadioStation(_currentStation);
+                    PlayRadioStation(CurrentStation);
                     return;
                 }
 
@@ -582,7 +539,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (_currentMusicItem == null)
+            if (CurrentMusicItem == null)
             {
                 if (SelectedItem?.Kind == MediaKind.Music)
                 {
@@ -610,57 +567,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void ButtonNextTrack()
     {
-        if (FilteredItems.Count == 0)
+        if (_playbackContext == null || !_playbackContext.HasNext)
         {
             return;
         }
 
-        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
-
-        if (isFavorites)
-        {
-            var currentItem = (MediaItem?)_currentStation ?? _currentMusicItem;
-            if (currentItem == null)
-            {
-                return;
-            }
-
-            int index = FilteredItems.IndexOf(currentItem);
-            if (index >= 0 && index < FilteredItems.Count - 1)
-            {
-                var next = FilteredItems[index + 1];
-                PlayItem(next);
-            }
-            return;
-        }
-
-        var kind = GetEffectiveKind();
-
-        if (kind == MediaKind.Radio)
-        {
-            if (_currentStation == null)
-            {
-                return;
-            }
-
-            int index = FilteredItems.IndexOf(_currentStation);
-            if (index >= 0 && index < FilteredItems.Count - 1)
-            {
-                PlayRadioStation(FilteredItems[index + 1]);
-            }
-            return;
-        }
-
-        if (_currentMusicItem == null)
-        {
-            return;
-        }
-
-        int fileIndex = FilteredItems.IndexOf(_currentMusicItem);
-        if (fileIndex >= 0 && fileIndex < FilteredItems.Count - 1)
-        {
-            PlayMusicItem(FilteredItems[fileIndex + 1]);
-        }
+        var next = _playbackContext.MoveNext()!;
+        ExecutePlayItem(next);
     }
 
     [RelayCommand]
@@ -679,31 +592,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         Stop();
-
-        if (_currentMusicItem != null)
-        {
-            _currentMusicItem.IsPlaying = false;
-            _currentMusicItem = null;
-        }
-
-        _currentMedia?.Dispose();
-        _currentMedia = null;
-
-        CurrentAlbumArt?.Dispose();
-        CurrentAlbumArt = null;
-        CurrentTrackMetadata = string.Empty;
-        CurrentTrackTime = "00:00";
-        CurrentTrackDuration = "00:00";
-        CurrentTrackTimeNumber = 0;
-        CurrentTrackDurationNumber = 0;
-
-        ButtonPlayPauseIcon = ICON_PLAY;
-        ButtonPlayPausePadding = ICON_PLAY_PADDING;
-
-#if WINDOWS
-        _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
-        _thumbBarService?.SetPlayingState(false);
-#endif
+        ClearPlayback();
 
         App.FolderPath = folders[0].Path.LocalPath;
         Settings.Set("OrgZ.FolderPath", App.FolderPath);
@@ -711,7 +600,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _allItems.RemoveAll(i => i.Kind == MediaKind.Music);
         FilteredItems = [];
-        _lastMusicFilteredList = [];
 
         _folderWatcher?.Stop();
         await ScanAndAnalyzeMusicAsync();
@@ -742,6 +630,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Height = 260,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
+            Classes = { "orgzDialog" },
             Content = new StackPanel
             {
                 VerticalAlignment = VerticalAlignment.Center,
@@ -776,8 +665,29 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                         HorizontalAlignment = HorizontalAlignment.Center,
                         Margin = new Thickness(0, 12, 0, 0)
                     },
+                    new Button
+                    {
+                        Content = "github.com/FoxCouncil/OrgZ",
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 8, 0, 0),
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Foreground = new SolidColorBrush(Color.Parse("#4A9EFF")),
+                        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                        Padding = new Thickness(0),
+                    },
                 }
             }
+        };
+
+        var ghButton = (Button)((StackPanel)dialog.Content!).Children[^1];
+        ghButton.Click += (_, _) =>
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "https://github.com/FoxCouncil/OrgZ",
+                UseShellExecute = true
+            });
         };
 
         await dialog.ShowDialog(_window);
@@ -822,26 +732,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (dialog.FolderChanged)
         {
             Stop();
-
-            if (_currentMusicItem != null)
-            {
-                _currentMusicItem.IsPlaying = false;
-                _currentMusicItem = null;
-            }
-
-            _currentMedia?.Dispose();
-            _currentMedia = null;
-
-            CurrentAlbumArt?.Dispose();
-            CurrentAlbumArt = null;
-            CurrentTrackMetadata = string.Empty;
-            CurrentTrackTime = "00:00";
-            CurrentTrackDuration = "00:00";
-            CurrentTrackTimeNumber = 0;
-            CurrentTrackDurationNumber = 0;
-
-            ButtonPlayPauseIcon = ICON_PLAY;
-            ButtonPlayPausePadding = ICON_PLAY_PADDING;
+            ClearPlayback();
 
 #if WINDOWS
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
@@ -850,7 +741,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             _allItems.RemoveAll(i => i.Kind == MediaKind.Music);
             FilteredItems = [];
-            _lastMusicFilteredList = [];
 
             _window.Title = App.FolderPath != string.Empty
                 ? $"OrgZ v{App.Version} - {App.FolderPath}"
@@ -912,6 +802,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             case MediaKind.Radio:
             {
                 PlayRadioStation(item);
+                break;
+            }
+        }
+    }
+
+    private void ExecutePlayItem(MediaItem item)
+    {
+        if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
+
+        switch (item.Kind)
+        {
+            case MediaKind.Music:
+            {
+                ExecutePlayMusic(item);
+                break;
+            }
+
+            case MediaKind.Radio:
+            {
+                ExecutePlayRadio(item);
                 break;
             }
         }
@@ -981,42 +891,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
-            if (_currentStation != null)
-            {
-                _currentStation.IsPlaying = false;
-                _currentStation = null;
-            }
-
-            if (_currentMusicItem != null)
-            {
-                _currentMusicItem.IsPlaying = false;
-            }
-
-            _currentMusicItem = file;
-            _currentMusicItem.IsPlaying = true;
-            SelectedItem = file;
-
-            CurrentAlbumArt?.Dispose();
-            var artBytes = ExtractAlbumArtBytes(_currentMusicItem.FilePath!);
-            CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
-
-#if WINDOWS
-            _smtcService?.UpdateMetadata(_currentMusicItem.Title, _currentMusicItem.Artist, _currentMusicItem.Album, artBytes);
-#endif
-
-            _currentMedia?.Dispose();
-            _currentMedia = new Media(_vlc, _currentMusicItem.FilePath!, FromType.FromPath);
-
-            _ = _player.Play(_currentMedia);
-
-            ApplyPerTrackOptions(_currentMusicItem);
-
-            _currentMusicItem.LastPlayed = DateTime.UtcNow;
-            _currentMusicItem.PlayCount++;
-            MediaCache.SetLastPlayed(_currentMusicItem.Id, _currentMusicItem.LastPlayed.Value);
-            MediaCache.IncrementPlayCount(_currentMusicItem.Id);
-
-            UpdateNavigationButtons();
+            if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
+            _playbackContext = new PlaybackContext(FilteredItems, file);
+            ExecutePlayMusic(file);
         });
     }
 
@@ -1029,83 +906,134 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
-            if (_currentMusicItem != null)
-            {
-                _currentMusicItem.IsPlaying = false;
-                _currentMusicItem = null;
-            }
-
-            if (_currentStation != null)
-            {
-                _currentStation.IsPlaying = false;
-            }
-
-            _currentStation = station;
-            _currentStation.IsPlaying = true;
-            SelectedItem = station;
-
-            CurrentAlbumArt?.Dispose();
-            CurrentAlbumArt = null;
-
-#if WINDOWS
-            _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
-#endif
-
-            if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
-            {
-                _ = LoadFaviconAsync(station.FaviconUrl);
-            }
-
-            _currentMedia?.Dispose();
-            _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl), FromType.FromLocation);
-
-            _currentMedia.MetaChanged += (s, e) =>
-            {
-                if (e.MetadataType != MetadataType.NowPlaying || _currentMedia == null)
-                {
-                    return;
-                }
-
-                var nowPlaying = _currentMedia.Meta(MetadataType.NowPlaying);
-                if (string.IsNullOrWhiteSpace(nowPlaying))
-                {
-                    return;
-                }
-
-                UI(() =>
-                {
-                    CurrentTrackMetadata = nowPlaying;
-                    UpdateMainStatus($"Playing: {nowPlaying}");
-
-                    // Update SMTC with the live track info
-                    string? artist = null;
-                    string? title = nowPlaying;
-
-                    // ICY metadata is typically "Artist - Title"
-                    var dashIdx = nowPlaying.IndexOf(" - ", StringComparison.Ordinal);
-                    if (dashIdx > 0)
-                    {
-                        artist = nowPlaying[..dashIdx].Trim();
-                        title = nowPlaying[(dashIdx + 3)..].Trim();
-                    }
-
-#if WINDOWS
-                    _smtcService?.UpdateMetadata(title, artist, _currentStation?.Title, null);
-#endif
-                });
-            };
-
-            _ = _player.Play(_currentMedia);
-
-            ApplyPerTrackOptions(station);
-
-            station.LastPlayed = DateTime.UtcNow;
-            station.PlayCount++;
-            MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
-            MediaCache.IncrementPlayCount(station.Id);
-
-            UpdateNavigationButtons();
+            if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
+            _playbackContext = new PlaybackContext(FilteredItems, station);
+            ExecutePlayRadio(station);
         });
+    }
+
+    private void ExecutePlayMusic(MediaItem file)
+    {
+        file.IsPlaying = true;
+        SelectedItem = file;
+
+        CurrentAlbumArt?.Dispose();
+        var artBytes = ExtractAlbumArtBytes(file.FilePath!);
+        CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
+
+#if WINDOWS
+        _smtcService?.UpdateMetadata(file.Title, file.Artist, file.Album, artBytes);
+#endif
+
+        _currentMedia?.Dispose();
+        _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
+
+        _ = _player.Play(_currentMedia);
+
+        ApplyPerTrackOptions(file);
+
+        file.LastPlayed = DateTime.UtcNow;
+        file.PlayCount++;
+        MediaCache.SetLastPlayed(file.Id, file.LastPlayed.Value);
+        MediaCache.IncrementPlayCount(file.Id);
+
+        UpdateNavigationButtons();
+    }
+
+    private void ExecutePlayRadio(MediaItem station)
+    {
+        station.IsPlaying = true;
+        SelectedItem = station;
+
+        CurrentAlbumArt?.Dispose();
+        CurrentAlbumArt = null;
+
+#if WINDOWS
+        _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
+#endif
+
+        if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
+        {
+            _ = LoadFaviconAsync(station.FaviconUrl);
+        }
+
+        _currentMedia?.Dispose();
+        _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
+
+        _currentMedia.MetaChanged += (s, e) =>
+        {
+            if (e.MetadataType != MetadataType.NowPlaying || _currentMedia == null)
+            {
+                return;
+            }
+
+            var nowPlaying = _currentMedia.Meta(MetadataType.NowPlaying);
+            if (string.IsNullOrWhiteSpace(nowPlaying))
+            {
+                return;
+            }
+
+            UI(() =>
+            {
+                UpdateMainStatus($"Playing: {nowPlaying}");
+
+                string? artist = null;
+                string? title = nowPlaying;
+
+                var dashIdx = nowPlaying.IndexOf(" - ", StringComparison.Ordinal);
+                if (dashIdx > 0)
+                {
+                    artist = nowPlaying[..dashIdx].Trim();
+                    title = nowPlaying[(dashIdx + 3)..].Trim();
+                }
+
+                CurrentTrackLine1 = title ?? nowPlaying;
+                CurrentTrackLine2 = artist ?? string.Empty;
+
+#if WINDOWS
+                _smtcService?.UpdateMetadata(title, artist, CurrentStation?.Title, null);
+#endif
+            });
+        };
+
+        _ = _player.Play(_currentMedia);
+
+        ApplyPerTrackOptions(station);
+
+        station.LastPlayed = DateTime.UtcNow;
+        station.PlayCount++;
+        MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
+        MediaCache.IncrementPlayCount(station.Id);
+
+        UpdateNavigationButtons();
+    }
+
+    private void ClearPlayback()
+    {
+        if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
+        _playbackContext = null;
+
+        _currentMedia?.Dispose();
+        _currentMedia = null;
+
+        CurrentAlbumArt?.Dispose();
+        CurrentAlbumArt = null;
+        CurrentTrackLine1 = string.Empty;
+        CurrentTrackLine2 = string.Empty;
+        CurrentTrackTime = "00:00";
+        CurrentTrackDuration = "00:00";
+        CurrentTrackTimeNumber = 0;
+        CurrentTrackDurationNumber = 0;
+
+        ButtonPlayPauseIcon = ICON_PLAY;
+        ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+#if WINDOWS
+        _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
+        _thumbBarService?.SetPlayingState(false);
+#endif
+
+        UpdateNavigationButtons();
     }
 
     private string ProcessStreamUrl(string streamUrl)
@@ -1309,7 +1237,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         station.IsFavorite = !station.IsFavorite;
         MediaCache.SetFavorite(station.Id, station.IsFavorite);
 
-        ApplyFilter();
+        // Only rebuild the list when viewing Favorites (item may need to appear/disappear)
+        if (SelectedSidebarItem?.IsFavorites == true)
+        {
+            var scroll = GetScrollOffset?.Invoke() ?? 0;
+            ApplyFilter();
+            SetScrollOffset?.Invoke(scroll);
+        }
     }
 
     [RelayCommand]
@@ -1724,13 +1658,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void UpdateNavigationButtons()
     {
-        var isFavorites = SelectedSidebarItem?.IsFavorites == true;
-        var kind = SelectedSidebarItem?.Kind;
-        var currentItem = isFavorites
-            ? (MediaItem?)_currentStation ?? _currentMusicItem
-            : kind == MediaKind.Radio ? _currentStation : _currentMusicItem;
-
-        if (currentItem == null || FilteredItems.Count == 0)
+        if (_playbackContext == null)
         {
             IsBackTrackButtonEnabled = false;
             IsNextTrackButtonEnabled = false;
@@ -1741,9 +1669,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        int index = FilteredItems.IndexOf(currentItem);
-        IsBackTrackButtonEnabled = index > 0;
-        IsNextTrackButtonEnabled = index >= 0 && index < FilteredItems.Count - 1;
+        IsBackTrackButtonEnabled = _playbackContext.HasPrevious;
+        IsNextTrackButtonEnabled = _playbackContext.HasNext;
 #if WINDOWS
         _smtcService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
         _thumbBarService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
@@ -1781,7 +1708,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     CurrentAlbumArt?.Dispose();
                     CurrentAlbumArt = bitmap;
 #if WINDOWS
-                    _smtcService?.UpdateMetadata(_currentStation?.Title, _currentStation?.Tags, "Internet Radio", bytes);
+                    _smtcService?.UpdateMetadata(CurrentStation?.Title, CurrentStation?.Tags, "Internet Radio", bytes);
 #endif
                 });
             }
@@ -1834,6 +1761,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
             });
         }
+    }
+
+    private static string FormatTags(string? tags)
+    {
+        if (string.IsNullOrWhiteSpace(tags))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(" \u00B7 ", tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private static void UI(Action action)
