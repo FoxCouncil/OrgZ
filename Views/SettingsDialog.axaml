@@ -74,7 +74,7 @@
 
 			<!-- ===== Stats Tab ===== -->
 			<TabItem Header="Stats">
-				<ScrollViewer x:Name="StatsScrollViewer" Margin="8,12">
+				<ScrollViewer x:Name="StatsScrollViewer" Margin="8,12" Padding="0,0,12,0">
 					<StackPanel Spacing="16">
 						<!-- Library Overview -->
 						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
