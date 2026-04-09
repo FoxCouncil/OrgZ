@@ -3,6 +3,7 @@
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
@@ -29,6 +30,7 @@ public partial class MainWindow : Window
 
     private string? _lastViewConfigKey;
     private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
+    private bool _groupedDataGridInitialized;
 
     private const string MediaItemDragFormat = "OrgZ.MediaItem";
     private const string PlaylistRowDragFormat = "OrgZ.PlaylistRowIndex";
@@ -423,14 +425,54 @@ public partial class MainWindow : Window
 
     private void ApplyViewConfig(ListViewConfig config)
     {
-        BuildColumns(config.Columns);
-        BuildContextMenu(config.ContextMenuItems);
+        bool isGrouped = config.GroupByPath != null;
+
+        // Toggle between two DataGrids — grouped views use GroupedDataGrid (columns set once),
+        // non-grouped views use MainDataGrid (columns rebuilt per view). This avoids an Avalonia
+        // bug where the DataGrid's internal RowGroupSpacerColumn state corrupts column insertion
+        // after a grouped view was bound.
+        MainDataGrid.IsVisible = !isGrouped;
+        GroupedDataGrid.IsVisible = isGrouped;
+
+        if (isGrouped)
+        {
+            // Build columns on GroupedDataGrid exactly once — rebuilding after a grouped
+            // DataGridCollectionView was bound triggers the Avalonia spacer column bug.
+            if (!_groupedDataGridInitialized)
+            {
+                BuildColumnsOn(GroupedDataGrid, config.Columns);
+                BuildContextMenuOn(GroupedDataGrid, config.ContextMenuItems);
+                _groupedDataGridInitialized = true;
+            }
+        }
+        else
+        {
+            BuildColumns(config.Columns);
+            BuildContextMenu(config.ContextMenuItems);
+        }
+
         RadioFilterPanel.IsVisible = config.ShowRadioFilterPanel;
+
+        // Auto-collapse group headers for grouped views
+        if (isGrouped)
+        {
+            GroupedDataGrid.LoadingRowGroup -= AutoCollapseRowGroup;
+            GroupedDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
+        }
 
         // Reset drill-down when switching views
         if (_viewModel.DrillDownState != null)
         {
             _viewModel.DrillUpToRoot();
+        }
+    }
+
+    private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
+    {
+        var group = e.RowGroupHeader.DataContext as DataGridCollectionViewGroup;
+        if (group != null)
+        {
+            Dispatcher.UIThread.Post(() => GroupedDataGrid.CollapseRowGroup(group, true));
         }
     }
 
@@ -608,9 +650,14 @@ public partial class MainWindow : Window
 
     private void BuildContextMenu(List<ContextMenuItemDef> defs)
     {
+        BuildContextMenuOn(MainDataGrid, defs);
+    }
+
+    private void BuildContextMenuOn(DataGrid grid, List<ContextMenuItemDef> defs)
+    {
         var menu = new ContextMenu();
         BuildMenuItems(menu.Items, defs);
-        MainDataGrid.ContextMenu = menu;
+        grid.ContextMenu = menu;
     }
 
     private void BuildMenuItems(Avalonia.Controls.ItemCollection items, List<ContextMenuItemDef> defs)
@@ -731,7 +778,8 @@ public partial class MainWindow : Window
         var config = ListViewConfigs.Get(_lastViewConfigKey);
         if (config != null)
         {
-            BuildContextMenu(config.ContextMenuItems);
+            var grid = config.GroupByPath != null ? GroupedDataGrid : MainDataGrid;
+            BuildContextMenuOn(grid, config.ContextMenuItems);
         }
     }
 
