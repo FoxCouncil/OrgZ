@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             x:Class="OrgZ.Controls.QueuePanel"
+             x:CompileBindings="False">
+	<Border Background="{DynamicResource SystemAltHighColor}" BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}" BorderThickness="1,0,0,0">
+		<DockPanel>
+			<Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="8,8,8,4">
+				<TextBlock Text="Up Next" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" />
+				<Button Grid.Column="1" Command="{Binding ClearQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Cursor="Hand" ToolTip.Tip="Clear Queue">
+					<i:Icon Value="fa-solid fa-trash" FontSize="12" Opacity="0.5" />
+				</Button>
+			</Grid>
+
+			<ListBox x:Name="QueueListBox"
+			         ItemsSource="{Binding PlaybackContextUpcoming}"
+			         SelectionMode="Single"
+			         Background="Transparent"
+			         Margin="0,4,0,0"
+			         DragDrop.AllowDrop="True">
+				<ListBox.Styles>
+					<Style Selector="ListBoxItem">
+						<Setter Property="Cursor" Value="Hand" />
+					</Style>
+				</ListBox.Styles>
+				<ListBox.ItemTemplate>
+					<DataTemplate>
+						<Grid ColumnDefinitions="*,Auto" Margin="4,2">
+							<StackPanel Grid.Column="0" VerticalAlignment="Center">
+								<TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="12" />
+								<TextBlock Text="{Binding Artist}" TextTrimming="CharacterEllipsis" FontSize="10" Opacity="0.6" />
+							</StackPanel>
+							<Button Grid.Column="1" Tag="{Binding}" Click="RemoveItem_Click" Background="Transparent" BorderThickness="0" Padding="4" Cursor="Hand" VerticalAlignment="Center">
+								<i:Icon Value="fa-solid fa-xmark" FontSize="10" Opacity="0.4" />
+							</Button>
+						</Grid>
+					</DataTemplate>
+				</ListBox.ItemTemplate>
+			</ListBox>
+		</DockPanel>
+	</Border>
+</UserControl>

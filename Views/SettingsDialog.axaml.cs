@@ -34,6 +34,7 @@ public partial class SettingsDialog : Window
         FolderPathText.Text = string.IsNullOrEmpty(App.FolderPath) ? "(No folder selected)" : App.FolderPath;
         MinimizeToTrayCheck.IsChecked = Settings.Get("OrgZ.MinimizeToTray", false);
         RememberLastTrackCheck.IsChecked = Settings.Get("OrgZ.RememberLastTrack", false);
+        ShowIgnoredCheck.IsChecked = Settings.Get("OrgZ.ShowIgnored", true);
 
         // Playback
         var bufferSize = Settings.Get("OrgZ.StreamingBufferSize", "Medium");
@@ -106,19 +107,18 @@ public partial class SettingsDialog : Window
         StatRadioFavorites.Text = favorites.ToString("N0");
         StatRadioCountries.Text = countries.ToString("N0");
 
-        // Radio Sources
-        var sourceGroups = radioItems
-            .GroupBy(s => s.Source ?? "unknown")
+        // Radio Genres (normalized, iTunes-style buckets)
+        var genreGroups = radioItems
+            .GroupBy(s => s.NormalizedGenre)
             .OrderByDescending(g => g.Count())
             .ToList();
 
-        foreach (var group in sourceGroups)
+        foreach (var group in genreGroups)
         {
-            var label = MediaItem.GetSourceDisplayName(group.Key);
-            RadioSourcesPanel.Children.Add(CreateBreakdownRow(label, $"{group.Count():N0} stations", null));
+            RadioSourcesPanel.Children.Add(CreateBreakdownRow(group.Key, $"{group.Count():N0} stations", null));
         }
 
-        if (sourceGroups.Count == 0)
+        if (genreGroups.Count == 0)
         {
             RadioSourcesPanel.Children.Add(CreateStatLabel("No stations", 0.4));
         }
@@ -209,6 +209,7 @@ public partial class SettingsDialog : Window
 
         Settings.Set("OrgZ.MinimizeToTray", MinimizeToTrayCheck.IsChecked == true);
         Settings.Set("OrgZ.RememberLastTrack", RememberLastTrackCheck.IsChecked == true);
+        Settings.Set("OrgZ.ShowIgnored", ShowIgnoredCheck.IsChecked == true);
 
         // Playback
         var bufferSize = BufferSizeCombo.SelectedIndex switch

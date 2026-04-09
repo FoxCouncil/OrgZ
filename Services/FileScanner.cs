@@ -88,25 +88,6 @@ public class FileScanner
         };
     }
 
-    public static int CountAudioFiles(string directoryPath, bool recursive = true)
-    {
-        if (string.IsNullOrEmpty(directoryPath) || !Directory.Exists(directoryPath))
-        {
-            return 0;
-        }
-
-        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-
-        try
-        {
-            return Directory.GetFiles(directoryPath, "*.*", searchOption).Count(file => SupportedExtensions.Contains(Path.GetExtension(file)));
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
     public static bool IsSupportedExtension(string filePath)
     {
         var extension = Path.GetExtension(filePath);

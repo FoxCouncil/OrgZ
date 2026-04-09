@@ -4,14 +4,10 @@
 		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
 		xmlns:i="https://github.com/projektanker/icons.avalonia"
 		xmlns:controls="using:OrgZ.Controls"
-		xmlns:converters="clr-namespace:OrgZ.Converters"
 		mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="450"
 		x:Class="OrgZ.Views.MainWindow"
 		Title="OrgZ"
 		x:CompileBindings="False">
-	<Window.Resources>
-		<converters:FileSizeConverter x:Key="FileSizeConverter" />
-	</Window.Resources>
 
 	<NativeMenu.Menu>
 		<NativeMenu>
@@ -102,9 +98,15 @@
 				<Border Grid.Column="0" Margin="25,4,4,4">
 					<StackPanel HorizontalAlignment="Center">
 						<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
+							<Button Command="{Binding ToggleShuffleCommand}" Background="Transparent" BorderThickness="0" Padding="4" VerticalAlignment="Center" Cursor="Hand" Width="32" Height="32">
+								<i:Icon Value="{Binding ShuffleIcon}" FontSize="16" Opacity="{Binding ShuffleOpacity}" />
+							</Button>
 							<Button IsEnabled="{Binding IsBackTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-backward-fast" Command="{Binding ButtonPreviousTrack}"></Button>
 							<Button IsEnabled="{Binding IsButtonPlayPauseEnabled}" Width="64" Height="64" FontSize="42" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="{Binding ButtonPlayPauseIcon}" Command="{Binding ButtonPlayPause}" Padding="{Binding ButtonPlayPausePadding}"></Button>
 							<Button IsEnabled="{Binding IsNextTrackButtonEnabled}" Width="50" Height="50" FontSize="28" CornerRadius="100" VerticalAlignment="Center" i:Attached.Icon="fa-solid fa-forward-fast" Command="{Binding ButtonNextTrack}"></Button>
+							<Button Command="{Binding CycleRepeatModeCommand}" Background="Transparent" BorderThickness="0" Padding="4" VerticalAlignment="Center" Cursor="Hand" Width="32" Height="32">
+								<i:Icon Value="{Binding RepeatIcon}" FontSize="16" Opacity="{Binding RepeatOpacity}" />
+							</Button>
 						</StackPanel>
 						<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,5">
 							<Button Command="{Binding MuteVolumeCommand}" Background="Transparent" BorderThickness="0" Padding="2" Margin="0,0,5,0" VerticalAlignment="Center" Cursor="Hand">
@@ -140,7 +142,7 @@
 								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
 								<Grid Width="420" Height="14">
 									<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}" VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
-									<Border x:Name="LiveStreamBar" IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
+									<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
 										<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
 											<Border.Background>
 												<LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
@@ -159,7 +161,13 @@
 				</Border>
 				<Border Grid.Column="5" Margin="4,4,25,4">
 					<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-						<i:Icon Value="fa-solid fa-search" Margin="10,10,5,10" />
+						<Button Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="10,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Browse by Artist">
+							<i:Icon Value="fa-solid fa-folder-tree" FontSize="16" />
+						</Button>
+						<Button Command="{Binding ToggleQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,5,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Up Next">
+							<i:Icon Value="fa-solid fa-list" FontSize="16" />
+						</Button>
+						<i:Icon Value="fa-solid fa-search" Margin="5,10,5,10" />
 						<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
 						<Button Command="{Binding ClearSearchCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,10,10" VerticalAlignment="Center" Cursor="Hand" IsVisible="{Binding SearchText.Length}">
 							<i:Icon Value="fa-solid fa-xmark" FontSize="14" />
@@ -177,41 +185,73 @@
 
 				<GridSplitter Grid.Column="1" ResizeDirection="Columns" />
 
-				<Border Grid.Column="2" CornerRadius="8" ClipToBounds="True">
-					<DockPanel>
-						<controls:RadioFilterPanel x:Name="RadioFilterPanel"
-							DockPanel.Dock="Bottom"
-							DataContext="{Binding}"
-							IsVisible="False" />
+				<Grid Grid.Column="2" ColumnDefinitions="*,Auto">
+					<Border Grid.Column="0" CornerRadius="8" ClipToBounds="True">
+						<DockPanel>
+							<controls:RadioFilterPanel x:Name="RadioFilterPanel"
+								DockPanel.Dock="Bottom"
+								DataContext="{Binding}"
+								IsVisible="False" />
 
-						<DataGrid x:Name="MainDataGrid"
-							DoubleTapped="DataGrid_DoubleTapped"
-							SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-							ItemsSource="{Binding FilteredItems}"
-							GridLinesVisibility="All"
-							IsReadOnly="True"
-							AutoGenerateColumns="False"
-							CanUserSortColumns="True"
-							SelectionMode="Single"
-							Background="{DynamicResource SystemAltHighColor}"
-							HorizontalScrollBarVisibility="Auto"
-							VerticalScrollBarVisibility="Auto">
-							<DataGrid.Styles>
-								<Style Selector="DataGridRow">
-									<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-								</Style>
-								<Style Selector="DataGridRow:nth-child(odd)">
-									<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-								</Style>
-								<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
-									<Setter Property="IsVisible" Value="False" />
-								</Style>
-							</DataGrid.Styles>
-							<DataGrid.Columns />
+							<Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" IsVisible="{Binding IsDrillDownActive}">
+								<controls:BreadcrumbBar x:Name="BreadcrumbBar" Grid.Column="0" />
+								<Button Grid.Column="1" Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" HorizontalAlignment="Right" Cursor="Hand" ToolTip.Tip="Exit Browse">
+									<i:Icon Value="fa-solid fa-xmark" FontSize="12" Opacity="0.5" />
+								</Button>
+							</Grid>
 
-						</DataGrid>
-					</DockPanel>
-				</Border>
+							<DataGrid x:Name="DrillDownGrid"
+								DoubleTapped="DrillDownGrid_DoubleTapped"
+								ItemsSource="{Binding DrillDownEntries}"
+								GridLinesVisibility="All"
+								IsReadOnly="True"
+								AutoGenerateColumns="False"
+								CanUserSortColumns="True"
+								SelectionMode="Single"
+								Background="{DynamicResource SystemAltHighColor}"
+								IsVisible="False">
+								<DataGrid.Styles>
+									<Style Selector="DataGridRow">
+										<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+									</Style>
+									<Style Selector="DataGridRow:nth-child(odd)">
+										<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+									</Style>
+								</DataGrid.Styles>
+								<DataGrid.Columns />
+							</DataGrid>
+
+							<DataGrid x:Name="MainDataGrid"
+								DoubleTapped="DataGrid_DoubleTapped"
+								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+								ItemsSource="{Binding FilteredItemsView}"
+								GridLinesVisibility="All"
+								IsReadOnly="True"
+								AutoGenerateColumns="False"
+								CanUserSortColumns="True"
+								SelectionMode="Single"
+								Background="{DynamicResource SystemAltHighColor}"
+								HorizontalScrollBarVisibility="Auto"
+								VerticalScrollBarVisibility="Auto">
+								<DataGrid.Styles>
+									<Style Selector="DataGridRow">
+										<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+									</Style>
+									<Style Selector="DataGridRow:nth-child(odd)">
+										<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+									</Style>
+									<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
+										<Setter Property="IsVisible" Value="False" />
+									</Style>
+								</DataGrid.Styles>
+								<DataGrid.Columns />
+
+							</DataGrid>
+						</DockPanel>
+					</Border>
+
+					<controls:QueuePanel Grid.Column="1" Width="250" DataContext="{Binding}" IsVisible="{Binding IsQueueVisible}" />
+				</Grid>
 			</Grid>
 		</DockPanel>
 		</Panel>

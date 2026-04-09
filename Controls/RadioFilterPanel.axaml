@@ -20,8 +20,7 @@
                       Width="160"
                       VerticalAlignment="Center" />
 
-            <Button x:Name="AddStationButton"
-                    Click="AddStation_Click"
+            <Button Click="AddStation_Click"
                     ToolTip.Tip="Add User Station"
                     VerticalAlignment="Center">
                 <i:Icon Value="fa-solid fa-plus" FontSize="14" />
@@ -31,8 +30,7 @@
                     VerticalAlignment="Center">
                 <i:Icon Value="fa-solid fa-arrows-rotate" FontSize="14" />
             </Button>
-            <Button x:Name="SyncButton"
-                    Click="SyncButton_Click"
+            <Button Click="SyncButton_Click"
                     ToolTip.Tip="Sync All Stations (~95k)"
                     VerticalAlignment="Center"
                     IsEnabled="{Binding !IsSyncing}">

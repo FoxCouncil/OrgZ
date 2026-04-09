@@ -14,6 +14,21 @@ public record ListViewConfig
     public bool ShowRadioFilterPanel { get; init; }
     public string? DefaultSortColumn { get; init; }
     public bool DefaultSortDescending { get; init; }
+    public bool SupportsDrillDown { get; init; }
+    public Func<IEnumerable<MediaItem>, IEnumerable<MediaItem>>? Sorter { get; init; }
+    public int? PlaylistId { get; init; }
+
+    /// <summary>
+    /// When false (default), ApplyFilter strips out items where IsIgnored is true.
+    /// The Ignored view sets this to true to do the opposite.
+    /// </summary>
+    public bool IncludeIgnored { get; init; }
+
+    /// <summary>
+    /// When set, the view wraps FilteredItems in a DataGridCollectionView grouped by this property path.
+    /// Avalonia's DataGrid renders collapsible group headers automatically.
+    /// </summary>
+    public string? GroupByPath { get; init; }
 }
 
 public static class ListViewConfigs
@@ -23,6 +38,7 @@ public static class ListViewConfigs
         ["Music"] = BuildMusicConfig(),
         ["Radio"] = BuildRadioConfig(),
         ["Favorites"] = BuildFavoritesConfig(),
+        ["Ignored"] = BuildIgnoredConfig(),
     };
 
     public static ListViewConfig? Get(string? key)
@@ -33,6 +49,47 @@ public static class ListViewConfigs
         }
 
         return _configs.GetValueOrDefault(key);
+    }
+
+    public static void Register(string key, ListViewConfig config)
+    {
+        _configs[key] = config;
+    }
+
+    public static void Remove(string key)
+    {
+        _configs.Remove(key);
+    }
+
+    public static ListViewConfig BuildPlaylistConfig(int playlistId, List<string> orderedTrackIds)
+    {
+        var idSet = new HashSet<string>(orderedTrackIds);
+        var orderMap = new Dictionary<string, int>(orderedTrackIds.Count);
+        for (int i = 0; i < orderedTrackIds.Count; i++)
+        {
+            orderMap[orderedTrackIds[i]] = i;
+        }
+
+        return new ListViewConfig
+        {
+            Key = $"Playlist:{playlistId}",
+            PlaylistId = playlistId,
+            Columns =
+            [
+                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
+            ],
+            BaseFilter = item => idSet.Contains(item.Id),
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildPlaylistContextMenu(),
+            Sorter = items => items.OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue),
+        };
     }
 
     private static ListViewConfig BuildMusicConfig()
@@ -46,6 +103,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
                 new ColumnDef { Header = "Year", BindingPath = "Year" },
                 new ColumnDef { Header = "Extension", BindingPath = "Extension" },
                 new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox },
@@ -58,7 +116,26 @@ public static class ListViewConfigs
                 (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Year?.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildMusicContextMenu(),
+            SupportsDrillDown = true,
         };
+    }
+
+    public static List<ColumnDef> BuildArtistsColumns()
+    {
+        return
+        [
+            new ColumnDef { Header = "Artist", BindingPath = "GroupKey", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+            new ColumnDef { Header = "Info", BindingPath = "SecondaryInfo", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+        ];
+    }
+
+    public static List<ColumnDef> BuildAlbumsColumns()
+    {
+        return
+        [
+            new ColumnDef { Header = "Album", BindingPath = "GroupKey", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+            new ColumnDef { Header = "Info", BindingPath = "SecondaryInfo", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+        ];
     }
 
     private static ListViewConfig BuildRadioConfig()
@@ -69,13 +146,10 @@ public static class ListViewConfigs
             Columns =
             [
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new ColumnDef { Header = "", BindingPath = "SourceLabel", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 45, CanUserResize = false },
-                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Country", BindingPath = "Country" },
-                new ColumnDef { Header = "Tags", BindingPath = "Tags", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Codec", BindingPath = "CodecLabel", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60 },
-                new ColumnDef { Header = "Bitrate", BindingPath = "BitrateLabel", Type = ColumnType.RightAligned },
-                new ColumnDef { Header = "Listeners", BindingPath = "ListenerCountLabel" },
+                new ColumnDef { Header = "Stream", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+                new ColumnDef { Header = "Country", BindingPath = "Country", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Bit Rate", BindingPath = "BitrateLabel", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80 },
+                new ColumnDef { Header = "Codec", BindingPath = "CodecLabel", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
             ],
             BaseFilter = item => item.Kind == MediaKind.Radio,
             SearchFilter = (item, search) =>
@@ -84,7 +158,45 @@ public static class ListViewConfigs
                 (item.Country?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildRadioContextMenu(),
             ShowRadioFilterPanel = true,
+            GroupByPath = "NormalizedGenre",
         };
+    }
+
+    private static ListViewConfig BuildIgnoredConfig()
+    {
+        return new ListViewConfig
+        {
+            Key = "Ignored",
+            IncludeIgnored = true,
+            Columns =
+            [
+                new ColumnDef { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "File Name", BindingPath = "FileName", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+            ],
+            BaseFilter = item => item.IsIgnored,
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildIgnoredContextMenu(),
+        };
+    }
+
+    private static List<ContextMenuItemDef> BuildIgnoredContextMenu()
+    {
+        return
+        [
+            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
+            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Restore to Library", CommandName = "RestoreFromIgnored" },
+            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
+        ];
     }
 
     private static ListViewConfig BuildFavoritesConfig()
@@ -98,6 +210,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
             ],
             BaseFilter = item => item.IsFavorite,
             SearchFilter = (item, search) =>
@@ -116,34 +229,24 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Play Next", IsEnabled = false },
-            new ContextMenuItemDef { Header = "Add to Queue", IsEnabled = false },
+            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
+            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
             new ContextMenuItemDef
             {
-                Header = "Rating", IsEnabled = false,
-                Children =
-                [
-                    new ContextMenuItemDef { Header = "1 Star", IsEnabled = false },
-                    new ContextMenuItemDef { Header = "2 Stars", IsEnabled = false },
-                    new ContextMenuItemDef { Header = "3 Stars", IsEnabled = false },
-                    new ContextMenuItemDef { Header = "4 Stars", IsEnabled = false },
-                    new ContextMenuItemDef { Header = "5 Stars", IsEnabled = false },
-                ]
+                Header = "Rating",
+                IsRatingMarker = true,
             },
             new ContextMenuItemDef
             {
-                Header = "Add to Playlist", IsEnabled = false,
-                Children =
-                [
-                    new ContextMenuItemDef { Header = "New Playlist...", IsEnabled = false },
-                ]
+                Header = "Add to Playlist",
+                IsAddToPlaylistMarker = true,
             },
             new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Show in Explorer", IsEnabled = false },
-            new ContextMenuItemDef { Header = "Remove from Library", IsEnabled = false },
+            new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
+            new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
         ];
     }
 
@@ -160,6 +263,23 @@ public static class ListViewConfigs
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Copy Stream URL", CommandName = "CopyUrl" },
             new ContextMenuItemDef { Header = "Visit Homepage", CommandName = "Homepage" },
+        ];
+    }
+
+    private static List<ContextMenuItemDef> BuildPlaylistContextMenu()
+    {
+        return
+        [
+            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
+            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
+            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
+            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Remove from Playlist", CommandName = "RemoveFromPlaylist" },
+            new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
+            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
         ];
     }
 }
