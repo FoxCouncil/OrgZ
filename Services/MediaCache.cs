@@ -7,9 +7,27 @@ namespace OrgZ.Services;
 
 public static class MediaCache
 {
-    private static readonly string CacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
-    private static readonly string CacheFilePath = Path.Combine(CacheDirectory, "library.db");
+    private static readonly string DefaultCacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
+    private static string CacheDirectory { get; set; } = DefaultCacheDirectory;
+    private static string CacheFilePath { get; set; } = Path.Combine(DefaultCacheDirectory, "library.db");
     private static string ConnectionString => $"Data Source={CacheFilePath}";
+
+    /// <summary>
+    /// Test hook: redirect the cache to a custom file path. Pass null to restore the default location.
+    /// </summary>
+    internal static void OverrideCachePath(string? path)
+    {
+        if (path == null)
+        {
+            CacheDirectory = DefaultCacheDirectory;
+            CacheFilePath = Path.Combine(DefaultCacheDirectory, "library.db");
+        }
+        else
+        {
+            CacheFilePath = path;
+            CacheDirectory = Path.GetDirectoryName(path) ?? DefaultCacheDirectory;
+        }
+    }
 
     public static void EnsureCreated()
     {
@@ -69,11 +87,11 @@ public static class MediaCache
                     Bitrate                 INTEGER,
                     Votes                   INTEGER,
                     ClickCount              INTEGER,
-                    ListenerCount           INTEGER,
                     IsHls                   INTEGER NOT NULL DEFAULT 0,
 
                     Rating                  INTEGER,
                     PlayCount               INTEGER NOT NULL DEFAULT 0,
+                    IsIgnored               INTEGER NOT NULL DEFAULT 0,
 
                     VolumeAdjustment        INTEGER NOT NULL DEFAULT 0,
                     EqPreset                TEXT,
@@ -106,6 +124,31 @@ public static class MediaCache
                     StationCount    INTEGER NOT NULL,
                     DurationMs      INTEGER NOT NULL
                 )
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS Playlists (
+                    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name        TEXT NOT NULL,
+                    CreatedAt   TEXT NOT NULL,
+                    UpdatedAt   TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS PlaylistTracks (
+                    PlaylistId  INTEGER NOT NULL,
+                    MediaId     TEXT NOT NULL,
+                    SortOrder   INTEGER NOT NULL,
+                    AddedAt     TEXT NOT NULL,
+                    PRIMARY KEY (PlaylistId, MediaId),
+                    FOREIGN KEY (PlaylistId) REFERENCES Playlists(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (MediaId) REFERENCES Media(Id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS IX_PlaylistTracks_PlaylistId ON PlaylistTracks(PlaylistId);
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -157,17 +200,16 @@ public static class MediaCache
                     (Id, Kind, Title, DateAdded, IsFavorite, LastPlayed,
                      StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                      Country, CountryCode, Tags, Codec, Bitrate,
-                     Votes, ClickCount, ListenerCount, IsHls)
+                     Votes, ClickCount, IsHls)
                 SELECT
                     CASE
                         WHEN Source = 'radiobrowser' THEN 'rb:' || SourceId
-                        WHEN Source = 'shoutcast' THEN 'sc:' || SourceId
                         ELSE 'user:' || Id
                     END,
                     'Radio', Name, DateAdded, IsFavorite, LastPlayed,
                     StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                     Country, CountryCode, Tags, Codec, Bitrate,
-                    Votes, ClickCount, ListenerCount, IsHls
+                    Votes, ClickCount, IsHls
                 FROM RadioStations
                 """;
             cmd.ExecuteNonQuery();
@@ -202,6 +244,7 @@ public static class MediaCache
             "StopTime INTEGER",
             "UseStartTime INTEGER NOT NULL DEFAULT 0",
             "UseStopTime INTEGER NOT NULL DEFAULT 0",
+            "IsIgnored INTEGER NOT NULL DEFAULT 0",
         };
 
         foreach (var col in columns)
@@ -250,29 +293,6 @@ public static class MediaCache
 
     // -- Music operations --
 
-    public static Dictionary<string, (MediaItem File, DateTime LastModified)> LoadAllMusic()
-    {
-        var result = new Dictionary<string, (MediaItem, DateTime)>(StringComparer.OrdinalIgnoreCase);
-
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT * FROM Media WHERE Kind = 'Music'";
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            var item = ReadMediaItem(reader);
-            if (item.FilePath != null && item.LastModified.HasValue)
-            {
-                result[item.FilePath] = (item, item.LastModified.Value);
-            }
-        }
-
-        return result;
-    }
-
     public static void UpsertMusic(MediaItem item)
     {
         using var connection = new SqliteConnection(ConnectionString);
@@ -317,7 +337,7 @@ public static class MediaCache
         cmd.CommandText = """
             SELECT Id, Title, StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                    Country, CountryCode, Tags, Codec, Bitrate, Votes, ClickCount,
-                   ListenerCount, IsHls, IsFavorite, LastPlayed, DateAdded,
+                   IsHls, IsFavorite, LastPlayed, DateAdded,
                    Rating, PlayCount
             FROM Media WHERE Kind = 'Radio'
             """;
@@ -329,64 +349,6 @@ public static class MediaCache
         }
 
         return result;
-    }
-
-    public static List<MediaItem> SearchRadio(string? query = null, string? country = null, string? genre = null)
-    {
-        var result = new List<MediaItem>();
-
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        var whereClause = BuildRadioWhereClause(cmd, query, country, genre);
-
-        cmd.CommandText = $"SELECT * FROM Media WHERE {whereClause} ORDER BY Title";
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            result.Add(ReadMediaItem(reader));
-        }
-
-        return result;
-    }
-
-    public static int CountRadio(string? query = null, string? country = null, string? genre = null)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        var whereClause = BuildRadioWhereClause(cmd, query, country, genre);
-
-        cmd.CommandText = $"SELECT COUNT(*) FROM Media WHERE {whereClause}";
-        return Convert.ToInt32(cmd.ExecuteScalar());
-    }
-
-    private static string BuildRadioWhereClause(SqliteCommand cmd, string? query, string? country, string? genre)
-    {
-        var where = new List<string> { "Kind = 'Radio'" };
-
-        if (!string.IsNullOrWhiteSpace(query))
-        {
-            where.Add("(Title LIKE @Query OR Tags LIKE @Query OR Country LIKE @Query)");
-            cmd.Parameters.AddWithValue("@Query", $"%{query}%");
-        }
-
-        if (!string.IsNullOrWhiteSpace(country) && country != "All")
-        {
-            where.Add("(Country = @Country OR CountryCode = @Country)");
-            cmd.Parameters.AddWithValue("@Country", country);
-        }
-
-        if (!string.IsNullOrWhiteSpace(genre) && genre != "All")
-        {
-            where.Add("Tags LIKE @Genre");
-            cmd.Parameters.AddWithValue("@Genre", $"%{genre}%");
-        }
-
-        return string.Join(" AND ", where);
     }
 
     public static void UpsertRadioStations(IEnumerable<MediaItem> stations)
@@ -439,6 +401,52 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Marks a media item as ignored: it disappears from normal views, is removed from every
+    /// playlist it was in, and will NOT be re-added by the scanner (UPSERT preserves IsIgnored).
+    /// The file itself is never touched.
+    /// </summary>
+    public static void IgnoreMedia(string id)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var tx = connection.BeginTransaction();
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE Media SET IsIgnored = 1 WHERE Id = @Id";
+            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "DELETE FROM PlaylistTracks WHERE MediaId = @Id";
+            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>
+    /// Clears the ignored flag. The item will reappear in its normal views. Playlist memberships
+    /// are NOT automatically restored (they were destroyed when the item was ignored).
+    /// </summary>
+    public static void RestoreMedia(string id)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Media SET IsIgnored = 0 WHERE Id = @Id";
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.ExecuteNonQuery();
+    }
+
     public static void SetLastPlayed(string id, DateTime lastPlayed)
     {
         using var connection = new SqliteConnection(ConnectionString);
@@ -460,52 +468,6 @@ public static class MediaCache
         cmd.CommandText = "DELETE FROM Media WHERE Kind = 'Radio' AND Source = @Source AND IsFavorite = 0";
         cmd.Parameters.AddWithValue("@Source", source);
         cmd.ExecuteNonQuery();
-    }
-
-    public static List<string> GetDistinctCountries()
-    {
-        var result = new List<string>();
-
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT DISTINCT Country FROM Media WHERE Kind = 'Radio' AND Country IS NOT NULL AND Country != '' ORDER BY Country";
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            result.Add(reader.GetString(0));
-        }
-
-        return result;
-    }
-
-    public static List<string> GetDistinctGenres()
-    {
-        var result = new List<string>();
-
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT DISTINCT Tags FROM Media WHERE Kind = 'Radio' AND Tags IS NOT NULL AND Tags != '' ORDER BY Tags";
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            var tags = reader.GetString(0);
-            foreach (var tag in tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                if (!result.Contains(tag, StringComparer.OrdinalIgnoreCase))
-                {
-                    result.Add(tag);
-                }
-            }
-        }
-
-        result.Sort(StringComparer.OrdinalIgnoreCase);
-        return result;
     }
 
     // -- Sync history --
@@ -569,7 +531,7 @@ public static class MediaCache
                  Issues,
                  StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                  Country, CountryCode, Tags, Codec, Bitrate,
-                 Votes, ClickCount, ListenerCount, IsHls,
+                 Votes, ClickCount, IsHls,
                  Rating, PlayCount,
                  VolumeAdjustment, EqPreset, StartTime, StopTime, UseStartTime, UseStopTime)
             VALUES
@@ -582,7 +544,7 @@ public static class MediaCache
                  @Issues,
                  @StreamUrl, @Source, @SourceId, @HomepageUrl, @FaviconUrl,
                  @Country, @CountryCode, @Tags, @Codec, @Bitrate,
-                 @Votes, @ClickCount, @ListenerCount, @IsHls,
+                 @Votes, @ClickCount, @IsHls,
                  @Rating, @PlayCount,
                  @VolumeAdjustment, @EqPreset, @StartTime, @StopTime, @UseStartTime, @UseStopTime)
             ON CONFLICT(Id) DO UPDATE SET
@@ -625,7 +587,6 @@ public static class MediaCache
                 Bitrate = excluded.Bitrate,
                 Votes = excluded.Votes,
                 ClickCount = excluded.ClickCount,
-                ListenerCount = excluded.ListenerCount,
                 IsHls = excluded.IsHls,
                 Rating = excluded.Rating,
                 PlayCount = excluded.PlayCount,
@@ -684,7 +645,6 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@Bitrate", item.Bitrate.HasValue ? (object)item.Bitrate.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@Votes", item.Votes.HasValue ? (object)item.Votes.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@ClickCount", item.ClickCount.HasValue ? (object)item.ClickCount.Value : DBNull.Value);
-        cmd.Parameters.AddWithValue("@ListenerCount", item.ListenerCount.HasValue ? (object)item.ListenerCount.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@IsHls", item.IsHls ? 1 : 0);
         cmd.Parameters.AddWithValue("@Rating", item.Rating.HasValue ? (object)item.Rating.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@PlayCount", item.PlayCount);
@@ -717,7 +677,6 @@ public static class MediaCache
             Bitrate = GetNullableInt(reader, "Bitrate"),
             Votes = GetNullableInt(reader, "Votes"),
             ClickCount = GetNullableInt(reader, "ClickCount"),
-            ListenerCount = GetNullableInt(reader, "ListenerCount"),
             IsHls = reader.GetInt32(reader.GetOrdinal("IsHls")) != 0,
         };
 
@@ -725,6 +684,7 @@ public static class MediaCache
         item.IsFavorite = reader.GetInt32(reader.GetOrdinal("IsFavorite")) != 0;
         item.Rating = GetNullableInt(reader, "Rating");
         item.PlayCount = reader.GetInt32(reader.GetOrdinal("PlayCount"));
+        item.IsIgnored = (GetNullableInt(reader, "IsIgnored") ?? 0) != 0;
 
         var lastPlayedOrd = reader.GetOrdinal("LastPlayed");
         item.LastPlayed = reader.IsDBNull(lastPlayedOrd) ? null : DateTime.Parse(reader.GetString(lastPlayedOrd), null, System.Globalization.DateTimeStyles.RoundtripKind);
@@ -762,7 +722,6 @@ public static class MediaCache
             Bitrate = GetNullableInt(reader, "Bitrate"),
             Votes = GetNullableInt(reader, "Votes"),
             ClickCount = GetNullableInt(reader, "ClickCount"),
-            ListenerCount = GetNullableInt(reader, "ListenerCount"),
             IsHls = reader.GetInt32(reader.GetOrdinal("IsHls")) != 0,
         };
 
@@ -812,6 +771,7 @@ public static class MediaCache
 
         item.Rating = GetNullableInt(reader, "Rating");
         item.PlayCount = reader.GetInt32(reader.GetOrdinal("PlayCount"));
+        item.IsIgnored = (GetNullableInt(reader, "IsIgnored") ?? 0) != 0;
 
         item.VolumeAdjustment = GetNullableInt(reader, "VolumeAdjustment") ?? 0;
         item.EqPreset = GetNullableString(reader, "EqPreset");
@@ -868,4 +828,162 @@ public static class MediaCache
         var ord = reader.GetOrdinal(column);
         return reader.IsDBNull(ord) ? null : DateTime.Parse(reader.GetString(ord), null, System.Globalization.DateTimeStyles.RoundtripKind);
     }
+
+    #region Playlists
+
+    public static int CreatePlaylist(string name)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        var now = DateTime.UtcNow.ToString("o");
+        cmd.CommandText = "INSERT INTO Playlists (Name, CreatedAt, UpdatedAt) VALUES (@name, @now, @now); SELECT last_insert_rowid();";
+        cmd.Parameters.AddWithValue("@name", name);
+        cmd.Parameters.AddWithValue("@now", now);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    public static void RenamePlaylist(int id, string newName)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Playlists SET Name = @name, UpdatedAt = @now WHERE Id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@name", newName);
+        cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+    }
+
+    public static void DeletePlaylist(int id)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        // Enable foreign keys for CASCADE
+        using (var pragma = connection.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA foreign_keys = ON;";
+            pragma.ExecuteNonQuery();
+        }
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM Playlists WHERE Id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    public static List<Playlist> LoadAllPlaylists()
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT Id, Name, CreatedAt, UpdatedAt FROM Playlists ORDER BY Name";
+
+        var playlists = new List<Playlist>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            playlists.Add(new Playlist
+            {
+                Id = reader.GetInt32(0),
+                Name = reader.GetString(1),
+                CreatedAt = DateTime.Parse(reader.GetString(2), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                UpdatedAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
+            });
+        }
+
+        return playlists;
+    }
+
+    public static void AddTrackToPlaylist(int playlistId, string mediaId)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        // Get next sort order
+        using var countCmd = connection.CreateCommand();
+        countCmd.CommandText = "SELECT COALESCE(MAX(SortOrder), -1) + 1 FROM PlaylistTracks WHERE PlaylistId = @pid";
+        countCmd.Parameters.AddWithValue("@pid", playlistId);
+        var nextSort = Convert.ToInt32(countCmd.ExecuteScalar());
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "INSERT OR IGNORE INTO PlaylistTracks (PlaylistId, MediaId, SortOrder, AddedAt) VALUES (@pid, @mid, @sort, @now)";
+        cmd.Parameters.AddWithValue("@pid", playlistId);
+        cmd.Parameters.AddWithValue("@mid", mediaId);
+        cmd.Parameters.AddWithValue("@sort", nextSort);
+        cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+
+        // Update playlist timestamp
+        using var upd = connection.CreateCommand();
+        upd.CommandText = "UPDATE Playlists SET UpdatedAt = @now WHERE Id = @pid";
+        upd.Parameters.AddWithValue("@pid", playlistId);
+        upd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        upd.ExecuteNonQuery();
+    }
+
+    public static void RemoveTrackFromPlaylist(int playlistId, string mediaId)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM PlaylistTracks WHERE PlaylistId = @pid AND MediaId = @mid";
+        cmd.Parameters.AddWithValue("@pid", playlistId);
+        cmd.Parameters.AddWithValue("@mid", mediaId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public static List<string> GetPlaylistTrackIds(int playlistId)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT MediaId FROM PlaylistTracks WHERE PlaylistId = @pid ORDER BY SortOrder";
+        cmd.Parameters.AddWithValue("@pid", playlistId);
+
+        var ids = new List<string>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids;
+    }
+
+    public static void ReorderPlaylistTracks(int playlistId, List<string> orderedMediaIds)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var tx = connection.BeginTransaction();
+
+        for (int i = 0; i < orderedMediaIds.Count; i++)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE PlaylistTracks SET SortOrder = @sort WHERE PlaylistId = @pid AND MediaId = @mid";
+            cmd.Parameters.AddWithValue("@sort", i);
+            cmd.Parameters.AddWithValue("@pid", playlistId);
+            cmd.Parameters.AddWithValue("@mid", orderedMediaIds[i]);
+            cmd.ExecuteNonQuery();
+        }
+
+        using var upd = connection.CreateCommand();
+        upd.Transaction = tx;
+        upd.CommandText = "UPDATE Playlists SET UpdatedAt = @now WHERE Id = @pid";
+        upd.Parameters.AddWithValue("@pid", playlistId);
+        upd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        upd.ExecuteNonQuery();
+
+        tx.Commit();
+    }
+
+    #endregion
 }

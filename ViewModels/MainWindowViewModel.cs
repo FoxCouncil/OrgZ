@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -56,18 +57,43 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private SidebarItem? _selectedSidebarItem;
 
-    internal ObservableCollection<SidebarItem> LibraryItems { get; } =
-    [
-        new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" },
-        new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" },
-        new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = false },
-        new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false },
-    ];
+    internal ObservableCollection<SidebarItem> LibraryItems { get; } = [];
+
+    internal ObservableCollection<SidebarItem> DeviceItems { get; } = [];
+
+    /// <summary>
+    /// Rebuilds the LibraryItems list. Called on startup and when settings like "Show Ignored in sidebar" change.
+    /// </summary>
+    internal void RebuildLibraryItems()
+    {
+        var selectedKey = SelectedSidebarItem?.ViewConfigKey;
+        LibraryItems.Clear();
+
+        LibraryItems.Add(new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" });
+        LibraryItems.Add(new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" });
+        LibraryItems.Add(new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = false });
+        LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false });
+
+        if (Settings.Get("OrgZ.ShowIgnored", true))
+        {
+            LibraryItems.Add(new() { Name = "Ignored", Icon = "fa-solid fa-eye-slash", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "Ignored" });
+        }
+
+        // Preserve selection if the current view still exists after the rebuild
+        if (selectedKey != null)
+        {
+            var restore = LibraryItems.FirstOrDefault(i => i.ViewConfigKey == selectedKey);
+            if (restore != null)
+            {
+                SelectedSidebarItem = restore;
+            }
+        }
+    }
 
     internal ObservableCollection<SidebarItem> PlaylistItems { get; } =
     [
         new() { Name = "Favorites", Icon = "fa-solid fa-star", Category = "PLAYLISTS", IsEnabled = true, IsFavorites = true, ViewConfigKey = "Favorites" },
-        new() { Name = "New Playlist...", Icon = "fa-solid fa-plus", Category = "PLAYLISTS", IsEnabled = false },
+        new() { Name = "New Playlist...", Icon = "fa-solid fa-plus", Category = "PLAYLISTS", IsEnabled = true, IsNewPlaylistAction = true },
     ];
 
     // -- Playback State --
@@ -116,6 +142,43 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isSeekEnabled = true;
 
+    // -- Shuffle / Repeat --
+
+    [ObservableProperty]
+    private ShuffleMode _shuffleMode = Settings.Get("OrgZ.ShuffleMode", ShuffleMode.Off);
+
+    [ObservableProperty]
+    private RepeatMode _repeatMode = Settings.Get("OrgZ.RepeatMode", RepeatMode.Off);
+
+    [ObservableProperty]
+    private string _shuffleIcon = "fa-solid fa-shuffle";
+
+    [ObservableProperty]
+    private double _shuffleOpacity = 0.4;
+
+    [ObservableProperty]
+    private string _repeatIcon = "fa-solid fa-repeat";
+
+    [ObservableProperty]
+    private double _repeatOpacity = 0.4;
+
+    // -- Drill-Down --
+
+    [ObservableProperty]
+    private DrillDownState? _drillDownState;
+
+    [ObservableProperty]
+    private List<DrillDownEntry> _drillDownEntries = [];
+
+    public bool IsDrillDownActive => DrillDownState != null;
+
+    // -- Queue --
+
+    [ObservableProperty]
+    private bool _isQueueVisible;
+
+    public ObservableCollection<MediaItem>? PlaybackContextUpcoming => _playbackContext?.UpcomingItems;
+
     // -- Unified Data --
 
     [ObservableProperty]
@@ -126,6 +189,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private List<MediaItem> _filteredItems = [];
+
+    /// <summary>
+    /// DataGrid-bound view wrapping <see cref="FilteredItems"/>. When the active view config
+    /// sets <c>GroupByPath</c>, this view's <c>GroupDescriptions</c> enables Avalonia's built-in
+    /// collapsible group headers. Always non-null after the first ApplyFilter call.
+    /// </summary>
+    [ObservableProperty]
+    private DataGridCollectionView? _filteredItemsView;
 
     // -- Radio Filters --
 
@@ -158,8 +229,33 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal Action? ScrollToSelectedRequested;
     internal Func<double>? GetScrollOffset;
     internal Action<double>? SetScrollOffset;
+    internal Action? PlaylistsChanged;
 
     // -- Change Handlers --
+
+    partial void OnShuffleModeChanged(ShuffleMode value)
+    {
+        ShuffleOpacity = value == ShuffleMode.On ? 1.0 : 0.4;
+        _playbackContext?.SetShuffle(value == ShuffleMode.On);
+        Settings.Set("OrgZ.ShuffleMode", value);
+        Settings.Save();
+        UpdateNavigationButtons();
+    }
+
+    partial void OnRepeatModeChanged(RepeatMode value)
+    {
+        RepeatIcon = value == RepeatMode.One ? "fa-solid fa-arrow-rotate-left" : "fa-solid fa-repeat";
+        RepeatOpacity = value == RepeatMode.Off ? 0.4 : 1.0;
+
+        if (_playbackContext != null)
+        {
+            _playbackContext.RepeatMode = value;
+        }
+
+        Settings.Set("OrgZ.RepeatMode", value);
+        Settings.Save();
+        UpdateNavigationButtons();
+    }
 
     partial void OnSearchTextChanged(string value)
     {
@@ -172,6 +268,91 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private void ClearSearch()
     {
         SearchText = string.Empty;
+    }
+
+    [RelayCommand]
+    private void ToggleShuffle()
+    {
+        ShuffleMode = ShuffleMode == ShuffleMode.Off ? ShuffleMode.On : ShuffleMode.Off;
+    }
+
+    [RelayCommand]
+    private void CycleRepeatMode()
+    {
+        RepeatMode = RepeatMode switch
+        {
+            RepeatMode.Off => RepeatMode.All,
+            RepeatMode.All => RepeatMode.One,
+            RepeatMode.One => RepeatMode.Off,
+            _ => RepeatMode.Off
+        };
+    }
+
+    [RelayCommand]
+    private void ToggleQueue()
+    {
+        IsQueueVisible = !IsQueueVisible;
+    }
+
+    [RelayCommand]
+    internal void PlayNext(MediaItem? item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        if (_playbackContext == null)
+        {
+            PlayItem(item);
+            return;
+        }
+
+        _playbackContext.InsertNext(item);
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
+    }
+
+    [RelayCommand]
+    internal void AddToQueue(MediaItem? item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        if (_playbackContext == null)
+        {
+            PlayItem(item);
+            return;
+        }
+
+        _playbackContext.Append(item);
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
+    }
+
+    [RelayCommand]
+    internal void RemoveFromQueue(int index)
+    {
+        _playbackContext?.RemoveFromUpcoming(index);
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
+    }
+
+    internal void MoveInQueue(int fromIndex, int toIndex)
+    {
+        if (_playbackContext == null || fromIndex == toIndex)
+        {
+            return;
+        }
+
+        _playbackContext.MoveInUpcoming(fromIndex, toIndex);
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
+    }
+
+    [RelayCommand]
+    internal void ClearQueue()
+    {
+        _playbackContext?.ClearUpcoming();
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
     }
 
     [RelayCommand]
@@ -264,6 +445,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         IEnumerable<MediaItem> items = _allItems.Where(_activeViewConfig.BaseFilter);
 
+        // Global ignore filter — hide ignored items from every view except the Ignored view itself
+        if (!_activeViewConfig.IncludeIgnored)
+        {
+            items = items.Where(i => !i.IsIgnored);
+        }
+
         // Radio-specific filters
         if (_activeViewConfig.ShowRadioFilterPanel)
         {
@@ -276,8 +463,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (SelectedGenre != "All")
             {
-                items = items.Where(s =>
-                    s.Tags != null && s.Tags.Contains(SelectedGenre, StringComparison.OrdinalIgnoreCase));
+                items = items.Where(s => s.NormalizedGenre == SelectedGenre);
             }
         }
 
@@ -289,7 +475,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             items = items.Where(item => _activeViewConfig.SearchFilter(item, search));
         }
 
+        // Optional view-defined sort (e.g., playlist track order)
+        if (_activeViewConfig.Sorter != null)
+        {
+            items = _activeViewConfig.Sorter(items);
+        }
+
         FilteredItems = items.ToList();
+
+        // Build the DataGridCollectionView wrapper. If the view config asks for grouping,
+        // wire it up so Avalonia's DataGrid renders collapsible group headers.
+        var view = new DataGridCollectionView(FilteredItems);
+        if (_activeViewConfig.GroupByPath != null)
+        {
+            view.GroupDescriptions.Add(new DataGridPathGroupDescription(_activeViewConfig.GroupByPath));
+        }
+        FilteredItemsView = view;
 
         // Update radio station count in status bar
         if (_activeViewConfig.ShowRadioFilterPanel)
@@ -312,6 +513,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _player.Volume = (int)CurrentVolume;
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+        // Initialize shuffle/repeat visual state from saved settings
+        ShuffleOpacity = ShuffleMode == ShuffleMode.On ? 1.0 : 0.4;
+        RepeatIcon = RepeatMode == RepeatMode.One ? "fa-solid fa-arrow-rotate-left" : "fa-solid fa-repeat";
+        RepeatOpacity = RepeatMode == RepeatMode.Off ? 0.4 : 1.0;
+
+        RebuildLibraryItems();
 
         var savedView = Settings.Get("OrgZ.ActiveView", "Music");
         SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
@@ -722,6 +930,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Sidebar composition depends on OrgZ.ShowIgnored — refresh in case it was toggled
+        RebuildLibraryItems();
+
         if (dialog.SettingsReset)
         {
             Stop();
@@ -758,7 +969,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (dialog.RadioCacheCleared)
         {
             Services.MediaCache.RemoveRadioBySource("radiobrowser");
-            Services.MediaCache.RemoveRadioBySource("shoutcast");
 
             _allItems.RemoveAll(i => i.Kind == MediaKind.Radio && !i.IsFavorite);
 
@@ -809,8 +1019,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ExecutePlayItem(MediaItem item)
     {
-        if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
-
         switch (item.Kind)
         {
             case MediaKind.Music:
@@ -891,8 +1099,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
-            if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
-            _playbackContext = new PlaybackContext(FilteredItems, file);
+            // If the item is already in the current context, just jump to it
+            if (_playbackContext != null && _playbackContext.JumpTo(file))
+            {
+                OnPropertyChanged(nameof(PlaybackContextUpcoming));
+                ExecutePlayMusic(file);
+                return;
+            }
+
+            _playbackContext?.Release();
+            _playbackContext = new PlaybackContext(FilteredItems, file, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+            OnPropertyChanged(nameof(PlaybackContextUpcoming));
             ExecutePlayMusic(file);
         });
     }
@@ -906,15 +1123,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
-            if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
-            _playbackContext = new PlaybackContext(FilteredItems, station);
+            if (_playbackContext != null && _playbackContext.JumpTo(station))
+            {
+                OnPropertyChanged(nameof(PlaybackContextUpcoming));
+                ExecutePlayRadio(station);
+                return;
+            }
+
+            _playbackContext?.Release();
+            _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+            OnPropertyChanged(nameof(PlaybackContextUpcoming));
             ExecutePlayRadio(station);
         });
     }
 
     private void ExecutePlayMusic(MediaItem file)
     {
-        file.IsPlaying = true;
         SelectedItem = file;
 
         CurrentAlbumArt?.Dispose();
@@ -942,7 +1166,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ExecutePlayRadio(MediaItem station)
     {
-        station.IsPlaying = true;
         SelectedItem = station;
 
         CurrentAlbumArt?.Dispose();
@@ -1010,8 +1233,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ClearPlayback()
     {
-        if (CurrentPlayingItem != null) { CurrentPlayingItem.IsPlaying = false; }
+        _playbackContext?.Release();
         _playbackContext = null;
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
 
         _currentMedia?.Dispose();
         _currentMedia = null;
@@ -1098,43 +1322,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             UpdateMainStatus("Fetching popular stations...");
-            var errors = new List<string>();
 
             try
             {
-                var rbStations = await RadioBrowserService.GetTopStationsAsync(250);
-                if (rbStations.Count > 0)
+                var stations = await RadioBrowserService.GetTopStationsAsync(250);
+                if (stations.Count > 0)
                 {
-                    await Task.Run(() => MediaCache.UpsertRadioStations(rbStations));
-                    _allItems.AddRange(rbStations);
+                    await Task.Run(() => MediaCache.UpsertRadioStations(stations));
+                    _allItems.AddRange(stations);
                 }
             }
             catch (Exception ex)
             {
-                errors.Add($"RadioBrowser: {ex.Message}");
-            }
-
-            try
-            {
-                var scStations = await ShoutcastService.GetTop500Async();
-                if (scStations.Count > 0)
-                {
-                    await Task.Run(() => MediaCache.UpsertRadioStations(scStations));
-                    _allItems.AddRange(scStations);
-                }
-            }
-            catch (Exception ex)
-            {
-                errors.Add($"Shoutcast: {ex.Message}");
+                Messages.Add($"Fetch failed: {ex.Message}");
             }
 
             RebuildRadioFilterOptions();
             ApplyFilter();
-
-            foreach (var error in errors)
-            {
-                Messages.Add(error);
-            }
 
             StatusBar.ErrorCount = Messages.Count;
             StatusBar.SyncStatus = "Sync for full library (~95k)";
@@ -1163,32 +1367,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         try
         {
-            dialog.UpdateSource("Syncing RadioBrowser...");
+            dialog.UpdateSource("Syncing radio stations...");
             dialog.SetIndeterminate(true);
-            int rbCount = 0;
 
             await foreach (var batch in RadioBrowserService.GetAllStationsAsync(ct))
             {
                 await Task.Run(() => MediaCache.UpsertRadioStations(batch), ct);
-                rbCount += batch.Count;
-                dialog.UpdateProgress(rbCount, $"RadioBrowser: {rbCount:N0}");
+                totalSynced += batch.Count;
+                dialog.UpdateProgress(totalSynced, $"{totalSynced:N0} stations");
             }
 
-            totalSynced += rbCount;
-            MediaCache.RecordSync("radiobrowser", rbCount, dialog.ElapsedMs);
-
-            dialog.UpdateSource($"RadioBrowser done ({rbCount:N0}). Syncing Shoutcast...");
-            int scCount = 0;
-
-            await foreach (var batch in ShoutcastService.GetAllStationsAsync(ct))
-            {
-                await Task.Run(() => MediaCache.UpsertRadioStations(batch), ct);
-                scCount += batch.Count;
-                totalSynced = rbCount + scCount;
-                dialog.UpdateProgress(totalSynced, $"Shoutcast: {scCount:N0}");
-            }
-
-            MediaCache.RecordSync("shoutcast", scCount, dialog.ElapsedMs);
+            MediaCache.RecordSync("radiobrowser", totalSynced, dialog.ElapsedMs);
 
             // Reload radio items from DB
             var freshRadio = await Task.Run(() => MediaCache.LoadAllRadio());
@@ -1308,17 +1497,436 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         Genres.Clear();
         Genres.Add("All");
-        foreach (var genre in radioItems
-            .Where(s => !string.IsNullOrWhiteSpace(s.Tags))
-            .SelectMany(s => s.Tags!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order())
+        // Only show canonical genres that actually appear in the current dataset.
+        var activeGenres = radioItems
+            .Select(s => s.NormalizedGenre)
+            .Distinct()
+            .ToHashSet();
+        foreach (var canonical in GenreNormalizer.AllCanonical)
         {
-            Genres.Add(genre);
+            if (activeGenres.Contains(canonical))
+            {
+                Genres.Add(canonical);
+            }
         }
 
         SelectedCountry = Countries.Contains(prevCountry) ? prevCountry : "All";
         SelectedGenre = Genres.Contains(prevGenre) ? prevGenre : "All";
+    }
+
+    #endregion
+
+    #region Drill-Down Navigation
+
+    [RelayCommand]
+    internal void ToggleDrillDown()
+    {
+        if (DrillDownState != null)
+        {
+            ExitDrillDown();
+        }
+        else if (_activeViewConfig?.SupportsDrillDown == true)
+        {
+            DrillDownState = new DrillDownState { Level = DrillDownLevel.Artists };
+            BuildDrillDownEntries();
+            OnPropertyChanged(nameof(IsDrillDownActive));
+        }
+    }
+
+    internal void DrillInto(DrillDownEntry entry)
+    {
+        if (DrillDownState == null)
+        {
+            return;
+        }
+
+        switch (DrillDownState.Level)
+        {
+            case DrillDownLevel.Artists:
+            {
+                DrillDownState.SelectedArtist = entry.GroupKey;
+                DrillDownState.Level = DrillDownLevel.Albums;
+                BuildDrillDownEntries();
+                break;
+            }
+
+            case DrillDownLevel.Albums:
+            {
+                DrillDownState.SelectedAlbum = entry.GroupKey;
+                DrillDownState.Level = DrillDownLevel.Songs;
+                // At songs level, filter the normal list and exit drill-down grid mode
+                ApplyDrillDownSongsFilter();
+                break;
+            }
+        }
+    }
+
+    internal void DrillUpToRoot()
+    {
+        ExitDrillDown();
+    }
+
+    internal void DrillUpToArtist()
+    {
+        if (DrillDownState == null)
+        {
+            return;
+        }
+
+        DrillDownState.SelectedAlbum = null;
+        DrillDownState.Level = DrillDownLevel.Albums;
+        BuildDrillDownEntries();
+    }
+
+    private void ExitDrillDown()
+    {
+        DrillDownState = null;
+        DrillDownEntries = [];
+        OnPropertyChanged(nameof(IsDrillDownActive));
+        ApplyFilter();
+    }
+
+    private void BuildDrillDownEntries()
+    {
+        var musicItems = _allItems.Where(i => i.Kind == MediaKind.Music);
+
+        if (DrillDownState!.Level == DrillDownLevel.Artists)
+        {
+            DrillDownEntries = musicItems
+                .Where(i => !string.IsNullOrEmpty(i.Artist))
+                .GroupBy(i => i.Artist!)
+                .Select(g => new DrillDownEntry
+                {
+                    GroupKey = g.Key,
+                    ItemCount = g.Count(),
+                    TotalDuration = TimeSpan.FromTicks(g.Sum(x => x.Duration?.Ticks ?? 0)),
+                    SecondaryInfo = $"{g.Select(x => x.Album).Where(a => !string.IsNullOrEmpty(a)).Distinct().Count()} albums, {g.Count()} songs",
+                })
+                .OrderBy(e => e.GroupKey)
+                .ToList();
+        }
+        else if (DrillDownState.Level == DrillDownLevel.Albums)
+        {
+            DrillDownEntries = musicItems
+                .Where(i => string.Equals(i.Artist, DrillDownState.SelectedArtist, StringComparison.OrdinalIgnoreCase))
+                .Where(i => !string.IsNullOrEmpty(i.Album))
+                .GroupBy(i => i.Album!)
+                .Select(g => new DrillDownEntry
+                {
+                    GroupKey = g.Key,
+                    ItemCount = g.Count(),
+                    TotalDuration = TimeSpan.FromTicks(g.Sum(x => x.Duration?.Ticks ?? 0)),
+                    SecondaryInfo = $"{g.FirstOrDefault()?.Year?.ToString() ?? "?"} \u2014 {g.Count()} songs",
+                })
+                .OrderBy(e => e.GroupKey)
+                .ToList();
+        }
+    }
+
+    private void ApplyDrillDownSongsFilter()
+    {
+        if (DrillDownState == null)
+        {
+            return;
+        }
+
+        var artist = DrillDownState.SelectedArtist;
+        var album = DrillDownState.SelectedAlbum;
+
+        FilteredItems = _allItems
+            .Where(i => i.Kind == MediaKind.Music)
+            .Where(i => string.Equals(i.Artist, artist, StringComparison.OrdinalIgnoreCase))
+            .Where(i => string.Equals(i.Album, album, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // Search within this scope
+        var searchText = SearchText?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(searchText) && _activeViewConfig != null)
+        {
+            FilteredItems = FilteredItems.Where(i => _activeViewConfig.SearchFilter(i, searchText)).ToList();
+        }
+    }
+
+    #endregion
+
+    #region Playlist Management
+
+    private void LoadPlaylistSidebarItems()
+    {
+        // Remove existing playlist sidebar items (keep Favorites and New Playlist action)
+        var toRemove = PlaylistItems.Where(i => i.PlaylistId != null).ToList();
+        foreach (var item in toRemove)
+        {
+            PlaylistItems.Remove(item);
+        }
+
+        var playlists = MediaCache.LoadAllPlaylists();
+
+        foreach (var playlist in playlists)
+        {
+            var key = $"Playlist:{playlist.Id}";
+            var trackIds = MediaCache.GetPlaylistTrackIds(playlist.Id);
+            ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlist.Id, trackIds));
+
+            // Insert before the "New Playlist..." item
+            var insertIndex = PlaylistItems.Count - 1;
+            if (insertIndex < 0)
+            {
+                insertIndex = 0;
+            }
+
+            PlaylistItems.Insert(insertIndex, new SidebarItem
+            {
+                Name = playlist.Name,
+                Icon = "fa-solid fa-list-ul",
+                Category = "PLAYLISTS",
+                IsEnabled = true,
+                ViewConfigKey = key,
+                PlaylistId = playlist.Id,
+            });
+        }
+    }
+
+    [RelayCommand]
+    internal async Task CreatePlaylist()
+    {
+        var dialog = new Views.PlaylistNameDialog();
+        var result = await dialog.ShowDialog<string?>(_window);
+
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return;
+        }
+
+        var id = MediaCache.CreatePlaylist(result.Trim());
+        LoadPlaylistSidebarItems();
+        PlaylistsChanged?.Invoke();
+
+        // Navigate to the new playlist
+        var newItem = PlaylistItems.FirstOrDefault(i => i.PlaylistId == id);
+        if (newItem != null)
+        {
+            SelectedSidebarItem = newItem;
+        }
+    }
+
+    [RelayCommand]
+    internal async Task RenamePlaylist(SidebarItem? item)
+    {
+        if (item?.PlaylistId == null)
+        {
+            return;
+        }
+
+        var dialog = new Views.PlaylistNameDialog(item.Name);
+        var result = await dialog.ShowDialog<string?>(_window);
+
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return;
+        }
+
+        MediaCache.RenamePlaylist(item.PlaylistId.Value, result.Trim());
+        LoadPlaylistSidebarItems();
+        PlaylistsChanged?.Invoke();
+    }
+
+    [RelayCommand]
+    internal void DeletePlaylist(SidebarItem? item)
+    {
+        if (item?.PlaylistId == null)
+        {
+            return;
+        }
+
+        var key = item.ViewConfigKey;
+        MediaCache.DeletePlaylist(item.PlaylistId.Value);
+        ListViewConfigs.Remove(key);
+
+        // Navigate away if we're viewing the deleted playlist
+        if (SelectedSidebarItem == item)
+        {
+            SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.IsFavorites) ?? LibraryItems[0];
+        }
+
+        PlaylistItems.Remove(item);
+        PlaylistsChanged?.Invoke();
+    }
+
+    [RelayCommand]
+    internal void AddToPlaylist(int playlistId)
+    {
+        if (SelectedItem == null)
+        {
+            return;
+        }
+
+        AddTrackToPlaylist(playlistId, SelectedItem);
+    }
+
+    internal void AddTrackToPlaylist(int playlistId, MediaItem item)
+    {
+        MediaCache.AddTrackToPlaylist(playlistId, item.Id);
+
+        // Refresh the playlist's config with updated track IDs
+        var key = $"Playlist:{playlistId}";
+        var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
+        ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, trackIds));
+
+        // Refresh view if currently viewing this playlist
+        if (SelectedSidebarItem?.ViewConfigKey == key)
+        {
+            _activeViewConfig = ListViewConfigs.Get(key);
+            ApplyFilter();
+        }
+    }
+
+    internal void SetRating(MediaItem item, int? rating)
+    {
+        if (item.Kind != MediaKind.Music)
+        {
+            return;
+        }
+
+        item.Rating = rating;
+        MediaCache.SetRating(item.Id, rating);
+    }
+
+    /// <summary>
+    /// Prompts the user to confirm, then marks the item as ignored.
+    /// The file is never touched. The item is also removed from any playlists it belongs to.
+    /// Shows a restore-capable "Ignored" view in the sidebar (if enabled in Settings).
+    /// </summary>
+    internal async Task RemoveFromLibraryAsync(MediaItem item)
+    {
+        if (item.Kind != MediaKind.Music)
+        {
+            return;
+        }
+
+        var title = !string.IsNullOrWhiteSpace(item.Title) ? item.Title : item.FileName ?? "this track";
+        var dialog = new Views.ConfirmDialog(
+            "Remove from Library",
+            $"Remove \"{title}\" from your library?\n\nThe file will not be deleted. You can restore it later from the Ignored view.",
+            "Remove");
+
+        var ok = await dialog.ShowDialog<bool>(_window);
+        if (!ok)
+        {
+            return;
+        }
+
+        MediaCache.IgnoreMedia(item.Id);
+        item.IsIgnored = true;
+
+        // If the item was in any playlists, those playlist configs now have stale trackIds.
+        // Rebuild them so playlist views stay accurate.
+        RefreshAllPlaylistConfigs();
+
+        ApplyFilter();
+    }
+
+    /// <summary>
+    /// Clears the ignored flag on the item. It re-appears in its natural view (Music, Favorites, etc.).
+    /// Playlist memberships are NOT restored — they were deleted at ignore time.
+    /// </summary>
+    internal void RestoreFromIgnored(MediaItem item)
+    {
+        MediaCache.RestoreMedia(item.Id);
+        item.IsIgnored = false;
+        ApplyFilter();
+    }
+
+    /// <summary>
+    /// Re-reads every playlist's track set from the DB and rebuilds its ListViewConfig entry.
+    /// Call this after operations that mutate playlist membership outside of direct playlist APIs.
+    /// </summary>
+    private void RefreshAllPlaylistConfigs()
+    {
+        var playlists = MediaCache.LoadAllPlaylists();
+        foreach (var p in playlists)
+        {
+            var key = $"Playlist:{p.Id}";
+            var trackIds = MediaCache.GetPlaylistTrackIds(p.Id);
+            ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(p.Id, trackIds));
+        }
+
+        // If currently viewing a playlist, swap in the refreshed config so ApplyFilter uses it
+        if (_activeViewConfig?.PlaylistId != null)
+        {
+            _activeViewConfig = ListViewConfigs.Get(_activeViewConfig.Key);
+        }
+    }
+
+    [RelayCommand]
+    internal void RemoveFromPlaylist()
+    {
+        if (SelectedItem == null || SelectedSidebarItem?.PlaylistId == null)
+        {
+            return;
+        }
+
+        var playlistId = SelectedSidebarItem.PlaylistId.Value;
+        var scroll = GetScrollOffset?.Invoke() ?? 0;
+
+        MediaCache.RemoveTrackFromPlaylist(playlistId, SelectedItem.Id);
+
+        var key = $"Playlist:{playlistId}";
+        var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
+        ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, trackIds));
+        _activeViewConfig = ListViewConfigs.Get(key);
+        ApplyFilter();
+        SetScrollOffset?.Invoke(scroll);
+    }
+
+    /// <summary>
+    /// Returns the active playlist ID if the current view is a playlist; null otherwise.
+    /// Used by the view to enable drag-to-reorder.
+    /// </summary>
+    internal int? ActivePlaylistId => _activeViewConfig?.PlaylistId;
+
+    /// <summary>
+    /// Reorders a track within the currently-active playlist.
+    /// fromIndex/toIndex are positions within the current FilteredItems list.
+    /// </summary>
+    internal void ReorderPlaylistTrack(int fromIndex, int toIndex)
+    {
+        if (_activeViewConfig?.PlaylistId == null)
+        {
+            return;
+        }
+
+        if (fromIndex < 0 || fromIndex >= FilteredItems.Count || toIndex < 0 || toIndex >= FilteredItems.Count || fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var playlistId = _activeViewConfig.PlaylistId.Value;
+        var scroll = GetScrollOffset?.Invoke() ?? 0;
+
+        // Move within current order then push the whole list back to DB.
+        // Use the full DB order (not just filtered) so search-filtered reorders don't lose hidden tracks.
+        var fullOrder = MediaCache.GetPlaylistTrackIds(playlistId);
+        var movedItem = FilteredItems[fromIndex];
+        var targetItem = FilteredItems[toIndex];
+
+        var fromDbIdx = fullOrder.IndexOf(movedItem.Id);
+        var toDbIdx = fullOrder.IndexOf(targetItem.Id);
+        if (fromDbIdx < 0 || toDbIdx < 0)
+        {
+            return;
+        }
+
+        fullOrder.RemoveAt(fromDbIdx);
+        fullOrder.Insert(toDbIdx, movedItem.Id);
+
+        MediaCache.ReorderPlaylistTracks(playlistId, fullOrder);
+
+        var key = $"Playlist:{playlistId}";
+        ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, fullOrder));
+        _activeViewConfig = ListViewConfigs.Get(key);
+        ApplyFilter();
+        SetScrollOffset?.Invoke(scroll);
     }
 
     #endregion
@@ -1362,6 +1970,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             StatusBar.SyncStatus = "Sync for full library (~95k)";
         }
+
+        // Load playlists
+        LoadPlaylistSidebarItems();
 
         // Apply initial filter for the current tab
         ApplyFilter();
@@ -1569,21 +2180,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         return false;
-    }
-
-    internal List<MediaItem> GetFlacFilesWithoutAlbumArt()
-    {
-        return [.. MusicItems.Where(f => AudioFileAnalyzer.Filters.IsFlacFile(f) && AudioFileAnalyzer.Filters.HasMissingAlbumArt(f))];
-    }
-
-    internal List<MediaItem> GetFilesWithExtensionMismatch()
-    {
-        return [.. MusicItems.Where(AudioFileAnalyzer.Filters.HasExtensionMismatch)];
-    }
-
-    internal List<MediaItem> GetMp3Files()
-    {
-        return [.. MusicItems.Where(AudioFileAnalyzer.Filters.IsMp3File)];
     }
 
     private async Task AnalyzeAllFilesAsync(List<MediaItem> filesToAnalyze)

@@ -66,6 +66,43 @@
                        Height="1"
                        Margin="12,4" />
 
+            <!-- DEVICES header -->
+            <TextBlock DockPanel.Dock="Top"
+                       Text="DEVICES"
+                       FontFamily="{StaticResource OrgZMonoFont}"
+                       FontSize="11"
+                       FontWeight="Bold"
+                       Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
+                       Margin="16,8,0,4" />
+
+            <!-- Device items -->
+            <ListBox DockPanel.Dock="Top"
+                     x:Name="DeviceListBox"
+                     ItemsSource="{Binding DeviceItems}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Padding="0"
+                     Margin="0,0,0,4"
+                     ItemTemplate="{StaticResource SidebarItemTemplate}"
+                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
+                     SelectionChanged="DeviceListBox_SelectionChanged" />
+
+            <!-- "No devices" placeholder, shown only when DeviceItems is empty -->
+            <TextBlock DockPanel.Dock="Top"
+                       Text="No devices connected"
+                       FontFamily="{StaticResource OrgZMonoFont}"
+                       FontSize="12"
+                       FontStyle="Italic"
+                       Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
+                       Margin="34,2,0,4"
+                       IsVisible="{Binding !DeviceItems.Count}" />
+
+            <!-- Separator -->
+            <Separator DockPanel.Dock="Top"
+                       Background="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
+                       Height="1"
+                       Margin="12,4" />
+
             <!-- PLAYLISTS header -->
             <TextBlock DockPanel.Dock="Top"
                        Text="PLAYLISTS"
@@ -84,7 +121,8 @@
                      Padding="0"
                      ItemTemplate="{StaticResource SidebarItemTemplate}"
                      ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
-                     SelectionChanged="PlaylistListBox_SelectionChanged" />
+                     SelectionChanged="PlaylistListBox_SelectionChanged"
+                     DragDrop.AllowDrop="True" />
 
             <!-- Fill remaining space -->
             <Border />

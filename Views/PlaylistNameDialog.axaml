@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		x:Class="OrgZ.Views.PlaylistNameDialog"
+		x:CompileBindings="False"
+		Title="Playlist Name"
+		Width="300" Height="140"
+		CanResize="False"
+		WindowStartupLocation="CenterOwner"
+		Classes="orgzDialog">
+	<StackPanel Margin="16" Spacing="12">
+		<TextBlock Text="Playlist name:" />
+		<TextBox x:Name="NameInput" Watermark="My Playlist" />
+		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+			<Button Content="OK" Width="70" Click="OkButton_Click" />
+			<Button Content="Cancel" Width="70" Click="CancelButton_Click" />
+		</StackPanel>
+	</StackPanel>
+</Window>
