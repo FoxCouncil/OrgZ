@@ -85,7 +85,7 @@ public partial class MediaInfoDialog : Window
         // Title line
         var durationStr = item.Duration.HasValue ? $" ({item.Duration.Value:m\\:ss})" : "";
         SummaryTitle.Text = $"{item.Title ?? item.FileName ?? "Unknown"}{durationStr}";
-        SummaryArtist.Text = isMusic ? (item.Artist ?? "") : item.SourceDisplayName;
+        SummaryArtist.Text = isMusic ? (item.Artist ?? "") : (item.Country ?? "");
         SummaryAlbum.Text = isMusic ? (item.Album ?? "") : (item.Country ?? "");
 
         // Album art
@@ -162,8 +162,8 @@ public partial class MediaInfoDialog : Window
         SummaryR2C2Label.Text = "Votes:";
         SummaryR2C2Value.Text = item.Votes is > 0 ? $"{item.Votes:N0}" : "-";
 
-        SummaryR3C0Label.Text = "Listeners:";
-        SummaryR3C0Value.Text = item.ListenerCount is > 0 ? $"{item.ListenerCount:N0}" : "-";
+        SummaryR3C0Label.Text = "Clicks:";
+        SummaryR3C0Value.Text = item.ClickCount is > 0 ? $"{item.ClickCount:N0}" : "-";
         SummaryKind.Text = "Internet Radio";
 
         SummaryR4C0Label.Text = "";
@@ -197,7 +197,7 @@ public partial class MediaInfoDialog : Window
         RadioInfoName.Text = item.Title ?? "";
         RadioInfoTags.Text = item.Tags ?? "";
         RadioInfoStreamUrl.Text = item.StreamUrl ?? "";
-        RadioInfoSource.Text = item.SourceDisplayName;
+        RadioInfoSource.Text = item.NormalizedGenre;
         RadioInfoCountry.Text = item.Country ?? "";
         RadioInfoHomepage.Text = item.HomepageUrl ?? "";
         RadioInfoCodec.Text = item.CodecLabel;
