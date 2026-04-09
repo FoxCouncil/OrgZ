@@ -221,6 +221,7 @@
 								<DataGrid.Columns />
 							</DataGrid>
 
+							<!-- Regular DataGrid for non-grouped views (Music, Favorites, Playlists, Ignored) -->
 							<DataGrid x:Name="MainDataGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
 								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
@@ -245,7 +246,34 @@
 									</Style>
 								</DataGrid.Styles>
 								<DataGrid.Columns />
+							</DataGrid>
 
+							<!-- Separate DataGrid for grouped views (Radio) — never shares column state with MainDataGrid -->
+							<DataGrid x:Name="GroupedDataGrid"
+								DoubleTapped="DataGrid_DoubleTapped"
+								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+								ItemsSource="{Binding FilteredItemsView}"
+								GridLinesVisibility="All"
+								IsReadOnly="True"
+								AutoGenerateColumns="False"
+								CanUserSortColumns="True"
+								SelectionMode="Single"
+								Background="{DynamicResource SystemAltHighColor}"
+								HorizontalScrollBarVisibility="Auto"
+								VerticalScrollBarVisibility="Auto"
+								IsVisible="False">
+								<DataGrid.Styles>
+									<Style Selector="DataGridRow">
+										<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+									</Style>
+									<Style Selector="DataGridRow:nth-child(odd)">
+										<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+									</Style>
+									<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
+										<Setter Property="IsVisible" Value="False" />
+									</Style>
+								</DataGrid.Styles>
+								<DataGrid.Columns />
 							</DataGrid>
 						</DockPanel>
 					</Border>
