@@ -33,8 +33,8 @@
 
 		<!-- Close button -->
 		<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0" Spacing="8">
-			<Button x:Name="ClearButton" Content="Clear" Width="80" Click="ClearButton_Click" />
-			<Button x:Name="CloseButton" Content="Close" Width="80" Click="CloseButton_Click" />
+			<Button Content="Clear" Width="80" Click="ClearButton_Click" />
+			<Button Content="Close" Width="80" Click="CloseButton_Click" />
 		</StackPanel>
 
 		<!-- Message list -->

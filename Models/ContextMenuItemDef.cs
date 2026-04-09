@@ -10,4 +10,14 @@ public record ContextMenuItemDef
     public bool IsSeparator { get; init; }
     public bool IsEnabled { get; init; } = true;
     public List<ContextMenuItemDef>? Children { get; init; }
+
+    /// <summary>
+    /// Marker: when set, the view will populate this submenu with the user's current playlists at build time.
+    /// </summary>
+    public bool IsAddToPlaylistMarker { get; init; }
+
+    /// <summary>
+    /// Marker: when set, the view will populate this submenu with rating choices (No Rating, 1-5 stars).
+    /// </summary>
+    public bool IsRatingMarker { get; init; }
 }

@@ -31,10 +31,29 @@ public partial class MediaItem : ObservableObject
     private bool _isFavorite;
 
     [ObservableProperty]
+    private bool _isIgnored;
+
+    [ObservableProperty]
     private DateTime? _lastPlayed;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RatingDisplay))]
     private int? _rating;
+
+    public string RatingDisplay
+    {
+        get
+        {
+            var stars = Rating ?? 0;
+            if (stars <= 0)
+            {
+                return "";
+            }
+
+            stars = Math.Clamp(stars, 0, 5);
+            return new string('★', stars) + new string('☆', 5 - stars);
+        }
+    }
 
     [ObservableProperty]
     private int _playCount;
@@ -132,24 +151,6 @@ public partial class MediaItem : ObservableObject
 
     public string? Source { get; init; }
 
-    public static string GetSourceDisplayName(string? source) => source switch
-    {
-        "radiobrowser" => "Radio Browser",
-        "shoutcast" => "SHOUTcast",
-        "user" => "User Added",
-        _ => source ?? ""
-    };
-
-    public string SourceDisplayName => GetSourceDisplayName(Source);
-
-    public string SourceLabel => Source switch
-    {
-        "radiobrowser" => "RB",
-        "shoutcast" => "SC",
-        "user" => "UG",
-        _ => Source ?? ""
-    };
-
     public string? SourceId { get; init; }
 
     public string? HomepageUrl { get; init; }
@@ -161,6 +162,12 @@ public partial class MediaItem : ObservableObject
     public string? CountryCode { get; init; }
 
     public string? Tags { get; init; }
+
+    /// <summary>
+    /// Provider-neutral canonical genre derived from <see cref="Tags"/> via <see cref="GenreNormalizer"/>.
+    /// Used as the DataGrid group key for the Radio view.
+    /// </summary>
+    public string NormalizedGenre => Services.GenreNormalizer.ExtractPrimaryGenre(Tags);
 
     public string? Codec { get; init; }
 
@@ -182,10 +189,6 @@ public partial class MediaItem : ObservableObject
     public int? Votes { get; init; }
 
     public int? ClickCount { get; init; }
-
-    public int? ListenerCount { get; init; }
-
-    public string ListenerCountLabel => ListenerCount is > 0 ? $"{ListenerCount:N0}" : "";
 
     public bool IsHls { get; init; }
 

@@ -2,7 +2,6 @@
 
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.Threading;
 
 namespace OrgZ.Views;
 
@@ -13,10 +12,6 @@ public partial class SyncProgressDialog : Window
     private readonly DispatcherTimer _elapsedTimer;
 
     public CancellationToken CancellationToken => _cts.Token;
-
-    public int TotalStationsSynced { get; private set; }
-
-    public List<string> Errors { get; } = [];
 
     public SyncProgressDialog()
     {
@@ -56,8 +51,6 @@ public partial class SyncProgressDialog : Window
 
     public void UpdateProgress(int stationCount, string detail)
     {
-        TotalStationsSynced = stationCount;
-
         Dispatcher.UIThread.Post(() =>
         {
             CountLabel.Text = $"{stationCount:N0} stations";
@@ -70,16 +63,6 @@ public partial class SyncProgressDialog : Window
         Dispatcher.UIThread.Post(() =>
         {
             ProgressBar.IsIndeterminate = indeterminate;
-        });
-    }
-
-    public void SetProgress(double value, double max)
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            ProgressBar.IsIndeterminate = false;
-            ProgressBar.Maximum = max;
-            ProgressBar.Value = value;
         });
     }
 

@@ -185,37 +185,4 @@ public class AudioFileAnalyzer
         item.Issues.Clear();
         AnalyzeFile(item);
     }
-
-    public static class Filters
-    {
-        public static bool HasMissingAlbumArt(MediaItem file)
-        {
-            return file.IsAnalyzed && file.HasAlbumArt == false;
-        }
-
-        public static bool HasExtensionMismatch(MediaItem file)
-        {
-            return file.IsAnalyzed && file.FileNameMatchesHeaders == false;
-        }
-
-        public static bool IsFlacFile(MediaItem file)
-        {
-            return (file.Extension ?? "").Equals(".flac", StringComparison.OrdinalIgnoreCase);
-        }
-
-        public static bool IsMp3File(MediaItem file)
-        {
-            return (file.Extension ?? "").Equals(".mp3", StringComparison.OrdinalIgnoreCase);
-        }
-
-        public static bool HasAnyIssues(MediaItem file)
-        {
-            return file.IsAnalyzed && file.Issues.Count > 0;
-        }
-
-        public static bool HasMissingTags(MediaItem file)
-        {
-            return file.IsAnalyzed && (string.IsNullOrWhiteSpace(file.Title) || string.IsNullOrWhiteSpace(file.Artist) || string.IsNullOrWhiteSpace(file.Album));
-        }
-    }
 }

@@ -20,8 +20,6 @@ public static class RadioBrowserService
 
     private static string? _serverBase;
 
-    public static string LastServerUsed => _serverBase ?? "(none)";
-
     private static async Task<string> GetServerBaseAsync()
     {
         if (_serverBase != null)
@@ -71,34 +69,6 @@ public static class RadioBrowserService
         return ParseStations(json);
     }
 
-    public static async Task<List<MediaItem>> SearchStationsAsync(string? name = null, string? countryCode = null, string? tag = null, int limit = 100)
-    {
-        var baseUrl = await GetServerBaseAsync();
-
-        var parameters = new List<string> { $"limit={limit}", "hidebroken=true" };
-
-        if (!string.IsNullOrWhiteSpace(name))
-        {
-            parameters.Add($"name={Uri.EscapeDataString(name)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(countryCode))
-        {
-            parameters.Add($"countrycode={Uri.EscapeDataString(countryCode)}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(tag))
-        {
-            parameters.Add($"tag={Uri.EscapeDataString(tag)}");
-        }
-
-        var url = $"{baseUrl}/json/stations/search?{string.Join("&", parameters)}";
-        var response = await _http.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync();
-        return ParseStations(json);
-    }
-
     public static async IAsyncEnumerable<List<MediaItem>> GetAllStationsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var baseUrl = await GetServerBaseAsync();
@@ -128,20 +98,6 @@ public static class RadioBrowserService
             yield return batch;
             offset += pageSize;
         }
-    }
-
-    public static async Task<List<CountryInfo>> GetCountriesAsync()
-    {
-        var baseUrl = await GetServerBaseAsync();
-        var json = await _http.GetStringAsync($"{baseUrl}/json/countries");
-        return JsonSerializer.Deserialize<List<CountryInfo>>(json, JsonOptions) ?? [];
-    }
-
-    public static async Task<List<TagInfo>> GetTagsAsync(int limit = 100)
-    {
-        var baseUrl = await GetServerBaseAsync();
-        var json = await _http.GetStringAsync($"{baseUrl}/json/tags?order=stationcount&reverse=true&limit={limit}");
-        return JsonSerializer.Deserialize<List<TagInfo>>(json, JsonOptions) ?? [];
     }
 
     private static List<MediaItem> ParseStations(string json)
@@ -236,26 +192,5 @@ public static class RadioBrowserService
 
         [JsonPropertyName("hls")]
         public int Hls { get; set; }
-    }
-
-    public class CountryInfo
-    {
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("iso_3166_1")]
-        public string Code { get; set; } = string.Empty;
-
-        [JsonPropertyName("stationcount")]
-        public int StationCount { get; set; }
-    }
-
-    public class TagInfo
-    {
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = string.Empty;
-
-        [JsonPropertyName("stationcount")]
-        public int StationCount { get; set; }
     }
 }

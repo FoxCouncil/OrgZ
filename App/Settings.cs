@@ -93,32 +93,6 @@ internal static class Settings
     }
 
     /// <summary>
-    /// Checks if a setting key exists
-    /// </summary>
-    public static bool Has(string key)
-    {
-        EnsureLoaded();
-
-        lock (_lock)
-        {
-            return _settings!.ContainsKey(key);
-        }
-    }
-
-    /// <summary>
-    /// Removes a setting by key
-    /// </summary>
-    public static bool Remove(string key)
-    {
-        EnsureLoaded();
-
-        lock (_lock)
-        {
-            return _settings!.Remove(key);
-        }
-    }
-
-    /// <summary>
     /// Saves the current settings to the JSON file
     /// </summary>
     public static void Save()
@@ -142,19 +116,6 @@ internal static class Settings
     }
 
     /// <summary>
-    /// Reloads settings from the JSON file
-    /// </summary>
-    public static void Reload()
-    {
-        lock (_lock)
-        {
-            _settings = null;
-        }
-
-        EnsureLoaded();
-    }
-
-    /// <summary>
     /// Clears all settings
     /// </summary>
     public static void Clear()
@@ -162,19 +123,6 @@ internal static class Settings
         lock (_lock)
         {
             _settings = [];
-        }
-    }
-
-    /// <summary>
-    /// Gets all setting keys
-    /// </summary>
-    public static IEnumerable<string> GetKeys()
-    {
-        EnsureLoaded();
-
-        lock (_lock)
-        {
-            return [.. _settings!.Keys];
         }
     }
 

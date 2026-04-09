@@ -1,0 +1,15 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             x:Class="OrgZ.Controls.BreadcrumbBar"
+             x:CompileBindings="False">
+	<StackPanel Orientation="Horizontal" Margin="8,4" Spacing="4">
+		<Button Content="Music" Click="Root_Click" Background="Transparent" BorderThickness="0" Padding="4,2" Cursor="Hand" Foreground="#4A9EFF" />
+
+		<TextBlock x:Name="Sep1" Text=">" VerticalAlignment="Center" Opacity="0.5" IsVisible="False" />
+		<Button x:Name="ArtistButton" Click="Artist_Click" Background="Transparent" BorderThickness="0" Padding="4,2" Cursor="Hand" Foreground="#4A9EFF" IsVisible="False" />
+
+		<TextBlock x:Name="Sep2" Text=">" VerticalAlignment="Center" Opacity="0.5" IsVisible="False" />
+		<TextBlock x:Name="AlbumLabel" VerticalAlignment="Center" IsVisible="False" />
+	</StackPanel>
+</UserControl>

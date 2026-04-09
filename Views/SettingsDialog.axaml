@@ -15,8 +15,8 @@
 	<DockPanel Margin="16">
 		<!-- OK / Cancel buttons at the bottom (iTunes style) -->
 		<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0" Spacing="8">
-			<Button x:Name="OkButton" Content="OK" Width="80" Click="OkButton_Click" />
-			<Button x:Name="CancelButton" Content="Cancel" Width="80" Click="CancelButton_Click" />
+			<Button Content="OK" Width="80" Click="OkButton_Click" />
+			<Button Content="Cancel" Width="80" Click="CancelButton_Click" />
 		</StackPanel>
 
 		<!-- Tabbed settings area -->
@@ -33,8 +33,8 @@
 									<TextBlock x:Name="FolderPathText" Text="" FontSize="11" TextWrapping="Wrap" MaxHeight="36" />
 								</Border>
 								<StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
-									<Button x:Name="ChangeFolderButton" Content="Change ..." Width="90" Click="ChangeFolderButton_Click" />
-									<Button x:Name="ResetFolderButton" Content="Reset" Width="90" Click="ResetFolderButton_Click" />
+									<Button Content="Change ..." Width="90" Click="ChangeFolderButton_Click" />
+									<Button Content="Reset" Width="90" Click="ResetFolderButton_Click" />
 								</StackPanel>
 							</Grid>
 						</StackPanel>
@@ -42,6 +42,7 @@
 
 					<CheckBox x:Name="MinimizeToTrayCheck" Content="Minimize to system tray on close" />
 					<CheckBox x:Name="RememberLastTrackCheck" Content="Remember last played track" />
+					<CheckBox x:Name="ShowIgnoredCheck" Content="Show Ignored section in sidebar" />
 				</StackPanel>
 			</TabItem>
 
@@ -74,7 +75,7 @@
 
 			<!-- ===== Stats Tab ===== -->
 			<TabItem Header="Stats">
-				<ScrollViewer x:Name="StatsScrollViewer" Margin="8,12" Padding="0,0,12,0">
+				<ScrollViewer Margin="8,12" Padding="0,0,12,0">
 					<StackPanel Spacing="16">
 						<!-- Library Overview -->
 						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
@@ -82,12 +83,12 @@
 								<TextBlock Text="Library Overview" FontWeight="Bold" FontSize="13" />
 								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="8,4,0,0">
 									<TextBlock Grid.Row="0" Grid.Column="0" Text="Music Tracks:" Opacity="0.6" />
-									<Button Grid.Row="0" Grid.Column="1" x:Name="LinkMusicCount" Classes="link" Click="LinkMusicCount_Click">
+									<Button Grid.Row="0" Grid.Column="1" Classes="link" Click="LinkMusicCount_Click">
 										<TextBlock x:Name="StatMusicCount" Text="0" Foreground="#4A9EFF" />
 									</Button>
 
 									<TextBlock Grid.Row="1" Grid.Column="0" Text="Radio Stations:" Opacity="0.6" />
-									<Button Grid.Row="1" Grid.Column="1" x:Name="LinkRadioCount" Classes="link" Click="LinkRadioCount_Click">
+									<Button Grid.Row="1" Grid.Column="1" Classes="link" Click="LinkRadioCount_Click">
 										<TextBlock x:Name="StatRadioCount" Text="0" Foreground="#4A9EFF" />
 									</Button>
 
@@ -145,8 +146,8 @@
 									<TextBlock Grid.Row="2" Grid.Column="1" x:Name="StatRadioCountries" Text="0" />
 								</Grid>
 
-								<!-- Sources inline -->
-								<TextBlock Text="Sources" FontWeight="Bold" FontSize="12" Opacity="0.8" Margin="0,4,0,0" />
+								<!-- Genres inline -->
+								<TextBlock Text="Genres" FontWeight="Bold" FontSize="12" Opacity="0.8" Margin="0,4,0,0" />
 								<StackPanel x:Name="RadioSourcesPanel" Spacing="2" Margin="8,0,0,0" />
 
 								<!-- Codecs inline -->

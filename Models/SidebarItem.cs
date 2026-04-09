@@ -11,4 +11,6 @@ internal class SidebarItem
     public bool IsFavorites { get; init; }
     public MediaKind? Kind { get; init; }
     public string ViewConfigKey { get; init; } = string.Empty;
+    public int? PlaylistId { get; init; }
+    public bool IsNewPlaylistAction { get; init; }
 }
