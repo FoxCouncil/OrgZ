@@ -39,6 +39,8 @@ public static class ListViewConfigs
         ["Radio"] = BuildRadioConfig(),
         ["Favorites"] = BuildFavoritesConfig(),
         ["Ignored"] = BuildIgnoredConfig(),
+        ["BadFormat"] = BuildBadFormatConfig(),
+        ["CdAudio"] = BuildCdAudioConfig(),
     };
 
     public static ListViewConfig? Get(string? key)
@@ -196,6 +198,61 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
+        ];
+    }
+
+    private static ListViewConfig BuildBadFormatConfig()
+    {
+        return new ListViewConfig
+        {
+            Key = "BadFormat",
+            Columns =
+            [
+                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Extension", BindingPath = "Extension", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
+                new ColumnDef { Header = "Reason", BindingPath = "FormatIssues", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+            ],
+            BaseFilter = item => item.Kind == MediaKind.Music && !string.IsNullOrEmpty(item.FormatIssues),
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.FormatIssues.Contains(search, StringComparison.OrdinalIgnoreCase)),
+            ContextMenuItems = BuildMusicContextMenu(),
+        };
+    }
+
+    private static ListViewConfig BuildCdAudioConfig()
+    {
+        return new ListViewConfig
+        {
+            Key = "CdAudio",
+            Columns =
+            [
+                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new ColumnDef { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40 },
+                new ColumnDef { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+            ],
+            BaseFilter = item => item.Source == "cdda",
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildCdAudioContextMenu(),
+        };
+    }
+
+    private static List<ContextMenuItemDef> BuildCdAudioContextMenu()
+    {
+        return
+        [
+            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
+            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
+            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
         ];
     }
 

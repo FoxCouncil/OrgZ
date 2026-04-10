@@ -36,6 +36,13 @@ public partial class SettingsDialog : Window
         RememberLastTrackCheck.IsChecked = Settings.Get("OrgZ.RememberLastTrack", false);
         ShowIgnoredCheck.IsChecked = Settings.Get("OrgZ.ShowIgnored", true);
 
+        BadFormatShowCheck.IsChecked = Settings.Get("OrgZ.BadFormat.ShowInSidebar", true);
+        BadFormatNoTitleCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoTitle", true);
+        BadFormatNoArtistCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoArtist", true);
+        BadFormatNoYearCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoYear", true);
+        BadFormatNoAlbumArtCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoAlbumArt", true);
+        BadFormatLossyCheck.IsChecked = Settings.Get("OrgZ.BadFormat.LossyFormats", true);
+
         // Playback
         var bufferSize = Settings.Get("OrgZ.StreamingBufferSize", "Medium");
         BufferSizeCombo.SelectedIndex = bufferSize switch
@@ -210,6 +217,13 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.MinimizeToTray", MinimizeToTrayCheck.IsChecked == true);
         Settings.Set("OrgZ.RememberLastTrack", RememberLastTrackCheck.IsChecked == true);
         Settings.Set("OrgZ.ShowIgnored", ShowIgnoredCheck.IsChecked == true);
+
+        Settings.Set("OrgZ.BadFormat.ShowInSidebar", BadFormatShowCheck.IsChecked == true);
+        Settings.Set("OrgZ.BadFormat.NoTitle", BadFormatNoTitleCheck.IsChecked == true);
+        Settings.Set("OrgZ.BadFormat.NoArtist", BadFormatNoArtistCheck.IsChecked == true);
+        Settings.Set("OrgZ.BadFormat.NoYear", BadFormatNoYearCheck.IsChecked == true);
+        Settings.Set("OrgZ.BadFormat.NoAlbumArt", BadFormatNoAlbumArtCheck.IsChecked == true);
+        Settings.Set("OrgZ.BadFormat.LossyFormats", BadFormatLossyCheck.IsChecked == true);
 
         // Playback
         var bufferSize = BufferSizeCombo.SelectedIndex switch

@@ -196,4 +196,53 @@ public class ListViewConfigTests
         var config = ListViewConfigs.BuildPlaylistConfig(1, ["a"]);
         Assert.False(config.IncludeIgnored);
     }
+
+    // -- Bad Format view --
+
+    [Fact]
+    public void BadFormatConfig_Exists()
+    {
+        Assert.NotNull(ListViewConfigs.Get("BadFormat"));
+    }
+
+    [Fact]
+    public void BadFormatConfig_BaseFilter_AcceptsOnlyMusicWithIssues()
+    {
+        var config = ListViewConfigs.Get("BadFormat")!;
+
+        // Clean track — should be excluded
+        var clean = new MediaItem
+        {
+            Id = "a", Kind = MediaKind.Music,
+            Title = "Song", Artist = "Artist", Year = 2020,
+            HasAlbumArt = true, Extension = ".flac"
+        };
+        Assert.False(config.BaseFilter(clean));
+
+        // Track with missing year — should be included
+        var noYear = new MediaItem
+        {
+            Id = "b", Kind = MediaKind.Music,
+            Title = "Song", Artist = "Artist",
+            HasAlbumArt = true, Extension = ".flac"
+        };
+        Assert.True(config.BaseFilter(noYear));
+
+        // Radio item — should be excluded
+        var radio = new MediaItem { Id = "c", Kind = MediaKind.Radio };
+        Assert.False(config.BaseFilter(radio));
+    }
+
+    [Fact]
+    public void BadFormatConfig_SearchFilter_MatchesReasonColumn()
+    {
+        var config = ListViewConfigs.Get("BadFormat")!;
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Title = "Song", Extension = ".mp3",
+            HasAlbumArt = true, Artist = "Artist", Year = 2020,
+        };
+        Assert.True(config.SearchFilter(item, "Lossy"));
+    }
 }

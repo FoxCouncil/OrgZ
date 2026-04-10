@@ -39,6 +39,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private PlaybackContext? _playbackContext;
 
+    private System.Threading.Timer? _cdPollTimer;
+    private readonly List<MediaItem> _cdTracks = [];
+    private bool _cdScanning;
+
     private bool isSeeking = false;
 
     private List<MediaItem> _allItems = [];
@@ -77,6 +81,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (Settings.Get("OrgZ.ShowIgnored", true))
         {
             LibraryItems.Add(new() { Name = "Ignored", Icon = "fa-solid fa-eye-slash", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "Ignored" });
+        }
+
+        if (Settings.Get("OrgZ.BadFormat.ShowInSidebar", true))
+        {
+            LibraryItems.Add(new() { Name = "Bad Format", Icon = "fa-solid fa-triangle-exclamation", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "BadFormat" });
         }
 
         // Preserve selection if the current view still exists after the rebuild
@@ -178,6 +187,56 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isQueueVisible;
 
     public ObservableCollection<MediaItem>? PlaybackContextUpcoming => _playbackContext?.UpcomingItems;
+
+    // -- Activity --
+
+    [ObservableProperty]
+    private bool _isActivityPanelVisible;
+
+    internal ObservableCollection<ActivityItem> Activities { get; } = [];
+
+    public int ActivityBadgeCount => Activities.Count(a => a.Status is ActivityStatus.Pending or ActivityStatus.Running);
+
+    public bool HasActiveActivities => ActivityBadgeCount > 0;
+
+    internal ActivityItem AddActivity(string title)
+    {
+        var item = new ActivityItem { Title = title, Status = ActivityStatus.Running };
+        UI(() =>
+        {
+            Activities.Add(item);
+            OnPropertyChanged(nameof(ActivityBadgeCount));
+            OnPropertyChanged(nameof(HasActiveActivities));
+        });
+        return item;
+    }
+
+    internal void UpdateActivityBadge()
+    {
+        UI(() =>
+        {
+            OnPropertyChanged(nameof(ActivityBadgeCount));
+            OnPropertyChanged(nameof(HasActiveActivities));
+        });
+    }
+
+    [RelayCommand]
+    private void ClearCompletedActivities()
+    {
+        var toRemove = Activities.Where(a => a.Status is ActivityStatus.Completed or ActivityStatus.Failed).ToList();
+        foreach (var item in toRemove)
+        {
+            Activities.Remove(item);
+        }
+        OnPropertyChanged(nameof(ActivityBadgeCount));
+        OnPropertyChanged(nameof(HasActiveActivities));
+    }
+
+    [RelayCommand]
+    private void ToggleActivityPanel()
+    {
+        IsActivityPanelVisible = !IsActivityPanelVisible;
+    }
 
     // -- Unified Data --
 
@@ -405,6 +464,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     partial void OnSelectedSidebarItemChanged(SidebarItem? value)
     {
         StatusBar.ActiveKind = value?.Kind;
+        StatusBar.HasGenericStats = value?.Kind == null && value?.ViewConfigKey != null;
 
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
 
@@ -496,6 +556,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (_activeViewConfig.ShowRadioFilterPanel)
         {
             UI(() => StatusBar.StationCount = FilteredItems.Count.ToString());
+        }
+
+        // Update generic status bar for non-Music/Radio views
+        if (StatusBar.HasGenericStats)
+        {
+            UpdateGenericStatusBar();
         }
 
         UpdateNavigationButtons();
@@ -623,6 +689,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 CurrentTrackLine1 = CurrentStation.Title ?? "Unknown Station";
                 CurrentTrackLine2 = FormatTags(CurrentStation.Tags);
 
+                return;
+            }
+
+            // CD tracks set their own display values in ExecutePlayCd — don't overwrite
+            if (CurrentPlayingItem?.Source == "cdda")
+            {
                 return;
             }
 
@@ -1019,6 +1091,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ExecutePlayItem(MediaItem item)
     {
+        // CD tracks are MediaKind.Music but use StreamUrl instead of FilePath
+        if (item.Source == "cdda")
+        {
+            ExecutePlayCd(item);
+            return;
+        }
+
         switch (item.Kind)
         {
             case MediaKind.Music:
@@ -1033,6 +1112,36 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 break;
             }
         }
+    }
+
+    private void ExecutePlayCd(MediaItem track)
+    {
+        SelectedItem = track;
+
+        CurrentTrackLine1 = track.Title ?? "Unknown Track";
+        CurrentTrackLine2 = track.Album ?? "";
+        CurrentTrackDuration = track.Duration?.ToString(@"mm\:ss") ?? "--:--";
+        CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
+
+        CurrentAlbumArt?.Dispose();
+        CurrentAlbumArt = null;
+
+#if WINDOWS
+        _smtcService?.UpdateMetadata(track.Title, track.Artist, null, null);
+#endif
+
+        _currentMedia?.Dispose();
+        _currentMedia = new LibVLCSharp.Shared.Media(_vlc, track.StreamUrl!, LibVLCSharp.Shared.FromType.FromLocation);
+        if (track.Track.HasValue)
+        {
+            _currentMedia.AddOption($":cdda-track={track.Track.Value}");
+        }
+        _ = _player.Play(_currentMedia);
+
+        ButtonPlayPauseIcon = ICON_PAUSE;
+        ButtonPlayPausePadding = new Avalonia.Thickness(0);
+        IsSeekEnabled = true;
+        UpdateNavigationButtons();
     }
 
     public void DataGridRowDoubleClick()
@@ -1092,7 +1201,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayMusicItem(MediaItem? file)
     {
-        if (_player == null || file == null || file.Kind != MediaKind.Music || string.IsNullOrEmpty(file.FilePath))
+        if (_player == null || file == null || file.Kind != MediaKind.Music)
+        {
+            return;
+        }
+
+        // CD tracks use StreamUrl, regular music uses FilePath
+        if (file.Source == "cdda")
+        {
+            PlayCdTrack(file);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(file.FilePath))
         {
             return;
         }
@@ -1732,9 +1853,217 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    internal void DeletePlaylist(SidebarItem? item)
+    internal async Task ImportPlaylist()
+    {
+        var files = await _window.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+        {
+            Title = "Import Playlist",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new Avalonia.Platform.Storage.FilePickerFileType("Playlist Files") { Patterns = ["*.m3u", "*.m3u8", "*.pls", "*.xspf"] },
+                new Avalonia.Platform.Storage.FilePickerFileType("All Files") { Patterns = ["*"] }
+            ]
+        });
+
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        var filePath = files[0].Path.LocalPath;
+        var result = PlaylistImporter.Import(filePath);
+        if (result.TrackPaths.Count == 0)
+        {
+            return;
+        }
+
+        // Match tracks to library by file path
+        var libraryLookup = _allItems
+            .Where(i => i.FilePath != null)
+            .ToDictionary(i => i.FilePath!, StringComparer.OrdinalIgnoreCase);
+
+        var matched = new List<MediaItem>();
+        var unmatched = new List<string>();
+
+        foreach (var path in result.TrackPaths)
+        {
+            if (libraryLookup.TryGetValue(path, out var item))
+            {
+                matched.Add(item);
+            }
+            else if (File.Exists(path) && FileScanner.IsSupportedExtension(path))
+            {
+                unmatched.Add(path);
+            }
+        }
+
+        // If there are unmatched tracks that exist on disk, offer to copy them
+        if (unmatched.Count > 0)
+        {
+            var copyDialog = new Views.ConfirmDialog(
+                "Copy to Library",
+                $"{unmatched.Count} track(s) are not in your library but exist on disk.\n\nCopy them to your music folder?",
+                "Copy");
+            var doCopy = await copyDialog.ShowDialog<bool>(_window);
+
+            if (doCopy)
+            {
+                var activity = AddActivity($"Copying {unmatched.Count} track(s) to library");
+                IsActivityPanelVisible = true;
+                int copied = 0;
+
+                foreach (var sourcePath in unmatched)
+                {
+                    copied++;
+                    UI(() =>
+                    {
+                        activity.Detail = $"Copying {copied} of {unmatched.Count}: {Path.GetFileName(sourcePath)}";
+                        activity.Progress = (double)copied / unmatched.Count;
+                    });
+
+                    var destPath = Path.Combine(App.FolderPath, Path.GetFileName(sourcePath));
+
+                    try
+                    {
+                        if (!File.Exists(destPath))
+                        {
+                            File.Copy(sourcePath, destPath);
+                        }
+
+                        var newItem = FileScanner.CreateMediaItemFromPath(destPath);
+                        if (newItem != null)
+                        {
+                            AudioFileAnalyzer.AnalyzeFile(newItem);
+                            MediaCache.UpsertMusic(newItem);
+                            _allItems.Add(newItem);
+                            matched.Add(newItem);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        UI(() => activity.Detail = $"Failed: {Path.GetFileName(sourcePath)} — {ex.Message}");
+                    }
+                }
+
+                UI(() =>
+                {
+                    activity.Status = ActivityStatus.Completed;
+                    activity.Detail = $"{copied} track(s) copied";
+                    activity.Progress = 1.0;
+                    UpdateActivityBadge();
+                });
+            }
+        }
+
+        if (matched.Count == 0)
+        {
+            return;
+        }
+
+        // Ask for playlist name
+        var name = !string.IsNullOrWhiteSpace(result.Name) ? result.Name : Path.GetFileNameWithoutExtension(filePath);
+        var nameDialog = new Views.PlaylistNameDialog(name);
+        var chosenName = await nameDialog.ShowDialog<string?>(_window);
+        if (string.IsNullOrWhiteSpace(chosenName))
+        {
+            return;
+        }
+
+        var playlistId = MediaCache.CreatePlaylist(chosenName.Trim());
+        foreach (var track in matched)
+        {
+            MediaCache.AddTrackToPlaylist(playlistId, track.Id);
+        }
+
+        LoadPlaylistSidebarItems();
+        PlaylistsChanged?.Invoke();
+
+        var newPlaylistItem = PlaylistItems.FirstOrDefault(i => i.PlaylistId == playlistId);
+        if (newPlaylistItem != null)
+        {
+            SelectedSidebarItem = newPlaylistItem;
+        }
+    }
+
+    internal List<MediaItem> GetPlaylistMediaItems(int playlistId)
+    {
+        var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
+        var lookup = _allItems.Where(i => i.FilePath != null).ToDictionary(i => i.Id);
+        return trackIds.Where(lookup.ContainsKey).Select(id => lookup[id]).ToList();
+    }
+
+    internal async Task ExportPlaylist(SidebarItem item, string format)
+    {
+        if (!item.PlaylistId.HasValue)
+        {
+            return;
+        }
+
+        var tracks = GetPlaylistMediaItems(item.PlaylistId.Value);
+        if (tracks.Count == 0)
+        {
+            return;
+        }
+
+        var extension = format switch
+        {
+            "M3U8" => "m3u8",
+            "PLS" => "pls",
+            "XSPF" => "xspf",
+            _ => "m3u8"
+        };
+
+        var file = await _window.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+        {
+            Title = $"Export Playlist — {item.Name}",
+            SuggestedFileName = $"{item.Name}.{extension}",
+            FileTypeChoices =
+            [
+                new Avalonia.Platform.Storage.FilePickerFileType(format) { Patterns = [$"*.{extension}"] }
+            ]
+        });
+
+        if (file == null)
+        {
+            return;
+        }
+
+        var path = file.Path.LocalPath;
+
+        switch (format)
+        {
+            case "M3U8":
+            {
+                PlaylistExporter.ExportM3U8(path, item.Name, tracks);
+                break;
+            }
+
+            case "PLS":
+            {
+                PlaylistExporter.ExportPLS(path, item.Name, tracks);
+                break;
+            }
+
+            case "XSPF":
+            {
+                PlaylistExporter.ExportXSPF(path, item.Name, tracks);
+                break;
+            }
+        }
+    }
+
+    [RelayCommand]
+    internal async Task DeletePlaylist(SidebarItem? item)
     {
         if (item?.PlaylistId == null)
+        {
+            return;
+        }
+
+        var dialog = new Views.ConfirmDialog("Delete Playlist", $"Delete playlist \"{item.Name}\"?\n\nThis cannot be undone.", "Delete");
+        var ok = await dialog.ShowDialog<bool>(_window);
+        if (!ok)
         {
             return;
         }
@@ -1982,6 +2311,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // Start watching for file changes
         StartFolderWatcher();
+
+        // Start CD drive polling (every 10 seconds)
+        _cdPollTimer = new System.Threading.Timer(_ => UI(() => _ = ScanForCdAsync()), null, 0, 10_000);
     }
 
     internal async Task ScanAndAnalyzeMusicAsync()
@@ -2281,6 +2613,31 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void UpdateGenericStatusBar()
+    {
+        var count = FilteredItems.Count;
+        var viewKey = SelectedSidebarItem?.ViewConfigKey ?? "";
+
+        var label = viewKey switch
+        {
+            "Favorites" => "favorites",
+            "Ignored" => "ignored",
+            "BadFormat" => "issues",
+            _ when viewKey.StartsWith("Playlist:") => "tracks",
+            _ => "items"
+        };
+
+        var duration = TimeSpan.FromTicks(FilteredItems.Where(i => i.Duration.HasValue).Sum(i => i.Duration!.Value.Ticks));
+        var durationStr = duration.TotalSeconds > 0 ? duration.ToString(@"d\:hh\:mm\:ss") : "";
+
+        UI(() =>
+        {
+            StatusBar.ItemCount = count.ToString();
+            StatusBar.ItemLabel = label;
+            StatusBar.ItemDuration = durationStr;
+        });
+    }
+
     #endregion
 
     #region Utils
@@ -2404,8 +2761,121 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #endregion
 
+    #region CD Audio
+
+    private async Task ScanForCdAsync()
+    {
+        if (_cdScanning)
+        {
+            return;
+        }
+
+        _cdScanning = true;
+
+        try
+        {
+            var drives = CdAudioService.GetCdDrivesWithMedia();
+
+            // Check for ejected discs — if a drive that had tracks is now gone or empty
+            if (_cdTracks.Count > 0)
+            {
+                var activeDriveIds = drives.Select(d => d.Name.TrimEnd('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                // ID format is "cd:F::1" — extract drive path between first "cd:" and the last ":"
+                var trackedDrives = _cdTracks
+                    .Select(t => { var s = t.Id[3..]; return s[..s.LastIndexOf(':')]; })
+                    .Distinct()
+                    .ToList();
+
+                foreach (var driveId in trackedDrives)
+                {
+                    if (!activeDriveIds.Contains(driveId))
+                    {
+                        // Drive disappeared
+                        _allItems.RemoveAll(i => i.Id.StartsWith($"cd:{driveId}:"));
+                        _cdTracks.RemoveAll(t => t.Id.StartsWith($"cd:{driveId}:"));
+                        var toRemove = DeviceItems.FirstOrDefault(d => d.Name.Contains(driveId));
+                        if (toRemove != null)
+                        {
+                            DeviceItems.Remove(toRemove);
+                        }
+                        // Drive gone — clean up
+                    }
+                }
+
+                if (_cdTracks.Count == 0 && SelectedSidebarItem?.ViewConfigKey == "CdAudio")
+                {
+                    SelectedSidebarItem = LibraryItems[0];
+                }
+            }
+
+            foreach (var drive in drives)
+            {
+                var driveId = drive.Name.TrimEnd('\\', '/');
+
+                // Skip if already have tracks from this drive
+                if (_cdTracks.Any(t => t.Id.StartsWith($"cd:{driveId}:")))
+                {
+                    continue;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"CD poll: media detected on {driveId}, reading TOC...");
+
+                var tracks = await Task.Run(() => CdAudioService.ReadDiscAsync(_vlc, drive));
+                System.Diagnostics.Debug.WriteLine($"CD poll: {driveId} → {tracks.Count} track(s)");
+
+                if (tracks.Count == 0)
+                {
+                    continue;
+                }
+
+                _cdTracks.AddRange(tracks);
+                _allItems.AddRange(tracks);
+
+                var label = tracks[0].Album ?? $"Audio CD ({driveId})";
+
+                DeviceItems.Add(new SidebarItem
+                {
+                    Name = label,
+                    Icon = "fa-solid fa-compact-disc",
+                    Category = "DEVICES",
+                    IsEnabled = true,
+                    ViewConfigKey = "CdAudio",
+                });
+
+                ApplyFilter();
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"CD poll error: {ex.Message}");
+        }
+        finally
+        {
+            _cdScanning = false;
+        }
+    }
+
+    internal void PlayCdTrack(MediaItem track)
+    {
+        if (track.StreamUrl == null)
+        {
+            return;
+        }
+
+        UI(() =>
+        {
+            _playbackContext?.Release();
+            _playbackContext = new PlaybackContext(_cdTracks, track);
+            OnPropertyChanged(nameof(PlaybackContextUpcoming));
+            ExecutePlayCd(track);
+        });
+    }
+
+    #endregion
+
     public void Dispose()
     {
+        _cdPollTimer?.Dispose();
         _folderWatcher?.Dispose();
 #if WINDOWS
         _thumbBarService?.Dispose();
