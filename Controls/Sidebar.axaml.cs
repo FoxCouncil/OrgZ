@@ -10,7 +10,7 @@ namespace OrgZ.Controls;
 
 public partial class Sidebar : UserControl
 {
-    private const string MediaItemDragFormat = "OrgZ.MediaItem";
+    internal static readonly DataFormat<string> MediaItemDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.MediaItem");
 
     private bool _suppressSelectionChange;
 
@@ -21,17 +21,88 @@ public partial class Sidebar : UserControl
         DragDrop.SetAllowDrop(PlaylistListBox, true);
         PlaylistListBox.AddHandler(DragDrop.DragOverEvent, PlaylistListBox_DragOver);
         PlaylistListBox.AddHandler(DragDrop.DropEvent, PlaylistListBox_Drop);
+        PlaylistListBox.ContextRequested += PlaylistListBox_ContextRequested;
+        DeviceListBox.ContextRequested += DeviceListBox_ContextRequested;
+    }
+
+    private void DeviceListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    {
+        var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
+        if (listBoxItem?.DataContext is not SidebarItem sb || !sb.IsEnabled)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var menu = new Avalonia.Controls.ContextMenu();
+
+        var rip = new Avalonia.Controls.MenuItem { Header = "Rip CD...", IsEnabled = false };
+        menu.Items.Add(rip);
+
+        var eject = new Avalonia.Controls.MenuItem { Header = "Eject" };
+        eject.Click += (_, _) =>
+        {
+            // Future: eject disc via platform API
+        };
+        eject.IsEnabled = false;
+        menu.Items.Add(eject);
+
+        listBoxItem.ContextMenu = menu;
+    }
+
+    private void PlaylistListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    {
+        var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
+        if (listBoxItem?.DataContext is not SidebarItem sb || sb.IsFavorites || sb.IsNewPlaylistAction || sb.IsImportPlaylistAction || !sb.PlaylistId.HasValue)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        var menu = new Avalonia.Controls.ContextMenu();
+
+        var rename = new Avalonia.Controls.MenuItem { Header = "Rename" };
+        rename.Click += (_, _) => _ = vm.RenamePlaylist(sb);
+        menu.Items.Add(rename);
+
+        var delete = new Avalonia.Controls.MenuItem { Header = "Delete" };
+        delete.Click += (_, _) => _ = vm.DeletePlaylist(sb);
+        menu.Items.Add(delete);
+
+        menu.Items.Add(new Avalonia.Controls.Separator());
+
+        var exportAs = new Avalonia.Controls.MenuItem { Header = "Export As" };
+
+        var m3u = new Avalonia.Controls.MenuItem { Header = "M3U8" };
+        m3u.Click += (_, _) => _ = vm.ExportPlaylist(sb, "M3U8");
+        exportAs.Items.Add(m3u);
+
+        var pls = new Avalonia.Controls.MenuItem { Header = "PLS" };
+        pls.Click += (_, _) => _ = vm.ExportPlaylist(sb, "PLS");
+        exportAs.Items.Add(pls);
+
+        var xspf = new Avalonia.Controls.MenuItem { Header = "XSPF" };
+        xspf.Click += (_, _) => _ = vm.ExportPlaylist(sb, "XSPF");
+        exportAs.Items.Add(xspf);
+
+        menu.Items.Add(exportAs);
+
+        listBoxItem.ContextMenu = menu;
     }
 
     private void PlaylistListBox_DragOver(object? sender, DragEventArgs e)
     {
-        if (!e.Data.Contains(MediaItemDragFormat))
+        if (!e.DataTransfer.Contains(MediaItemDragFormat))
         {
             e.DragEffects = DragDropEffects.None;
             return;
         }
 
-        // Only allow drop if hovering over an actual playlist (not Favorites action or "New Playlist...")
         var item = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
         if (item?.DataContext is SidebarItem sb && sb.PlaylistId.HasValue)
         {
@@ -47,12 +118,13 @@ public partial class Sidebar : UserControl
 
     private void PlaylistListBox_Drop(object? sender, DragEventArgs e)
     {
-        if (!e.Data.Contains(MediaItemDragFormat))
+        if (!e.DataTransfer.Contains(MediaItemDragFormat))
         {
             return;
         }
 
-        if (e.Data.Get(MediaItemDragFormat) is not MediaItem media)
+        var media = MainWindow.DraggedMediaItem;
+        if (media == null)
         {
             return;
         }
@@ -119,7 +191,6 @@ public partial class Sidebar : UserControl
         {
             if (item.IsNewPlaylistAction)
             {
-                // Reset selection so the action item doesn't stay selected
                 PlaylistListBox.SelectedItem = null;
 
                 if (DataContext is MainWindowViewModel vm2)
@@ -129,6 +200,7 @@ public partial class Sidebar : UserControl
 
                 return;
             }
+
 
             _suppressSelectionChange = true;
             LibraryListBox.SelectedItem = null;

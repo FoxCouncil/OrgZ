@@ -15,6 +15,9 @@
 				<NativeMenu>
 					<NativeMenuItem Header="Change Library Folder..." Command="{Binding ChangeLibraryFolderCommand}" />
 					<NativeMenuItemSeparator />
+					<NativeMenuItem Header="Import Playlist..." Command="{Binding ImportPlaylistCommand}" />
+					<NativeMenuItem Header="Export Library..." IsEnabled="False" />
+					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Settings..." Command="{Binding ShowSettingsCommand}" />
 					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Exit" Command="{Binding ExitApplicationCommand}" Gesture="Ctrl+Q" />
@@ -164,8 +167,19 @@
 						<Button Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="10,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Browse by Artist">
 							<i:Icon Value="fa-solid fa-folder-tree" FontSize="16" />
 						</Button>
-						<Button Command="{Binding ToggleQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,5,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Up Next">
+						<Button Command="{Binding ToggleQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Up Next">
 							<i:Icon Value="fa-solid fa-list" FontSize="16" />
+						</Button>
+						<Button Command="{Binding ToggleActivityPanelCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,5,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Activity">
+							<Panel>
+								<i:Icon Value="fa-solid fa-bars-progress" FontSize="16" />
+								<Border Background="OrangeRed" CornerRadius="6" MinWidth="12" Height="12"
+								        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-6,0"
+								        IsVisible="{Binding HasActiveActivities}" Padding="2,0">
+									<TextBlock Text="{Binding ActivityBadgeCount}" FontSize="8" Foreground="White"
+									           HorizontalAlignment="Center" VerticalAlignment="Center" />
+								</Border>
+							</Panel>
 						</Button>
 						<i:Icon Value="fa-solid fa-search" Margin="5,10,5,10" />
 						<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
@@ -244,6 +258,9 @@
 									<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
 										<Setter Property="IsVisible" Value="False" />
 									</Style>
+									<Style Selector="DataGridCell TextBlock">
+										<Setter Property="VerticalAlignment" Value="Center" />
+									</Style>
 								</DataGrid.Styles>
 								<DataGrid.Columns />
 							</DataGrid>
@@ -272,6 +289,9 @@
 									<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
 										<Setter Property="IsVisible" Value="False" />
 									</Style>
+									<Style Selector="DataGridCell TextBlock">
+										<Setter Property="VerticalAlignment" Value="Center" />
+									</Style>
 								</DataGrid.Styles>
 								<DataGrid.Columns />
 							</DataGrid>
@@ -279,6 +299,7 @@
 					</Border>
 
 					<controls:QueuePanel Grid.Column="1" Width="250" DataContext="{Binding}" IsVisible="{Binding IsQueueVisible}" />
+					<controls:ActivityPanel Grid.Column="1" Width="280" DataContext="{Binding}" IsVisible="{Binding IsActivityPanelVisible}" />
 				</Grid>
 			</Grid>
 		</DockPanel>

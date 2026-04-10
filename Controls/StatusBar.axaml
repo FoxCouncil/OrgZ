@@ -125,6 +125,48 @@
                     </Button>
                 </Border>
             </Grid>
+            <!-- Generic status for other views (Favorites, Playlists, Ignored, Bad Format) -->
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+                  IsVisible="{Binding HasGenericStats}">
+                <Grid.Styles>
+                    <Style Selector="Grid > Border">
+                        <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
+                        <Setter Property="BorderThickness" Value="0,0,1,0"/>
+                        <Setter Property="Padding" Value="4,0"/>
+                    </Style>
+
+                    <Style Selector="Grid > Border:last-child">
+                        <Setter Property="BorderThickness" Value="0"/>
+                    </Style>
+                </Grid.Styles>
+
+                <Border Grid.Column="0">
+                    <TextBlock Text="{Binding MainStatus}" />
+                </Border>
+
+                <Border Grid.Column="1">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding ItemCount}" />
+                        <TextBlock Text="{Binding ItemLabel}" FontSize="10" VerticalAlignment="Bottom" Classes="label" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="2" IsVisible="{Binding ItemDuration, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding ItemDuration}" />
+                        <TextBlock Text="time" FontSize="10" VerticalAlignment="Bottom" Classes="label" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="3" IsVisible="{Binding !!ErrorCount}">
+                    <Button Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />
+                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="OrangeRed" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Border>
+            </Grid>
         </Panel>
     </Border>
 

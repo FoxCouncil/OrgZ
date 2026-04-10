@@ -13,4 +13,5 @@ internal class SidebarItem
     public string ViewConfigKey { get; init; } = string.Empty;
     public int? PlaylistId { get; init; }
     public bool IsNewPlaylistAction { get; init; }
+    public bool IsImportPlaylistAction { get; init; }
 }

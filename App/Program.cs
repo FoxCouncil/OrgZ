@@ -1,8 +1,8 @@
 ﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
-using Projektanker.Icons.Avalonia;
-using Projektanker.Icons.Avalonia.FontAwesome;
+using Optris.Icons.Avalonia;
+using Optris.Icons.Avalonia.FontAwesome;
 using Velopack;
 
 namespace OrgZ;
