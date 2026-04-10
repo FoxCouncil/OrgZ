@@ -11,8 +11,10 @@ namespace OrgZ.Controls;
 
 public partial class QueuePanel : UserControl
 {
-    private const string QueueDragFormat = "OrgZ.QueueIndex";
+    internal static readonly DataFormat<string> QueueDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.QueueIndex");
+    internal static int DraggedQueueIndex = -1;
 
+    private PointerPressedEventArgs? _pressEvent;
     private Point? _pressOrigin;
     private int _pressIndex = -1;
 
@@ -48,7 +50,6 @@ public partial class QueuePanel : UserControl
             return;
         }
 
-        // Don't initiate drag if user clicked the X button
         if (e.Source is Visual src && src.FindAncestorOfType<Button>() != null)
         {
             return;
@@ -62,19 +63,19 @@ public partial class QueuePanel : UserControl
 
         _pressIndex = QueueListBox.IndexFromContainer(item);
         _pressOrigin = e.GetPosition(QueueListBox);
+        _pressEvent = e;
     }
 
     private async void QueueListBox_PointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_pressOrigin == null || _pressIndex < 0)
+        if (_pressOrigin == null || _pressIndex < 0 || _pressEvent == null)
         {
             return;
         }
 
         if (!e.GetCurrentPoint(QueueListBox).Properties.IsLeftButtonPressed)
         {
-            _pressOrigin = null;
-            _pressIndex = -1;
+            ResetDragState();
             return;
         }
 
@@ -86,25 +87,31 @@ public partial class QueuePanel : UserControl
             return;
         }
 
-        var data = new DataObject();
-        data.Set(QueueDragFormat, _pressIndex);
+        DraggedQueueIndex = _pressIndex;
+        var data = new DataTransfer();
+        data.Add(DataTransferItem.Create(QueueDragFormat, "queue"));
+        var pressEvent = _pressEvent;
+        ResetDragState();
 
-        var indexToDrag = _pressIndex;
-        _pressOrigin = null;
-        _pressIndex = -1;
-
-        await DragDrop.DoDragDrop(e, data, DragDropEffects.Move);
+        await DragDrop.DoDragDropAsync(pressEvent, data, DragDropEffects.Move);
+        DraggedQueueIndex = -1;
     }
 
     private void QueueListBox_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        ResetDragState();
+    }
+
+    private void ResetDragState()
+    {
         _pressOrigin = null;
         _pressIndex = -1;
+        _pressEvent = null;
     }
 
     private void QueueListBox_DragOver(object? sender, DragEventArgs e)
     {
-        if (e.Data.Contains(QueueDragFormat))
+        if (e.DataTransfer.Contains(QueueDragFormat))
         {
             e.DragEffects = DragDropEffects.Move;
             e.Handled = true;
@@ -117,12 +124,13 @@ public partial class QueuePanel : UserControl
 
     private void QueueListBox_Drop(object? sender, DragEventArgs e)
     {
-        if (!e.Data.Contains(QueueDragFormat))
+        if (!e.DataTransfer.Contains(QueueDragFormat))
         {
             return;
         }
 
-        if (e.Data.Get(QueueDragFormat) is not int fromIndex)
+        var fromIndex = DraggedQueueIndex;
+        if (fromIndex < 0)
         {
             return;
         }
@@ -132,7 +140,6 @@ public partial class QueuePanel : UserControl
             return;
         }
 
-        // Determine target index based on which container the drop landed on
         var target = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
         int toIndex;
         if (target != null)
@@ -141,7 +148,6 @@ public partial class QueuePanel : UserControl
         }
         else
         {
-            // Dropped past the last item — append to end
             toIndex = vm.PlaybackContextUpcoming.Count - 1;
         }
 

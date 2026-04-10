@@ -145,6 +145,56 @@ public partial class MediaItem : ObservableObject
 
     public List<string> Issues { get; init; } = [];
 
+    private static readonly HashSet<string> LossyExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wma", ".aac", ".ogg", ".m4a"
+    };
+
+    /// <summary>
+    /// Returns a comma-joined list of format quality issues based on the active Settings criteria.
+    /// Empty string means the track passes all checks. Used as both the BaseFilter test for the
+    /// Bad Format view and displayed in a "Reason" column.
+    /// </summary>
+    public string FormatIssues
+    {
+        get
+        {
+            if (Kind != MediaKind.Music)
+            {
+                return "";
+            }
+
+            var issues = new List<string>();
+
+            if (Settings.Get("OrgZ.BadFormat.NoTitle", true) && string.IsNullOrWhiteSpace(Title))
+            {
+                issues.Add("No Title");
+            }
+
+            if (Settings.Get("OrgZ.BadFormat.NoArtist", true) && string.IsNullOrWhiteSpace(Artist))
+            {
+                issues.Add("No Artist");
+            }
+
+            if (Settings.Get("OrgZ.BadFormat.NoYear", true) && (Year == null || Year == 0))
+            {
+                issues.Add("No Year");
+            }
+
+            if (Settings.Get("OrgZ.BadFormat.NoAlbumArt", true) && HasAlbumArt != true)
+            {
+                issues.Add("No Album Art");
+            }
+
+            if (Settings.Get("OrgZ.BadFormat.LossyFormats", true) && Extension != null && LossyExtensions.Contains(Extension))
+            {
+                issues.Add($"Lossy Format ({Extension.ToLowerInvariant()})");
+            }
+
+            return string.Join(", ", issues);
+        }
+    }
+
     // -- Radio-only (nullable for music) --
 
     public string? StreamUrl { get; init; }

@@ -247,4 +247,31 @@ public class GenreNormalizerTests
         var distinct = GenreNormalizer.AllCanonical.Distinct().Count();
         Assert.Equal(GenreNormalizer.AllCanonical.Count, distinct);
     }
+
+    [Fact]
+    public void AllRuleOutputs_ExistInAllCanonical()
+    {
+        // Every genre that any rule can produce must be present in the AllCanonical list.
+        // This catches typos in rule definitions (e.g., "Clasical" vs "Classical").
+        var canonicalSet = new HashSet<string>(GenreNormalizer.AllCanonical);
+
+        // Test a comprehensive set of inputs that exercise most rules
+        var testInputs = new[]
+        {
+            "christian", "gospel", "npr", "public radio", "talk", "news", "comedy",
+            "sports", "nfl", "death metal", "metal", "hard rock", "alternative", "indie",
+            "punk", "emo", "classic rock", "prog rock", "50s", "60s", "70s", "80s",
+            "disco", "hip-hop", "rap", "r&b", "soul", "funk", "ambient", "chillout",
+            "lounge", "electronic", "techno", "house", "dance", "country", "bluegrass",
+            "folk", "acoustic", "jazz", "blues", "classical", "opera", "reggae", "ska",
+            "latin", "salsa", "k-pop", "world", "top 40", "pop", "hits", "eclectic",
+            "variety", "rock", "completely unknown tag"
+        };
+
+        foreach (var input in testInputs)
+        {
+            var result = GenreNormalizer.Normalize(input);
+            Assert.True(canonicalSet.Contains(result), $"Rule output \"{result}\" (from input \"{input}\") is not in AllCanonical");
+        }
+    }
 }

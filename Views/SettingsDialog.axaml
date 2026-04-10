@@ -43,6 +43,20 @@
 					<CheckBox x:Name="MinimizeToTrayCheck" Content="Minimize to system tray on close" />
 					<CheckBox x:Name="RememberLastTrackCheck" Content="Remember last played track" />
 					<CheckBox x:Name="ShowIgnoredCheck" Content="Show Ignored section in sidebar" />
+
+					<!-- Bad Format quality criteria -->
+					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<StackPanel Spacing="8">
+							<TextBlock Text="Bad Format Detection" FontWeight="Bold" FontSize="13" />
+							<TextBlock Text="Flag music tracks that match any of these criteria:" FontSize="11" Opacity="0.6" />
+							<CheckBox x:Name="BadFormatShowCheck" Content="Show Bad Format section in sidebar" />
+							<CheckBox x:Name="BadFormatNoTitleCheck" Content="Missing title metadata" />
+							<CheckBox x:Name="BadFormatNoArtistCheck" Content="Missing artist metadata" />
+							<CheckBox x:Name="BadFormatNoYearCheck" Content="Missing year metadata" />
+							<CheckBox x:Name="BadFormatNoAlbumArtCheck" Content="Missing album art" />
+							<CheckBox x:Name="BadFormatLossyCheck" Content="Lossy formats (.mp3, .wma, .aac, .ogg, .m4a)" />
+						</StackPanel>
+					</Border>
 				</StackPanel>
 			</TabItem>
 

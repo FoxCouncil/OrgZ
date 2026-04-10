@@ -401,6 +401,72 @@ public class PlaybackContextTests
         Assert.Equal(1, playing);
     }
 
+    // -- Shuffle mid-playback --
+
+    [Fact]
+    public void SetShuffle_OnMidPlayback_PinsCurrentAndPreservesAllTracks()
+    {
+        var list = MakeList(10);
+        var ctx = new PlaybackContext(list, list[0]);
+        ctx.MoveNext(); // now at index 1
+        ctx.MoveNext(); // now at index 2
+
+        var currentBefore = ctx.CurrentItem;
+
+        ctx.SetShuffle(true);
+
+        Assert.Equal(currentBefore, ctx.CurrentItem);
+        Assert.Equal(0, ctx.CurrentIndex);
+        Assert.Equal(10, ctx.Playlist.Count);
+        Assert.True(ctx.IsShuffled);
+    }
+
+    [Fact]
+    public void SetShuffle_OffMidPlayback_RestoresOriginalOrderAndFindsCurrentPosition()
+    {
+        var list = MakeList(10);
+        var ctx = new PlaybackContext(list, list[3], shuffle: true);
+
+        // Advance a few in shuffled order
+        ctx.MoveNext();
+        ctx.MoveNext();
+        var currentItem = ctx.CurrentItem;
+
+        ctx.SetShuffle(false);
+
+        // Current item should still be the same track
+        Assert.Equal(currentItem, ctx.CurrentItem);
+        Assert.False(ctx.IsShuffled);
+        // Original order restored
+        for (int i = 0; i < list.Count; i++)
+        {
+            Assert.Equal(list[i], ctx.Playlist[i]);
+        }
+        // CurrentIndex should point to the right position in the original order
+        Assert.Equal(list.IndexOf(currentItem), ctx.CurrentIndex);
+    }
+
+    [Fact]
+    public void SetShuffle_OnThenOff_FullCycle_NoTracksLost()
+    {
+        var list = MakeList(20);
+        var ctx = new PlaybackContext(list, list[5]);
+
+        ctx.SetShuffle(true);
+        ctx.MoveNext();
+        ctx.MoveNext();
+        ctx.MoveNext();
+
+        ctx.SetShuffle(false);
+
+        // Every original track must still be present
+        foreach (var item in list)
+        {
+            Assert.Contains(item, ctx.Playlist);
+        }
+        Assert.Equal(20, ctx.Playlist.Count);
+    }
+
     // -- Upcoming list maintenance --
 
     [Fact]

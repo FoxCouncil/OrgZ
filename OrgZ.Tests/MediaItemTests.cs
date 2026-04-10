@@ -130,6 +130,103 @@ public class MediaItemTests
         Assert.Equal(expected, item.NormalizedGenre);
     }
 
+    // -- FormatIssues --
+
+    [Fact]
+    public void FormatIssues_CleanTrack_ReturnsEmpty()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Title = "Song", Artist = "Artist", Year = 2020,
+            HasAlbumArt = true, Extension = ".flac"
+        };
+        Assert.Equal("", item.FormatIssues);
+    }
+
+    [Fact]
+    public void FormatIssues_MissingTitle_Flagged()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Artist = "Artist", Year = 2020,
+            HasAlbumArt = true, Extension = ".flac"
+        };
+        Assert.Contains("No Title", item.FormatIssues);
+    }
+
+    [Fact]
+    public void FormatIssues_MissingArtist_Flagged()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Title = "Song", Year = 2020,
+            HasAlbumArt = true, Extension = ".flac"
+        };
+        Assert.Contains("No Artist", item.FormatIssues);
+    }
+
+    [Fact]
+    public void FormatIssues_MissingYear_Flagged()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Title = "Song", Artist = "Artist",
+            HasAlbumArt = true, Extension = ".flac"
+        };
+        Assert.Contains("No Year", item.FormatIssues);
+    }
+
+    [Fact]
+    public void FormatIssues_MissingAlbumArt_Flagged()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Title = "Song", Artist = "Artist", Year = 2020,
+            HasAlbumArt = false, Extension = ".flac"
+        };
+        Assert.Contains("No Album Art", item.FormatIssues);
+    }
+
+    [Fact]
+    public void FormatIssues_LossyFormat_Flagged()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Title = "Song", Artist = "Artist", Year = 2020,
+            HasAlbumArt = true, Extension = ".mp3"
+        };
+        Assert.Contains("Lossy Format (.mp3)", item.FormatIssues);
+    }
+
+    [Fact]
+    public void FormatIssues_MultipleIssues_CommaJoined()
+    {
+        var item = new MediaItem
+        {
+            Id = "x", Kind = MediaKind.Music,
+            Extension = ".mp3"
+        };
+        var issues = item.FormatIssues;
+        Assert.Contains("No Title", issues);
+        Assert.Contains("No Artist", issues);
+        Assert.Contains("No Year", issues);
+        Assert.Contains("Lossy Format", issues);
+        Assert.Contains(", ", issues);
+    }
+
+    [Fact]
+    public void FormatIssues_RadioItem_AlwaysEmpty()
+    {
+        var item = new MediaItem { Id = "x", Kind = MediaKind.Radio };
+        Assert.Equal("", item.FormatIssues);
+    }
+
     // -- RatingDisplay --
 
     [Theory]

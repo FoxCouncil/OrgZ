@@ -24,4 +24,5 @@ public record ColumnDef
     public bool CanUserSort { get; init; } = true;
     public bool CanUserResize { get; init; } = true;
     public bool CanUserReorder { get; init; } = true;
+    public string? StringFormat { get; init; }
 }
