@@ -621,7 +621,7 @@ public partial class MainWindow : Window
                             HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Center,
                         };
-                        tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath));
+                        tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
                         return tb;
                     }),
                 },

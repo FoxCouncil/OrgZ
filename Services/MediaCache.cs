@@ -149,6 +149,17 @@ public static class MediaCache
                 );
 
                 CREATE INDEX IF NOT EXISTS IX_PlaylistTracks_PlaylistId ON PlaylistTracks(PlaylistId);
+
+                CREATE TABLE IF NOT EXISTS CdMetadataCache (
+                    DiscId      TEXT PRIMARY KEY,
+                    ReleaseMbid TEXT,
+                    Artist      TEXT,
+                    Album       TEXT,
+                    Year        INTEGER,
+                    TracksJson  TEXT,
+                    CoverArt    BLOB,
+                    CachedAt    TEXT NOT NULL
+                );
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -986,4 +997,69 @@ public static class MediaCache
     }
 
     #endregion
+
+    #region CD Metadata Cache
+
+    public static CachedCdMetadata? GetCdMetadata(string discId)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt FROM CdMetadataCache WHERE DiscId = @id";
+        cmd.Parameters.AddWithValue("@id", discId);
+
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        return new CachedCdMetadata
+        {
+            DiscId = discId,
+            ReleaseMbid = reader.IsDBNull(0) ? null : reader.GetString(0),
+            Artist = reader.IsDBNull(1) ? null : reader.GetString(1),
+            Album = reader.IsDBNull(2) ? null : reader.GetString(2),
+            Year = reader.IsDBNull(3) ? null : (uint?)reader.GetInt32(3),
+            TracksJson = reader.IsDBNull(4) ? null : reader.GetString(4),
+            CoverArt = reader.IsDBNull(5) ? null : (byte[])reader[5],
+        };
+    }
+
+    public static void SaveCdMetadata(CachedCdMetadata meta)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT OR REPLACE INTO CdMetadataCache
+                (DiscId, ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, CachedAt)
+            VALUES
+                (@id, @mbid, @artist, @album, @year, @tracks, @art, @now)
+            """;
+        cmd.Parameters.AddWithValue("@id", meta.DiscId);
+        cmd.Parameters.AddWithValue("@mbid", (object?)meta.ReleaseMbid ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@artist", (object?)meta.Artist ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@album", (object?)meta.Album ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@year", meta.Year.HasValue ? (object)(int)meta.Year.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@tracks", (object?)meta.TracksJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@art", (object?)meta.CoverArt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+    }
+
+    #endregion
+}
+
+public class CachedCdMetadata
+{
+    public string DiscId { get; set; } = "";
+    public string? ReleaseMbid { get; set; }
+    public string? Artist { get; set; }
+    public string? Album { get; set; }
+    public uint? Year { get; set; }
+    public string? TracksJson { get; set; }
+    public byte[]? CoverArt { get; set; }
 }

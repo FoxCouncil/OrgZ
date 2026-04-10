@@ -42,6 +42,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private System.Threading.Timer? _cdPollTimer;
     private readonly List<MediaItem> _cdTracks = [];
     private bool _cdScanning;
+    private Bitmap? _cdCoverArt;
 
     private bool isSeeking = false;
 
@@ -1119,15 +1120,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectedItem = track;
 
         CurrentTrackLine1 = track.Title ?? "Unknown Track";
-        CurrentTrackLine2 = track.Album ?? "";
+        CurrentTrackLine2 = !string.IsNullOrWhiteSpace(track.Artist)
+            ? (string.IsNullOrWhiteSpace(track.Album) ? track.Artist : $"{track.Artist} \u2014 {track.Album}")
+            : track.Album ?? "";
         CurrentTrackDuration = track.Duration?.ToString(@"mm\:ss") ?? "--:--";
         CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
 
-        CurrentAlbumArt?.Dispose();
-        CurrentAlbumArt = null;
+        CurrentAlbumArt = _cdCoverArt;
 
 #if WINDOWS
-        _smtcService?.UpdateMetadata(track.Title, track.Artist, null, null);
+        _smtcService?.UpdateMetadata(track.Title, track.Artist, track.Album, null);
 #endif
 
         _currentMedia?.Dispose();
@@ -2776,11 +2778,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var drives = CdAudioService.GetCdDrivesWithMedia();
 
-            // Check for ejected discs — if a drive that had tracks is now gone or empty
+            // Check for ejected discs
             if (_cdTracks.Count > 0)
             {
                 var activeDriveIds = drives.Select(d => d.Name.TrimEnd('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                // ID format is "cd:F::1" — extract drive path between first "cd:" and the last ":"
                 var trackedDrives = _cdTracks
                     .Select(t => { var s = t.Id[3..]; return s[..s.LastIndexOf(':')]; })
                     .Distinct()
@@ -2790,21 +2791,29 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 {
                     if (!activeDriveIds.Contains(driveId))
                     {
-                        // Drive disappeared
+                        // Stop playback if playing a CD track from this drive
+                        if (CurrentPlayingItem?.Source == "cdda" && CurrentPlayingItem.Id.StartsWith($"cd:{driveId}:"))
+                        {
+                            ClearPlayback();
+                        }
+
                         _allItems.RemoveAll(i => i.Id.StartsWith($"cd:{driveId}:"));
                         _cdTracks.RemoveAll(t => t.Id.StartsWith($"cd:{driveId}:"));
+
                         var toRemove = DeviceItems.FirstOrDefault(d => d.Name.Contains(driveId));
                         if (toRemove != null)
                         {
                             DeviceItems.Remove(toRemove);
                         }
-                        // Drive gone — clean up
+
+                        _cdCoverArt = null;
                     }
                 }
 
                 if (_cdTracks.Count == 0 && SelectedSidebarItem?.ViewConfigKey == "CdAudio")
                 {
                     SelectedSidebarItem = LibraryItems[0];
+                    ApplyFilter();
                 }
             }
 
@@ -2818,20 +2827,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"CD poll: media detected on {driveId}, reading TOC...");
+                var discInfo = await CdAudioService.ReadDiscAsync(_vlc, drive);
 
-                var tracks = await Task.Run(() => CdAudioService.ReadDiscAsync(_vlc, drive));
-                System.Diagnostics.Debug.WriteLine($"CD poll: {driveId} → {tracks.Count} track(s)");
-
-                if (tracks.Count == 0)
+                if (discInfo.Tracks.Count == 0)
                 {
                     continue;
                 }
 
-                _cdTracks.AddRange(tracks);
-                _allItems.AddRange(tracks);
+                _cdTracks.AddRange(discInfo.Tracks);
+                _allItems.AddRange(discInfo.Tracks);
 
-                var label = tracks[0].Album ?? $"Audio CD ({driveId})";
+                var label = discInfo.Tracks[0].Album ?? $"Audio CD ({driveId})";
 
                 DeviceItems.Add(new SidebarItem
                 {
@@ -2841,6 +2847,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     IsEnabled = true,
                     ViewConfigKey = "CdAudio",
                 });
+
+                // Store cover art for playback display
+                if (discInfo.CoverArtBytes != null)
+                {
+                    _cdCoverArt = BitmapFromBytes(discInfo.CoverArtBytes);
+                }
 
                 ApplyFilter();
             }
