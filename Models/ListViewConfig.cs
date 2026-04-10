@@ -235,7 +235,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
                 new ColumnDef { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40 },
                 new ColumnDef { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, StringFormat = "mm\\:ss" },
             ],
             BaseFilter = item => item.Source == "cdda",
             SearchFilter = (item, search) =>
