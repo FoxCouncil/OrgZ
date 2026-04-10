@@ -8,13 +8,14 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using OrgZ.ViewModels;
-using Projektanker.Icons.Avalonia;
+using Optris.Icons.Avalonia;
 
 namespace OrgZ.Views;
 
@@ -32,8 +33,10 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
     private bool _groupedDataGridInitialized;
 
-    private const string MediaItemDragFormat = "OrgZ.MediaItem";
-    private const string PlaylistRowDragFormat = "OrgZ.PlaylistRowIndex";
+    internal static MediaItem? DraggedMediaItem;
+    private static int _draggedPlaylistRowIndex = -1;
+    private static readonly DataFormat<string> PlaylistRowDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.PlaylistRowIndex");
+    private PointerPressedEventArgs? _gridPressEvent;
     private Point? _gridDragOrigin;
     private MediaItem? _gridDragItem;
     private int _gridDragRowIndex = -1;
@@ -567,6 +570,8 @@ public partial class MainWindow : Window
                             Value = "fa-regular fa-star",
                             FontSize = 12,
                             Opacity = 0.15,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
                         };
                         starEmpty.Bind(IsVisibleProperty, new Binding("!IsFavorite"));
 
@@ -575,6 +580,8 @@ public partial class MainWindow : Window
                             Value = "fa-solid fa-star",
                             FontSize = 12,
                             Foreground = new SolidColorBrush(Colors.Gold),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
                         };
                         starFilled.Bind(IsVisibleProperty, new Binding("IsFavorite"));
 
@@ -582,6 +589,7 @@ public partial class MainWindow : Window
                         {
                             Width = 14,
                             Height = 14,
+                            VerticalAlignment = VerticalAlignment.Center,
                             Children = { starEmpty, starFilled },
                         };
 
@@ -628,14 +636,14 @@ public partial class MainWindow : Window
                             VerticalAlignment = VerticalAlignment.Center,
                             Margin = new Thickness(8, 0),
                         };
-                        tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath));
+                        tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
                         return tb;
                     }),
                 },
                 _ => new DataGridTextColumn
                 {
                     Header = def.Header,
-                    Binding = new Binding(def.BindingPath),
+                    Binding = new Binding(def.BindingPath) { StringFormat = def.StringFormat },
                 },
             };
 
@@ -991,20 +999,19 @@ public partial class MainWindow : Window
         _gridDragOrigin = e.GetPosition(MainDataGrid);
         _gridDragItem = item;
         _gridDragRowIndex = row.Index;
+        _gridPressEvent = e;
     }
 
     private async void MainDataGrid_PointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_gridDragOrigin == null || _gridDragItem == null)
+        if (_gridDragOrigin == null || _gridDragItem == null || _gridPressEvent == null)
         {
             return;
         }
 
         if (!e.GetCurrentPoint(MainDataGrid).Properties.IsLeftButtonPressed)
         {
-            _gridDragOrigin = null;
-            _gridDragItem = null;
-            _gridDragRowIndex = -1;
+            ResetGridDragState();
             return;
         }
 
@@ -1016,33 +1023,53 @@ public partial class MainWindow : Window
             return;
         }
 
-        var data = new DataObject();
-        data.Set(MediaItemDragFormat, _gridDragItem);
+        DraggedMediaItem = _gridDragItem;
+        _draggedPlaylistRowIndex = _gridDragRowIndex;
 
-        // If currently viewing a playlist, also embed the row index so the grid can accept the drop for reordering
+        var data = new DataTransfer();
+        data.Add(DataTransferItem.Create(Sidebar.MediaItemDragFormat, "media"));
+
         if (_viewModel.ActivePlaylistId.HasValue && _gridDragRowIndex >= 0)
         {
-            data.Set(PlaylistRowDragFormat, _gridDragRowIndex);
+            data.Add(DataTransferItem.Create(PlaylistRowDragFormat, "row"));
         }
 
-        _gridDragOrigin = null;
-        _gridDragItem = null;
-        _gridDragRowIndex = -1;
+        // Include the actual file so external apps (Telegram, Explorer, etc.) receive it as a file drop
+        if (_gridDragItem?.FilePath != null && File.Exists(_gridDragItem.FilePath))
+        {
+            var storage = StorageProvider;
+            var file = await storage.TryGetFileFromPathAsync(new Uri(_gridDragItem.FilePath));
+            if (file != null)
+            {
+                data.Add(DataTransferItem.CreateFile(file));
+            }
+        }
 
-        await DragDrop.DoDragDrop(e, data, DragDropEffects.Move | DragDropEffects.Copy);
+        var pressEvent = _gridPressEvent;
+        ResetGridDragState();
+
+        await DragDrop.DoDragDropAsync(pressEvent, data, DragDropEffects.Move | DragDropEffects.Copy);
+        DraggedMediaItem = null;
+        _draggedPlaylistRowIndex = -1;
     }
 
     private void MainDataGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        ResetGridDragState();
+    }
+
+    private void ResetGridDragState()
+    {
         _gridDragOrigin = null;
         _gridDragItem = null;
         _gridDragRowIndex = -1;
+        _gridPressEvent = null;
     }
 
     private void MainDataGrid_DragOver(object? sender, DragEventArgs e)
     {
         // Only accept playlist-row drags, and only when we're currently viewing the same playlist
-        if (!_viewModel.ActivePlaylistId.HasValue || !e.Data.Contains(PlaylistRowDragFormat))
+        if (!_viewModel.ActivePlaylistId.HasValue || !e.DataTransfer.Contains(PlaylistRowDragFormat))
         {
             e.DragEffects = DragDropEffects.None;
             return;
@@ -1054,12 +1081,13 @@ public partial class MainWindow : Window
 
     private void MainDataGrid_Drop(object? sender, DragEventArgs e)
     {
-        if (!_viewModel.ActivePlaylistId.HasValue || !e.Data.Contains(PlaylistRowDragFormat))
+        if (!_viewModel.ActivePlaylistId.HasValue || !e.DataTransfer.Contains(PlaylistRowDragFormat))
         {
             return;
         }
 
-        if (e.Data.Get(PlaylistRowDragFormat) is not int fromIndex)
+        var fromIndex = _draggedPlaylistRowIndex;
+        if (fromIndex < 0)
         {
             return;
         }

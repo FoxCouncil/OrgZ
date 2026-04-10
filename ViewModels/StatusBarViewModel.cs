@@ -30,4 +30,17 @@ internal partial class StatusBarViewModel : ObservableObject
 
     [ObservableProperty]
     private int _errorCount;
+
+    // Generic stats for non-Music/Radio views (Favorites, Playlists, Ignored, Bad Format)
+    [ObservableProperty]
+    private string _itemCount = "0";
+
+    [ObservableProperty]
+    private string _itemLabel = "items";
+
+    [ObservableProperty]
+    private string _itemDuration = "";
+
+    [ObservableProperty]
+    private bool _hasGenericStats;
 }
