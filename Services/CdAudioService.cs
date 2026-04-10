@@ -5,9 +5,23 @@ using LibVLCSharp.Shared;
 
 namespace OrgZ.Services;
 
+public class CdDiscInfo
+{
+    public string DrivePath { get; set; } = "";
+    public int FirstTrack { get; set; }
+    public int LastTrack { get; set; }
+    public int[] TrackOffsets { get; set; } = [];
+    public int LeadOutOffset { get; set; }
+    public string? DiscId { get; set; }
+    public string? TocString { get; set; }
+    public string? ReleaseMbid { get; set; }
+    public byte[]? CoverArtBytes { get; set; }
+    public List<MediaItem> Tracks { get; set; } = [];
+}
+
 /// <summary>
-/// Detects audio CDs in optical drives and reads the table of contents via LibVLC.
-/// Each track becomes a MediaItem with a cdda:// URI as the StreamUrl.
+/// Detects audio CDs in optical drives and reads the table of contents via Win32 IOCTL.
+/// Computes MusicBrainz DiscID and enriches tracks with metadata from MusicBrainz + Cover Art Archive.
 /// </summary>
 public static class CdAudioService
 {
@@ -88,46 +102,54 @@ public static class CdAudioService
     /// </summary>
     public static List<DriveInfo> GetCdDrivesWithMedia()
     {
-        var all = GetAllCdDrives();
-        System.Diagnostics.Debug.WriteLine($"CdAudio: {all.Count} CD-ROM drive(s): {string.Join(", ", all.Select(d => d.Name))}");
-        foreach (var d in all)
-        {
-            var has = DriveHasMedia(d);
-            System.Diagnostics.Debug.WriteLine($"CdAudio:   {d.Name} → HasMedia={has}");
-        }
-        return all.Where(DriveHasMedia).ToList();
+        return GetAllCdDrives().Where(DriveHasMedia).ToList();
     }
 
     /// <summary>
     /// Reads the TOC from an audio CD. On Windows, uses IOCTL_CDROM_READ_TOC for instant
     /// reliable track enumeration. Builds cdda:// URIs for LibVLC playback.
     /// </summary>
-    public static Task<List<MediaItem>> ReadDiscAsync(LibVLC vlc, DriveInfo drive)
+    public static async Task<CdDiscInfo> ReadDiscAsync(LibVLC vlc, DriveInfo drive)
     {
-        var tracks = new List<MediaItem>();
         var drivePath = drive.Name.TrimEnd('\\', '/');
 
-        string label;
+        string volumeLabel;
         try
         {
-            label = drive.VolumeLabel;
+            volumeLabel = drive.VolumeLabel;
         }
         catch
         {
-            label = "";
+            volumeLabel = "";
         }
 
-        label = string.IsNullOrWhiteSpace(label)
-            ? $"Audio CD ({drivePath})"
-            : $"{label} ({drivePath})";
+        var info = new CdDiscInfo { DrivePath = drivePath };
 
 #if WINDOWS
-        var tocTracks = ReadTocWin32(drivePath);
-        System.Diagnostics.Debug.WriteLine($"CdAudio: TOC read from {drivePath}: {tocTracks.Count} track(s)");
-
-        foreach (var (trackNum, duration) in tocTracks)
+        var tocResult = ReadTocWin32(drivePath);
+        if (tocResult == null)
         {
-            tracks.Add(new MediaItem
+            return info;
+        }
+
+        info.FirstTrack = tocResult.Value.FirstTrack;
+        info.LastTrack = tocResult.Value.LastTrack;
+        info.TrackOffsets = tocResult.Value.TrackOffsets;
+        info.LeadOutOffset = tocResult.Value.LeadOutOffset;
+
+
+        // Compute MusicBrainz DiscID
+        info.DiscId = DiscIdService.ComputeDiscId(info.FirstTrack, info.LastTrack, info.TrackOffsets, info.LeadOutOffset);
+        info.TocString = DiscIdService.BuildTocString(info.FirstTrack, info.LastTrack, info.TrackOffsets, info.LeadOutOffset);
+        System.Diagnostics.Debug.WriteLine($"CdAudio: DiscID = {info.DiscId}");
+
+        var label = string.IsNullOrWhiteSpace(volumeLabel)
+            ? $"Audio CD ({drivePath})"
+            : $"{volumeLabel} ({drivePath})";
+
+        foreach (var (trackNum, duration) in tocResult.Value.Tracks)
+        {
+            info.Tracks.Add(new MediaItem
             {
                 Id = $"cd:{drivePath}:{trackNum}",
                 Kind = MediaKind.Music,
@@ -139,26 +161,165 @@ public static class CdAudioService
                 Source = "cdda",
             });
         }
+
+        // Look up metadata via MusicBrainz
+        await EnrichFromMusicBrainzAsync(info);
 #endif
 
-        return Task.FromResult(tracks);
+        return info;
+    }
+
+    private static async Task EnrichFromMusicBrainzAsync(CdDiscInfo info)
+    {
+        if (string.IsNullOrEmpty(info.DiscId))
+        {
+            return;
+        }
+
+        // Check cache first
+        var cached = MediaCache.GetCdMetadata(info.DiscId);
+        if (cached != null)
+        {
+
+            ApplyCachedMetadata(info, cached);
+            return;
+        }
+
+        // Query MusicBrainz
+
+        var result = await MusicBrainzService.LookupByDiscIdAsync(info.DiscId);
+
+        if (result == null && !string.IsNullOrEmpty(info.TocString))
+        {
+
+            result = await MusicBrainzService.LookupByTocAsync(info.TocString);
+        }
+
+        if (result == null)
+        {
+
+            return;
+        }
+
+        System.Diagnostics.Debug.WriteLine($"CdAudio: matched → {result.Artist} — {result.Title} ({result.Year})");
+        info.ReleaseMbid = result.ReleaseMbid;
+
+        // Fetch cover art
+        byte[]? coverArt = null;
+        if (!string.IsNullOrEmpty(result.ReleaseMbid))
+        {
+            coverArt = await MusicBrainzService.FetchCoverArtAsync(result.ReleaseMbid);
+        }
+
+        // Cache the result
+        var tracksJson = System.Text.Json.JsonSerializer.Serialize(result.Tracks);
+        MediaCache.SaveCdMetadata(new CachedCdMetadata
+        {
+            DiscId = info.DiscId,
+            ReleaseMbid = result.ReleaseMbid,
+            Artist = result.Artist,
+            Album = result.Title,
+            Year = result.Year,
+            TracksJson = tracksJson,
+            CoverArt = coverArt,
+        });
+
+        // Apply to tracks
+        ApplyLookupResult(info, result, coverArt);
+    }
+
+    private static void ApplyCachedMetadata(CdDiscInfo info, CachedCdMetadata cached)
+    {
+        info.ReleaseMbid = cached.ReleaseMbid;
+        info.CoverArtBytes = cached.CoverArt;
+
+        if (string.IsNullOrEmpty(cached.Album))
+        {
+            return;
+        }
+
+        List<TrackInfo>? trackInfos = null;
+        if (!string.IsNullOrEmpty(cached.TracksJson))
+        {
+            trackInfos = System.Text.Json.JsonSerializer.Deserialize<List<TrackInfo>>(cached.TracksJson);
+        }
+
+        var albumLabel = cached.Album;
+        if (cached.Year.HasValue)
+        {
+            albumLabel += $" ({cached.Year})";
+        }
+        albumLabel += $" ({info.DrivePath})";
+
+        foreach (var track in info.Tracks)
+        {
+            track.Album = albumLabel;
+            track.Artist = cached.Artist;
+            if (cached.Year.HasValue)
+            {
+                track.Year = cached.Year;
+            }
+
+            var mbTrack = trackInfos?.FirstOrDefault(t => t.Position == track.Track);
+            if (mbTrack != null)
+            {
+                track.Title = mbTrack.Title;
+                if (!string.IsNullOrWhiteSpace(mbTrack.Artist))
+                {
+                    track.Artist = mbTrack.Artist;
+                }
+            }
+        }
+    }
+
+    private static void ApplyLookupResult(CdDiscInfo info, DiscLookupResult result, byte[]? coverArt)
+    {
+        info.CoverArtBytes = coverArt;
+
+        var albumLabel = result.Title;
+        if (result.Year.HasValue)
+        {
+            albumLabel += $" ({result.Year})";
+        }
+        albumLabel += $" ({info.DrivePath})";
+
+        foreach (var track in info.Tracks)
+        {
+            track.Album = albumLabel;
+            track.Artist = result.Artist;
+            if (result.Year.HasValue)
+            {
+                track.Year = result.Year;
+            }
+
+            var mbTrack = result.Tracks.FirstOrDefault(t => t.Position == track.Track);
+            if (mbTrack != null)
+            {
+                track.Title = mbTrack.Title;
+                if (!string.IsNullOrWhiteSpace(mbTrack.Artist))
+                {
+                    track.Artist = mbTrack.Artist;
+                }
+            }
+        }
     }
 
 #if WINDOWS
+    private record struct TocResult(int FirstTrack, int LastTrack, int[] TrackOffsets, int LeadOutOffset, List<(int TrackNum, TimeSpan Duration)> Tracks);
+
     /// <summary>
     /// Reads the CD table of contents via IOCTL_CDROM_READ_TOC.
-    /// Returns (trackNumber, duration) pairs. Red Book: 75 frames/second.
+    /// Returns track info + raw LBA offsets for DiscID computation.
     /// </summary>
-    private static unsafe List<(int TrackNum, TimeSpan Duration)> ReadTocWin32(string drivePath)
+    private static unsafe TocResult? ReadTocWin32(string drivePath)
     {
-        var result = new List<(int, TimeSpan)>();
         var devicePath = $@"\\.\{drivePath}";
 
         var handle = CreateFile(devicePath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
         if (handle == IntPtr.Zero || handle == new IntPtr(-1))
         {
             System.Diagnostics.Debug.WriteLine($"CdAudio: CreateFile failed for {devicePath}");
-            return result;
+            return null;
         }
 
         try
@@ -173,35 +334,92 @@ public static class CdAudioService
                 if (!ok)
                 {
                     System.Diagnostics.Debug.WriteLine($"CdAudio: IOCTL_CDROM_READ_TOC failed");
-                    return result;
+                    return null;
                 }
 
                 toc = Marshal.PtrToStructure<CDROM_TOC>(tocPtr);
-                System.Diagnostics.Debug.WriteLine($"CdAudio: TOC first={toc.FirstTrack} last={toc.LastTrack}");
 
-                int trackCount = toc.LastTrack - toc.FirstTrack + 1;
 
-                for (int i = 0; i < trackCount; i++)
+                int totalEntries = toc.LastTrack - toc.FirstTrack + 1;
+                var trackList = new List<(int, TimeSpan)>();
+                var audioOffsets = new List<int>();
+                var allOffsets = new int[totalEntries];
+                int firstAudioTrack = toc.LastTrack;
+                int lastAudioTrack = toc.FirstTrack;
+
+                // First pass: collect offsets and identify audio vs data tracks
+                // Control byte bit 2 (0x04): 0 = audio, 1 = data
+                for (int i = 0; i < totalEntries; i++)
                 {
-                    // Each TRACK_DATA is 8 bytes
-                    var offset = i * 8;
-                    var nextOffset = (i + 1) * 8;
+                    var byteOffset = i * 8;
+                    byte control = toc.TrackDataRaw[byteOffset + 1];
+                    byte min = toc.TrackDataRaw[byteOffset + 5];
+                    byte sec = toc.TrackDataRaw[byteOffset + 6];
+                    byte frm = toc.TrackDataRaw[byteOffset + 7];
+                    int lba = DiscIdService.MsfToLba(min, sec, frm);
+                    allOffsets[i] = lba;
 
-                    byte min1 = toc.TrackDataRaw[offset + 5];
-                    byte sec1 = toc.TrackDataRaw[offset + 6];
-                    byte frm1 = toc.TrackDataRaw[offset + 7];
+                    bool isData = (control & 0x04) != 0;
+                    int trackNum = toc.FirstTrack + i;
 
-                    byte min2 = toc.TrackDataRaw[nextOffset + 5];
-                    byte sec2 = toc.TrackDataRaw[nextOffset + 6];
-                    byte frm2 = toc.TrackDataRaw[nextOffset + 7];
 
-                    int startFrames = min1 * 60 * 75 + sec1 * 75 + frm1;
-                    int endFrames = min2 * 60 * 75 + sec2 * 75 + frm2;
-                    int durationFrames = endFrames - startFrames;
-
-                    var duration = TimeSpan.FromSeconds((double)durationFrames / 75.0);
-                    result.Add((toc.FirstTrack + i, duration));
+                    if (!isData)
+                    {
+                        audioOffsets.Add(lba);
+                        if (trackNum < firstAudioTrack) firstAudioTrack = trackNum;
+                        if (trackNum > lastAudioTrack) lastAudioTrack = trackNum;
+                    }
                 }
+
+                // Lead-out is the entry after the last track (track 0xAA)
+                var leadOutByte = totalEntries * 8;
+                byte loTrackNum = toc.TrackDataRaw[leadOutByte + 2];
+                byte loMin = toc.TrackDataRaw[leadOutByte + 5];
+                byte loSec = toc.TrackDataRaw[leadOutByte + 6];
+                byte loFrm = toc.TrackDataRaw[leadOutByte + 7];
+                int leadOut = DiscIdService.MsfToLba(loMin, loSec, loFrm);
+
+                if (audioOffsets.Count == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"CdAudio: no audio tracks found (data-only disc)");
+                    return null;
+                }
+
+                // For mixed-mode CDs, the DiscID lead-out is the end of the audio session,
+                // NOT the data track start or the full disc lead-out.
+                // Standard multi-session gap = 11400 frames (6750 lead-out + 4500 lead-in + 150 pre-gap).
+                // audio_session_leadout = first_data_track_start - 11400
+                const int MultiSessionGap = 11400;
+                int discIdLeadOut = leadOut;
+                for (int i = 0; i < totalEntries; i++)
+                {
+                    byte control = toc.TrackDataRaw[i * 8 + 1];
+                    if ((control & 0x04) != 0)
+                    {
+                        discIdLeadOut = allOffsets[i] - MultiSessionGap;
+
+                        break;
+                    }
+                }
+
+                // Compute durations for audio tracks only
+                for (int i = 0; i < totalEntries; i++)
+                {
+                    byte control = toc.TrackDataRaw[i * 8 + 1];
+                    if ((control & 0x04) != 0)
+                    {
+                        continue;
+                    }
+
+                    int trackNum = toc.FirstTrack + i;
+                    int endOffset = (i < totalEntries - 1) ? allOffsets[i + 1] : discIdLeadOut;
+                    int durationFrames = endOffset - allOffsets[i];
+                    var duration = TimeSpan.FromSeconds((double)durationFrames / 75.0);
+                    trackList.Add((trackNum, duration));
+                }
+
+
+                return new TocResult(firstAudioTrack, lastAudioTrack, [.. audioOffsets], discIdLeadOut, trackList);
             }
             finally
             {
@@ -212,8 +430,6 @@ public static class CdAudioService
         {
             CloseHandle(handle);
         }
-
-        return result;
     }
 #endif
 }
