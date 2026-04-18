@@ -3,6 +3,8 @@
 using Avalonia;
 using Optris.Icons.Avalonia;
 using Optris.Icons.Avalonia.FontAwesome;
+using OrgZ.Services;
+using Serilog;
 using Velopack;
 
 namespace OrgZ;
@@ -15,14 +17,29 @@ internal class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        VelopackApp.Build().Run();
+        // Logging must come up first so Velopack/Avalonia init failures are captured.
+        Logging.Initialize();
+
+        try
+        {
+            VelopackApp.Build().Run();
 
 #if WINDOWS
-        SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
-        ShortcutInstaller.EnsureShortcut();
+            SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
+            ShortcutInstaller.EnsureShortcut();
 #endif
 
-        _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "Unhandled exception escaped Program.Main");
+            throw;
+        }
+        finally
+        {
+            Logging.Shutdown();
+        }
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.

@@ -160,6 +160,7 @@ public static class MediaCache
                     CoverArt    BLOB,
                     CachedAt    TEXT NOT NULL
                 );
+
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -348,7 +349,7 @@ public static class MediaCache
         cmd.CommandText = """
             SELECT Id, Title, StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                    Country, CountryCode, Tags, Codec, Bitrate, Votes, ClickCount,
-                   IsHls, IsFavorite, LastPlayed, DateAdded,
+                   IsHls, IsFavorite, IsIgnored, LastPlayed, DateAdded,
                    Rating, PlayCount
             FROM Media WHERE Kind = 'Radio'
             """;

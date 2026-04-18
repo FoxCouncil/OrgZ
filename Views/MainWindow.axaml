@@ -207,6 +207,16 @@
 								DataContext="{Binding}"
 								IsVisible="False" />
 
+							<ContentControl DockPanel.Dock="Top"
+								Content="{Binding SelectedDevice}"
+								IsVisible="{Binding SelectedDevice, Converter={x:Static ObjectConverters.IsNotNull}}">
+								<ContentControl.ContentTemplate>
+									<DataTemplate>
+										<controls:DeviceInfoBar />
+									</DataTemplate>
+								</ContentControl.ContentTemplate>
+							</ContentControl>
+
 							<Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" IsVisible="{Binding IsDrillDownActive}">
 								<controls:BreadcrumbBar x:Name="BreadcrumbBar" Grid.Column="0" />
 								<Button Grid.Column="1" Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" HorizontalAlignment="Right" Cursor="Hand" ToolTip.Tip="Exit Browse">

@@ -24,7 +24,16 @@
         <DataTemplate x:Key="SidebarItemTemplate" x:DataType="models:SidebarItem">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
-                    <i:Icon Value="{Binding Icon}" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Panel>
+                        <Image Source="{Binding IconBitmap}"
+                               Stretch="Uniform"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding HasIconBitmap}" />
+                        <i:Icon Value="{Binding Icon}" FontSize="14"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                IsVisible="{Binding !HasIconBitmap}" />
+                    </Panel>
                 </Border>
                 <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="0,2,0,0" />
             </StackPanel>
@@ -51,7 +60,7 @@
             <ListBox DockPanel.Dock="Top"
                      x:Name="LibraryListBox"
                      ItemsSource="{Binding LibraryItems}"
-                     SelectedItem="{Binding SelectedSidebarItem, Mode=TwoWay}"
+                     SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
                      Background="Transparent"
                      BorderThickness="0"
                      Padding="0"
@@ -79,6 +88,7 @@
             <ListBox DockPanel.Dock="Top"
                      x:Name="DeviceListBox"
                      ItemsSource="{Binding DeviceItems}"
+                     SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
                      Background="Transparent"
                      BorderThickness="0"
                      Padding="0"
@@ -116,6 +126,7 @@
             <ListBox DockPanel.Dock="Top"
                      x:Name="PlaylistListBox"
                      ItemsSource="{Binding PlaylistItems}"
+                     SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
                      Background="Transparent"
                      BorderThickness="0"
                      Padding="0"
