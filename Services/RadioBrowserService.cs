@@ -100,7 +100,7 @@ public static class RadioBrowserService
         }
     }
 
-    private static List<MediaItem> ParseStations(string json)
+    internal static List<MediaItem> ParseStations(string json)
     {
         var raw = JsonSerializer.Deserialize<List<RbStation>>(json, JsonOptions);
         if (raw == null)

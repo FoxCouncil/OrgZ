@@ -3,6 +3,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Serilog;
 
 namespace OrgZ.Services;
 
@@ -13,6 +14,7 @@ namespace OrgZ.Services;
 /// </summary>
 public static class MusicBrainzService
 {
+    private static readonly ILogger _log = Logging.For("MusicBrainz");
     private static readonly HttpClient _http = new();
     private static readonly SemaphoreSlim _rateLimiter = new(1, 1);
     private static DateTime _lastRequest = DateTime.MinValue;
@@ -202,7 +204,7 @@ public static class MusicBrainzService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"MusicBrainz: {ex.Message}");
+            _log.Warning(ex, "MusicBrainz request failed");
             return null;
         }
     }

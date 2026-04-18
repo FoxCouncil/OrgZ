@@ -2,6 +2,7 @@
 
 using System.Runtime.InteropServices;
 using LibVLCSharp.Shared;
+using Serilog;
 
 namespace OrgZ.Services;
 
@@ -25,6 +26,8 @@ public class CdDiscInfo
 /// </summary>
 public static class CdAudioService
 {
+    private static readonly ILogger _log = Logging.For("CdAudio");
+
 #if WINDOWS
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFile(string fileName, uint desiredAccess, uint shareMode, IntPtr secAttr, uint creationDisposition, uint flags, IntPtr template);
@@ -141,7 +144,7 @@ public static class CdAudioService
         // Compute MusicBrainz DiscID
         info.DiscId = DiscIdService.ComputeDiscId(info.FirstTrack, info.LastTrack, info.TrackOffsets, info.LeadOutOffset);
         info.TocString = DiscIdService.BuildTocString(info.FirstTrack, info.LastTrack, info.TrackOffsets, info.LeadOutOffset);
-        System.Diagnostics.Debug.WriteLine($"CdAudio: DiscID = {info.DiscId}");
+        _log.Debug("DiscID computed: {DiscId} for {DrivePath}", info.DiscId, info.DrivePath);
 
         var label = string.IsNullOrWhiteSpace(volumeLabel)
             ? $"Audio CD ({drivePath})"
@@ -201,7 +204,7 @@ public static class CdAudioService
             return;
         }
 
-        System.Diagnostics.Debug.WriteLine($"CdAudio: matched → {result.Artist} — {result.Title} ({result.Year})");
+        _log.Information("MusicBrainz match: Artist={Artist} Title={Title} Year={Year}", result.Artist, result.Title, result.Year);
         info.ReleaseMbid = result.ReleaseMbid;
 
         // Fetch cover art
@@ -318,7 +321,7 @@ public static class CdAudioService
         var handle = CreateFile(devicePath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
         if (handle == IntPtr.Zero || handle == new IntPtr(-1))
         {
-            System.Diagnostics.Debug.WriteLine($"CdAudio: CreateFile failed for {devicePath}");
+            _log.Warning("CreateFile failed for {DevicePath} (Win32 error {Error})", devicePath, Marshal.GetLastWin32Error());
             return null;
         }
 
@@ -333,7 +336,7 @@ public static class CdAudioService
                 var ok = DeviceIoControl(handle, IOCTL_CDROM_READ_TOC, IntPtr.Zero, 0, tocPtr, tocSize, out _, IntPtr.Zero);
                 if (!ok)
                 {
-                    System.Diagnostics.Debug.WriteLine($"CdAudio: IOCTL_CDROM_READ_TOC failed");
+                    _log.Warning("IOCTL_CDROM_READ_TOC failed for {DevicePath} (Win32 error {Error})", devicePath, Marshal.GetLastWin32Error());
                     return null;
                 }
 
@@ -381,7 +384,7 @@ public static class CdAudioService
 
                 if (audioOffsets.Count == 0)
                 {
-                    System.Diagnostics.Debug.WriteLine($"CdAudio: no audio tracks found (data-only disc)");
+                    _log.Debug("No audio tracks found in TOC (data-only disc) for {DevicePath}", devicePath);
                     return null;
                 }
 

@@ -34,18 +34,41 @@ public partial class Sidebar : UserControl
             return;
         }
 
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
         var menu = new Avalonia.Controls.ContextMenu();
 
-        var rip = new Avalonia.Controls.MenuItem { Header = "Rip CD...", IsEnabled = false };
-        menu.Items.Add(rip);
-
-        var eject = new Avalonia.Controls.MenuItem { Header = "Eject" };
-        eject.Click += (_, _) =>
+        // iPod / Rockbox / GenericPlayer devices use "Device:{mountPath}" as their view key;
+        // CD audio uses the fixed "CdAudio" key. Branch the menu accordingly.
+        if (sb.ViewConfigKey?.StartsWith("Device:") == true)
         {
-            // Future: eject disc via platform API
-        };
-        eject.IsEnabled = false;
-        menu.Items.Add(eject);
+            var importLib = new Avalonia.Controls.MenuItem { Header = "Import Into Library...", IsEnabled = false };
+            menu.Items.Add(importLib);
+
+            var importDevice = new Avalonia.Controls.MenuItem { Header = "Import Into iPod...", IsEnabled = false };
+            menu.Items.Add(importDevice);
+
+            menu.Items.Add(new Avalonia.Controls.Separator());
+
+            var refresh = new Avalonia.Controls.MenuItem { Header = "Refresh Device Info" };
+            refresh.Click += (_, _) => vm.RefreshDeviceInfo(sb);
+            menu.Items.Add(refresh);
+
+            var eject = new Avalonia.Controls.MenuItem { Header = "Eject" };
+            eject.Click += (_, _) => vm.EjectDevice(sb);
+            menu.Items.Add(eject);
+        }
+        else
+        {
+            var rip = new Avalonia.Controls.MenuItem { Header = "Rip CD...", IsEnabled = false };
+            menu.Items.Add(rip);
+
+            var eject = new Avalonia.Controls.MenuItem { Header = "Eject", IsEnabled = false };
+            menu.Items.Add(eject);
+        }
 
         listBoxItem.ContextMenu = menu;
     }
@@ -150,12 +173,17 @@ public partial class Sidebar : UserControl
             return;
         }
 
-        if (LibraryListBox.SelectedItem != null)
+        if (LibraryListBox.SelectedItem is SidebarItem item)
         {
             _suppressSelectionChange = true;
             DeviceListBox.SelectedItem = null;
             PlaylistListBox.SelectedItem = null;
             _suppressSelectionChange = false;
+
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.SelectedSidebarItem = item;
+            }
         }
     }
 

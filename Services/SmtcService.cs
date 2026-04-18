@@ -4,6 +4,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Serilog;
 using IStream = System.Runtime.InteropServices.ComTypes.IStream;
 
 namespace OrgZ.Services;
@@ -319,6 +320,8 @@ internal static unsafe class ButtonPressedHandlerFactory
 
 internal sealed class SmtcService : IDisposable
 {
+    private static readonly ILogger _log = Logging.For<SmtcService>();
+
     private static readonly Guid IID_IRandomAccessStream = new("905A0FE1-BC53-11DF-8C49-001E4FC686DA");
 
     private ISystemMediaTransportControls? _smtc;
@@ -343,7 +346,7 @@ internal sealed class SmtcService : IDisposable
         {
             // Ensure WinRT is initialized on this thread
             int roHr = SmtcNativeMethods.RoInitialize(0); // RO_INIT_SINGLETHREADED
-            System.Diagnostics.Debug.WriteLine($"SMTC: RoInitialize hr=0x{roHr:X8}");
+            _log.Debug("RoInitialize hr=0x{Hr:X8}", roHr);
 
             int hr = SmtcNativeMethods.WindowsCreateString("Windows.Media.SystemMediaTransportControls", "Windows.Media.SystemMediaTransportControls".Length, out IntPtr hClassName);
             if (hr < 0)
@@ -356,7 +359,7 @@ internal sealed class SmtcService : IDisposable
             {
                 var interopIid = typeof(ISystemMediaTransportControlsInterop).GUID;
                 hr = SmtcNativeMethods.RoGetActivationFactory(hClassName, ref interopIid, out IntPtr factoryPtr);
-                System.Diagnostics.Debug.WriteLine($"SMTC: RoGetActivationFactory hr=0x{hr:X8} ptr=0x{factoryPtr:X}");
+                _log.Debug("RoGetActivationFactory hr=0x{Hr:X8} ptr=0x{Ptr:X}", hr, factoryPtr);
                 if (hr < 0)
                 {
                     InitDiagnostics = $"SMTC: RoGetActivationFactory failed hr=0x{hr:X8}";
@@ -369,9 +372,9 @@ internal sealed class SmtcService : IDisposable
                     try
                     {
                         var smtcIid = typeof(ISystemMediaTransportControls).GUID;
-                        System.Diagnostics.Debug.WriteLine($"SMTC: GetForWindow hwnd=0x{hwnd:X} smtcIid={smtcIid}");
+                        _log.Debug("GetForWindow hwnd=0x{Hwnd:X} smtcIid={SmtcIid}", hwnd, smtcIid);
                         hr = interop.GetForWindow(hwnd, ref smtcIid, out IntPtr smtcPtr);
-                        System.Diagnostics.Debug.WriteLine($"SMTC: GetForWindow hr=0x{hr:X8} ptr=0x{smtcPtr:X}");
+                        _log.Debug("GetForWindow hr=0x{Hr:X8} ptr=0x{Ptr:X}", hr, smtcPtr);
                         if (hr < 0)
                         {
                             InitDiagnostics = $"SMTC: GetForWindow failed hr=0x{hr:X8}";
@@ -397,7 +400,7 @@ internal sealed class SmtcService : IDisposable
             }
 
             hr = _smtc.put_IsEnabled(1);
-            System.Diagnostics.Debug.WriteLine($"SMTC: put_IsEnabled hr=0x{hr:X8}");
+            _log.Debug("put_IsEnabled hr=0x{Hr:X8}", hr);
             _smtc.put_IsPlayEnabled(1);
             _smtc.put_IsPauseEnabled(1);
             _smtc.put_IsNextEnabled(0);
@@ -406,10 +409,10 @@ internal sealed class SmtcService : IDisposable
             // Set initial playback status and call Update() on the display updater
             // so Windows registers our SMTC session (required per MSDN docs)
             hr = _smtc.put_PlaybackStatus((int)MediaPlaybackStatus.Closed);
-            System.Diagnostics.Debug.WriteLine($"SMTC: put_PlaybackStatus(Closed) hr=0x{hr:X8}");
+            _log.Debug("put_PlaybackStatus(Closed) hr=0x{Hr:X8}", hr);
 
             hr = _smtc.get_DisplayUpdater(out IntPtr initUpdaterPtr);
-            System.Diagnostics.Debug.WriteLine($"SMTC: get_DisplayUpdater hr=0x{hr:X8} ptr=0x{initUpdaterPtr:X}");
+            _log.Debug("get_DisplayUpdater hr=0x{Hr:X8} ptr=0x{Ptr:X}", hr, initUpdaterPtr);
             if (hr >= 0 && initUpdaterPtr != IntPtr.Zero)
             {
                 var initUpdater = (ISmtcDisplayUpdater)Marshal.GetObjectForIUnknown(initUpdaterPtr);
@@ -417,9 +420,9 @@ internal sealed class SmtcService : IDisposable
                 try
                 {
                     hr = initUpdater.put_Type((int)MediaPlaybackType.Music);
-                    System.Diagnostics.Debug.WriteLine($"SMTC: put_Type(Music) hr=0x{hr:X8}");
+                    _log.Debug("put_Type(Music) hr=0x{Hr:X8}", hr);
                     hr = initUpdater.Update();
-                    System.Diagnostics.Debug.WriteLine($"SMTC: Update() hr=0x{hr:X8}");
+                    _log.Debug("Update() hr=0x{Hr:X8}", hr);
                 }
                 finally
                 {
@@ -429,7 +432,7 @@ internal sealed class SmtcService : IDisposable
 
             var handlerPtr = ButtonPressedHandlerFactory.Create(OnButtonPressed);
             hr = _smtc.add_ButtonPressed(handlerPtr, out _buttonPressedToken);
-            System.Diagnostics.Debug.WriteLine($"SMTC: add_ButtonPressed hr=0x{hr:X8} token={_buttonPressedToken}");
+            _log.Debug("add_ButtonPressed hr=0x{Hr:X8} token={Token}", hr, _buttonPressedToken);
             if (hr < 0)
             {
                 ButtonPressedHandlerFactory.Destroy();
@@ -437,13 +440,13 @@ internal sealed class SmtcService : IDisposable
 
             _initialized = true;
             InitDiagnostics = "SMTC: Initialized OK";
-            System.Diagnostics.Debug.WriteLine("SMTC: Initialization complete");
+            _log.Information("SMTC initialization complete");
             return true;
         }
         catch (Exception ex)
         {
             InitDiagnostics = $"SMTC: Exception: {ex.Message}";
-            System.Diagnostics.Debug.WriteLine($"SMTC: Exception during init: {ex}");
+            _log.Error(ex, "SMTC initialization failed");
             return false;
         }
     }
@@ -458,11 +461,11 @@ internal sealed class SmtcService : IDisposable
         try
         {
             int hr = _smtc.put_PlaybackStatus((int)status);
-            System.Diagnostics.Debug.WriteLine($"SMTC: SetPlaybackStatus({status}) hr=0x{hr:X8}");
+            _log.Verbose("SetPlaybackStatus({Status}) hr=0x{Hr:X8}", status, hr);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"SMTC: SetPlaybackStatus exception: {ex.Message}");
+            _log.Warning(ex, "SetPlaybackStatus({Status}) threw", status);
         }
     }
 

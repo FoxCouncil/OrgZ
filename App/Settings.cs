@@ -7,9 +7,12 @@ namespace OrgZ;
 
 internal static class Settings
 {
-    private static readonly string SettingsFileName = "settings.json";
-    private static readonly string SettingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
-    private static readonly string SettingsFilePath = Path.Combine(SettingsDirectory, SettingsFileName);
+    private const string SettingsFileName = "settings.json";
+    private static readonly string DefaultSettingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
+
+    private static string SettingsDirectory { get; set; } = DefaultSettingsDirectory;
+    private static string SettingsFilePath { get; set; } = Path.Combine(DefaultSettingsDirectory, SettingsFileName);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -18,6 +21,21 @@ internal static class Settings
 
     private static Dictionary<string, object>? _settings;
     private static readonly Lock _lock = new();
+
+    /// <summary>
+    /// Test hook: redirect the settings file to a custom directory. Pass null to restore
+    /// the default %APPDATA%/OrgZ location. Resets the in-memory cache so the next Get
+    /// re-loads from the new path.
+    /// </summary>
+    internal static void OverrideSettingsDirectory(string? directory)
+    {
+        lock (_lock)
+        {
+            SettingsDirectory = directory ?? DefaultSettingsDirectory;
+            SettingsFilePath = Path.Combine(SettingsDirectory, SettingsFileName);
+            _settings = null;
+        }
+    }
 
     /// <summary>
     /// Loads settings from the JSON file or creates empty settings if file doesn't exist
