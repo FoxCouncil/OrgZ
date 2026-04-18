@@ -63,6 +63,65 @@ public static class ListViewConfigs
         _configs.Remove(key);
     }
 
+    public static ListViewConfig BuildDeviceConfig(string mountPath, DeviceType deviceType)
+    {
+        var source = $"device:{mountPath}";
+        var key = $"Device:{mountPath}";
+
+        var columns = deviceType == DeviceType.StockIPod
+            ? new List<ColumnDef>
+            {
+                new() { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new() { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40, Type = ColumnType.Centered },
+                new() { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+                new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new() { Header = "Genre", BindingPath = "Genre", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100 },
+                new() { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new() { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
+                new() { Header = "Plays", BindingPath = "PlayCount", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.RightAligned },
+            }
+            : new List<ColumnDef>
+            {
+                new() { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new() { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+                new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new() { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new() { Header = "Extension", BindingPath = "Extension", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
+            };
+
+        return new ListViewConfig
+        {
+            Key = key,
+            Columns = columns,
+            BaseFilter = item => item.Source == source,
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildDeviceContextMenu(),
+        };
+    }
+
+    private static List<ContextMenuItemDef> BuildDeviceContextMenu()
+    {
+        return
+        [
+            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
+            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
+            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
+            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
+        ];
+    }
+
     public static ListViewConfig BuildPlaylistConfig(int playlistId, List<string> orderedTrackIds)
     {
         var idSet = new HashSet<string>(orderedTrackIds);
