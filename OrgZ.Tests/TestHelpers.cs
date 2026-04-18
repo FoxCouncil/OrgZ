@@ -15,7 +15,8 @@ internal static class TestHelpers
         bool isFavorite = false,
         string? fileName = null,
         string? extension = null,
-        uint? year = null)
+        uint? year = null,
+        string? source = null)
     {
         return new MediaItem
         {
@@ -28,6 +29,7 @@ internal static class TestHelpers
             FileName = fileName,
             Extension = extension,
             Year = year,
+            Source = source,
         };
     }
 

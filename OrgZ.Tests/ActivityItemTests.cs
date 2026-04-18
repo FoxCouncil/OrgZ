@@ -82,4 +82,33 @@ public class ActivityItemTests
         Assert.Equal(0.5, item.Progress);
         Assert.Equal(ActivityStatus.Completed, item.Status);
     }
+
+    [Fact]
+    public void StatusIcon_default_arm_returns_question_mark_for_unknown_value()
+    {
+        // Defensive default arm — only reachable if a future enum value isn't handled
+        // or someone casts an out-of-range int. Tests it explicitly so the arm doesn't
+        // rot away undetected.
+        var item = new ActivityItem { Status = (ActivityStatus)999 };
+        Assert.Equal("fa-solid fa-question", item.StatusIcon);
+    }
+
+    [Fact]
+    public void StatusColor_default_arm_returns_grey_for_unknown_value()
+    {
+        var item = new ActivityItem { Status = (ActivityStatus)999 };
+        Assert.Equal("#888888", item.StatusColor);
+    }
+
+    [Fact]
+    public void Title_setter_raises_PropertyChanged()
+    {
+        var item = new ActivityItem();
+        var raised = new List<string?>();
+        item.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        item.Title = "Scanning iPod";
+
+        Assert.Contains(nameof(ActivityItem.Title), raised);
+    }
 }

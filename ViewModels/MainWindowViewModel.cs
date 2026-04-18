@@ -9,11 +9,14 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using LibVLCSharp.Shared;
+using Serilog;
 
 namespace OrgZ.ViewModels;
 
 internal partial class MainWindowViewModel : ObservableObject, IDisposable
 {
+    private static readonly ILogger _log = Logging.For<MainWindowViewModel>();
+
     private const string ICON_PLAY = "fa-solid fa-play";
 
     private readonly Thickness ICON_PLAY_PADDING = new(4, 0, 0, 0);
@@ -39,10 +42,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private PlaybackContext? _playbackContext;
 
-    private System.Threading.Timer? _cdPollTimer;
     private readonly List<MediaItem> _cdTracks = [];
     private bool _cdScanning;
     private Bitmap? _cdCoverArt;
+
+    private DeviceDetectionService? _deviceDetection;
+    private readonly Dictionary<string, ConnectedDevice> _connectedDevices = new(StringComparer.OrdinalIgnoreCase);
 
     private bool isSeeking = false;
 
@@ -61,6 +66,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private SidebarItem? _selectedSidebarItem;
+
+    [ObservableProperty]
+    private ConnectedDevice? _selectedDevice;
 
     internal ObservableCollection<SidebarItem> LibraryItems { get; } = [];
 
@@ -424,26 +432,37 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Find the sidebar item that matches this media kind
-        SidebarItem? target = item.Kind switch
+        SidebarItem? target = null;
+
+        // Device tracks → find the matching device sidebar entry
+        if (item.Source?.StartsWith("device:") == true)
         {
-            MediaKind.Music => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Music),
-            MediaKind.Radio => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Radio),
-            _ => null
-        };
+            var viewKey = $"Device:{item.Source["device:".Length..]}";
+            target = DeviceItems.FirstOrDefault(i => i.ViewConfigKey == viewKey);
+        }
+        // CD tracks → find the CdAudio sidebar entry
+        else if (item.Source == "cdda")
+        {
+            target = DeviceItems.FirstOrDefault(i => i.ViewConfigKey == "CdAudio");
+        }
+        // Library tracks
+        else
+        {
+            target = item.Kind switch
+            {
+                MediaKind.Music => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Music),
+                MediaKind.Radio => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Radio),
+                _ => null
+            };
+        }
 
         if (target == null)
         {
             return;
         }
 
-        // Clear search so the item is visible in the unfiltered list
         SearchText = string.Empty;
-
-        // Switch view (this triggers ApplyFilter)
         SelectedSidebarItem = target;
-
-        // Select the playing item and scroll to it
         SelectedItem = item;
         ScrollToSelectedRequested?.Invoke();
     }
@@ -464,8 +483,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedSidebarItemChanged(SidebarItem? value)
     {
+        _log.Debug("Sidebar selection changed: ViewKey={ViewKey} Name={Name} _allItems.Count={ItemCount}", value?.ViewConfigKey ?? "<null>", value?.Name ?? "<null>", _allItems.Count);
+
         StatusBar.ActiveKind = value?.Kind;
         StatusBar.HasGenericStats = value?.Kind == null && value?.ViewConfigKey != null;
+
+        // Resolve the selected device (if this sidebar entry is a portable device view)
+        if (value?.ViewConfigKey is { } key && key.StartsWith("Device:"))
+        {
+            var mountPath = key["Device:".Length..];
+            SelectedDevice = _connectedDevices.TryGetValue(mountPath, out var dev) ? dev : null;
+
+            // User actively clicked the device → persist the /.orgz/device identity record.
+            // This merges whatever we've detected live with any prior record on the mount,
+            // so stock-firmware boots and Rockbox boots accumulate a complete picture over
+            // time in a single file that travels with the iPod.
+            if (SelectedDevice != null)
+            {
+                Task.Run(() => DeviceFingerprint.PersistDeviceRecord(SelectedDevice));
+            }
+        }
+        else
+        {
+            SelectedDevice = null;
+        }
 
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
 
@@ -499,73 +540,102 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         if (_activeViewConfig == null)
         {
+            _log.Debug("ApplyFilter: _activeViewConfig is null — emptying FilteredItems");
             FilteredItems = [];
             UpdateNavigationButtons();
             return;
         }
 
-        IEnumerable<MediaItem> items = _allItems.Where(_activeViewConfig.BaseFilter);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var viewKey = _activeViewConfig.Key;
+        var startCount = _allItems.Count;
 
-        // Global ignore filter — hide ignored items from every view except the Ignored view itself
-        if (!_activeViewConfig.IncludeIgnored)
+        try
         {
-            items = items.Where(i => !i.IsIgnored);
-        }
+            // Snapshot _allItems up front so a concurrent mutation (background scan,
+            // file watcher, anything that AddRange's during render) can't throw
+            // InvalidOperationException("Collection was modified") halfway through the
+            // pipeline. _allItems should be UI-thread-only by convention, but the cost
+            // of a snapshot is one array allocation — cheap insurance against the kind
+            // of all-tabs-go-empty bug we're chasing.
+            var snapshot = _allItems.ToArray();
+            IEnumerable<MediaItem> items = snapshot.Where(_activeViewConfig.BaseFilter);
 
-        // Radio-specific filters
-        if (_activeViewConfig.ShowRadioFilterPanel)
-        {
-            if (SelectedCountry != "All")
+            // Global ignore filter — hide ignored items from every view except the Ignored view itself
+            if (!_activeViewConfig.IncludeIgnored)
             {
-                items = items.Where(s =>
-                    (s.Country?.Equals(SelectedCountry, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (s.CountryCode?.Equals(SelectedCountry, StringComparison.OrdinalIgnoreCase) ?? false));
+                items = items.Where(i => !i.IsIgnored);
             }
 
-            if (SelectedGenre != "All")
+            // Radio-specific filters
+            if (_activeViewConfig.ShowRadioFilterPanel)
             {
-                items = items.Where(s => s.NormalizedGenre == SelectedGenre);
+                if (SelectedCountry != "All")
+                {
+                    items = items.Where(s =>
+                        (s.Country?.Equals(SelectedCountry, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        (s.CountryCode?.Equals(SelectedCountry, StringComparison.OrdinalIgnoreCase) ?? false));
+                }
+
+                if (SelectedGenre != "All")
+                {
+                    items = items.Where(s => s.NormalizedGenre == SelectedGenre);
+                }
             }
-        }
 
-        // Search text filter
-        var searchText = SearchText?.Trim() ?? string.Empty;
-        if (!string.IsNullOrEmpty(searchText))
+            // Search text filter
+            var searchText = SearchText?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(searchText))
+            {
+                var search = searchText;
+                items = items.Where(item => _activeViewConfig.SearchFilter(item, search));
+            }
+
+            // Optional view-defined sort (e.g., playlist track order)
+            if (_activeViewConfig.Sorter != null)
+            {
+                items = _activeViewConfig.Sorter(items);
+            }
+
+            FilteredItems = items.ToList();
+
+            // Build the DataGridCollectionView wrapper. If the view config asks for grouping,
+            // wire it up so Avalonia's DataGrid renders collapsible group headers.
+            var view = new DataGridCollectionView(FilteredItems);
+            if (_activeViewConfig.GroupByPath != null)
+            {
+                view.GroupDescriptions.Add(new DataGridPathGroupDescription(_activeViewConfig.GroupByPath));
+            }
+            FilteredItemsView = view;
+
+            // Update radio station count in status bar
+            if (_activeViewConfig.ShowRadioFilterPanel)
+            {
+                UI(() => StatusBar.StationCount = FilteredItems.Count.ToString());
+            }
+
+            // Update generic status bar for non-Music/Radio views
+            if (StatusBar.HasGenericStats)
+            {
+                UpdateGenericStatusBar();
+            }
+
+            UpdateNavigationButtons();
+
+            sw.Stop();
+            _log.Debug("ApplyFilter ok: ViewKey={ViewKey} _allItems={AllCount} Filtered={FilteredCount} Elapsed={ElapsedMs}ms", viewKey, startCount, FilteredItems.Count, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
         {
-            var search = searchText;
-            items = items.Where(item => _activeViewConfig.SearchFilter(item, search));
+            sw.Stop();
+            // Don't leave the UI in a broken state. Log loudly, then empty FilteredItems
+            // so the user sees a clean (empty) grid instead of stale/garbage rows. The
+            // exception is the actual diagnostic — DO NOT swallow without surfacing.
+            _log.Error(ex, "ApplyFilter threw: ViewKey={ViewKey} _allItems={AllCount} Elapsed={ElapsedMs}ms", viewKey, startCount, sw.ElapsedMilliseconds);
+            FilteredItems = [];
+            FilteredItemsView = new DataGridCollectionView(FilteredItems);
+            UpdateNavigationButtons();
         }
-
-        // Optional view-defined sort (e.g., playlist track order)
-        if (_activeViewConfig.Sorter != null)
-        {
-            items = _activeViewConfig.Sorter(items);
-        }
-
-        FilteredItems = items.ToList();
-
-        // Build the DataGridCollectionView wrapper. If the view config asks for grouping,
-        // wire it up so Avalonia's DataGrid renders collapsible group headers.
-        var view = new DataGridCollectionView(FilteredItems);
-        if (_activeViewConfig.GroupByPath != null)
-        {
-            view.GroupDescriptions.Add(new DataGridPathGroupDescription(_activeViewConfig.GroupByPath));
-        }
-        FilteredItemsView = view;
-
-        // Update radio station count in status bar
-        if (_activeViewConfig.ShowRadioFilterPanel)
-        {
-            UI(() => StatusBar.StationCount = FilteredItems.Count.ToString());
-        }
-
-        // Update generic status bar for non-Music/Radio views
-        if (StatusBar.HasGenericStats)
-        {
-            UpdateGenericStatusBar();
-        }
-
-        UpdateNavigationButtons();
     }
 
     public MainWindowViewModel(MainWindow window)
@@ -696,6 +766,42 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // CD tracks set their own display values in ExecutePlayCd — don't overwrite
             if (CurrentPlayingItem?.Source == "cdda")
             {
+                if (e.Media != null && e.Media.Duration > 0)
+                {
+                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"mm\:ss");
+                    CurrentTrackDurationNumber = e.Media.Duration;
+                }
+                return;
+            }
+
+            // Device tracks: set metadata from the MediaItem (populated during scan),
+            // append the device name to Line2.
+            if (CurrentPlayingItem?.Source?.StartsWith("device:") == true)
+            {
+                IsSeekEnabled = true;
+
+                if (e.Media != null)
+                {
+                    if (e.Media.ParsedStatus != MediaParsedStatus.Done)
+                    {
+                        _ = await e.Media.Parse();
+                    }
+                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"mm\:ss");
+                    CurrentTrackDurationNumber = e.Media.Duration;
+                }
+
+                var mountPath = CurrentPlayingItem.Source["device:".Length..];
+                string deviceLabel = mountPath.TrimEnd('\\', '/');
+                if (_connectedDevices.TryGetValue(mountPath, out var dev))
+                {
+                    deviceLabel = dev.Name;
+                }
+
+                CurrentTrackLine1 = CurrentPlayingItem.Title ?? "Unknown Title";
+                var devArtist = CurrentPlayingItem.Artist ?? "Unknown Artist";
+                var devAlbum = CurrentPlayingItem.Album;
+                var devParts = string.IsNullOrWhiteSpace(devAlbum) ? devArtist : $"{devArtist} \u2014 {devAlbum}";
+                CurrentTrackLine2 = $"{devParts} ({deviceLabel})";
                 return;
             }
 
@@ -1099,6 +1205,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Device tracks (iPod/Rockbox) are MediaKind.Music with Source="device:{mountPath}"
+        if (item.Source?.StartsWith("device:") == true)
+        {
+            ExecutePlayDeviceTrack(item);
+            return;
+        }
+
         switch (item.Kind)
         {
             case MediaKind.Music:
@@ -1113,6 +1226,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Plays a track from a connected device (iPod/Rockbox). Delegates to
+    /// ExecutePlayMusic for the actual playback — the MediaChanged handler detects
+    /// device sources and appends the device label to Line2.
+    /// </summary>
+    private void ExecutePlayDeviceTrack(MediaItem item)
+    {
+        ExecutePlayMusic(item);
     }
 
     private void ExecutePlayCd(MediaItem track)
@@ -1264,7 +1387,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         SelectedItem = file;
 
-        CurrentAlbumArt?.Dispose();
+        // Don't dispose — Avalonia's ref-counted bitmap lifecycle handles cleanup.
+        // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
         var artBytes = ExtractAlbumArtBytes(file.FilePath!);
         CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
 
@@ -1291,7 +1415,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         SelectedItem = station;
 
-        CurrentAlbumArt?.Dispose();
+        // Don't dispose — Avalonia's ref-counted bitmap lifecycle handles cleanup.
+        // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
         CurrentAlbumArt = null;
 
 #if WINDOWS
@@ -1363,7 +1488,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentMedia?.Dispose();
         _currentMedia = null;
 
-        CurrentAlbumArt?.Dispose();
+        // Don't dispose — Avalonia's ref-counted bitmap lifecycle handles cleanup.
+        // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
         CurrentAlbumArt = null;
         CurrentTrackLine1 = string.Empty;
         CurrentTrackLine2 = string.Empty;
@@ -2272,7 +2398,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UpdateMainStatus("Loading library...");
 
+        var loadSw = System.Diagnostics.Stopwatch.StartNew();
         _allItems = await Task.Run(() => MediaCache.LoadAll());
+        loadSw.Stop();
+        _log.Information("MediaCache.LoadAll: {Count} items in {ElapsedMs}ms", _allItems.Count, loadSw.ElapsedMilliseconds);
 
         // Initialize radio filter options from loaded data
         var radioItems = _allItems.Where(i => i.Kind == MediaKind.Radio).ToList();
@@ -2314,8 +2443,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Start watching for file changes
         StartFolderWatcher();
 
-        // Start CD drive polling (every 10 seconds)
-        _cdPollTimer = new System.Threading.Timer(_ => UI(() => _ = ScanForCdAsync()), null, 0, 10_000);
+        // Start event-driven portable device detection (iPod, Rockbox, Audio CD).
+        // CD drive arrival/removal also routes through the same WMI watcher —
+        // no separate polling timer required.
+        _deviceDetection = new DeviceDetectionService();
+        _deviceDetection.DeviceConnected += device => UI(() => _ = HandleDeviceConnectedAsync(device));
+        _deviceDetection.DeviceDisconnected += mountPath => UI(() => HandleDeviceDisconnected(mountPath));
+        _deviceDetection.CdDriveEvent += () => UI(() => _ = ScanForCdAsync());
+        _deviceDetection.Start();
     }
 
     internal async Task ScanAndAnalyzeMusicAsync()
@@ -2660,7 +2795,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 UI(() =>
                 {
-                    CurrentAlbumArt?.Dispose();
+                    // Don't dispose — Avalonia's ref-counted bitmap lifecycle handles cleanup.
+        // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
                     CurrentAlbumArt = bitmap;
 #if WINDOWS
                     _smtcService?.UpdateMetadata(CurrentStation?.Title, CurrentStation?.Tags, "Internet Radio", bytes);
@@ -2752,7 +2888,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            using var stream = new MemoryStream(bytes);
+            var stream = new MemoryStream(bytes);
             return new Bitmap(stream);
         }
         catch { }
@@ -2859,7 +2995,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"CD poll error: {ex.Message}");
+            _log.Warning(ex, "CD scan failed");
         }
         finally
         {
@@ -2885,10 +3021,349 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #endregion
 
+    #region Portable Devices (iPod / Rockbox)
+
+    private async Task HandleDeviceConnectedAsync(ConnectedDevice device)
+    {
+        if (_connectedDevices.ContainsKey(device.MountPath))
+        {
+            _log.Debug("HandleDeviceConnectedAsync ignored — {MountPath} already connected", device.MountPath);
+            return;
+        }
+
+        _connectedDevices[device.MountPath] = device;
+
+        var viewKey = $"Device:{device.MountPath}";
+        ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDeviceConfig(device.MountPath, device.DeviceType));
+
+        var sidebarItem = new SidebarItem
+        {
+            Name = device.SidebarLabel,
+            Icon = device.Icon,
+            IconBitmap = device.GenerationImage,
+            Category = "DEVICES",
+            IsEnabled = true,
+            ViewConfigKey = viewKey,
+        };
+        DeviceItems.Add(sidebarItem);
+
+        var activity = AddActivity($"Scanning {device.Name}");
+        _log.Information("Device scan starting: MountPath={MountPath} Type={DeviceType} Name={Name}", device.MountPath, device.DeviceType, device.Name);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            List<MediaItem> scanned;
+
+            if (device.DeviceType == DeviceType.StockIPod)
+            {
+                scanned = await Task.Run(() => ScanStockIPod(device, activity));
+            }
+            else
+            {
+                scanned = await Task.Run(() => ScanRockboxDevice(device, activity));
+            }
+
+            sw.Stop();
+            var beforeCount = _allItems.Count;
+            _allItems.AddRange(scanned);
+            var afterCount = _allItems.Count;
+            device.AudioSpace = scanned.Sum(i => i.FileSize ?? 0);
+            device.RefreshSpace();
+
+            activity.Status = ActivityStatus.Completed;
+            activity.Detail = $"Found {scanned.Count} tracks";
+            activity.Progress = 1.0;
+            UpdateActivityBadge();
+
+            _log.Information("Device scan complete: MountPath={MountPath} Tracks={Tracks} ScanMs={ScanMs} _allItems {Before}->{After}", device.MountPath, scanned.Count, sw.ElapsedMilliseconds, beforeCount, afterCount);
+
+            if (SelectedSidebarItem == sidebarItem)
+            {
+                _log.Debug("Selected sidebar is the just-scanned device; re-applying filter");
+                ApplyFilter();
+            }
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            activity.Status = ActivityStatus.Failed;
+            activity.Error = ex.Message;
+            activity.Detail = "Scan failed";
+            UpdateActivityBadge();
+            _log.Error(ex, "Device scan failed: MountPath={MountPath} ElapsedMs={ElapsedMs}", device.MountPath, sw.ElapsedMilliseconds);
+        }
+    }
+
+    /// <summary>
+    /// Re-runs device fingerprinting for the selected device without requiring a
+    /// reconnect. Useful after the user has edited /.orgz/device or wants to pick up
+    /// new metadata from a freshly-booted firmware mode. Activity panel reports progress.
+    /// </summary>
+    internal void RefreshDeviceInfo(SidebarItem item)
+    {
+        if (item.ViewConfigKey?.StartsWith("Device:") != true)
+        {
+            return;
+        }
+
+        var mountPath = item.ViewConfigKey["Device:".Length..];
+        if (!_connectedDevices.TryGetValue(mountPath, out var oldDevice))
+        {
+            return;
+        }
+
+        var activity = AddActivity($"Refreshing {oldDevice.Name}");
+
+        try
+        {
+            var drive = new DriveInfo(mountPath);
+            var refreshed = DeviceFingerprint.Identify(drive);
+            if (refreshed != null)
+            {
+                // Copy the fresh values back into the live device so existing bindings update
+                oldDevice.Name                 = refreshed.Name;
+                oldDevice.Model                = refreshed.Model;
+                oldDevice.HardwareModel        = refreshed.HardwareModel;
+                oldDevice.Serial               = refreshed.Serial;
+                oldDevice.FireWireGuid         = refreshed.FireWireGuid;
+                oldDevice.AppleModelNumber     = refreshed.AppleModelNumber;
+                oldDevice.IpodGeneration       = refreshed.IpodGeneration;
+                oldDevice.FirmwareVersion      = refreshed.FirmwareVersion;
+                oldDevice.AppleFirmwareVersion = refreshed.AppleFirmwareVersion;
+                oldDevice.Format               = refreshed.Format;
+                oldDevice.RefreshSpace();
+
+                DeviceFingerprint.PersistDeviceRecord(oldDevice);
+
+                activity.Status = ActivityStatus.Completed;
+                activity.Detail = $"{oldDevice.Model}";
+            }
+            else
+            {
+                activity.Status = ActivityStatus.Failed;
+                activity.Error = "device no longer recognized";
+            }
+        }
+        catch (Exception ex)
+        {
+            activity.Status = ActivityStatus.Failed;
+            activity.Error = ex.Message;
+            activity.Detail = "Refresh failed";
+        }
+        UpdateActivityBadge();
+    }
+
+    internal void EjectDevice(SidebarItem item)
+    {
+        if (item.ViewConfigKey?.StartsWith("Device:") != true)
+        {
+            return;
+        }
+
+        var mountPath = item.ViewConfigKey["Device:".Length..];
+        var activity = AddActivity($"Ejecting {item.Name}");
+
+        if (DeviceEjector.Eject(mountPath, out var error))
+        {
+            activity.Status = ActivityStatus.Completed;
+            activity.Detail = "Safely removed";
+            // The WMI removal event will fire shortly and HandleDeviceDisconnected will
+            // tear down the sidebar entry, view config, and items.
+        }
+        else
+        {
+            activity.Status = ActivityStatus.Failed;
+            activity.Error = error ?? "unknown error";
+            activity.Detail = $"Eject failed: {error}";
+        }
+        UpdateActivityBadge();
+    }
+
+    private void HandleDeviceDisconnected(string mountPath)
+    {
+        if (!_connectedDevices.Remove(mountPath))
+        {
+            return;
+        }
+
+        var source = $"device:{mountPath}";
+        var viewKey = $"Device:{mountPath}";
+
+        // Stop playback if we're playing from this device
+        if (CurrentPlayingItem?.Source == source)
+        {
+            ClearPlayback();
+        }
+
+        _allItems.RemoveAll(i => i.Source == source);
+
+        var sidebarItem = DeviceItems.FirstOrDefault(d => d.ViewConfigKey == viewKey);
+        if (sidebarItem != null)
+        {
+            DeviceItems.Remove(sidebarItem);
+        }
+
+        ListViewConfigs.Remove(viewKey);
+
+        // If the user was viewing this device, fall back to the default library view
+        if (SelectedSidebarItem?.ViewConfigKey == viewKey)
+        {
+            SelectedSidebarItem = LibraryItems.FirstOrDefault() ?? null;
+        }
+    }
+
+    /// <summary>
+    /// Reads an iTunesDB from a stock iPod and converts tracks to MediaItems. The iTunesDB
+    /// is authoritative — FilePaths point to scrambled names like F23/ABCD.mp3 but all
+    /// metadata (title/artist/album/play counts/ratings) comes from the DB.
+    /// </summary>
+    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, ActivityItem activity)
+    {
+        var dbPath = Path.Combine(device.MountPath, "iPod_Control", "iTunes", "iTunesDB");
+        if (!File.Exists(dbPath))
+        {
+            activity.Detail = "iTunesDB not found";
+            return [];
+        }
+
+        activity.Detail = "Parsing iTunesDB...";
+        var source = $"device:{device.MountPath}";
+        var tracks = ITunesDbReader.Read(dbPath, device.MountPath);
+
+        var items = new List<MediaItem>(tracks.Count);
+        for (int i = 0; i < tracks.Count; i++)
+        {
+            var t = tracks[i];
+            var ext = !string.IsNullOrEmpty(t.FilePath) ? Path.GetExtension(t.FilePath) : null;
+
+            items.Add(new MediaItem
+            {
+                Id = $"device:{device.MountPath}:{t.TrackId}",
+                Kind = MediaKind.Music,
+                Title = t.Title,
+                Artist = t.Artist,
+                Album = t.Album,
+                Genre = t.Genre,
+                Composer = t.Composer,
+                Year = t.Year > 0 ? (uint)t.Year : null,
+                Track = t.TrackNumber > 0 ? (uint)t.TrackNumber : null,
+                TotalTracks = t.TotalTracks > 0 ? (uint)t.TotalTracks : null,
+                Disc = t.DiscNumber > 0 ? (uint)t.DiscNumber : null,
+                TotalDiscs = t.TotalDiscs > 0 ? (uint)t.TotalDiscs : null,
+                Duration = t.DurationMs > 0 ? TimeSpan.FromMilliseconds(t.DurationMs) : null,
+                FilePath = t.FilePath,
+                FileName = !string.IsNullOrEmpty(t.FilePath) ? Path.GetFileName(t.FilePath) : null,
+                Extension = ext,
+                FileSize = t.FileSize,
+                AudioBitrate = t.Bitrate > 0 ? t.Bitrate : null,
+                SampleRate = t.SampleRate > 0 ? t.SampleRate : null,
+                PlayCount = t.PlayCount,
+                Rating = t.Rating > 0 ? t.Rating / 20 : null,
+                LastPlayed = t.LastPlayed,
+                DateAdded = t.DateAdded ?? DateTime.UtcNow,
+                IsAnalyzed = true,
+                Source = source,
+                StreamUrl = t.FilePath,
+            });
+
+            if ((i & 0xFF) == 0)
+            {
+                activity.Detail = $"Read {i + 1} of {tracks.Count} tracks";
+                activity.Progress = tracks.Count > 0 ? (double)(i + 1) / tracks.Count : 1.0;
+            }
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// Walks a Rockbox device filesystem, analyzing every supported audio file with TagLib.
+    /// Slower than iTunesDB parsing but necessary because Rockbox has no central database.
+    /// Updates <see cref="ConnectedDevice.AudioSpace"/> progressively so the capacity bar
+    /// in the DeviceInfoBar fills in as the scan runs.
+    /// </summary>
+    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, ActivityItem activity)
+    {
+        activity.Detail = "Walking filesystem...";
+
+        var files = new List<string>();
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(device.MountPath, "*.*", SearchOption.AllDirectories))
+            {
+                if (FileScanner.IsSupportedExtension(path))
+                {
+                    files.Add(path);
+                }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Skip directories we can't enter — best effort
+        }
+
+        var source = $"device:{device.MountPath}";
+        var items = new List<MediaItem>(files.Count);
+        long audioBytes = 0;
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            var path = files[i];
+            MediaItem? item;
+            try
+            {
+                var info = new FileInfo(path);
+                item = new MediaItem
+                {
+                    Id = path,
+                    Kind = MediaKind.Music,
+                    FilePath = path,
+                    FileName = info.Name,
+                    Extension = info.Extension,
+                    FileSize = info.Length,
+                    LastModified = info.LastWriteTimeUtc,
+                    Source = source,
+                    StreamUrl = path,
+                };
+
+                AudioFileAnalyzer.AnalyzeFile(item);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Rockbox scan failed on file {Path}", path);
+                continue;
+            }
+
+            items.Add(item);
+            audioBytes += item.FileSize ?? 0;
+
+            if ((i & 0x1F) == 0)
+            {
+                activity.Detail = $"Analyzing {i + 1} of {files.Count}";
+                activity.Progress = files.Count > 0 ? (double)(i + 1) / files.Count : 1.0;
+
+                // Push live audio-bytes back to the device model so the capacity bar
+                // fills in as we go. Marshalled to UI thread because the bar bindings
+                // listen to property-changed events.
+                var snapshot = audioBytes;
+                Dispatcher.UIThread.Post(() => device.AudioSpace = snapshot);
+            }
+        }
+
+        // Final sync of the accumulated total
+        var finalTotal = audioBytes;
+        Dispatcher.UIThread.Post(() => device.AudioSpace = finalTotal);
+
+        return items;
+    }
+
+    #endregion
+
     public void Dispose()
     {
-        _cdPollTimer?.Dispose();
         _folderWatcher?.Dispose();
+        _deviceDetection?.Dispose();
 #if WINDOWS
         _thumbBarService?.Dispose();
         _smtcService?.Dispose();

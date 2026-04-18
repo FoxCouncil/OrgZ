@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:converters="clr-namespace:OrgZ.Converters"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="120"
+             x:Class="OrgZ.Controls.DeviceInfoBar"
+             x:DataType="models:ConnectedDevice">
+
+    <UserControl.Resources>
+        <converters:DoubleToStarGridLengthConverter x:Key="StarConverter" />
+    </UserControl.Resources>
+
+    <Border Background="#1A1A1A"
+            BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="16,10">
+
+        <Border.Styles>
+            <Style Selector="TextBlock.label">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="Opacity" Value="0.55" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="0,0,6,0" />
+            </Style>
+            <Style Selector="TextBlock.value">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+        </Border.Styles>
+
+        <DockPanel>
+
+            <!-- TOP: icon + iTunes-style identity grid -->
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,10">
+
+                <!-- Large device image: per-generation product photo when available,
+                     otherwise the generic FontAwesome icon. -->
+                <Border Grid.Column="0"
+                        Background="{DynamicResource SystemChromeGrayColor}"
+                        CornerRadius="6"
+                        Width="72" Height="72"
+                        VerticalAlignment="Center"
+                        ClipToBounds="True">
+                    <Panel>
+                        <Image Source="{Binding GenerationImage}"
+                               Stretch="Uniform"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Margin="4"
+                               IsVisible="{Binding HasGenerationImage}" />
+                        <i:Icon Value="{Binding Icon}" FontSize="36"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                IsVisible="{Binding !HasGenerationImage}" />
+                    </Panel>
+                </Border>
+
+                <!-- 2-column identity grid. Column widths are fixed so long values
+                     truncate with ellipsis instead of pushing the layout around. -->
+                <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110" />
+                        <ColumnDefinition Width="220" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="130" />
+                        <ColumnDefinition Width="220" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" Classes="label" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" Classes="value" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Model:" Classes="label" />
+                    <TextBlock Grid.Row="1" Grid.Column="1"
+                               x:Name="ModelValueText"
+                               Text="{Binding ModelLabelDisplay}"
+                               Classes="value"
+                               Cursor="Hand"
+                               ToolTip.Tip="Click to toggle between iPod model and hardware adapter"
+                               PointerPressed="ModelValueText_PointerPressed" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Serial Number:" Classes="label" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SerialDisplay}" Classes="value" />
+
+                    <TextBlock Grid.Row="0" Grid.Column="3" Text="Capacity:" Classes="label" />
+                    <TextBlock Grid.Row="0" Grid.Column="4" Text="{Binding TotalSpaceLabel}" Classes="value" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="3" Text="Software Version:" Classes="label" />
+                    <TextBlock Grid.Row="1" Grid.Column="4" Text="{Binding FirmwareVersionDisplay}" Classes="value" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
+                    <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
+                </Grid>
+            </Grid>
+
+            <!-- BOTTOM: full-width capacity bar with inline legend -->
+            <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*">
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <TextBlock Text="Capacity" FontSize="11" Opacity="0.55" />
+                    <TextBlock Text="{Binding TotalSpaceLabel}" FontSize="13" FontWeight="Bold" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="6">
+
+                    <Border Background="#2A2A2A" CornerRadius="3" ClipToBounds="True" Height="14"
+                            BorderBrush="#3A3A3A" BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{Binding AudioPercent, Converter={StaticResource StarConverter}}" />
+                                <ColumnDefinition Width="{Binding OtherPercent, Converter={StaticResource StarConverter}}" />
+                                <ColumnDefinition Width="{Binding FreePercent, Converter={StaticResource StarConverter}}" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                        <GradientStop Color="#6FB4FF" Offset="0" />
+                                        <GradientStop Color="#2F7EE5" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <Border Grid.Column="1">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                        <GradientStop Color="#A0A0A0" Offset="0" />
+                                        <GradientStop Color="#606060" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <Border Grid.Column="2" Background="#444444" />
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="18">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Width="10" Height="10" CornerRadius="1" VerticalAlignment="Center">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                        <GradientStop Color="#6FB4FF" Offset="0" />
+                                        <GradientStop Color="#2F7EE5" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <TextBlock Text="Audio" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding AudioSpaceLabel}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Width="10" Height="10" CornerRadius="1" VerticalAlignment="Center">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                        <GradientStop Color="#A0A0A0" Offset="0" />
+                                        <GradientStop Color="#606060" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <TextBlock Text="Other" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding OtherSpaceLabel}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Width="10" Height="10" CornerRadius="1" VerticalAlignment="Center"
+                                    Background="#444444" BorderBrush="#555555" BorderThickness="1" />
+                            <TextBlock Text="Free" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding FreeSpaceLabel}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+
+        </DockPanel>
+    </Border>
+
+</UserControl>
