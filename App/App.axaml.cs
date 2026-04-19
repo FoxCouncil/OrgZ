@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
@@ -31,24 +32,55 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            var mainWindow = new MainWindow();
+            desktop.MainWindow = mainWindow;
 
+            UpdateTitle(mainWindow);
+
+            // Defer the first-run folder picker until the main window is actually shown.
+            // On Linux the picker goes through xdg-desktop-portal over D-Bus; blocking
+            // synchronously here (the old `.GetAwaiter().GetResult()` path) deadlocks the
+            // UI thread and the main window never gets mapped.
             if (FolderPath == string.Empty)
             {
-                IStorageFolder? folder = AskForDirectory(desktop);
-
-                FolderPath = folder?.Path.LocalPath ?? string.Empty;
-
-                Settings.Set(SettingKey_FolderPath, FolderPath);
-                Settings.Save();
+                mainWindow.Opened += OnMainWindowOpenedPickFolder;
             }
-
-            desktop.MainWindow.Title = FolderPath != string.Empty ? $"OrgZ v{Version} - {FolderPath}" : $"OrgZ v{Version} - [No folder selected]";
         }
 
         _ = Task.Run(CheckForUpdatesAsync);
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static void UpdateTitle(Window window)
+    {
+        window.Title = FolderPath != string.Empty ? $"OrgZ v{Version} - {FolderPath}" : $"OrgZ v{Version} - [No folder selected]";
+    }
+
+    private async void OnMainWindowOpenedPickFolder(object? sender, EventArgs e)
+    {
+        if (sender is not Window window)
+        {
+            return;
+        }
+
+        window.Opened -= OnMainWindowOpenedPickFolder;
+
+        var folders = await window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select OrgZ Folder",
+            AllowMultiple = false,
+        });
+
+        if (folders == null || folders.Count == 0)
+        {
+            return;
+        }
+
+        FolderPath = folders[0].Path.LocalPath ?? string.Empty;
+        Settings.Set(SettingKey_FolderPath, FolderPath);
+        Settings.Save();
+        UpdateTitle(window);
     }
 
     private static async Task CheckForUpdatesAsync()
@@ -93,22 +125,4 @@ public partial class App : Application
         }
     }
 
-    private static IStorageFolder? AskForDirectory(IClassicDesktopStyleApplicationLifetime desktop)
-    {
-        if (desktop == null || desktop.MainWindow == null)
-        {
-            return null;
-        }
-
-        IStorageProvider storage = desktop.MainWindow.StorageProvider;
-
-        IReadOnlyList<IStorageFolder> selectedFolders = storage.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select OrgZ Folder", AllowMultiple = false }).GetAwaiter().GetResult();
-
-        if (selectedFolders == null || selectedFolders.Count == 0)
-        {
-            return null;
-        }
-
-        return selectedFolders[0];
-    }
 }

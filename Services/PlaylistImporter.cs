@@ -51,7 +51,7 @@ public static class PlaylistImporter
             }
 
             // Resolve relative paths against the playlist file's directory
-            var resolved = Path.IsPathRooted(trimmed)
+            var resolved = IsAbsolutePath(trimmed)
                 ? trimmed
                 : Path.GetFullPath(trimmed, dir);
 
@@ -59,6 +59,29 @@ public static class PlaylistImporter
         }
 
         return new PlaylistImportResult { Name = name, TrackPaths = paths };
+    }
+
+    // Playlists are portable — treat Windows drive-letter and UNC paths as absolute on any
+    // host so round-trips across OSes preserve paths verbatim. Path.IsPathRooted only
+    // recognises the native rooting convention.
+    private static bool IsAbsolutePath(string p)
+    {
+        if (Path.IsPathRooted(p))
+        {
+            return true;
+        }
+
+        if (p.Length >= 3 && char.IsLetter(p[0]) && p[1] == ':' && (p[2] == '\\' || p[2] == '/'))
+        {
+            return true;
+        }
+
+        if (p.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static PlaylistImportResult ParsePLS(string filePath)
@@ -89,7 +112,7 @@ public static class PlaylistImporter
             }
 
             var path = trimmed[(eqIdx + 1)..].Trim();
-            var resolved = Path.IsPathRooted(path)
+            var resolved = IsAbsolutePath(path)
                 ? path
                 : Path.GetFullPath(path, dir);
 

@@ -36,6 +36,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private TaskbarThumbBarService? _thumbBarService;
 #endif
 
+    private MprisService? _mprisService;
+
     private MusicFolderWatcher? _folderWatcher;
 
     private Media? _currentMedia;
@@ -253,10 +255,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private MediaItem? _selectedItem;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNoSearchResults), nameof(NoSearchResultsMessage))]
     private string _searchText = Settings.Get("OrgZ.SearchText", string.Empty);
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNoSearchResults))]
     private List<MediaItem> _filteredItems = [];
+
+    public bool ShowNoSearchResults => FilteredItems.Count == 0 && !string.IsNullOrWhiteSpace(SearchText);
+
+    public string NoSearchResultsMessage => $"No search results for \"{SearchText}\".";
 
     /// <summary>
     /// DataGrid-bound view wrapping <see cref="FilteredItems"/>. When the active view config
@@ -690,6 +698,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Paused);
             _thumbBarService?.SetPlayingState(false);
 #endif
+            _mprisService?.SetPlaybackStatus("Paused");
 
             UpdateMainStatus("Paused");
         });
@@ -703,6 +712,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Playing);
             _thumbBarService?.SetPlayingState(true);
 #endif
+            _mprisService?.SetPlaybackStatus("Playing");
 
             UpdateMainStatus("Playing");
         });
@@ -735,6 +745,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
             _thumbBarService?.SetPlayingState(false);
 #endif
+            _mprisService?.SetPlaybackStatus("Stopped");
 
             UpdateMainStatus("Stopped");
         });
@@ -820,6 +831,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var album = CurrentMusicItem?.Album;
             CurrentTrackLine2 = string.IsNullOrWhiteSpace(album) ? artist : $"{artist} \u2014 {album}";
         });
+
+        // Linux shell integration — GNOME/KDE/XFCE media keys + panel widgets. Failure
+        // here is non-fatal: if the session bus isn't reachable the service quietly
+        // disables itself and the rest of the app keeps working.
+        if (OperatingSystem.IsLinux())
+        {
+            _mprisService = new MprisService();
+            _mprisService.PlayPauseRequested += ButtonPlayPause;
+            _mprisService.NextRequested += ButtonNextTrack;
+            _mprisService.PreviousRequested += ButtonPreviousTrack;
+            _mprisService.StopRequested += Stop;
+            _mprisService.RaiseRequested += () => Dispatcher.UIThread.Post(() =>
+            {
+                if (_window.WindowState == Avalonia.Controls.WindowState.Minimized)
+                {
+                    _window.WindowState = Avalonia.Controls.WindowState.Normal;
+                }
+                _window.Activate();
+            });
+            _ = _mprisService.InitializeAsync();
+        }
     }
 
 #if WINDOWS
@@ -1254,6 +1286,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #if WINDOWS
         _smtcService?.UpdateMetadata(track.Title, track.Artist, track.Album, null);
 #endif
+        _mprisService?.SetMetadata(track.Title, track.Artist, track.Album, null);
 
         _currentMedia?.Dispose();
         _currentMedia = new LibVLCSharp.Shared.Media(_vlc, track.StreamUrl!, LibVLCSharp.Shared.FromType.FromLocation);
@@ -1395,6 +1428,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #if WINDOWS
         _smtcService?.UpdateMetadata(file.Title, file.Artist, file.Album, artBytes);
 #endif
+        _mprisService?.SetMetadata(file.Title, file.Artist, file.Album, string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri);
 
         _currentMedia?.Dispose();
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
@@ -1422,6 +1456,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #if WINDOWS
         _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
 #endif
+        _mprisService?.SetMetadata(station.Title, station.Tags, "Internet Radio", station.FaviconUrl);
 
         if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
         {
@@ -3055,18 +3090,34 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             List<MediaItem> scanned;
 
+            var beforeCount = _allItems.Count;
+
+            // Stream scanned items into _allItems in small batches so the grid fills in
+            // as the scan runs, instead of staying empty until the walk completes. Every
+            // batch is marshalled to the UI thread and triggers a filter re-apply when
+            // the device's sidebar entry is currently selected.
+            void FlushBatch(IReadOnlyList<MediaItem> batch)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _allItems.AddRange(batch);
+                    if (SelectedSidebarItem == sidebarItem)
+                    {
+                        ApplyFilter();
+                    }
+                });
+            }
+
             if (device.DeviceType == DeviceType.StockIPod)
             {
-                scanned = await Task.Run(() => ScanStockIPod(device, activity));
+                scanned = await Task.Run(() => ScanStockIPod(device, activity, FlushBatch));
             }
             else
             {
-                scanned = await Task.Run(() => ScanRockboxDevice(device, activity));
+                scanned = await Task.Run(() => ScanRockboxDevice(device, activity, FlushBatch));
             }
 
             sw.Stop();
-            var beforeCount = _allItems.Count;
-            _allItems.AddRange(scanned);
             var afterCount = _allItems.Count;
             device.AudioSpace = scanned.Sum(i => i.FileSize ?? 0);
             device.RefreshSpace();
@@ -3216,15 +3267,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Reads an iTunesDB from a stock iPod and converts tracks to MediaItems. The iTunesDB
     /// is authoritative — FilePaths point to scrambled names like F23/ABCD.mp3 but all
-    /// metadata (title/artist/album/play counts/ratings) comes from the DB.
+    /// metadata (title/artist/album/play counts/ratings) comes from the DB. When the DB is
+    /// missing or unreadable, falls back to a raw filesystem walk so the grid still fills
+    /// with whatever audio we can find on the device.
     /// </summary>
-    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, ActivityItem activity)
+    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null)
     {
         var dbPath = Path.Combine(device.MountPath, "iPod_Control", "iTunes", "iTunesDB");
         if (!File.Exists(dbPath))
         {
-            activity.Detail = "iTunesDB not found";
-            return [];
+            activity.Detail = "iTunesDB missing — walking filesystem";
+            _log.Information("iTunesDB not found at {DbPath} — falling back to filesystem walk", dbPath);
+            return ScanRockboxDevice(device, activity, flushBatch);
         }
 
         activity.Detail = "Parsing iTunesDB...";
@@ -3232,12 +3286,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var tracks = ITunesDbReader.Read(dbPath, device.MountPath);
 
         var items = new List<MediaItem>(tracks.Count);
+        var pending = new List<MediaItem>(capacity: 64);
         for (int i = 0; i < tracks.Count; i++)
         {
             var t = tracks[i];
             var ext = !string.IsNullOrEmpty(t.FilePath) ? Path.GetExtension(t.FilePath) : null;
 
-            items.Add(new MediaItem
+            var mediaItem = new MediaItem
             {
                 Id = $"device:{device.MountPath}:{t.TrackId}",
                 Kind = MediaKind.Music,
@@ -3265,13 +3320,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 IsAnalyzed = true,
                 Source = source,
                 StreamUrl = t.FilePath,
-            });
+            };
+            items.Add(mediaItem);
+            pending.Add(mediaItem);
 
             if ((i & 0xFF) == 0)
             {
                 activity.Detail = $"Read {i + 1} of {tracks.Count} tracks";
                 activity.Progress = tracks.Count > 0 ? (double)(i + 1) / tracks.Count : 1.0;
+
+                if (pending.Count > 0 && flushBatch != null)
+                {
+                    flushBatch(pending.ToArray());
+                    pending.Clear();
+                }
             }
+        }
+
+        if (pending.Count > 0 && flushBatch != null)
+        {
+            flushBatch(pending.ToArray());
         }
 
         return items;
@@ -3281,12 +3349,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// Walks a Rockbox device filesystem, analyzing every supported audio file with TagLib.
     /// Slower than iTunesDB parsing but necessary because Rockbox has no central database.
     /// Updates <see cref="ConnectedDevice.AudioSpace"/> progressively so the capacity bar
-    /// in the DeviceInfoBar fills in as the scan runs.
+    /// in the DeviceInfoBar fills in as the scan runs. When <paramref name="flushBatch"/>
+    /// is non-null, items are pushed in batches of ~32 so the grid populates incrementally
+    /// instead of remaining empty until the full walk completes.
+    ///
+    /// Uses <see cref="DeviceLibraryCache"/> to persist results to <c>{mount}/.orgz/library.db</c>
+    /// and only re-analyze files whose size+mtime differ from the cached entry. First scan
+    /// is full; every subsequent connect deltas in ~milliseconds unless the music changed.
     /// </summary>
-    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, ActivityItem activity)
+    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null)
     {
-        activity.Detail = "Walking filesystem...";
+        var source = $"device:{device.MountPath}";
 
+        // Load cache first — even if the filesystem walk is slow, we can flush cached
+        // items to the grid immediately and only pay for analysis on actually-new files.
+        activity.Detail = "Loading device cache...";
+        var cached = DeviceLibraryCache.TryLoad(device.MountPath, source);
+        var cacheByPath = cached
+            .Where(i => !string.IsNullOrEmpty(i.FilePath))
+            .ToDictionary(i => i.FilePath!, StringComparer.OrdinalIgnoreCase);
+
+        activity.Detail = "Walking filesystem...";
         var files = new List<string>();
         try
         {
@@ -3303,9 +3386,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // Skip directories we can't enter — best effort
         }
 
-        var source = $"device:{device.MountPath}";
         var items = new List<MediaItem>(files.Count);
+        var pending = new List<MediaItem>(capacity: 32);
+        var newlyAnalyzed = new List<MediaItem>(capacity: 32);
         long audioBytes = 0;
+        int reused = 0;
+        int analyzed = 0;
 
         for (int i = 0; i < files.Count; i++)
         {
@@ -3314,20 +3400,35 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             try
             {
                 var info = new FileInfo(path);
-                item = new MediaItem
-                {
-                    Id = path,
-                    Kind = MediaKind.Music,
-                    FilePath = path,
-                    FileName = info.Name,
-                    Extension = info.Extension,
-                    FileSize = info.Length,
-                    LastModified = info.LastWriteTimeUtc,
-                    Source = source,
-                    StreamUrl = path,
-                };
 
-                AudioFileAnalyzer.AnalyzeFile(item);
+                // Delta: if the cached entry matches size + mtime, reuse it verbatim and
+                // skip TagLib analysis entirely. On a steady library the vast majority of
+                // files hit this path, and the whole "scan" becomes a directory enumeration.
+                if (cacheByPath.TryGetValue(path, out var cachedItem)
+                    && cachedItem.FileSize == info.Length
+                    && cachedItem.LastModified == info.LastWriteTimeUtc)
+                {
+                    item = cachedItem;
+                    reused++;
+                }
+                else
+                {
+                    item = new MediaItem
+                    {
+                        Id = path,
+                        Kind = MediaKind.Music,
+                        FilePath = path,
+                        FileName = info.Name,
+                        Extension = info.Extension,
+                        FileSize = info.Length,
+                        LastModified = info.LastWriteTimeUtc,
+                        Source = source,
+                        StreamUrl = path,
+                    };
+                    AudioFileAnalyzer.AnalyzeFile(item);
+                    analyzed++;
+                    newlyAnalyzed.Add(item);
+                }
             }
             catch (Exception ex)
             {
@@ -3336,6 +3437,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             items.Add(item);
+            pending.Add(item);
             audioBytes += item.FileSize ?? 0;
 
             if ((i & 0x1F) == 0)
@@ -3348,12 +3450,43 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 // listen to property-changed events.
                 var snapshot = audioBytes;
                 Dispatcher.UIThread.Post(() => device.AudioSpace = snapshot);
+
+                if (pending.Count > 0 && flushBatch != null)
+                {
+                    flushBatch(pending.ToArray());
+                    pending.Clear();
+                }
+
+                // Persist newly-analyzed items immediately so an interrupted scan resumes
+                // from here on the next connect instead of replaying all the TagLib work.
+                if (newlyAnalyzed.Count > 0)
+                {
+                    DeviceLibraryCache.Upsert(device.MountPath, newlyAnalyzed);
+                    newlyAnalyzed.Clear();
+                }
             }
         }
 
-        // Final sync of the accumulated total
+        // Final sync of the accumulated total + any tail items
         var finalTotal = audioBytes;
         Dispatcher.UIThread.Post(() => device.AudioSpace = finalTotal);
+
+        if (pending.Count > 0 && flushBatch != null)
+        {
+            flushBatch(pending.ToArray());
+        }
+
+        if (newlyAnalyzed.Count > 0)
+        {
+            DeviceLibraryCache.Upsert(device.MountPath, newlyAnalyzed);
+        }
+
+        _log.Information("Rockbox scan: total={Total} cached={Reused} analyzed={Analyzed}", files.Count, reused, analyzed);
+
+        // Scan completed to the end — prune cache rows for files that have been removed
+        // from the device since the last complete scan. Skipped on interrupt (this line
+        // is never reached) so a partial run doesn't erase otherwise-valid rows.
+        DeviceLibraryCache.PruneMissing(device.MountPath, items.Select(i => i.FilePath!).Where(p => !string.IsNullOrEmpty(p)));
 
         return items;
     }
@@ -3368,6 +3501,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _thumbBarService?.Dispose();
         _smtcService?.Dispose();
 #endif
+        _mprisService?.Dispose();
         _currentMedia?.Dispose();
         _player?.Dispose();
         _vlc?.Dispose();

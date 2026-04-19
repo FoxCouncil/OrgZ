@@ -8,6 +8,7 @@ namespace OrgZ.Tests;
 /// MediaCache tests use a fresh temp DB file per test class instance.
 /// xUnit creates one instance per test method, so each test gets an isolated DB.
 /// </summary>
+[Collection("MediaCache")]
 public class MediaCacheTests : IDisposable
 {
     private readonly string _tempDbPath;

@@ -191,7 +191,7 @@
 			</Grid>
 
 			<!-- Status bar at bottom -->
-			<controls:StatusBar DockPanel.Dock="Bottom" x:Name="MainStatusBar" DataContext="{Binding StatusBar}" />
+			<controls:StatusBar DockPanel.Dock="Bottom" x:Name="MainStatusBar" DataContext="{Binding StatusBar}" Margin="4,0,4,0" />
 
 			<!-- Sidebar + Content area with resizable splitter -->
 			<Grid ColumnDefinitions="200,4,*" Margin="4">
@@ -275,6 +275,16 @@
 								<DataGrid.Columns />
 							</DataGrid>
 
+							<!-- Empty-state overlay: centered message when a search filter is active but
+							     yields no matches. Drawn as a DockPanel fill child on top of the grids. -->
+							<TextBlock Text="{Binding NoSearchResultsMessage}"
+							           IsVisible="{Binding ShowNoSearchResults}"
+							           HorizontalAlignment="Center"
+							           VerticalAlignment="Center"
+							           FontSize="16"
+							           Opacity="0.6"
+							           IsHitTestVisible="False" />
+
 							<!-- Separate DataGrid for grouped views (Radio) — never shares column state with MainDataGrid -->
 							<DataGrid x:Name="GroupedDataGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
@@ -308,8 +318,8 @@
 						</DockPanel>
 					</Border>
 
-					<controls:QueuePanel Grid.Column="1" Width="250" DataContext="{Binding}" IsVisible="{Binding IsQueueVisible}" />
-					<controls:ActivityPanel Grid.Column="1" Width="280" DataContext="{Binding}" IsVisible="{Binding IsActivityPanelVisible}" />
+					<controls:QueuePanel Grid.Column="1" Width="250" Margin="4,0,0,0" DataContext="{Binding}" IsVisible="{Binding IsQueueVisible}" />
+					<controls:ActivityPanel Grid.Column="1" Width="280" Margin="4,0,0,0" DataContext="{Binding}" IsVisible="{Binding IsActivityPanelVisible}" />
 				</Grid>
 			</Grid>
 		</DockPanel>
