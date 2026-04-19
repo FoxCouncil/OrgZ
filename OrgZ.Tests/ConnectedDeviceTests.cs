@@ -101,6 +101,8 @@ public class ConnectedDeviceTests
     [InlineData("FAT32",   "Windows (FAT32)")]
     [InlineData("exFAT",   "Windows (exFAT)")]
     [InlineData("NTFS",    "Windows (NTFS)")]
+    [InlineData("vfat",    "Windows (FAT32)")]
+    [InlineData("msdos",   "Windows (FAT)")]
     [InlineData("HFS",     "Mac (HFS)")]
     [InlineData("HFS+",    "Mac (HFS+)")]
     [InlineData("hfsplus", "Mac (hfsplus)")]
@@ -188,12 +190,14 @@ public class ConnectedDeviceTests
     }
 
     [Fact]
-    public void SidebarLabel_strips_dev_prefix_on_Linux()
+    public void SidebarLabel_just_name_on_Linux()
     {
         if (!OperatingSystem.IsLinux()) return;
 
-        var d = MakeDevice("/dev/sdb1", name: "FOXPOD");
-        Assert.Equal("FOXPOD (sdb1)", d.SidebarLabel);
+        // Mount paths like "/media/fox/FOXPOD" aren't helpful next to the volume label
+        // the way a Windows drive letter is. Linux shows just the name.
+        var d = MakeDevice("/media/fox/FOXPOD", name: "FOXPOD");
+        Assert.Equal("FOXPOD", d.SidebarLabel);
     }
 
     [Fact]

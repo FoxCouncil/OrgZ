@@ -215,15 +215,20 @@ public partial class ConnectedDevice : ObservableObject
                 return "\u2014";
             }
 
+            // On Linux, .NET reports FAT32 as "vfat" and FAT16 as "msdos" — rewrite them to
+            // the canonical Apple/Windows names since the filesystem is identical and users
+            // expect to see "FAT32", not "vfat".
             return Format.ToUpperInvariant() switch
             {
-                "FAT" or "FAT32" or "EXFAT"   => $"Windows ({Format})",
+                "FAT" or "FAT32" or "EXFAT"    => $"Windows ({Format})",
+                "VFAT"                         => "Windows (FAT32)",
+                "MSDOS"                        => "Windows (FAT)",
                 "NTFS"                         => $"Windows ({Format})",
                 "HFS" or "HFS+" or "HFSPLUS"   => $"Mac ({Format})",
-                "APFS"                          => $"Mac ({Format})",
-                "EXT2" or "EXT3" or "EXT4"      => $"Linux ({Format})",
-                "BTRFS" or "XFS" or "F2FS"      => $"Linux ({Format})",
-                _                               => Format,
+                "APFS"                         => $"Mac ({Format})",
+                "EXT2" or "EXT3" or "EXT4"     => $"Linux ({Format})",
+                "BTRFS" or "XFS" or "F2FS"     => $"Linux ({Format})",
+                _                              => Format,
             };
         }
     }
@@ -319,8 +324,9 @@ public partial class ConnectedDevice : ObservableObject
     };
 
     /// <summary>
-    /// Sidebar label. On Windows: "NAME (L:)". On macOS: "NAME". On Linux: "NAME (sdb1)"
-    /// using the block device node stripped of "/dev/".
+    /// Sidebar label. On Windows: "NAME (L:)". On Linux/macOS: just "NAME" — mount paths
+    /// like "/media/fox/FOXPOD" aren't helpful next to the volume label the way a Windows
+    /// drive letter is.
     /// </summary>
     public string SidebarLabel
     {
@@ -332,17 +338,6 @@ public partial class ConnectedDevice : ObservableObject
                 return string.IsNullOrEmpty(letter) ? Name : $"{Name} ({letter})";
             }
 
-            if (OperatingSystem.IsLinux())
-            {
-                var devNode = MountPath;
-                if (devNode.StartsWith("/dev/"))
-                {
-                    devNode = devNode[5..];
-                }
-                return string.IsNullOrEmpty(devNode) ? Name : $"{Name} ({devNode})";
-            }
-
-            // macOS and anything else: just the volume name
             return Name;
         }
     }

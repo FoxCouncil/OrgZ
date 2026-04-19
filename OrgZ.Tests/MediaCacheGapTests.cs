@@ -10,6 +10,7 @@ namespace OrgZ.Tests;
 /// LoadAllRadio + UpsertRadioStations, RemoveRadioBySource, GetLastSync + RecordSync,
 /// GetCdMetadata + SaveCdMetadata.
 /// </summary>
+[Collection("MediaCache")]
 public class MediaCacheGapTests : IDisposable
 {
     private readonly string _tempDbPath;

@@ -16,11 +16,11 @@
         <converters:MediaKindMatchConverter x:Key="MediaKindMatch" />
     </UserControl.Resources>
 
-    <Border>
+    <Border CornerRadius="8" ClipToBounds="True">
         <Border.Styles>
             <Style Selector="Border">
                 <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
-                <Setter Property="BorderThickness" Value="0,1,0,0"/>
+                <Setter Property="BorderThickness" Value="1"/>
                 <Setter Property="Background" Value="#1A1A1A" />
             </Style>
             <Style Selector="TextBlock.label">

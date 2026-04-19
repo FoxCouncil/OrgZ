@@ -29,18 +29,21 @@ public static class DeviceFingerprint
             return null;
         }
 
-        // Only consider removable drives — skip fixed disks, network, CD-ROM
-        if (drive.DriveType != DriveType.Removable)
-        {
-            return null;
-        }
-
         var root = drive.RootDirectory.FullName;
 
         bool hasRockbox = Directory.Exists(Path.Combine(root, ".rockbox"));
         bool hasIPodControl = Directory.Exists(Path.Combine(root, "iPod_Control"));
 
         if (!hasRockbox && !hasIPodControl)
+        {
+            return null;
+        }
+
+        // DriveType is only a reliable pre-filter on Windows. On Linux, .NET maps FAT/exFAT
+        // mounts under /media/* to DriveType.Fixed — so an iPod would be rejected here if we
+        // gated on Removable. The marker-file check above is authoritative: anything with
+        // .rockbox or iPod_Control is an iPod regardless of what DriveType reports.
+        if (OperatingSystem.IsWindows() && drive.DriveType != DriveType.Removable)
         {
             return null;
         }
@@ -66,7 +69,7 @@ public static class DeviceFingerprint
         {
             MountPath = root,
             DeviceType = type,
-            Name = !string.IsNullOrWhiteSpace(drive.VolumeLabel) ? drive.VolumeLabel : "Portable Player",
+            Name = ResolveVolumeName(drive, root),
         };
 
         // Read the on-device /.orgz/device record first — it's the authoritative cache
@@ -224,6 +227,28 @@ public static class DeviceFingerprint
 
     private static string? PreferNonEmpty(string? fresh, string? fallback)
         => !string.IsNullOrWhiteSpace(fresh) ? fresh : fallback;
+
+    // .NET on Linux returns the mount root (e.g. "/media/fox/FOXPOD") for VolumeLabel on
+    // FAT/exFAT mounts instead of the actual filesystem label. udisks2 mounts by convention
+    // use the label as the final path component, so that's our best fallback.
+    private static string ResolveVolumeName(DriveInfo drive, string root)
+    {
+        var label = drive.VolumeLabel;
+        if (!string.IsNullOrWhiteSpace(label) && !PathsEqual(label, root))
+        {
+            return label;
+        }
+
+        var leaf = Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return !string.IsNullOrWhiteSpace(leaf) ? leaf : "Portable Player";
+    }
+
+    private static bool PathsEqual(string a, string b)
+    {
+        var na = a.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var nb = b.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(na, nb, StringComparison.Ordinal);
+    }
 
     // TODO(device-service): PopulateFromScsiInquiry + IsKnownPassThroughHostileBridge
     // removed from the non-admin detection pipeline. All SCSI INQUIRY / ATA PASS-THROUGH
