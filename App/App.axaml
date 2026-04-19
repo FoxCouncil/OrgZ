@@ -1,8 +1,10 @@
 <Application xmlns="https://github.com/avaloniaui"
 			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 			 x:Class="OrgZ.App"
-			 RequestedThemeVariant="Default">
-	<!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+			 RequestedThemeVariant="Dark">
+	<!-- OrgZStyles.axaml is hand-authored dark-only (dark bg/fg color constants), so the
+	     FluentTheme variant is pinned to Dark to match. Switch to "Default" / "Light" only
+	     after OrgZStyles is rewritten with ThemeDictionaries. -->
 
 	<NativeMenu.Menu>
 		<NativeMenu>

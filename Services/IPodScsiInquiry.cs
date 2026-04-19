@@ -390,13 +390,13 @@ public static class IPodScsiInquiry
 #endif
     }
 
+#if WINDOWS
     /// <summary>
     /// Sends Apple's vendor-specific 0xC6 READ command and returns the 256-byte ASCII
     /// SysInfo blob. Same SRB setup as InquiryVpd but 10-byte CDB and 256-byte data.
     /// </summary>
     private static byte[]? ReadAppleSysInfoBlob(SafeFileHandleWrapper handle, out string? error)
     {
-#if WINDOWS
         error = null;
         const int senseSize = 32;
         const int dataSize = 256;
@@ -472,10 +472,6 @@ public static class IPodScsiInquiry
         {
             Marshal.FreeHGlobal(buffer);
         }
-#else
-        error = "not supported on this platform";
-        return null;
-#endif
     }
 
     /// <summary>
@@ -485,7 +481,6 @@ public static class IPodScsiInquiry
     /// </summary>
     private static byte[]? AtaIdentifyDevice16(SafeFileHandleWrapper handle, out string? error)
     {
-#if WINDOWS
         // CDB: 85 08 0E 00 00 00 01 00 00 00 00 00 00 00 EC 00
         //  [0]=0x85 opcode
         //  [1]=0x08 protocol 4 (PIO data-in) << 1
@@ -499,10 +494,6 @@ public static class IPodScsiInquiry
         cdb[6]  = 0x01;
         cdb[14] = ATA_IDENTIFY_DEVICE;
         return SendAtaPassThrough(handle, cdb, 16, 512, out error);
-#else
-        error = "not supported on this platform";
-        return null;
-#endif
     }
 
     /// <summary>
@@ -512,7 +503,6 @@ public static class IPodScsiInquiry
     /// </summary>
     private static byte[]? AtaIdentifyDevice12(SafeFileHandleWrapper handle, out string? error)
     {
-#if WINDOWS
         // CDB: A1 08 0E 00 01 00 00 00 00 EC 00 00
         var cdb = new byte[16];
         cdb[0] = ATA_PASS_THROUGH_12;
@@ -521,11 +511,8 @@ public static class IPodScsiInquiry
         cdb[4] = 0x01;
         cdb[9] = ATA_IDENTIFY_DEVICE;
         return SendAtaPassThrough(handle, cdb, 12, 512, out error);
-#else
-        error = "not supported on this platform";
-        return null;
-#endif
     }
+#endif
 
 #if WINDOWS
     /// <summary>
