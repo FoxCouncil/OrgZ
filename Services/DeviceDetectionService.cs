@@ -31,10 +31,12 @@ public sealed class DeviceDetectionService : IDisposable
     private ManagementEventWatcher? _watcher;
 #endif
 
+    private readonly List<FileSystemWatcher> _linuxMountWatchers = [];
+
     public IReadOnlyCollection<ConnectedDevice> Connected => _connected.Values;
 
     /// <summary>
-    /// Enumerates currently-mounted devices and installs the WMI change watcher.
+    /// Enumerates currently-mounted devices and installs the platform hot-plug watcher.
     /// </summary>
     public void Start()
     {
@@ -54,7 +56,80 @@ public sealed class DeviceDetectionService : IDisposable
         {
             _log.Error(ex, "WMI watcher failed to start — device hot-plug detection disabled for this session");
         }
+#else
+        if (OperatingSystem.IsLinux())
+        {
+            StartLinuxMountWatchers();
+        }
 #endif
+    }
+
+    // udisks2 auto-mounts removable media under /media/$USER on Debian/Ubuntu and
+    // /run/media/$USER on Fedora/Arch. Watching those directories for subdirectory
+    // creation/deletion gives us hot-plug without polling /proc/self/mountinfo.
+    private void StartLinuxMountWatchers()
+    {
+        var user = Environment.UserName;
+        var roots = new[]
+        {
+            $"/media/{user}",
+            $"/run/media/{user}",
+        };
+
+        foreach (var root in roots)
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            try
+            {
+                var watcher = new FileSystemWatcher(root)
+                {
+                    NotifyFilter = NotifyFilters.DirectoryName,
+                    IncludeSubdirectories = false,
+                    EnableRaisingEvents = true,
+                };
+                watcher.Created += OnLinuxMountCreated;
+                watcher.Deleted += OnLinuxMountDeleted;
+                _linuxMountWatchers.Add(watcher);
+                _log.Debug("Linux mount watcher installed at {Root}", root);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Failed to install Linux mount watcher at {Root}", root);
+            }
+        }
+
+        if (_linuxMountWatchers.Count == 0)
+        {
+            _log.Information("No udisks2 mount root present — Linux hot-plug detection disabled for this session");
+        }
+    }
+
+    private void OnLinuxMountCreated(object sender, FileSystemEventArgs e)
+    {
+        // Give udisks2 a beat to finish mounting the filesystem before we try to read it
+        _ = Task.Delay(TimeSpan.FromMilliseconds(600)).ContinueWith(_ =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    TryAddDrive(new DriveInfo(e.FullPath));
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Drive {MountPath} not readable 600ms after mount-create event", e.FullPath);
+                }
+            });
+        });
+    }
+
+    private void OnLinuxMountDeleted(object sender, FileSystemEventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => RemoveDrive(e.FullPath));
     }
 
     private void EnumerateExistingDrives()
@@ -197,5 +272,19 @@ public sealed class DeviceDetectionService : IDisposable
         }
         _watcher = null;
 #endif
+
+        foreach (var w in _linuxMountWatchers)
+        {
+            try
+            {
+                w.EnableRaisingEvents = false;
+                w.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Error tearing down Linux mount watcher at {Path}", w.Path);
+            }
+        }
+        _linuxMountWatchers.Clear();
     }
 }
