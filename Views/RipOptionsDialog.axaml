@@ -1,0 +1,79 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OrgZ.Views.RipOptionsDialog"
+        x:CompileBindings="False"
+        Title="Rip Options"
+        MinWidth="380" MinHeight="220"
+        SizeToContent="WidthAndHeight"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Classes="orgzDialog">
+    <StackPanel Margin="16" Spacing="12">
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto">
+            <TextBlock Grid.Column="0" Text="Format:" VerticalAlignment="Center" />
+            <ComboBox x:Name="FormatCombo" Grid.Column="1" SelectionChanged="FormatCombo_SelectionChanged">
+                <ComboBoxItem Content="WAV (lossless, uncompressed)" Tag="Wav" />
+                <ComboBoxItem Content="FLAC (lossless)" Tag="Flac" />
+                <ComboBoxItem Content="MP3 (lossy, LAME)" Tag="Mp3" />
+            </ComboBox>
+        </Grid>
+
+        <Border x:Name="WavPanel" IsVisible="False" Padding="0,4,0,0">
+            <TextBlock Text="Raw 16-bit stereo 44.1 kHz PCM — identical to the CD, largest file size." TextWrapping="Wrap" Opacity="0.7" />
+        </Border>
+
+        <StackPanel x:Name="FlacPanel" IsVisible="False" Spacing="8">
+            <Grid ColumnDefinitions="100,*">
+                <TextBlock Grid.Column="0" Text="Compression:" VerticalAlignment="Center" />
+                <ComboBox x:Name="FlacCompressionCombo" Grid.Column="1">
+                    <ComboBoxItem Content="0 — Fast (least compression)" Tag="0" />
+                    <ComboBoxItem Content="3 — Faster" Tag="3" />
+                    <ComboBoxItem Content="5 — Balanced (default)" Tag="5" />
+                    <ComboBoxItem Content="6 — Better" Tag="6" />
+                    <ComboBoxItem Content="8 — Best (slowest)" Tag="8" />
+                </ComboBox>
+            </Grid>
+            <TextBlock Text="Higher levels produce smaller files but take longer to encode.  Decoded audio is identical at every level." TextWrapping="Wrap" Opacity="0.7" />
+        </StackPanel>
+
+        <StackPanel x:Name="Mp3Panel" IsVisible="False" Spacing="8">
+            <Grid ColumnDefinitions="100,*">
+                <TextBlock Grid.Column="0" Text="Mode:" VerticalAlignment="Center" />
+                <ComboBox x:Name="Mp3ModeCombo" Grid.Column="1" SelectionChanged="Mp3ModeCombo_SelectionChanged">
+                    <ComboBoxItem Content="Variable bitrate (VBR)" Tag="Vbr" />
+                    <ComboBoxItem Content="Constant bitrate (CBR)" Tag="Cbr" />
+                </ComboBox>
+            </Grid>
+            <Grid ColumnDefinitions="100,*" x:Name="Mp3VbrRow">
+                <TextBlock Grid.Column="0" Text="Quality:" VerticalAlignment="Center" />
+                <ComboBox x:Name="Mp3VbrCombo" Grid.Column="1">
+                    <ComboBoxItem Content="V0 — ~245 kbps (highest)" Tag="0" />
+                    <ComboBoxItem Content="V2 — ~190 kbps (recommended)" Tag="2" />
+                    <ComboBoxItem Content="V4 — ~165 kbps" Tag="4" />
+                    <ComboBoxItem Content="V6 — ~115 kbps" Tag="6" />
+                    <ComboBoxItem Content="V9 — ~65 kbps (lowest)" Tag="9" />
+                </ComboBox>
+            </Grid>
+            <Grid ColumnDefinitions="100,*" x:Name="Mp3CbrRow">
+                <TextBlock Grid.Column="0" Text="Bitrate:" VerticalAlignment="Center" />
+                <ComboBox x:Name="Mp3CbrCombo" Grid.Column="1">
+                    <ComboBoxItem Content="64 kbps" Tag="64" />
+                    <ComboBoxItem Content="96 kbps" Tag="96" />
+                    <ComboBoxItem Content="128 kbps" Tag="128" />
+                    <ComboBoxItem Content="160 kbps" Tag="160" />
+                    <ComboBoxItem Content="192 kbps" Tag="192" />
+                    <ComboBoxItem Content="224 kbps" Tag="224" />
+                    <ComboBoxItem Content="256 kbps" Tag="256" />
+                    <ComboBoxItem Content="320 kbps" Tag="320" />
+                </ComboBox>
+            </Grid>
+            <TextBlock Text="VBR (V0–V9) adjusts bitrate per frame; V2 is the community standard.  CBR keeps a fixed bitrate across the file and is best for streaming." TextWrapping="Wrap" Opacity="0.7" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
+            <Button Content="Rip" Width="80" IsDefault="True" Click="OkButton_Click" />
+            <Button Content="Cancel" Width="80" IsCancel="True" Click="CancelButton_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

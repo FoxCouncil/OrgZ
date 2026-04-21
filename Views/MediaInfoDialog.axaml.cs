@@ -27,6 +27,8 @@ public partial class MediaInfoDialog : Window
     {
         InitializeComponent();
 
+        WindowSizeTracker.Track(this, "MediaInfo");
+
         _items = items;
         _currentIndex = items.IndexOf(item);
         if (_currentIndex < 0)

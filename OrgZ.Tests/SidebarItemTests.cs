@@ -21,6 +21,8 @@ public class SidebarItemTests
         Assert.Null(item.PlaylistId);
         Assert.Null(item.IconBitmap);
         Assert.False(item.HasIconBitmap);
+        Assert.False(item.HasChildren);
+        Assert.Empty(item.Children);
     }
 
     [Fact]
@@ -72,5 +74,64 @@ public class SidebarItemTests
     public void HasIconBitmap_false_when_bitmap_null()
     {
         Assert.False(new SidebarItem().HasIconBitmap);
+    }
+
+    // ===== Tree structure: Children + IsDeviceParent =====
+
+    [Fact]
+    public void Children_defaults_to_empty_collection()
+    {
+        var item = new SidebarItem();
+        Assert.NotNull(item.Children);
+        Assert.Empty(item.Children);
+    }
+
+    [Fact]
+    public void HasChildren_false_for_leaf_items()
+    {
+        Assert.False(new SidebarItem().HasChildren);
+    }
+
+    [Fact]
+    public void HasChildren_true_when_children_added()
+    {
+        var parent = new SidebarItem();
+        Assert.False(parent.HasChildren);
+
+        parent.Children.Add(new SidebarItem { Name = "Music" });
+        Assert.True(parent.HasChildren);
+    }
+
+    [Fact]
+    public void Children_can_be_populated_via_initializer()
+    {
+        var parent = new SidebarItem
+        {
+            Name = "FOXPOD",
+            ViewConfigKey = "Device:/m/FOXPOD",
+            Children =
+            {
+                new SidebarItem { Name = "Playlists", ViewConfigKey = "Device:/m/FOXPOD:Playlists" },
+            },
+        };
+
+        Assert.Single(parent.Children);
+        Assert.Equal("Playlists", parent.Children[0].Name);
+        Assert.Equal("Device:/m/FOXPOD", parent.ViewConfigKey);
+    }
+
+    [Fact]
+    public void Children_collection_mutates_HasChildren_observably()
+    {
+        // The collection is an ObservableCollection so TreeView sees live changes
+        // when playlists are populated after initial connect.
+        var parent = new SidebarItem();
+        parent.Children.Add(new SidebarItem { Name = "Playlists" });
+        parent.Children.Add(new SidebarItem { Name = "Settings" });
+        parent.Children.RemoveAt(0);
+
+        Assert.True(parent.HasChildren);
+        Assert.Single(parent.Children);
+        Assert.Equal("Settings", parent.Children[0].Name);
     }
 }

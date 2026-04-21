@@ -29,6 +29,38 @@
 		<Thickness x:Key="OrgZMonoContentPadding">11,7,11,4</Thickness>
 		<Thickness x:Key="OrgZMonoCheckPadding">8,5,0,1</Thickness>
 		<Thickness x:Key="OrgZMonoComboBoxPadding">12,7,12,4</Thickness>
+
+		<!-- ═══ Classic-iTunes palette ═══ -->
+		<!-- LCD display: sage-green gradient with darker rim, used by the mini-player
+		     chassis and the main-window now-playing panel.  All numeric and text
+		     colors derived from this one palette so the two windows stay in sync. -->
+		<LinearGradientBrush x:Key="OrgZLcdBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+			<GradientStop Offset="0" Color="#D2DAC4" />
+			<GradientStop Offset="0.5" Color="#C8D0B7" />
+			<GradientStop Offset="1" Color="#B6BEA6" />
+		</LinearGradientBrush>
+		<SolidColorBrush x:Key="OrgZLcdRimBrush" Color="#8B917C" />
+		<SolidColorBrush x:Key="OrgZLcdTextBrush" Color="#1E2014" />
+		<SolidColorBrush x:Key="OrgZLcdMutedTextBrush" Color="#3A3E28" />
+		<SolidColorBrush x:Key="OrgZLcdProgressBrush" Color="#4A5840" />
+		<SolidColorBrush x:Key="OrgZLcdProgressTrackBrush" Color="#9BA189" />
+
+		<!-- Brushed-metal chassis for the mini-player body -->
+		<LinearGradientBrush x:Key="OrgZMetalBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+			<GradientStop Offset="0" Color="#DFDFDF" />
+			<GradientStop Offset="0.5" Color="#CBCBCB" />
+			<GradientStop Offset="1" Color="#A8A8A8" />
+		</LinearGradientBrush>
+		<SolidColorBrush x:Key="OrgZMetalRimBrush" Color="#7A7A7A" />
+		<SolidColorBrush x:Key="OrgZMetalTextBrush" Color="#2B2B2B" />
+
+		<!-- Glossy aqua transport button body -->
+		<LinearGradientBrush x:Key="OrgZAquaBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+			<GradientStop Offset="0" Color="#6F6F6F" />
+			<GradientStop Offset="0.45" Color="#2A2A2A" />
+			<GradientStop Offset="0.55" Color="#101010" />
+			<GradientStop Offset="1" Color="#3A3A3A" />
+		</LinearGradientBrush>
 	</Styles.Resources>
 
 	<!-- Dialog window background -->

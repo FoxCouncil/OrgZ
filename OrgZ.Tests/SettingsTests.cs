@@ -5,7 +5,10 @@ namespace OrgZ.Tests;
 /// <summary>
 /// Each test runs against an isolated temp directory via OverrideSettingsDirectory,
 /// then restores the default before delete so we never poison the user's real settings.
+/// Shares the "Settings" collection with other tests that manipulate the global Settings
+/// override (e.g. ColumnStateStoreTests) so xUnit serializes them.
 /// </summary>
+[Collection("Settings")]
 public class SettingsTests : IDisposable
 {
     private readonly string _tempDir;

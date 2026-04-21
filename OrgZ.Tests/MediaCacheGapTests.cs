@@ -135,7 +135,7 @@ public class MediaCacheGapTests : IDisposable
     {
         MediaCache.UpsertMusic(Music("a"));
         MediaCache.RemoveMusic([]);
-        Assert.Single(MediaCache.LoadAll().Where(i => i.Kind == MediaKind.Music));
+        Assert.Single(MediaCache.LoadAll(), i => i.Kind == MediaKind.Music);
     }
 
     [Fact]

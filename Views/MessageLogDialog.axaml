@@ -8,6 +8,7 @@
 		x:CompileBindings="False"
 		Title="Messages"
 		Width="500" Height="350"
+		MinWidth="400" MinHeight="240"
 		CanResize="True"
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">

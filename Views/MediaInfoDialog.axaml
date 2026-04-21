@@ -7,7 +7,8 @@
 		x:CompileBindings="False"
 		Title="Media Info"
 		Width="560" Height="500"
-		CanResize="False"
+		MinWidth="480" MinHeight="440"
+		CanResize="True"
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">
 

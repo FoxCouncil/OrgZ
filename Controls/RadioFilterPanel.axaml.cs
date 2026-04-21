@@ -30,10 +30,11 @@ public partial class RadioFilterPanel : UserControl
         var dialog = new Window
         {
             Title = "Add Radio Station",
-            Width = 400,
-            Height = 200,
+            MinWidth = 400,
+            MinHeight = 200,
+            SizeToContent = Avalonia.Controls.SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false,
+            CanResize = true,
             Content = new StackPanel
             {
                 Margin = new Avalonia.Thickness(16),

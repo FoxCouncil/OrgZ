@@ -1,0 +1,195 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:i="https://github.com/projektanker/icons.avalonia"
+        x:Class="OrgZ.Views.MiniPlayerWindow"
+        x:CompileBindings="False"
+        Title="OrgZ Mini-Player"
+        Width="440" Height="82"
+        MinWidth="360" MinHeight="82" MaxHeight="82"
+        CanResize="True"
+        Topmost="True"
+        ShowInTaskbar="True"
+        SystemDecorations="None"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Styles>
+
+        <!-- Duplicate of MainWindow's slider style so the mini-player's seek and
+             volume sliders match the full player exactly.  Keep in sync with
+             MainWindow.axaml by hand - NOT merged into a shared resource because
+             the main-window look is the canonical design and shouldn't shift if
+             someone tweaks the mini-player later. -->
+        <Style Selector="Slider:horizontal">
+            <Setter Property="MinHeight" Value="14" />
+            <Setter Property="Margin" Value="0,-2,0,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource OrgZLcdProgressBrush}" />
+            <Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
+            <Style Selector="^ Track">
+                <Setter Property="Height" Value="14" />
+                <Setter Property="Margin" Value="0" />
+                <Style Selector="^ Thumb">
+                    <Setter Property="Width" Value="14" />
+                    <Setter Property="Height" Value="14" />
+                    <Setter Property="CornerRadius" Value="0" />
+                    <Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Setter Property="Margin" Value="0" />
+                    <Setter Property="Padding" Value="0" />
+                </Style>
+            </Style>
+        </Style>
+
+        <!-- Transport buttons: same colors as MainWindow's transport cluster -
+             SystemChromeGrayColor background with default Fluent foreground so
+             hover / press states come from the FluentTheme defaults identically
+             to the main player.  CornerRadius is set per-button in markup to
+             get the round pill shape. -->
+        <Style Selector="Button.xport">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style Selector="Button.winChrome">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="#7B7B7B" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource OrgZMetalTextBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="CornerRadius" Value="1" />
+        </Style>
+        <Style Selector="Button.winChrome:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#D8D8D8" />
+        </Style>
+    </Window.Styles>
+
+    <Border CornerRadius="6" BorderThickness="1" BorderBrush="{StaticResource OrgZMetalRimBrush}"
+            Background="{StaticResource OrgZMetalBrush}" ClipToBounds="True"
+            PointerPressed="Chassis_PointerPressed">
+
+        <Grid ColumnDefinitions="44,Auto,*" VerticalAlignment="Stretch">
+
+            <!-- ===== Left chrome: platform-specific ===== -->
+
+            <!-- macOS traffic lights -->
+            <StackPanel x:Name="MacChrome" Grid.Column="0" Orientation="Vertical" Spacing="6"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False">
+                <Ellipse Width="12" Height="12" Cursor="Hand" Stroke="#9C2727" StrokeThickness="1"
+                         PointerPressed="MacClose_PointerPressed" ToolTip.Tip="Close">
+                    <Ellipse.Fill>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                            <GradientStop Offset="0" Color="#FF7B6C" />
+                            <GradientStop Offset="1" Color="#D6423A" />
+                        </LinearGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <Ellipse Width="12" Height="12" Cursor="Hand" Stroke="#A26A10" StrokeThickness="1"
+                         PointerPressed="MacMinimize_PointerPressed" ToolTip.Tip="Minimize">
+                    <Ellipse.Fill>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                            <GradientStop Offset="0" Color="#FFD17A" />
+                            <GradientStop Offset="1" Color="#E2A522" />
+                        </LinearGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <Ellipse Width="12" Height="12" Cursor="Hand" Stroke="#1F8A26" StrokeThickness="1"
+                         PointerPressed="MacExpand_PointerPressed" ToolTip.Tip="Switch to full player">
+                    <Ellipse.Fill>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                            <GradientStop Offset="0" Color="#72E580" />
+                            <GradientStop Offset="1" Color="#32B247" />
+                        </LinearGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+            </StackPanel>
+
+            <!-- Windows / Linux chrome: square close / expand / minimize -->
+            <StackPanel x:Name="WinChrome" Grid.Column="0" Orientation="Vertical" Spacing="4"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Button Classes="winChrome" Width="20" Height="16" Click="Close_Click" ToolTip.Tip="Close">
+                    <i:Icon Value="fa-solid fa-xmark" FontSize="10" />
+                </Button>
+                <Button Classes="winChrome" Width="20" Height="16" Click="Expand_Click" ToolTip.Tip="Switch to full player">
+                    <i:Icon Value="fa-solid fa-up-right-and-down-left-from-center" FontSize="8" />
+                </Button>
+                <Button Classes="winChrome" Width="20" Height="14" Click="Minimize_Click" ToolTip.Tip="Minimize">
+                    <i:Icon Value="fa-solid fa-window-minimize" FontSize="8" />
+                </Button>
+            </StackPanel>
+
+            <!-- ===== Transport cluster ===== -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,2,8,2" Spacing="0">
+
+                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center" Margin="0,0,0,8">
+                    <Button Classes="xport" Width="32" Height="32" CornerRadius="16"
+                            IsEnabled="{Binding IsBackTrackButtonEnabled}"
+                            i:Attached.Icon="fa-solid fa-backward-step" FontSize="14"
+                            Command="{Binding ButtonPreviousTrack}" ToolTip.Tip="Previous" />
+                    <Button Classes="xport" Width="40" Height="40" CornerRadius="20"
+                            IsEnabled="{Binding IsButtonPlayPauseEnabled}"
+                            i:Attached.Icon="{Binding ButtonPlayPauseIcon}" FontSize="18"
+                            Padding="{Binding ButtonPlayPausePadding}"
+                            Command="{Binding ButtonPlayPause}" ToolTip.Tip="Play / Pause" />
+                    <Button Classes="xport" Width="32" Height="32" CornerRadius="16"
+                            IsEnabled="{Binding IsNextTrackButtonEnabled}"
+                            i:Attached.Icon="fa-solid fa-forward-step" FontSize="14"
+                            Command="{Binding ButtonNextTrack}" ToolTip.Tip="Next" />
+                </StackPanel>
+
+                <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,-6,0,0">
+                    <Button Grid.Column="0" Command="{Binding MuteVolumeCommand}" Background="Transparent" BorderThickness="0"
+                            Padding="1" Cursor="Hand" VerticalAlignment="Center" ToolTip.Tip="Mute">
+                        <i:Icon Value="fa-solid fa-volume-low" FontSize="11" Foreground="{StaticResource OrgZMetalTextBrush}" />
+                    </Button>
+                    <Slider Grid.Column="1" Minimum="0" Maximum="100"
+                            Value="{Binding CurrentVolume, Mode=TwoWay}"
+                            VerticalAlignment="Center" Margin="2,0" Height="18" Padding="0,-9,0,0" />
+                    <Button Grid.Column="2" Command="{Binding MaxVolumeCommand}" Background="Transparent" BorderThickness="0"
+                            Padding="1" Cursor="Hand" VerticalAlignment="Center" ToolTip.Tip="Max volume">
+                        <i:Icon Value="fa-solid fa-volume-high" FontSize="11" Foreground="{StaticResource OrgZMetalTextBrush}" />
+                    </Button>
+                </Grid>
+            </StackPanel>
+
+            <!-- ===== LCD display ===== -->
+            <Border Grid.Column="2" Margin="6,10,10,10" CornerRadius="5"
+                    Background="{StaticResource OrgZLcdBrush}"
+                    BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" ClipToBounds="True"
+                    Cursor="Hand" PointerPressed="Lcd_PointerPressed" ToolTip.Tip="Double-click for full-screen">
+
+                <Grid RowDefinitions="Auto,*,Auto" Margin="8,4,8,4">
+
+                    <TextBlock Grid.Row="0" Text="{Binding CurrentTrackLine1}" FontSize="11" FontWeight="Bold"
+                               Foreground="{StaticResource OrgZLcdTextBrush}" TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap" HorizontalAlignment="Center" />
+
+                    <TextBlock Grid.Row="1" Text="{Binding CurrentTrackLine2}" FontSize="10" FontStyle="Italic"
+                               Foreground="{StaticResource OrgZLcdMutedTextBrush}" TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                    <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Bottom">
+                        <TextBlock Grid.Column="0" Text="{Binding CurrentTrackTime}" FontSize="9"
+                                   Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
+                        <Grid Grid.Column="1" Margin="6,0" Height="14" VerticalAlignment="Center">
+                            <Slider Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}"
+                                    Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
+                                    IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
+                                    VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
+                            <Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True"
+                                    Background="{StaticResource OrgZLcdRimBrush}" Height="3" VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock Grid.Column="2" Text="{Binding CurrentTrackDuration}" FontSize="9"
+                                   Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+        </Grid>
+    </Border>
+</Window>
