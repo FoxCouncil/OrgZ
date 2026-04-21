@@ -17,18 +17,28 @@ internal class Program
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
-    public static void Main(string[] args)
+    public static int Main(string[] args)
     {
+        // Elevated CD helper mode: ShellExecute(runas) relaunches OrgZ.exe with
+        // --cd-helper to perform a rip or burn.  Bypass single-instance, Velopack,
+        // and Avalonia init — this process only lives long enough to finish the
+        // SCSI operation and write progress events to the shared file.
+        if (CdHelperMode.ShouldRun(args))
+        {
+            return CdHelperMode.Run(args);
+        }
+
         // Logging must come up first so Velopack/Avalonia init failures are captured.
         Logging.Initialize();
 
         try
         {
-            // Single-instance via D-Bus name ownership on Linux: if another OrgZ is
-            // already running, ask it to raise its window and exit this process.
-            if (SingleInstanceGuard.TryBecomePrimary())
+            // Single-instance via D-Bus name ownership on Linux: if we can't claim the
+            // singleton bus name, another OrgZ is already running — it's been asked to
+            // raise its window and we exit this process.
+            if (!SingleInstanceGuard.TryAcquirePrimary())
             {
-                return;
+                return 0;
             }
 
             VelopackApp.Build().Run();
@@ -56,6 +66,8 @@ internal class Program
             SingleInstanceGuard.Release();
             Logging.Shutdown();
         }
+
+        return 0;
     }
 
     // LibVLCSharp's P/Invoke asks for "libvlc" / "libvlccore" with no version suffix, but most

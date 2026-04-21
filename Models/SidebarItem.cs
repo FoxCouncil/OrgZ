@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
 
 namespace OrgZ.Models;
@@ -26,4 +27,16 @@ internal class SidebarItem
     public int? PlaylistId { get; init; }
     public bool IsNewPlaylistAction { get; init; }
     public bool IsImportPlaylistAction { get; init; }
+
+    /// <summary>
+    /// Nested sidebar entries rendered under this one. Currently used by the DEVICES
+    /// section so a connected iPod expands to show its Playlists and future sub-views
+    /// (browse, settings, sync). The device row itself is the music view, so Music is
+    /// not listed as a child. The collection is mutable so the scan pipeline can add
+    /// items (e.g. discovered playlists) after the initial expansion.
+    /// Empty for leaf items; TreeView renders them without an expander chevron.
+    /// </summary>
+    public ObservableCollection<SidebarItem> Children { get; init; } = [];
+
+    public bool HasChildren => Children.Count > 0;
 }

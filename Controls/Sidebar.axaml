@@ -38,7 +38,28 @@
                 <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="0,2,0,0" />
             </StackPanel>
         </DataTemplate>
+        <TreeDataTemplate x:Key="DeviceTreeTemplate" x:DataType="models:SidebarItem" ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
+                    <Panel>
+                        <Image Source="{Binding IconBitmap}"
+                               Stretch="Uniform"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding HasIconBitmap}" />
+                        <i:Icon Value="{Binding Icon}" FontSize="14"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                IsVisible="{Binding !HasIconBitmap}" />
+                    </Panel>
+                </Border>
+                <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="0,2,0,0" />
+            </StackPanel>
+        </TreeDataTemplate>
         <ControlTheme x:Key="SidebarItemContainerTheme" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+        </ControlTheme>
+        <ControlTheme x:Key="DeviceTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+            <Setter Property="IsExpanded" Value="True" />
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
         </ControlTheme>
     </UserControl.Resources>
@@ -84,18 +105,19 @@
                        Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
                        Margin="16,8,0,4" />
 
-            <!-- Device items -->
-            <ListBox DockPanel.Dock="Top"
-                     x:Name="DeviceListBox"
-                     ItemsSource="{Binding DeviceItems}"
-                     SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Padding="0"
-                     Margin="0,0,0,4"
-                     ItemTemplate="{StaticResource SidebarItemTemplate}"
-                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
-                     SelectionChanged="DeviceListBox_SelectionChanged" />
+            <!-- Device tree: each connected device is a parent with Music/Playlists
+                 as children. Auto-expanded by the container theme so the nested items
+                 are always visible — the chevron still toggles if the user wants. -->
+            <TreeView DockPanel.Dock="Top"
+                      x:Name="DeviceTreeView"
+                      ItemsSource="{Binding DeviceItems}"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Padding="0"
+                      Margin="0,0,0,4"
+                      ItemTemplate="{StaticResource DeviceTreeTemplate}"
+                      ItemContainerTheme="{StaticResource DeviceTreeItemTheme}"
+                      SelectionChanged="DeviceTreeView_SelectionChanged" />
 
             <!-- "No devices" placeholder, shown only when DeviceItems is empty -->
             <TextBlock DockPanel.Dock="Top"

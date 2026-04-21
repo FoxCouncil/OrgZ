@@ -45,6 +45,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        WindowSizeTracker.Track(this, "Main");
+
         var slider = this.FindControl<Slider>("CurrentTimeSlider")!;
 
         slider.AddHandler(InputElement.PointerPressedEvent, Slider_PointerPressed, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
@@ -56,6 +58,13 @@ public partial class MainWindow : Window
         DragDrop.SetAllowDrop(MainDataGrid, true);
         MainDataGrid.AddHandler(DragDrop.DragOverEvent, MainDataGrid_DragOver);
         MainDataGrid.AddHandler(DragDrop.DropEvent, MainDataGrid_Drop);
+
+        // Column-header context menu: right-click any header → toggle columns + persist.
+        // Wired at the tunneling stage so the DataGrid doesn't eat the event first.
+        MainDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
+        GroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
+        MainDataGrid.ColumnReordered += DataGrid_ColumnReordered;
+        GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
 
         DataContext = _viewModel = new MainWindowViewModel(this);
 
@@ -72,6 +81,9 @@ public partial class MainWindow : Window
             ["ShowInExplorer"] = ContextMenu_ShowInExplorer,
             ["RemoveFromLibrary"] = ContextMenu_RemoveFromLibrary,
             ["RestoreFromIgnored"] = ContextMenu_RestoreFromIgnored,
+            ["RipTrack"] = async (s, e) => await _viewModel.RipSelectedCdTrackAsync(),
+            ["RipCd"] = async (s, e) => await _viewModel.RipCurrentCdAsync(),
+            ["BurnToCd"] = ContextMenu_BurnToCd,
         };
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -456,11 +468,23 @@ public partial class MainWindow : Window
 
         RadioFilterPanel.IsVisible = config.ShowRadioFilterPanel;
 
-        // Auto-collapse group headers for grouped views
+        // Group expand/collapse for grouped views uses persisted per-view state. On
+        // load, each group gets the state it had last time (or collapsed by default
+        // for first-time keys). User toggles are captured via the header's
+        // IsItemsExpanded observable and saved immediately.
         if (isGrouped)
         {
+            _currentGroupedViewKey = _lastViewConfigKey ?? _viewModel.SelectedSidebarItem?.ViewConfigKey;
+            _groupExpansion = string.IsNullOrEmpty(_currentGroupedViewKey)
+                ? new Dictionary<string, bool>(StringComparer.Ordinal)
+                : GroupExpansionState.Load(_currentGroupedViewKey!);
+
             GroupedDataGrid.LoadingRowGroup -= AutoCollapseRowGroup;
             GroupedDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
+        }
+        else
+        {
+            _currentGroupedViewKey = null;
         }
 
         // Reset drill-down when switching views
@@ -470,12 +494,90 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Per-group expansion state for the currently active grouped view. Loaded from
+    /// Settings when entering a grouped view, updated on every toggle, persisted on
+    /// every change. True = expanded, false = collapsed, missing = never seen
+    /// (treated as collapsed and recorded as such on first materialization).
+    /// </summary>
+    private Dictionary<string, bool> _groupExpansion = new(StringComparer.Ordinal);
+    private string? _currentGroupedViewKey;
+
+    /// <summary>
+    /// Headers we've already wired the IsItemsExpanded observer to, tracked by weak
+    /// reference so re-realization of the same header gets its own subscription
+    /// without leaking old ones.
+    /// </summary>
+    private readonly HashSet<DataGridRowGroupHeader> _observedHeaders = new();
+
     private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
     {
-        var group = e.RowGroupHeader.DataContext as DataGridCollectionViewGroup;
-        if (group != null)
+        var header = e.RowGroupHeader;
+        if (header.DataContext is not DataGridCollectionViewGroup group)
         {
-            Dispatcher.UIThread.Post(() => GroupedDataGrid.CollapseRowGroup(group, true));
+            return;
+        }
+
+        var keyString = group.Key?.ToString() ?? string.Empty;
+
+        // Decide target state: saved value if we've seen the key before, else default
+        // to collapsed (and record it so next time we load, we don't keep re-collapsing).
+        bool shouldBeExpanded;
+        if (_groupExpansion.TryGetValue(keyString, out var saved))
+        {
+            shouldBeExpanded = saved;
+        }
+        else
+        {
+            shouldBeExpanded = false;
+            _groupExpansion[keyString] = false;
+            PersistGroupExpansion();
+        }
+
+        // Apply the target state. The toggle happens on a dispatcher post because doing
+        // it synchronously inside LoadingRowGroup re-entrantly can corrupt the grid's
+        // realization state — the same reason the original auto-collapse used a post.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (shouldBeExpanded)
+            {
+                GroupedDataGrid.ExpandRowGroup(group, true);
+            }
+            else
+            {
+                GroupedDataGrid.CollapseRowGroup(group, true);
+            }
+        });
+
+        // Avalonia's DataGridRowGroupHeader doesn't publicly expose its expansion state
+        // as a styled property, so we can't observe user toggles via PropertyChanged.
+        // Instead: our dict IS the source of truth. Every Tapped on the header is a
+        // toggle — rows inside the group don't bubble up to the header's Tapped since
+        // they're siblings in the grid's visual tree, not children. We flip our dict
+        // on each tap and trust that Avalonia flips the visual to match.
+        if (_observedHeaders.Add(header))
+        {
+            header.Tapped += OnGroupHeaderTapped;
+        }
+    }
+
+    private void OnGroupHeaderTapped(object? sender, Avalonia.Input.TappedEventArgs e)
+    {
+        if (sender is not DataGridRowGroupHeader h || h.DataContext is not DataGridCollectionViewGroup g)
+        {
+            return;
+        }
+        var k = g.Key?.ToString() ?? string.Empty;
+        var prev = _groupExpansion.TryGetValue(k, out var p) && p;
+        _groupExpansion[k] = !prev;
+        PersistGroupExpansion();
+    }
+
+    private void PersistGroupExpansion()
+    {
+        if (!string.IsNullOrEmpty(_currentGroupedViewKey))
+        {
+            GroupExpansionState.Save(_currentGroupedViewKey!, _groupExpansion);
         }
     }
 
@@ -530,8 +632,50 @@ public partial class MainWindow : Window
         BuildColumnsOn(MainDataGrid, columnDefs);
     }
 
+    /// <summary>
+    /// Returns the ordered column defs for a view, honoring any saved user order. Columns
+    /// the user has in their saved state come first in saved order; columns added to the
+    /// config after the state was saved append at the end so they're never silently lost.
+    /// </summary>
+    private static List<ColumnDef> ApplySavedOrder(string? viewKey, List<ColumnDef> defs)
+    {
+        if (string.IsNullOrEmpty(viewKey))
+        {
+            return defs;
+        }
+
+        var savedKeys = ColumnStateStore.LoadOrder(viewKey);
+        if (savedKeys.Count == 0)
+        {
+            return defs;
+        }
+
+        var byKey = defs.ToDictionary(d => d.Key, StringComparer.Ordinal);
+        var ordered = new List<ColumnDef>(defs.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var key in savedKeys)
+        {
+            if (byKey.TryGetValue(key, out var def) && seen.Add(key))
+            {
+                ordered.Add(def);
+            }
+        }
+        // Append any columns introduced since the state was saved
+        foreach (var def in defs)
+        {
+            if (seen.Add(def.Key))
+            {
+                ordered.Add(def);
+            }
+        }
+        return ordered;
+    }
+
     private void BuildColumnsOn(DataGrid grid, List<ColumnDef> columnDefs)
     {
+        var viewKey = _lastViewConfigKey ?? _viewModel.SelectedSidebarItem?.ViewConfigKey;
+        columnDefs = ApplySavedOrder(viewKey, columnDefs);
         grid.Columns.Clear();
 
         foreach (var def in columnDefs)
@@ -621,6 +765,7 @@ public partial class MainWindow : Window
                             HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Center,
                         };
+                        ApplyColumnTextOverrides(tb, def);
                         tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
                         return tb;
                     }),
@@ -636,6 +781,7 @@ public partial class MainWindow : Window
                             VerticalAlignment = VerticalAlignment.Center,
                             Margin = new Thickness(8, 0),
                         };
+                        ApplyColumnTextOverrides(tb, def);
                         tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
                         return tb;
                     }),
@@ -652,8 +798,140 @@ public partial class MainWindow : Window
             col.CanUserResize = def.CanUserResize;
             col.CanUserReorder = def.CanUserReorder;
 
+            // Apply saved visibility override if one exists, else use the column def's
+            // IsDefaultVisible. The "#" track column and "Title" are always kept visible
+            // even if somehow saved-off — losing either would strand the user.
+            bool? savedVisible = string.IsNullOrEmpty(viewKey) ? null : ColumnStateStore.GetVisibility(viewKey!, def.Key);
+            col.IsVisible = savedVisible ?? def.IsDefaultVisible;
+
+            // Tag the column with its Key so the reorder + toggle handlers can look it
+            // up by DataGridColumn without having to maintain a parallel map.
+            col.SetValue(ColumnKeyProperty, def.Key);
+
             grid.Columns.Add(col);
         }
+    }
+
+    /// <summary>
+    /// Applies per-column text overrides (FontSize, LetterSpacing) to a cell TextBlock
+    /// when the ColumnDef opts in. Used by Centered / RightAligned templates so narrow
+    /// numeric columns (like the "#" track column) can tighten their text without
+    /// affecting the rest of the grid.
+    /// </summary>
+    private static void ApplyColumnTextOverrides(TextBlock tb, ColumnDef def)
+    {
+        if (def.FontSize.HasValue)
+        {
+            tb.FontSize = def.FontSize.Value;
+        }
+        if (def.LetterSpacing.HasValue)
+        {
+            tb.LetterSpacing = def.LetterSpacing.Value;
+        }
+    }
+
+    /// <summary>
+    /// Attached property that tags a DataGridColumn with its stable ColumnDef.Key,
+    /// used to look up the column in saved state when the user toggles or reorders.
+    /// </summary>
+    internal static readonly AttachedProperty<string?> ColumnKeyProperty =
+        AvaloniaProperty.RegisterAttached<MainWindow, DataGridColumn, string?>("ColumnKey");
+
+    private void DataGrid_HeaderRightClick(object? sender, PointerPressedEventArgs e)
+    {
+        // Only react to right-click (secondary mouse button) on a DataGridColumnHeader.
+        if (!e.GetCurrentPoint(null).Properties.IsRightButtonPressed)
+        {
+            return;
+        }
+
+        var header = (e.Source as Visual)?.FindAncestorOfType<Avalonia.Controls.DataGridColumnHeader>();
+        if (header == null || sender is not DataGrid grid)
+        {
+            return;
+        }
+
+        var viewKey = _lastViewConfigKey ?? _viewModel.SelectedSidebarItem?.ViewConfigKey;
+        var config = ListViewConfigs.Get(viewKey);
+        if (config == null)
+        {
+            return;
+        }
+
+        var menu = new Avalonia.Controls.ContextMenu();
+        foreach (var def in config.Columns)
+        {
+            // Skip the play-indicator / no-header columns — they're structural, can't
+            // meaningfully be toggled by users.
+            if (string.IsNullOrEmpty(def.Header))
+            {
+                continue;
+            }
+
+            var col = grid.Columns.FirstOrDefault(c => c.GetValue(ColumnKeyProperty) == def.Key);
+            bool isVisible = col?.IsVisible ?? def.IsDefaultVisible;
+
+            var item = new Avalonia.Controls.MenuItem
+            {
+                Header = def.Header,
+                Icon = isVisible
+                    ? new Icon { Value = "fa-solid fa-check", FontSize = 12 }
+                    : null,
+            };
+            var capturedKey = def.Key;
+            var capturedVisible = isVisible;
+            item.Click += (_, _) => ToggleColumn(grid, viewKey!, capturedKey, !capturedVisible);
+            menu.Items.Add(item);
+        }
+
+        header.ContextMenu = menu;
+        menu.Open(header);
+        e.Handled = true;
+    }
+
+    private void ToggleColumn(DataGrid grid, string viewKey, string columnKey, bool newVisible)
+    {
+        var col = grid.Columns.FirstOrDefault(c => c.GetValue(ColumnKeyProperty) == columnKey);
+        if (col != null)
+        {
+            col.IsVisible = newVisible;
+        }
+
+        // Persist the full state so saved visibility survives a view rebuild
+        PersistColumnState(grid, viewKey);
+    }
+
+    private void DataGrid_ColumnReordered(object? sender, DataGridColumnEventArgs e)
+    {
+        if (sender is not DataGrid grid)
+        {
+            return;
+        }
+        var viewKey = _lastViewConfigKey ?? _viewModel.SelectedSidebarItem?.ViewConfigKey;
+        if (string.IsNullOrEmpty(viewKey))
+        {
+            return;
+        }
+        PersistColumnState(grid, viewKey);
+    }
+
+    /// <summary>
+    /// Walks the grid's columns in display-index order and writes the (key, visibility)
+    /// pairs to ColumnStateStore. Skips columns without a Key (structural extras).
+    /// </summary>
+    private static void PersistColumnState(DataGrid grid, string viewKey)
+    {
+        var ordered = grid.Columns
+            .Where(c => !string.IsNullOrEmpty(c.GetValue(ColumnKeyProperty)))
+            .OrderBy(c => c.DisplayIndex)
+            .Select(c => new ColumnStateStore.ColumnState
+            {
+                Key = c.GetValue(ColumnKeyProperty)!,
+                IsVisible = c.IsVisible,
+            })
+            .ToList();
+
+        ColumnStateStore.Save(viewKey, ordered);
     }
 
     private void BuildContextMenu(List<ContextMenuItemDef> defs)
@@ -917,6 +1195,22 @@ public partial class MainWindow : Window
         _viewModel.NavigateToPlaying();
     }
 
+    private async void ContextMenu_BurnToCd(object? sender, RoutedEventArgs e)
+    {
+        var tracks = MainDataGrid.SelectedItems?.OfType<MediaItem>().ToList() ?? [];
+        if (tracks.Count == 0 && _viewModel.SelectedItem != null)
+        {
+            tracks.Add(_viewModel.SelectedItem);
+        }
+
+        if (tracks.Count == 0)
+        {
+            return;
+        }
+
+        await _viewModel.BurnTracksToCdAsync(tracks);
+    }
+
     private void Slider_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         _viewModel.CurrentTrackTimeNumberPointerPressed();
@@ -931,7 +1225,42 @@ public partial class MainWindow : Window
     {
         base.OnKeyDown(e);
 
-        if (FocusManager?.GetFocusedElement() is TextBox)
+        // Ctrl+F focuses the search box even from other controls — that's the standard
+        // "jump to search" shortcut and people expect it to work no matter where focus is.
+        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+            return;
+        }
+
+        var focused = FocusManager?.GetFocusedElement();
+        var focusedIsTextBox = focused is TextBox;
+
+        // Enter from the search box: if nothing is currently selected in the grid, pick
+        // the first filtered item and play it. If the user selected a row before typing,
+        // play that. Either way, Enter acts as "play the thing you're looking at".
+        if (e.Key == Key.Enter || e.Key == Key.Return)
+        {
+            if (_viewModel.SelectedItem != null)
+            {
+                _viewModel.DataGridRowDoubleClick();
+                e.Handled = true;
+                return;
+            }
+            if (_viewModel.FilteredItems.Count > 0)
+            {
+                _viewModel.SelectedItem = _viewModel.FilteredItems[0];
+                _viewModel.DataGridRowDoubleClick();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        // All other shortcuts are suppressed when a text field has focus — otherwise
+        // typing "s" in search would toggle shuffle, etc.
+        if (focusedIsTextBox)
         {
             return;
         }

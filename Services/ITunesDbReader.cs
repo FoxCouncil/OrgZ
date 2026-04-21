@@ -56,13 +56,41 @@ public static class ITunesDbReader
 
     public static List<ITunesTrack> Read(string iTunesDbPath, string mountPath)
     {
-        var tracks = new List<ITunesTrack>();
+        ReadAll(iTunesDbPath, mountPath, out var tracks, out _);
+        return tracks;
+    }
+
+    /// <summary>
+    /// A single playlist entry from the iTunesDB. Name comes from the first string MHOD
+    /// child of the MHYP; TrackIds is the ordered list of MHIP references. Apple hides
+    /// one "master library" playlist at the front (flag byte is 1 in MHYP header) that
+    /// contains every track — we skip it so it doesn't pollute the sidebar.
+    /// </summary>
+    public class ITunesPlaylist
+    {
+        public uint PlaylistId { get; set; }
+        public string? Name { get; set; }
+        public List<uint> TrackIds { get; set; } = [];
+        public bool IsMaster { get; set; }
+        public bool IsPodcastPlaylist { get; set; }
+    }
+
+    /// <summary>
+    /// Parses both tracks and playlists in one pass. Playlists reference tracks by
+    /// iTunesDB TrackId; callers should map those to <see cref="MediaItem.Id"/> (usually
+    /// <c>device:{mount}:{trackId}</c>) to join against the live track list.
+    /// </summary>
+    public static void ReadAll(string iTunesDbPath, string mountPath, out List<ITunesTrack> tracks, out List<ITunesPlaylist> playlists)
+    {
+        tracks = [];
+        playlists = [];
+
         var bytes = File.ReadAllBytes(iTunesDbPath);
 
         // Root must be MHBD
         if (bytes.Length < 4 || !MatchMagic(bytes, 0, "mhbd"))
         {
-            return tracks;
+            return;
         }
 
         int headerSize = ReadInt32(bytes, 4);
@@ -103,12 +131,34 @@ public static class ITunesDbReader
                     }
                 }
             }
+            else if (mhsdType == 2 || mhsdType == 3)
+            {
+                // Dataset type 2 = playlists (legacy). Type 3 is the "playlists v2" format
+                // used on newer iPods; the MHLP layout is the same, so we handle both.
+                // MHLP sits right after the MHSD header.
+                int mhlpPos = pos + mhsdHeaderSize;
+                if (mhlpPos + 12 <= bytes.Length && MatchMagic(bytes, mhlpPos, "mhlp"))
+                {
+                    int mhlpHeaderSize = ReadInt32(bytes, mhlpPos + 4);
+                    int playlistCount = ReadInt32(bytes, mhlpPos + 8);
+
+                    int mhypPos = mhlpPos + mhlpHeaderSize;
+                    for (int i = 0; i < playlistCount && mhypPos + 12 <= bytes.Length; i++)
+                    {
+                        var pl = ReadMhyp(bytes, mhypPos, out int mhypTotalSize);
+                        if (pl != null && !pl.IsMaster && !pl.IsPodcastPlaylist)
+                        {
+                            playlists.Add(pl);
+                        }
+                        if (mhypTotalSize <= 0) break;
+                        mhypPos += mhypTotalSize;
+                    }
+                }
+            }
 
             if (mhsdTotalSize <= 0) break;
             pos += mhsdTotalSize;
         }
-
-        return tracks;
     }
 
     private static ITunesTrack? ReadMhit(byte[] bytes, int pos, string mountPath, out int totalSize)
@@ -181,6 +231,107 @@ public static class ITunesDbReader
         }
 
         return track;
+    }
+
+    /// <summary>
+    /// Parses one MHYP playlist header and its MHIP track-reference children. MHYP layout:
+    ///   [00..03] 'mhyp'
+    ///   [04..07] headerSize
+    ///   [08..0B] totalSize
+    ///   [0C..0F] number of MHOD children (name + sort order + smart rules)
+    ///   [10..13] number of MHIP children (tracks in this playlist)
+    ///   [14]     master flag (1 = library/master playlist — skip)
+    ///   [15..17] padding
+    ///   [18..1B] playlist ID (uint32)
+    ///   ...
+    /// Then the MHODs and MHIPs follow starting at headerSize. MHIP layout:
+    ///   [00..03] 'mhip'
+    ///   [04..07] headerSize
+    ///   [08..0B] totalSize
+    ///   [0C..0F] number of MHOD children (optional extras)
+    ///   [10..13] podcast grouping ref
+    ///   [14..17] group ID
+    ///   [18..1B] trackId (matches iTunesDB MHIT.TrackId)
+    ///   [1C..1F] timestamp
+    ///   ...
+    /// </summary>
+    private static ITunesPlaylist? ReadMhyp(byte[] bytes, int pos, out int totalSize)
+    {
+        totalSize = 0;
+        if (!MatchMagic(bytes, pos, "mhyp"))
+        {
+            return null;
+        }
+
+        int headerSize = ReadInt32(bytes, pos + 4);
+        totalSize = ReadInt32(bytes, pos + 8);
+        int mhodCount = ReadInt32(bytes, pos + 12);
+        int mhipCount = ReadInt32(bytes, pos + 16);
+        byte masterFlag = bytes.Length > pos + 20 ? bytes[pos + 20] : (byte)0;
+        uint playlistId = bytes.Length > pos + 0x1B ? (uint)ReadInt32(bytes, pos + 0x1C) : 0u;
+
+        var playlist = new ITunesPlaylist
+        {
+            PlaylistId = playlistId,
+            IsMaster = masterFlag == 1,
+        };
+
+        // Walk the MHOD children first (playlist name, sort order, etc) then the MHIPs.
+        // Both child blocks sit contiguously starting at headerSize.
+        int childPos = pos + headerSize;
+        for (int i = 0; i < mhodCount && childPos + 8 <= bytes.Length; i++)
+        {
+            if (!MatchMagic(bytes, childPos, "mhod"))
+            {
+                break;
+            }
+
+            int mhodHeaderSize = ReadInt32(bytes, childPos + 4);
+            int mhodTotalSize = ReadInt32(bytes, childPos + 8);
+            int mhodType = ReadInt32(bytes, childPos + 12);
+
+            if (mhodType == MHOD_TITLE && mhodHeaderSize > 0 && childPos + mhodHeaderSize + 16 <= bytes.Length)
+            {
+                int strLen = ReadInt32(bytes, childPos + mhodHeaderSize + 4);
+                int strStart = childPos + mhodHeaderSize + 16;
+                if (strLen > 0 && strStart + strLen <= bytes.Length)
+                {
+                    playlist.Name = Encoding.Unicode.GetString(bytes, strStart, strLen);
+                }
+            }
+
+            // Type 52 signals the podcast auto-playlist (iTunes internal). Skip it so
+            // Podcasts don't show up in the OrgZ sidebar as a regular playlist.
+            if (mhodType == 52)
+            {
+                playlist.IsPodcastPlaylist = true;
+            }
+
+            if (mhodTotalSize <= 0) break;
+            childPos += mhodTotalSize;
+        }
+
+        for (int i = 0; i < mhipCount && childPos + 8 <= bytes.Length; i++)
+        {
+            if (!MatchMagic(bytes, childPos, "mhip"))
+            {
+                break;
+            }
+
+            int mhipHeaderSize = ReadInt32(bytes, childPos + 4);
+            int mhipTotalSize = ReadInt32(bytes, childPos + 8);
+
+            if (bytes.Length > childPos + 0x1B)
+            {
+                uint trackId = (uint)ReadInt32(bytes, childPos + 0x18);
+                playlist.TrackIds.Add(trackId);
+            }
+
+            if (mhipTotalSize <= 0) break;
+            childPos += mhipTotalSize;
+        }
+
+        return playlist;
     }
 
     /// <summary>

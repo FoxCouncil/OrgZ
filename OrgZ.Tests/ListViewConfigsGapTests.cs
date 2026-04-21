@@ -130,6 +130,144 @@ public class ListViewConfigsGapTests
         Assert.Equal(@"Device:L:\", cfg.Key);
     }
 
+    // ===== BuildDevicePlaylistsConfig — placeholder view under the device tree =====
+
+    [Fact]
+    public void BuildDevicePlaylistsConfig_Key_includes_mount_path_and_Playlists_suffix()
+    {
+        var cfg = ListViewConfigs.BuildDevicePlaylistsConfig(@"L:\");
+        Assert.Equal(@"Device:L:\:Playlists", cfg.Key);
+    }
+
+    [Fact]
+    public void BuildDevicePlaylistsConfig_BaseFilter_rejects_everything_for_now()
+    {
+        // The Playlists child is a placeholder until iTunesDB MHYP / M3U scanning is wired
+        // up — the filter returns false for every item so the grid renders empty.
+        var cfg = ListViewConfigs.BuildDevicePlaylistsConfig(@"L:\");
+        var anything = Music("t1", title: "Anything");
+        Assert.False(cfg.BaseFilter(anything));
+    }
+
+    [Fact]
+    public void BuildDevicePlaylistsConfig_columns_describe_playlists_not_tracks()
+    {
+        var cfg = ListViewConfigs.BuildDevicePlaylistsConfig(@"L:\");
+        var headers = cfg.Columns.Select(c => c.Header).ToList();
+
+        Assert.Contains("Playlist", headers);
+        Assert.Contains("Tracks", headers);
+        Assert.Contains("Duration", headers);
+        Assert.DoesNotContain("Artist", headers);   // not a track list
+        Assert.DoesNotContain("Album", headers);
+    }
+
+    [Fact]
+    public void BuildDevicePlaylistsConfig_SearchFilter_matches_title()
+    {
+        var cfg = ListViewConfigs.BuildDevicePlaylistsConfig(@"L:\");
+        var pl = Music("pl1", title: "Road Trip");
+        Assert.True(cfg.SearchFilter(pl, "Road"));
+        Assert.False(cfg.SearchFilter(pl, "Workout"));
+    }
+
+    // ===== ColumnDef defaults — IsDefaultVisible + Key =====
+
+    [Fact]
+    public void ColumnDef_IsDefaultVisible_defaults_to_true()
+    {
+        var col = new ColumnDef { Header = "Anything", BindingPath = "Title" };
+        Assert.True(col.IsDefaultVisible);
+    }
+
+    [Fact]
+    public void ColumnDef_Key_uses_BindingPath_by_default()
+    {
+        var col = new ColumnDef { Header = "Artist", BindingPath = "Artist" };
+        Assert.Equal("Artist", col.Key);
+    }
+
+    [Fact]
+    public void ColumnDef_Key_falls_back_to_Header_when_BindingPath_empty()
+    {
+        var col = new ColumnDef { Header = "Play", BindingPath = "" };
+        Assert.Equal("Play", col.Key);
+    }
+
+    // ===== Music view: Extension/HasAlbumArt default-hidden, "#" track column present =====
+
+    [Fact]
+    public void MusicConfig_hides_programmer_columns_by_default()
+    {
+        var cfg = ListViewConfigs.Get("Music")!;
+        foreach (var header in new[] { "Extension", "Has Album Art", "Plays" })
+        {
+            var col = cfg.Columns.Single(c => c.Header == header);
+            Assert.False(col.IsDefaultVisible, $"{header} should be hidden by default");
+        }
+    }
+
+    [Fact]
+    public void MusicConfig_has_Duration_column_default_visible()
+    {
+        var cfg = ListViewConfigs.Get("Music")!;
+        var dur = cfg.Columns.Single(c => c.Header == "Duration");
+        Assert.Equal("Duration", dur.BindingPath);
+        Assert.True(dur.IsDefaultVisible);
+        Assert.Equal(@"mm\:ss", dur.StringFormat);
+    }
+
+    [Fact]
+    public void MusicConfig_has_Plays_column_bound_to_PlayCount()
+    {
+        var cfg = ListViewConfigs.Get("Music")!;
+        var plays = cfg.Columns.Single(c => c.Header == "Plays");
+        Assert.Equal("PlayCount", plays.BindingPath);
+        Assert.Equal(ColumnType.RightAligned, plays.Type);
+    }
+
+    [Fact]
+    public void MusicConfig_has_track_number_column_using_TrackDisplay()
+    {
+        var cfg = ListViewConfigs.Get("Music")!;
+        var trackCol = cfg.Columns.Single(c => c.Header == "Track #");
+        Assert.Equal("TrackDisplay", trackCol.BindingPath);
+        Assert.True(trackCol.IsDefaultVisible);
+        Assert.Equal(ColumnType.RightAligned, trackCol.Type);
+    }
+
+    [Fact]
+    public void MusicConfig_core_columns_default_visible()
+    {
+        var cfg = ListViewConfigs.Get("Music")!;
+        foreach (var header in new[] { "Title", "Artist", "Album", "Rating", "Year" })
+        {
+            var col = cfg.Columns.Single(c => c.Header == header);
+            Assert.True(col.IsDefaultVisible, $"{header} should be visible by default");
+        }
+    }
+
+    [Fact]
+    public void MusicConfig_default_column_order_puts_Title_Artist_Track_first()
+    {
+        // Media-style layout: Title → Artist → # (track), with the play indicator as the
+        // structural leader. Album / Rating / Year follow. Users can drag to reorder and
+        // their preference persists per ColumnStateStore, but the default ships in this
+        // order for every fresh install.
+        var cfg = ListViewConfigs.Get("Music")!;
+        var headersInOrder = cfg.Columns.Select(c => c.Header).ToList();
+
+        // Find positions (play indicator has empty header so we look past index 0)
+        var titleIdx  = headersInOrder.IndexOf("Title");
+        var artistIdx = headersInOrder.IndexOf("Artist");
+        var trackIdx  = headersInOrder.IndexOf("Track #");
+        var albumIdx  = headersInOrder.IndexOf("Album");
+
+        Assert.True(titleIdx < artistIdx, "Title must come before Artist");
+        Assert.True(artistIdx < trackIdx, "Artist must come before Track #");
+        Assert.True(trackIdx < albumIdx,  "Track # must come before Album");
+    }
+
     // ===== Drill-down column factories =====
 
     [Fact]

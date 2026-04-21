@@ -38,38 +38,36 @@ internal static class Settings
     }
 
     /// <summary>
-    /// Loads settings from the JSON file or creates empty settings if file doesn't exist
+    /// Loads settings from the JSON file or creates empty settings.  Caller must
+    /// already hold <see cref="_lock"/> — this method is not self-synchronizing
+    /// because the race between "check → load" and
+    /// <see cref="OverrideSettingsDirectory"/> (which nulls <c>_settings</c>
+    /// under the same lock) can otherwise leave Get/Set observing a null map
+    /// in between.  See the test-suite regression that surfaced under xUnit
+    /// parallel execution in 2026-04.
     /// </summary>
-    private static void EnsureLoaded()
+    private static void EnsureLoadedLocked()
     {
         if (_settings != null)
         {
             return;
         }
 
-        lock (_lock)
+        try
         {
-            if (_settings != null)
+            if (File.Exists(SettingsFilePath))
             {
+                string json = File.ReadAllText(SettingsFilePath);
+                _settings = JsonSerializer.Deserialize<Dictionary<string, object>>(json, JsonOptions) ?? [];
                 return;
             }
-
-            try
-            {
-                if (File.Exists(SettingsFilePath))
-                {
-                    string json = File.ReadAllText(SettingsFilePath);
-                    _settings = JsonSerializer.Deserialize<Dictionary<string, object>>(json, JsonOptions) ?? [];
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading settings from {SettingsFilePath}: {ex.Message}");
-            }
-
-            _settings = [];
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading settings from {SettingsFilePath}: {ex.Message}");
+        }
+
+        _settings = [];
     }
 
     /// <summary>
@@ -77,10 +75,9 @@ internal static class Settings
     /// </summary>
     public static T Get<T>(string key, T defaultValue = default!)
     {
-        EnsureLoaded();
-
         lock (_lock)
         {
+            EnsureLoadedLocked();
             if (_settings!.TryGetValue(key, out object? value))
             {
                 try
@@ -102,10 +99,9 @@ internal static class Settings
     /// </summary>
     public static void Set<T>(string key, T value)
     {
-        EnsureLoaded();
-
         lock (_lock)
         {
+            EnsureLoadedLocked();
             _settings![key] = value!;
         }
     }
@@ -115,12 +111,11 @@ internal static class Settings
     /// </summary>
     public static void Save()
     {
-        EnsureLoaded();
-
         try
         {
             lock (_lock)
             {
+                EnsureLoadedLocked();
                 Directory.CreateDirectory(SettingsDirectory);
                 string json = JsonSerializer.Serialize(_settings, JsonOptions);
                 File.WriteAllText(SettingsFilePath, json);

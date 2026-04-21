@@ -33,6 +33,12 @@ public sealed class DeviceDetectionService : IDisposable
 
     private readonly List<FileSystemWatcher> _linuxMountWatchers = [];
 
+    // Debounce: a flaky USB port can re-mount the same path multiple times per second.
+    // Track the latest debounce generation per mount path — when the timer fires we only
+    // act if the generation matches what we captured at scheduling time.
+    private readonly Dictionary<string, int> _linuxMountDebounce = new(StringComparer.Ordinal);
+    private readonly object _linuxMountDebounceLock = new();
+
     public IReadOnlyCollection<ConnectedDevice> Connected => _connected.Values;
 
     /// <summary>
@@ -108,27 +114,61 @@ public sealed class DeviceDetectionService : IDisposable
         }
     }
 
-    private void OnLinuxMountCreated(object sender, FileSystemEventArgs e)
+    private async void OnLinuxMountCreated(object sender, FileSystemEventArgs e)
     {
-        // Give udisks2 a beat to finish mounting the filesystem before we try to read it
-        _ = Task.Delay(TimeSpan.FromMilliseconds(600)).ContinueWith(_ =>
+        // Debounce: if the same mount path fires multiple Created events within the
+        // delay window (flaky USB port, udisks2 retry logic, Finder probe), only the
+        // latest one wins. Each event bumps the generation counter; the timer checks
+        // at dispatch time that its captured generation still matches current.
+        int myGeneration;
+        lock (_linuxMountDebounceLock)
         {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            _linuxMountDebounce.TryGetValue(e.FullPath, out var current);
+            myGeneration = current + 1;
+            _linuxMountDebounce[e.FullPath] = myGeneration;
+        }
+
+        // Give udisks2 a beat to finish mounting the filesystem before we try to read it
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(600));
+        }
+        catch
+        {
+            // Delay doesn't throw in practice; defensive only
+            return;
+        }
+
+        lock (_linuxMountDebounceLock)
+        {
+            if (!_linuxMountDebounce.TryGetValue(e.FullPath, out var current) || current != myGeneration)
             {
-                try
-                {
-                    TryAddDrive(new DriveInfo(e.FullPath));
-                }
-                catch (Exception ex)
-                {
-                    _log.Warning(ex, "Drive {MountPath} not readable 600ms after mount-create event", e.FullPath);
-                }
-            });
+                // Superseded by a newer Created event — drop this one
+                return;
+            }
+        }
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                TryAddDrive(new DriveInfo(e.FullPath));
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Drive {MountPath} not readable 600ms after mount-create event", e.FullPath);
+            }
         });
     }
 
     private void OnLinuxMountDeleted(object sender, FileSystemEventArgs e)
     {
+        // Any pending debounce for this path is now moot — the mount is gone
+        lock (_linuxMountDebounceLock)
+        {
+            _linuxMountDebounce.Remove(e.FullPath);
+        }
+
         Avalonia.Threading.Dispatcher.UIThread.Post(() => RemoveDrive(e.FullPath));
     }
 

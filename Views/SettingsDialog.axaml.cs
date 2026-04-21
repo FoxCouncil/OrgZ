@@ -3,6 +3,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using OrgZ.ViewModels;
 
 namespace OrgZ.Views;
 
@@ -23,6 +24,8 @@ public partial class SettingsDialog : Window
 
         _pendingFolderPath = App.FolderPath;
         _allItems = allItems;
+
+        WindowSizeTracker.Track(this, "Settings");
 
         LoadSettings();
         PopulateStats();
@@ -59,6 +62,23 @@ public partial class SettingsDialog : Window
         ShuffleAlbumRadio.IsChecked = shuffleMode == "Album";
 
         AutoAdvanceCheck.IsChecked = Settings.Get("OrgZ.AutoAdvance", true);
+
+        // Playback → Mini-Player / Visualizer
+        var miniMode = MainWindowViewModel.LoadMiniPlayerMode();
+        MiniPlayerModeReplace.IsChecked = miniMode == MiniPlayerMode.Replace;
+        MiniPlayerModeSideBySide.IsChecked = miniMode == MiniPlayerMode.SideBySide;
+
+        VisualizerEnabledCheck.IsChecked = Settings.Get("OrgZ.Visualizer.Enabled", false);
+        var visName = Settings.Get("OrgZ.Visualizer.Name", "spectrum");
+        VisualizerNameCombo.SelectedIndex = visName switch
+        {
+            "spectrum" => 0,
+            "spectrometer" => 1,
+            "scope" => 2,
+            "vumeter" => 3,
+            "goom" => 4,
+            _ => 0,
+        };
 
         // Advanced
         var dbDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
@@ -239,6 +259,14 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.ShuffleMode", ShuffleAlbumRadio.IsChecked == true ? "Album" : "Song");
         Settings.Set("OrgZ.AutoAdvance", AutoAdvanceCheck.IsChecked == true);
 
+        // Playback → Mini-Player / Visualizer
+        var miniMode = MiniPlayerModeSideBySide.IsChecked == true ? MiniPlayerMode.SideBySide : MiniPlayerMode.Replace;
+        MainWindowViewModel.SaveMiniPlayerMode(miniMode);
+
+        Settings.Set("OrgZ.Visualizer.Enabled", VisualizerEnabledCheck.IsChecked == true);
+        var visTag = (VisualizerNameCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "spectrum";
+        Settings.Set("OrgZ.Visualizer.Name", visTag);
+
         Settings.Save();
     }
 
@@ -269,6 +297,13 @@ public partial class SettingsDialog : Window
         RadioCacheCleared = true;
         ClearRadioCacheButton.IsEnabled = false;
         ClearRadioCacheButton.Content = "Cleared";
+    }
+
+    private void ResetWindowSizesButton_Click(object? sender, RoutedEventArgs e)
+    {
+        WindowSizeTracker.ResetAll();
+        ResetWindowSizesButton.IsEnabled = false;
+        ResetWindowSizesButton.Content = "Reset";
     }
 
     private void ResetSettingsButton_Click(object? sender, RoutedEventArgs e)

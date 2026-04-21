@@ -208,6 +208,255 @@ public class ITunesDbReaderTests : IDisposable
         Assert.Empty(ITunesDbReader.Read(_dbPath, "F:\\"));
     }
 
+    // ===== Playlist parsing (ReadAll + MHSD type 2 + MHYP + MHIP) =====
+
+    [Fact]
+    public void ReadAll_returns_empty_playlists_when_db_has_only_tracks()
+    {
+        var track = new TestTrack { TrackId = 1, Title = "Only Track" };
+        File.WriteAllBytes(_dbPath, BuildItDb([track]));
+
+        ITunesDbReader.ReadAll(_dbPath, "F:\\", out var tracks, out var playlists);
+        Assert.Single(tracks);
+        Assert.Empty(playlists);
+    }
+
+    [Fact]
+    public void ReadAll_extracts_a_single_user_playlist()
+    {
+        var tracks = new List<TestTrack>
+        {
+            new() { TrackId = 100, Title = "One" },
+            new() { TrackId = 200, Title = "Two" },
+        };
+        var playlists = new List<TestPlaylist>
+        {
+            new() { PlaylistId = 42, Name = "Road Trip", IsMaster = false, TrackIds = [100, 200] },
+        };
+
+        File.WriteAllBytes(_dbPath, BuildItDbWithPlaylists(tracks, playlists));
+
+        ITunesDbReader.ReadAll(_dbPath, "F:\\", out var readTracks, out var readPlaylists);
+        Assert.Equal(2, readTracks.Count);
+
+        var pl = Assert.Single(readPlaylists);
+        Assert.Equal(42u, pl.PlaylistId);
+        Assert.Equal("Road Trip", pl.Name);
+        Assert.False(pl.IsMaster);
+        Assert.Equal([100u, 200u], pl.TrackIds);
+    }
+
+    [Fact]
+    public void ReadAll_skips_master_library_playlist()
+    {
+        var tracks = new List<TestTrack> { new() { TrackId = 1, Title = "T1" } };
+        var playlists = new List<TestPlaylist>
+        {
+            new() { PlaylistId = 1, Name = "Library",   IsMaster = true,  TrackIds = [1] },
+            new() { PlaylistId = 2, Name = "My Mix",    IsMaster = false, TrackIds = [1] },
+        };
+
+        File.WriteAllBytes(_dbPath, BuildItDbWithPlaylists(tracks, playlists));
+
+        ITunesDbReader.ReadAll(_dbPath, "F:\\", out _, out var readPlaylists);
+        var pl = Assert.Single(readPlaylists);
+        Assert.Equal("My Mix", pl.Name);
+    }
+
+    [Fact]
+    public void ReadAll_preserves_playlist_track_order()
+    {
+        var tracks = new List<TestTrack>
+        {
+            new() { TrackId = 10, Title = "A" },
+            new() { TrackId = 20, Title = "B" },
+            new() { TrackId = 30, Title = "C" },
+        };
+        var playlists = new List<TestPlaylist>
+        {
+            new() { PlaylistId = 50, Name = "Shuffle Me", TrackIds = [30, 10, 20] },
+        };
+
+        File.WriteAllBytes(_dbPath, BuildItDbWithPlaylists(tracks, playlists));
+
+        ITunesDbReader.ReadAll(_dbPath, "F:\\", out _, out var readPlaylists);
+        Assert.Equal([30u, 10u, 20u], readPlaylists[0].TrackIds);
+    }
+
+    [Fact]
+    public void ReadAll_handles_playlist_with_no_tracks()
+    {
+        var tracks = new List<TestTrack> { new() { TrackId = 1, Title = "T1" } };
+        var playlists = new List<TestPlaylist>
+        {
+            new() { PlaylistId = 99, Name = "Empty Playlist", TrackIds = [] },
+        };
+
+        File.WriteAllBytes(_dbPath, BuildItDbWithPlaylists(tracks, playlists));
+
+        ITunesDbReader.ReadAll(_dbPath, "F:\\", out _, out var readPlaylists);
+        var pl = Assert.Single(readPlaylists);
+        Assert.Empty(pl.TrackIds);
+    }
+
+    [Fact]
+    public void ReadAll_multiple_playlists_round_trip()
+    {
+        var tracks = new List<TestTrack>
+        {
+            new() { TrackId = 1, Title = "A" },
+            new() { TrackId = 2, Title = "B" },
+            new() { TrackId = 3, Title = "C" },
+        };
+        var playlists = new List<TestPlaylist>
+        {
+            new() { PlaylistId = 10, Name = "First",  TrackIds = [1, 2] },
+            new() { PlaylistId = 20, Name = "Second", TrackIds = [2, 3] },
+            new() { PlaylistId = 30, Name = "Third",  TrackIds = [1, 3] },
+        };
+
+        File.WriteAllBytes(_dbPath, BuildItDbWithPlaylists(tracks, playlists));
+
+        ITunesDbReader.ReadAll(_dbPath, "F:\\", out _, out var readPlaylists);
+        Assert.Equal(3, readPlaylists.Count);
+        Assert.Equal("First",  readPlaylists[0].Name);
+        Assert.Equal("Second", readPlaylists[1].Name);
+        Assert.Equal("Third",  readPlaylists[2].Name);
+    }
+
+    // ===== Synthetic playlist builder =====
+
+    private sealed class TestPlaylist
+    {
+        public uint PlaylistId { get; set; }
+        public string Name { get; set; } = "Untitled";
+        public bool IsMaster { get; set; }
+        public List<uint> TrackIds { get; set; } = [];
+    }
+
+    private static byte[] BuildItDbWithPlaylists(List<TestTrack> tracks, List<TestPlaylist> playlists)
+    {
+        // Build the tracks MHSD first (type 1)
+        var mhsd1 = BuildTracksMhsd(tracks);
+
+        // Build the playlists MHSD (type 2)
+        var mhsd2 = BuildPlaylistsMhsd(playlists);
+
+        // Build MHBD wrapping both
+        const int mhbdHeaderSize = 188;
+        int mhbdTotal = mhbdHeaderSize + mhsd1.Length + mhsd2.Length;
+        var mhbd = new byte[mhbdTotal];
+        WriteAscii(mhbd, 0, "mhbd");
+        WriteInt32(mhbd, 4, mhbdHeaderSize);
+        WriteInt32(mhbd, 8, mhbdTotal);
+        Buffer.BlockCopy(mhsd1, 0, mhbd, mhbdHeaderSize, mhsd1.Length);
+        Buffer.BlockCopy(mhsd2, 0, mhbd, mhbdHeaderSize + mhsd1.Length, mhsd2.Length);
+        return mhbd;
+    }
+
+    private static byte[] BuildTracksMhsd(List<TestTrack> tracks)
+    {
+        var mhits = tracks.Select(BuildMhit).ToList();
+        int mhitsTotal = mhits.Sum(m => m.Length);
+
+        const int mhltHeaderSize = 92;
+        var mhlt = new byte[mhltHeaderSize + mhitsTotal];
+        WriteAscii(mhlt, 0, "mhlt");
+        WriteInt32(mhlt, 4, mhltHeaderSize);
+        WriteInt32(mhlt, 8, tracks.Count);
+        int p = mhltHeaderSize;
+        foreach (var m in mhits)
+        {
+            Buffer.BlockCopy(m, 0, mhlt, p, m.Length);
+            p += m.Length;
+        }
+
+        const int mhsdHeaderSize = 96;
+        int mhsdTotal = mhsdHeaderSize + mhlt.Length;
+        var mhsd = new byte[mhsdTotal];
+        WriteAscii(mhsd, 0, "mhsd");
+        WriteInt32(mhsd, 4, mhsdHeaderSize);
+        WriteInt32(mhsd, 8, mhsdTotal);
+        WriteInt32(mhsd, 12, 1);   // type 1 = tracks
+        Buffer.BlockCopy(mhlt, 0, mhsd, mhsdHeaderSize, mhlt.Length);
+        return mhsd;
+    }
+
+    private static byte[] BuildPlaylistsMhsd(List<TestPlaylist> playlists)
+    {
+        var mhyps = playlists.Select(BuildMhyp).ToList();
+        int mhypsTotal = mhyps.Sum(m => m.Length);
+
+        const int mhlpHeaderSize = 92;
+        var mhlp = new byte[mhlpHeaderSize + mhypsTotal];
+        WriteAscii(mhlp, 0, "mhlp");
+        WriteInt32(mhlp, 4, mhlpHeaderSize);
+        WriteInt32(mhlp, 8, playlists.Count);
+        int p = mhlpHeaderSize;
+        foreach (var m in mhyps)
+        {
+            Buffer.BlockCopy(m, 0, mhlp, p, m.Length);
+            p += m.Length;
+        }
+
+        const int mhsdHeaderSize = 96;
+        int mhsdTotal = mhsdHeaderSize + mhlp.Length;
+        var mhsd = new byte[mhsdTotal];
+        WriteAscii(mhsd, 0, "mhsd");
+        WriteInt32(mhsd, 4, mhsdHeaderSize);
+        WriteInt32(mhsd, 8, mhsdTotal);
+        WriteInt32(mhsd, 12, 2);   // type 2 = playlists
+        Buffer.BlockCopy(mhlp, 0, mhsd, mhsdHeaderSize, mhlp.Length);
+        return mhsd;
+    }
+
+    private static byte[] BuildMhyp(TestPlaylist pl)
+    {
+        // MHYP layout — header 108 bytes, then MHOD (name) + MHIPs.
+        const int mhypHeaderSize = 108;
+
+        // One name MHOD (type 1)
+        var nameMhod = BuildStringMhod(1, pl.Name);
+        var mhips = pl.TrackIds.Select(BuildMhip).ToList();
+
+        int childrenTotal = nameMhod.Length + mhips.Sum(m => m.Length);
+        int mhypTotal = mhypHeaderSize + childrenTotal;
+        var mhyp = new byte[mhypTotal];
+
+        WriteAscii(mhyp, 0, "mhyp");
+        WriteInt32(mhyp, 4, mhypHeaderSize);
+        WriteInt32(mhyp, 8, mhypTotal);
+        WriteInt32(mhyp, 12, 1);   // MHOD count (name only)
+        WriteInt32(mhyp, 16, pl.TrackIds.Count);   // MHIP count
+        mhyp[20] = (byte)(pl.IsMaster ? 1 : 0);
+        WriteInt32(mhyp, 0x1C, (int)pl.PlaylistId);
+
+        int p = mhypHeaderSize;
+        Buffer.BlockCopy(nameMhod, 0, mhyp, p, nameMhod.Length);
+        p += nameMhod.Length;
+        foreach (var m in mhips)
+        {
+            Buffer.BlockCopy(m, 0, mhyp, p, m.Length);
+            p += m.Length;
+        }
+        return mhyp;
+    }
+
+    private static byte[] BuildMhip(uint trackId)
+    {
+        // MHIP header is 76 bytes; we only set the magic + sizes + trackId
+        const int mhipHeaderSize = 76;
+        var mhip = new byte[mhipHeaderSize];
+        WriteAscii(mhip, 0, "mhip");
+        WriteInt32(mhip, 4, mhipHeaderSize);
+        WriteInt32(mhip, 8, mhipHeaderSize);
+        WriteInt32(mhip, 12, 0);   // no MHOD children
+        WriteInt32(mhip, 16, 0);   // podcast group ref
+        WriteInt32(mhip, 20, 0);   // group ID
+        WriteInt32(mhip, 0x18, (int)trackId);
+        return mhip;
+    }
+
     // ===== Synthetic iTunesDB builder =====
 
     private sealed class TestTrack

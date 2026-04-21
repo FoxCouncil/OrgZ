@@ -315,6 +315,14 @@ public partial class ConnectedDevice : ObservableObject
 
     public bool IsReadOnly => DeviceType == DeviceType.StockIPod;
 
+    /// <summary>
+    /// Playlists discovered on the device during the scan. For stock iPods this comes
+    /// from iTunesDB MHYP/MHIP chunks; for Rockbox from <c>Playlists/*.m3u</c> files.
+    /// Populated on the UI thread at the end of the scan — view models subscribe to
+    /// changes to rebuild the sidebar tree children.
+    /// </summary>
+    public System.Collections.ObjectModel.ObservableCollection<DevicePlaylist> Playlists { get; } = [];
+
     public string Icon => DeviceType switch
     {
         DeviceType.StockIPod => "fa-solid fa-music",
