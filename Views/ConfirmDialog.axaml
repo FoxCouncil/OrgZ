@@ -3,12 +3,13 @@
 		x:Class="OrgZ.Views.ConfirmDialog"
 		x:CompileBindings="False"
 		Title="Confirm"
-		Width="380" Height="170"
-		CanResize="False"
+		Width="420" MinWidth="380" MaxWidth="640"
+		SizeToContent="Height"
+		CanResize="True"
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">
 	<StackPanel Margin="16" Spacing="12">
-		<TextBlock x:Name="MessageText" Text="" TextWrapping="Wrap" />
+		<TextBlock x:Name="MessageText" Text="" TextWrapping="Wrap" MinHeight="48" />
 		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
 			<Button x:Name="ConfirmButton" Content="OK" Width="90" Click="ConfirmButton_Click" />
 			<Button Content="Cancel" Width="70" Click="CancelButton_Click" />

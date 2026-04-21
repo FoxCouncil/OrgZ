@@ -76,10 +76,31 @@ public partial class MediaItem : ObservableObject
     private uint? _year;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TrackDisplay))]
     private uint? _track;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TrackDisplay))]
     private uint? _totalTracks;
+
+    /// <summary>
+    /// Human display for the track column: "1 of 12" when both Track and TotalTracks
+    /// are known, just the track number when TotalTracks is missing, empty when Track
+    /// is missing altogether. Matches the iTunes / music-player convention.
+    /// </summary>
+    public string TrackDisplay
+    {
+        get
+        {
+            if (!Track.HasValue)
+            {
+                return string.Empty;
+            }
+            return TotalTracks.HasValue && TotalTracks.Value > 0
+                ? $"{Track.Value} of {TotalTracks.Value}"
+                : Track.Value.ToString();
+        }
+    }
 
     [ObservableProperty]
     private uint? _disc;

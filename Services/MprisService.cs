@@ -44,6 +44,12 @@ public sealed class MprisService : IDisposable
     private string? _artUrl;
     private long _trackId;
 
+    // Separate Play / Pause / PlayPause events so shells can request idempotent
+    // actions when they know current state - MPRIS spec says Play always plays and
+    // Pause always pauses, regardless of current status. PlayPauseRequested remains
+    // for media keys that just toggle.
+    public event Action? PlayRequested;
+    public event Action? PauseRequested;
     public event Action? PlayPauseRequested;
     public event Action? NextRequested;
     public event Action? PreviousRequested;
@@ -105,12 +111,21 @@ public sealed class MprisService : IDisposable
     /// <summary>
     /// Updates track metadata and emits PropertiesChanged with the new Metadata dict.
     /// Null fields are omitted from the payload; the MPRIS spec expects absent keys
-    /// rather than empty strings for "no value".
+    /// rather than empty strings for "no value". <c>_trackId</c> only increments when
+    /// at least one field actually changed - otherwise MPRIS clients mistake every
+    /// repeat-publish as a track change and reset their scrubber / re-fetch art.
     /// </summary>
     public void SetMetadata(string? title, string? artist, string? album, string? artUrl)
     {
+        bool changed;
         lock (_stateLock)
         {
+            changed = _title != title || _artist != artist || _album != album || _artUrl != artUrl;
+            if (!changed)
+            {
+                return;
+            }
+
             _title = title;
             _artist = artist;
             _album = album;
@@ -126,42 +141,39 @@ public sealed class MprisService : IDisposable
 
     private VariantValue BuildMetadataVariant()
     {
+        lock (_stateLock)
+        {
+            return BuildMetadataVariantUnsafe();
+        }
+    }
+
+    // Assumes _stateLock is already held. Used from PlayerProperties() so both
+    // PlaybackStatus and Metadata come from the same snapshot.
+    private VariantValue BuildMetadataVariantUnsafe()
+    {
         // MPRIS requires "mpris:trackid" to be a valid D-Bus object path. Use a synthetic
         // path rooted under our object path and tagged with a monotonic counter so listeners
         // see a distinct track when we swap metadata.
-        var pairs = new List<KeyValuePair<string, VariantValue>>(6);
-
-        long trackId;
-        string? title, artist, album, artUrl;
-        lock (_stateLock)
-        {
-            trackId = _trackId;
-            title = _title;
-            artist = _artist;
-            album = _album;
-            artUrl = _artUrl;
-        }
-
         var dict = new Dict<string, VariantValue>();
-        dict.Add("mpris:trackid", VariantValue.ObjectPath($"/org/mpris/MediaPlayer2/OrgZ/Track/{trackId}"));
+        dict.Add("mpris:trackid", VariantValue.ObjectPath($"/org/mpris/MediaPlayer2/OrgZ/Track/{_trackId}"));
 
-        if (!string.IsNullOrWhiteSpace(title))
+        if (!string.IsNullOrWhiteSpace(_title))
         {
-            dict.Add("xesam:title", VariantValue.String(title));
+            dict.Add("xesam:title", VariantValue.String(_title));
         }
-        if (!string.IsNullOrWhiteSpace(artist))
+        if (!string.IsNullOrWhiteSpace(_artist))
         {
             // xesam:artist is "as" (array of strings) - wrap the single artist in an Array.
-            var artistArr = new Tmds.DBus.Protocol.Array<string> { artist };
+            var artistArr = new Tmds.DBus.Protocol.Array<string> { _artist };
             dict.Add("xesam:artist", artistArr);
         }
-        if (!string.IsNullOrWhiteSpace(album))
+        if (!string.IsNullOrWhiteSpace(_album))
         {
-            dict.Add("xesam:album", VariantValue.String(album));
+            dict.Add("xesam:album", VariantValue.String(_album));
         }
-        if (!string.IsNullOrWhiteSpace(artUrl))
+        if (!string.IsNullOrWhiteSpace(_artUrl))
         {
-            dict.Add("mpris:artUrl", VariantValue.String(artUrl));
+            dict.Add("mpris:artUrl", VariantValue.String(_artUrl));
         }
 
         return dict;
@@ -301,9 +313,15 @@ public sealed class MprisService : IDisposable
             switch (member)
             {
                 case "PlayPause":
-                case "Play":
-                case "Pause":
                     _svc.PlayPauseRequested?.Invoke();
+                    ReplyEmpty(context);
+                    return;
+                case "Play":
+                    _svc.PlayRequested?.Invoke();
+                    ReplyEmpty(context);
+                    return;
+                case "Pause":
+                    _svc.PauseRequested?.Invoke();
                     ReplyEmpty(context);
                     return;
                 case "Next":
@@ -341,8 +359,12 @@ public sealed class MprisService : IDisposable
                     HandlePropertiesGetAll(context);
                     return;
                 case "Set":
-                    // OrgZ exposes all MPRIS props read-only for now; accept the call silently.
-                    ReplyEmpty(context);
+                    // Every MPRIS property OrgZ exposes is read-only. Return the standard
+                    // error instead of silently accepting - shells trust the ack and get
+                    // confused when their local Rate/Volume state diverges from ours.
+                    context.ReplyError(
+                        "org.freedesktop.DBus.Error.PropertyReadOnly",
+                        "OrgZ exposes all MPRIS properties as read-only");
                     return;
                 default:
                     context.ReplyUnknownMethodError();
@@ -472,24 +494,38 @@ public sealed class MprisService : IDisposable
         }
     }
 
-    private Dictionary<string, VariantValue> PlayerProperties() => new()
+    // Takes a single lock for both PlaybackStatus + Metadata so GetAll returns a
+    // consistent snapshot - otherwise a concurrent SetPlaybackStatus between the two
+    // reads would give the shell an inconsistent state tuple.
+    private Dictionary<string, VariantValue> PlayerProperties()
     {
-        ["PlaybackStatus"] = VariantValue.String(SnapshotPlaybackStatus()),
-        ["LoopStatus"]     = VariantValue.String("None"),
-        ["Rate"]           = VariantValue.Double(1.0),
-        ["Shuffle"]        = VariantValue.Bool(false),
-        ["Metadata"]       = BuildMetadataVariant(),
-        ["Volume"]         = VariantValue.Double(1.0),
-        ["Position"]       = VariantValue.Int64(0),
-        ["MinimumRate"]    = VariantValue.Double(1.0),
-        ["MaximumRate"]    = VariantValue.Double(1.0),
-        ["CanGoNext"]      = VariantValue.Bool(true),
-        ["CanGoPrevious"]  = VariantValue.Bool(true),
-        ["CanPlay"]        = VariantValue.Bool(true),
-        ["CanPause"]       = VariantValue.Bool(true),
-        ["CanSeek"]        = VariantValue.Bool(false),
-        ["CanControl"]     = VariantValue.Bool(true),
-    };
+        string status;
+        VariantValue metadata;
+        lock (_stateLock)
+        {
+            status = _playbackStatus;
+            metadata = BuildMetadataVariantUnsafe();
+        }
+
+        return new()
+        {
+            ["PlaybackStatus"] = VariantValue.String(status),
+            ["LoopStatus"]     = VariantValue.String("None"),
+            ["Rate"]           = VariantValue.Double(1.0),
+            ["Shuffle"]        = VariantValue.Bool(false),
+            ["Metadata"]       = metadata,
+            ["Volume"]         = VariantValue.Double(1.0),
+            ["Position"]       = VariantValue.Int64(0),
+            ["MinimumRate"]    = VariantValue.Double(1.0),
+            ["MaximumRate"]    = VariantValue.Double(1.0),
+            ["CanGoNext"]      = VariantValue.Bool(true),
+            ["CanGoPrevious"]  = VariantValue.Bool(true),
+            ["CanPlay"]        = VariantValue.Bool(true),
+            ["CanPause"]       = VariantValue.Bool(true),
+            ["CanSeek"]        = VariantValue.Bool(false),
+            ["CanControl"]     = VariantValue.Bool(true),
+        };
+    }
 
     private static readonly string[] SupportedMimeTypes =
     {
@@ -530,11 +566,11 @@ public sealed class MprisService : IDisposable
     <method name="OpenUri"><arg direction="in" type="s"/></method>
     <signal name="Seeked"><arg type="x"/></signal>
     <property name="PlaybackStatus" type="s" access="read"/>
-    <property name="LoopStatus" type="s" access="readwrite"/>
-    <property name="Rate" type="d" access="readwrite"/>
-    <property name="Shuffle" type="b" access="readwrite"/>
+    <property name="LoopStatus" type="s" access="read"/>
+    <property name="Rate" type="d" access="read"/>
+    <property name="Shuffle" type="b" access="read"/>
     <property name="Metadata" type="a{sv}" access="read"/>
-    <property name="Volume" type="d" access="readwrite"/>
+    <property name="Volume" type="d" access="read"/>
     <property name="Position" type="x" access="read"/>
     <property name="MinimumRate" type="d" access="read"/>
     <property name="MaximumRate" type="d" access="read"/>

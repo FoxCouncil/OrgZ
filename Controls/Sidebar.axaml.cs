@@ -22,13 +22,15 @@ public partial class Sidebar : UserControl
         PlaylistListBox.AddHandler(DragDrop.DragOverEvent, PlaylistListBox_DragOver);
         PlaylistListBox.AddHandler(DragDrop.DropEvent, PlaylistListBox_Drop);
         PlaylistListBox.ContextRequested += PlaylistListBox_ContextRequested;
-        DeviceListBox.ContextRequested += DeviceListBox_ContextRequested;
+        DeviceTreeView.ContextRequested += DeviceTreeView_ContextRequested;
     }
 
-    private void DeviceListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    private void DeviceTreeView_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
     {
-        var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (listBoxItem?.DataContext is not SidebarItem sb || !sb.IsEnabled)
+        // Hit-test for a TreeViewItem ancestor - context menu applies to whichever
+        // node the user right-clicked (device parent or one of its children).
+        var treeItem = (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>();
+        if (treeItem?.DataContext is not SidebarItem sb || !sb.IsEnabled)
         {
             e.Handled = true;
             return;
@@ -70,7 +72,7 @@ public partial class Sidebar : UserControl
             menu.Items.Add(eject);
         }
 
-        listBoxItem.ContextMenu = menu;
+        treeItem.ContextMenu = menu;
     }
 
     private void PlaylistListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
@@ -114,6 +116,28 @@ public partial class Sidebar : UserControl
         exportAs.Items.Add(xspf);
 
         menu.Items.Add(exportAs);
+
+        // "Send to Device" submenu - one item per connected WRITABLE device. Read-only
+        // devices (stock iPods) are intentionally omitted rather than greyed out, since
+        // the user picked the "never write to stock" policy.
+        var sendTo = new Avalonia.Controls.MenuItem { Header = "Send to Device" };
+        var writableDevices = vm.ConnectedDevicesSnapshot().Where(d => !d.IsReadOnly).ToList();
+        if (writableDevices.Count == 0)
+        {
+            var none = new Avalonia.Controls.MenuItem { Header = "No compatible devices", IsEnabled = false };
+            sendTo.Items.Add(none);
+        }
+        else
+        {
+            foreach (var device in writableDevices)
+            {
+                var dev = device;   // capture
+                var deviceItem = new Avalonia.Controls.MenuItem { Header = dev.SidebarLabel };
+                deviceItem.Click += (_, _) => _ = vm.SendPlaylistToDevice(sb, dev);
+                sendTo.Items.Add(deviceItem);
+            }
+        }
+        menu.Items.Add(sendTo);
 
         listBoxItem.ContextMenu = menu;
     }
@@ -176,7 +200,7 @@ public partial class Sidebar : UserControl
         if (LibraryListBox.SelectedItem is SidebarItem item)
         {
             _suppressSelectionChange = true;
-            DeviceListBox.SelectedItem = null;
+            DeviceTreeView.SelectedItem = null;
             PlaylistListBox.SelectedItem = null;
             _suppressSelectionChange = false;
 
@@ -187,24 +211,47 @@ public partial class Sidebar : UserControl
         }
     }
 
-    private void DeviceListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void DeviceTreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionChange)
         {
             return;
         }
 
-        if (DeviceListBox.SelectedItem is SidebarItem item)
+        if (DeviceTreeView.SelectedItem is not SidebarItem item)
         {
-            _suppressSelectionChange = true;
-            LibraryListBox.SelectedItem = null;
-            PlaylistListBox.SelectedItem = null;
-            _suppressSelectionChange = false;
+            return;
+        }
 
-            if (DataContext is MainWindowViewModel vm)
+        // The device row itself is the music view (its ViewConfigKey is "Device:{mount}")
+        // so clicking it navigates normally. The "Playlists" sub-parent IS a pure
+        // container though: clicking it jumps to the first playlist when any exist, so
+        // the main grid never shows the empty placeholder unless the device genuinely
+        // has no playlists.
+        bool isPlaylistsContainer = item.ViewConfigKey?.EndsWith(":Playlists") == true;
+        if (isPlaylistsContainer && item.Children.Count > 0)
+        {
+            var firstChild = item.Children[0];
+            _suppressSelectionChange = true;
+            // Programmatically move selection to the child inside the tree so the
+            // visual highlight lands on the right row.
+            var container = DeviceTreeView.TreeContainerFromItem(firstChild);
+            if (container is TreeViewItem tvi)
             {
-                vm.SelectedSidebarItem = item;
+                tvi.IsSelected = true;
             }
+            _suppressSelectionChange = false;
+            item = firstChild;
+        }
+
+        _suppressSelectionChange = true;
+        LibraryListBox.SelectedItem = null;
+        PlaylistListBox.SelectedItem = null;
+        _suppressSelectionChange = false;
+
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.SelectedSidebarItem = item;
         }
     }
 
@@ -232,7 +279,7 @@ public partial class Sidebar : UserControl
 
             _suppressSelectionChange = true;
             LibraryListBox.SelectedItem = null;
-            DeviceListBox.SelectedItem = null;
+            DeviceTreeView.SelectedItem = null;
             _suppressSelectionChange = false;
 
             if (DataContext is MainWindowViewModel vm)

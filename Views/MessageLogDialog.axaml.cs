@@ -18,6 +18,8 @@ public partial class MessageLogDialog : Window
     {
         InitializeComponent();
 
+        WindowSizeTracker.Track(this, "MessageLog");
+
         _messages = messages;
         Title = title;
         HeaderText.Text = title;

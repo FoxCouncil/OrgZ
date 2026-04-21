@@ -7,6 +7,8 @@
 		mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="450"
 		x:Class="OrgZ.Views.MainWindow"
 		Title="OrgZ"
+		Width="1100" Height="700"
+		MinWidth="800" MinHeight="500"
 		x:CompileBindings="False">
 
 	<NativeMenu.Menu>
@@ -30,6 +32,12 @@
 					<NativeMenuItem Header="Next Track" Command="{Binding ButtonNextTrackCommand}" Gesture="Ctrl+Right" />
 				</NativeMenu>
 			</NativeMenuItem>
+			<NativeMenuItem Header="Window">
+				<NativeMenu>
+					<NativeMenuItem Header="Switch to Mini-Player" Command="{Binding ToggleMiniPlayerCommand}" Gesture="Alt+Shift+M" />
+					<NativeMenuItem Header="Now Playing Full-Screen" Command="{Binding ShowNowPlayingFullScreenCommand}" Gesture="F11" />
+				</NativeMenu>
+			</NativeMenuItem>
 			<NativeMenuItem Header="Help">
 				<NativeMenu>
 					<NativeMenuItem Header="About OrgZ" Command="{Binding ShowAboutCommand}" />
@@ -48,8 +56,11 @@
 			<Setter Property="Margin" Value="0,-2,0,0" />
 			<Setter Property="Padding" Value="0" />
 
-			<!-- Track background -->
-			<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+			<!-- Filled track (left of thumb) -->
+			<Setter Property="Foreground" Value="{StaticResource OrgZLcdProgressBrush}" />
+
+			<!-- Empty track background -->
+			<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
 
 			<Style Selector="^ Track">
 				<Setter Property="Height" Value="14" />
@@ -60,8 +71,8 @@
 					<Setter Property="Width" Value="14" />
 					<Setter Property="Height" Value="14" />
 					<Setter Property="CornerRadius" Value="0" />
-					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
-					<Setter Property="BorderBrush" Value="{DynamicResource SystemControlHighlightAccentBrush}" />
+					<Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
+					<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
 					<Setter Property="BorderThickness" Value="1" />
 					<Setter Property="Margin" Value="0" />
 					<Setter Property="Padding" Value="0" />
@@ -131,18 +142,18 @@
 					</Border>
 				</Border>
 				<Border Grid.Column="3" Margin="4" Cursor="Hand" PointerPressed="NowPlaying_PointerPressed">
-					<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="15" Height="75">
+					<Border Background="{StaticResource OrgZLcdBrush}" BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" CornerRadius="6" Height="75">
 						<StackPanel VerticalAlignment="Center">
 							<StackPanel Width="420" Margin="10,0,10,0">
 								<Border ClipToBounds="True" Height="20">
-									<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Left" TextWrapping="NoWrap" />
+									<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
 								</Border>
 								<Border ClipToBounds="True" Height="20">
-									<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" Opacity="0.7" HorizontalAlignment="Left" TextWrapping="NoWrap" />
+									<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource OrgZLcdMutedTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
 								</Border>
 							</StackPanel>
 							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,0" Spacing="12">
-								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="16" FontWeight="Bold" />
+								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
 								<Grid Width="420" Height="14">
 									<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}" VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
 									<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
@@ -157,7 +168,7 @@
 										</Border>
 									</Border>
 								</Grid>
-								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="16" FontWeight="Bold" />
+								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
 							</StackPanel>
 						</StackPanel>
 					</Border>
@@ -182,7 +193,7 @@
 							</Panel>
 						</Button>
 						<i:Icon Value="fa-solid fa-search" Margin="5,10,5,10" />
-						<TextBox Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
+						<TextBox x:Name="SearchBox" Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
 						<Button Command="{Binding ClearSearchCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,10,10" VerticalAlignment="Center" Cursor="Hand" IsVisible="{Binding SearchText.Length}">
 							<i:Icon Value="fa-solid fa-xmark" FontSize="14" />
 						</Button>

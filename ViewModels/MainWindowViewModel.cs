@@ -256,7 +256,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowNoSearchResults), nameof(NoSearchResultsMessage))]
-    private string _searchText = Settings.Get("OrgZ.SearchText", string.Empty);
+    // Not persisted across app launches - search is always transient state.
+    // Per-view search is stored in _searchTextByView and swapped on sidebar changes.
+    private string _searchText = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowNoSearchResults))]
@@ -333,11 +335,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdateNavigationButtons();
     }
 
+    // Per-view search state: each sidebar view remembers its own search text, so
+    // typing "rush" while on Music doesn't leak into the iPod view and vice-versa.
+    // Switching away saves the current text under the leaving view's key; switching
+    // back restores it. _suppressSearchPersist guards the restore so loading a saved
+    // text doesn't cascade back as a "user typed this" save.
+    private readonly Dictionary<string, string> _searchTextByView = new(StringComparer.Ordinal);
+    private bool _suppressSearchPersist;
+
     partial void OnSearchTextChanged(string value)
     {
         ApplyFilter();
-        Settings.Set("OrgZ.SearchText", value);
-        Settings.Save();
+
+        if (!_suppressSearchPersist)
+        {
+            PerViewSearchState.Save(_searchTextByView, SelectedSidebarItem?.ViewConfigKey, value);
+        }
     }
 
     [RelayCommand]
@@ -368,6 +381,79 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private void ToggleQueue()
     {
         IsQueueVisible = !IsQueueVisible;
+    }
+
+    private MiniPlayerWindow? _miniPlayer;
+    private NowPlayingFullScreenWindow? _fullScreen;
+
+    /// <summary>
+    /// Opens the mini-player.  In <see cref="MiniPlayerMode.Replace"/> (iTunes-style)
+    /// mode, the main window is hidden; in <see cref="MiniPlayerMode.SideBySide"/>
+    /// mode both windows remain visible.  Idempotent - if the mini-player is already
+    /// open the call becomes a focus request.
+    /// </summary>
+    [RelayCommand]
+    internal void ToggleMiniPlayer()
+    {
+        if (_miniPlayer != null)
+        {
+            _miniPlayer.Activate();
+            return;
+        }
+
+        var mode = LoadMiniPlayerMode();
+
+        _miniPlayer = new MiniPlayerWindow { DataContext = this };
+        _miniPlayer.RestoreMainRequested += () =>
+        {
+            _window.Show();
+            _window.Activate();
+        };
+        _miniPlayer.FullScreenRequested += ShowNowPlayingFullScreen;
+        _miniPlayer.Closed += (_, _) =>
+        {
+            _miniPlayer = null;
+            if (!_window.IsVisible)
+            {
+                _window.Show();
+                _window.Activate();
+            }
+        };
+
+        _miniPlayer.Show();
+
+        if (mode == MiniPlayerMode.Replace)
+        {
+            _window.Hide();
+        }
+    }
+
+    [RelayCommand]
+    internal void ShowNowPlayingFullScreen()
+    {
+        if (_fullScreen != null)
+        {
+            _fullScreen.Activate();
+            return;
+        }
+
+        _fullScreen = new NowPlayingFullScreenWindow { DataContext = this };
+        _fullScreen.Closed += (_, _) => _fullScreen = null;
+        _fullScreen.Show();
+    }
+
+    internal static MiniPlayerMode LoadMiniPlayerMode()
+    {
+        var raw = Settings.Get("OrgZ.MiniPlayer.Mode", nameof(MiniPlayerMode.Replace));
+        return Enum.TryParse<MiniPlayerMode>(raw, ignoreCase: true, out var mode)
+            ? mode
+            : MiniPlayerMode.Replace;
+    }
+
+    internal static void SaveMiniPlayerMode(MiniPlayerMode mode)
+    {
+        Settings.Set("OrgZ.MiniPlayer.Mode", mode.ToString());
+        Settings.Save();
     }
 
     [RelayCommand]
@@ -469,7 +555,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        SearchText = string.Empty;
+        // Don't clear SearchText - the per-view swap in OnSelectedSidebarItemChanged
+        // restores whatever search was active in the target view (possibly nothing).
         SelectedSidebarItem = target;
         SelectedItem = item;
         ScrollToSelectedRequested?.Invoke();
@@ -489,9 +576,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         Settings.Save();
     }
 
+    partial void OnSelectedSidebarItemChanging(SidebarItem? oldValue, SidebarItem? newValue)
+    {
+        // Fires BEFORE SelectedSidebarItem is actually updated. SearchText still reflects
+        // the old view, so snapshot it into the per-view dict before the view swap.
+        PerViewSearchState.Save(_searchTextByView, oldValue?.ViewConfigKey, SearchText);
+    }
+
     partial void OnSelectedSidebarItemChanged(SidebarItem? value)
     {
         _log.Debug("Sidebar selection changed: ViewKey={ViewKey} Name={Name} _allItems.Count={ItemCount}", value?.ViewConfigKey ?? "<null>", value?.Name ?? "<null>", _allItems.Count);
+
+        // Restore the incoming view's remembered search text. Suppress persistence so
+        // this programmatic set doesn't re-save the same value under the NEW key.
+        var restored = PerViewSearchState.Restore(_searchTextByView, value?.ViewConfigKey);
+        if (restored != SearchText)
+        {
+            _suppressSearchPersist = true;
+            try { SearchText = restored; }
+            finally { _suppressSearchPersist = false; }
+        }
 
         StatusBar.ActiveKind = value?.Kind;
         StatusBar.HasGenericStats = value?.Kind == null && value?.ViewConfigKey != null;
@@ -838,11 +942,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (OperatingSystem.IsLinux())
         {
             _mprisService = new MprisService();
-            _mprisService.PlayPauseRequested += ButtonPlayPause;
-            _mprisService.NextRequested += ButtonNextTrack;
-            _mprisService.PreviousRequested += ButtonPreviousTrack;
-            _mprisService.StopRequested += Stop;
-            _mprisService.RaiseRequested += () => Dispatcher.UIThread.Post(() =>
+            // EVERY MPRIS callback fires from the Tmds.DBus worker thread. VM state
+            // touches (player control, property changes) MUST happen on the UI thread
+            // or Avalonia bindings will crash with cross-thread access violations.
+            _mprisService.PlayRequested     += () => Dispatcher.UIThread.Post(Play);
+            _mprisService.PauseRequested    += () => Dispatcher.UIThread.Post(Pause);
+            _mprisService.PlayPauseRequested += () => Dispatcher.UIThread.Post(ButtonPlayPause);
+            _mprisService.NextRequested     += () => Dispatcher.UIThread.Post(ButtonNextTrack);
+            _mprisService.PreviousRequested += () => Dispatcher.UIThread.Post(ButtonPreviousTrack);
+            _mprisService.StopRequested     += () => Dispatcher.UIThread.Post(Stop);
+            _mprisService.RaiseRequested    += () => Dispatcher.UIThread.Post(() =>
             {
                 if (_window.WindowState == Avalonia.Controls.WindowState.Minimized)
                 {
@@ -1045,10 +1154,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var dialog = new Window
         {
             Title = "About OrgZ",
-            Width = 300,
-            Height = 260,
+            MinWidth = 300,
+            MinHeight = 260,
+            SizeToContent = SizeToContent.WidthAndHeight,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false,
+            CanResize = true,
             Classes = { "orgzDialog" },
             Content = new StackPanel
             {
@@ -1288,13 +1398,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #endif
         _mprisService?.SetMetadata(track.Title, track.Artist, track.Album, null);
 
-        _currentMedia?.Dispose();
+        var previousMedia = _currentMedia;
         _currentMedia = new LibVLCSharp.Shared.Media(_vlc, track.StreamUrl!, LibVLCSharp.Shared.FromType.FromLocation);
         if (track.Track.HasValue)
         {
             _currentMedia.AddOption($":cdda-track={track.Track.Value}");
         }
         _ = _player.Play(_currentMedia);
+        DeferDispose(previousMedia);
 
         ButtonPlayPauseIcon = ICON_PAUSE;
         ButtonPlayPausePadding = new Avalonia.Thickness(0);
@@ -1416,6 +1527,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
+    /// <summary>
+    /// Adds the LibVLC visualizer option to the media when the
+    /// <c>OrgZ.Visualizer.Enabled</c> setting is on.  Values match the libvlc
+    /// <c>--audio-visual</c> argument: <c>spectrum</c>, <c>scope</c>, <c>vumeter</c>,
+    /// <c>spectrometer</c>, <c>goom</c>.  LibVLC opens its own render window when
+    /// a visualizer is attached to audio-only media.
+    /// </summary>
+    private static void ApplyVisualizerOption(Media media)
+    {
+        if (!Settings.Get("OrgZ.Visualizer.Enabled", false))
+        {
+            return;
+        }
+
+        var name = Settings.Get("OrgZ.Visualizer.Name", "spectrum");
+        media.AddOption($":audio-visual={name}");
+    }
+
     private void ExecutePlayMusic(MediaItem file)
     {
         SelectedItem = file;
@@ -1430,10 +1559,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #endif
         _mprisService?.SetMetadata(file.Title, file.Artist, file.Album, string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri);
 
-        _currentMedia?.Dispose();
+        var previousMedia = _currentMedia;
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
+        ApplyVisualizerOption(_currentMedia);
 
         _ = _player.Play(_currentMedia);
+        DeferDispose(previousMedia);
 
         ApplyPerTrackOptions(file);
 
@@ -1463,17 +1594,33 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _ = LoadFaviconAsync(station.FaviconUrl);
         }
 
-        _currentMedia?.Dispose();
+        var previousMedia = _currentMedia;
         _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
 
-        _currentMedia.MetaChanged += (s, e) =>
+        // Capture THIS specific Media instance. When the user switches stations rapidly,
+        // LibVLC can still deliver late MetaChanged events from the previous (disposed)
+        // Media object. If the handler read from _currentMedia directly, it would either
+        // (a) pull metadata from the new station's Media when the old one fired, or
+        // (b) invoke Meta() on a disposed native handle. We guard both by comparing
+        // the event sender to this captured local - events from any other instance get
+        // silently dropped.
+        var thisMedia = _currentMedia;
+
+        thisMedia.MetaChanged += (s, e) =>
         {
-            if (e.MetadataType != MetadataType.NowPlaying || _currentMedia == null)
+            if (e.MetadataType != MetadataType.NowPlaying)
+            {
+                return;
+            }
+            // Drop late events from a disposed predecessor. Referential equality on the
+            // managed wrapper is enough - even if LibVLC recycles a native handle, the
+            // managed Media is unique per ExecutePlayRadio call.
+            if (!ReferenceEquals(s, thisMedia) || !ReferenceEquals(_currentMedia, thisMedia))
             {
                 return;
             }
 
-            var nowPlaying = _currentMedia.Meta(MetadataType.NowPlaying);
+            var nowPlaying = thisMedia.Meta(MetadataType.NowPlaying);
             if (string.IsNullOrWhiteSpace(nowPlaying))
             {
                 return;
@@ -1481,6 +1628,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             UI(() =>
             {
+                // Re-check on the UI thread - a station switch could have landed between
+                // the handler firing and this continuation running.
+                if (!ReferenceEquals(_currentMedia, thisMedia))
+                {
+                    return;
+                }
+
                 UpdateMainStatus($"Playing: {nowPlaying}");
 
                 string? artist = null;
@@ -1502,7 +1656,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             });
         };
 
-        _ = _player.Play(_currentMedia);
+        _ = _player.Play(thisMedia);
+        DeferDispose(previousMedia);
 
         ApplyPerTrackOptions(station);
 
@@ -1512,6 +1667,38 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         MediaCache.IncrementPlayCount(station.Id);
 
         UpdateNavigationButtons();
+    }
+
+    /// <summary>
+    /// Defers disposal of a LibVLC <see cref="Media"/> that's just been replaced
+    /// as <see cref="_currentMedia"/>.  The player's native transition from the
+    /// old Media to the new one completes on a worker thread after
+    /// <see cref="LibVLCSharp.Shared.MediaPlayer.Play(Media)"/> returns; disposing
+    /// the old Media inline can race that transition and corrupt native state
+    /// (manifests as <c>ExecutionEngineException</c> when the user mashes
+    /// Next/Prev faster than the transitions can settle).  Posting the dispose
+    /// to the UI dispatcher at Background priority lets the player claim its
+    /// new ref and release the old one before we free the native handle.
+    /// </summary>
+    private static void DeferDispose(Media? media)
+    {
+        if (media == null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                media.Dispose();
+            }
+            catch
+            {
+                // Best-effort: the native handle may already be gone if a
+                // previous deferred dispose got there first.
+            }
+        }, DispatcherPriority.Background);
     }
 
     private void ClearPlayback()
@@ -1917,11 +2104,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var artist = DrillDownState.SelectedArtist;
         var album = DrillDownState.SelectedAlbum;
 
-        FilteredItems = _allItems
+        var tracksInAlbum = _allItems
             .Where(i => i.Kind == MediaKind.Music)
             .Where(i => string.Equals(i.Artist, artist, StringComparison.OrdinalIgnoreCase))
-            .Where(i => string.Equals(i.Album, album, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+            .Where(i => string.Equals(i.Album, album, StringComparison.OrdinalIgnoreCase));
+        FilteredItems = AlbumTrackSort.Order(tracksInAlbum).ToList();
 
         // Search within this scope
         var searchText = SearchText?.Trim() ?? string.Empty;
@@ -2154,6 +2341,159 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
         var lookup = _allItems.Where(i => i.FilePath != null).ToDictionary(i => i.Id);
         return trackIds.Where(lookup.ContainsKey).Select(id => lookup[id]).ToList();
+    }
+
+    /// <summary>
+    /// Snapshot of currently connected devices - safe to enumerate from the view layer
+    /// without holding a reference to the live _connectedDevices dictionary.
+    /// </summary>
+    internal IReadOnlyList<ConnectedDevice> ConnectedDevicesSnapshot()
+        => _connectedDevices.Values.ToList();
+
+    /// <summary>
+    /// Copies a library playlist onto a connected writable device as an M3U file under
+    /// <c>{mount}/Playlists/</c>. Tracks are matched against the device's own library by
+    /// case-insensitive Artist + Title; unmatched library tracks are reported in the
+    /// activity detail but don't abort the export. The resulting M3U uses Rockbox-style
+    /// absolute paths ("/Music/...") so the device can resolve them regardless of where
+    /// its filesystem is mounted on a host.
+    /// </summary>
+    internal async Task SendPlaylistToDevice(SidebarItem playlistItem, ConnectedDevice device)
+    {
+        if (!playlistItem.PlaylistId.HasValue || device.IsReadOnly)
+        {
+            return;
+        }
+
+        var activity = AddActivity($"Sending \"{playlistItem.Name}\" to {device.Name}");
+
+        try
+        {
+            var libraryTracks = await Task.Run(() => GetPlaylistMediaItems(playlistItem.PlaylistId.Value));
+            if (libraryTracks.Count == 0)
+            {
+                activity.Status = ActivityStatus.Completed;
+                activity.Detail = "Playlist is empty — nothing to send";
+                UpdateActivityBadge();
+                return;
+            }
+
+            var deviceSource = $"device:{device.MountPath}";
+            var deviceTracksByAT = _allItems
+                .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
+                .GroupBy(i => NormalizeMatchKey(i.Artist, i.Title))
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var matchedPaths = new List<string>(libraryTracks.Count);
+            int matched = 0, missed = 0;
+
+            foreach (var libTrack in libraryTracks)
+            {
+                var key = NormalizeMatchKey(libTrack.Artist, libTrack.Title);
+                if (!string.IsNullOrEmpty(key) && deviceTracksByAT.TryGetValue(key, out var deviceTrack))
+                {
+                    matchedPaths.Add(ToDeviceRelativePath(deviceTrack.FilePath!, device.MountPath));
+                    matched++;
+                }
+                else
+                {
+                    missed++;
+                }
+            }
+
+            // Write the M3U file next to the device's existing playlists
+            var playlistsDir = Path.Combine(device.MountPath, "Playlists");
+            Directory.CreateDirectory(playlistsDir);
+            var safeName = SanitizeFileName(playlistItem.Name);
+            var targetPath = Path.Combine(playlistsDir, safeName + ".m3u");
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("#EXTM3U");
+            sb.Append("#PLAYLIST:").AppendLine(playlistItem.Name);
+            foreach (var p in matchedPaths)
+            {
+                sb.AppendLine(p);
+            }
+            await File.WriteAllTextAsync(targetPath, sb.ToString());
+
+            activity.Status = matched > 0 ? ActivityStatus.Completed : ActivityStatus.Failed;
+            activity.Detail = missed == 0
+                ? $"{matched} tracks written"
+                : $"{matched} written, {missed} not found on device";
+            if (matched == 0)
+            {
+                activity.Error = "None of the library tracks were found on the device";
+            }
+            UpdateActivityBadge();
+
+            // Publish the newly-added playlist into the device's sidebar tree so the user
+            // can navigate to it immediately without waiting for a reconnect.
+            var pl = new DevicePlaylist
+            {
+                Name = playlistItem.Name,
+                Key = safeName,
+                TrackIds = matchedPaths
+                    .Select(p => ToMountAbsolute(p, device.MountPath))
+                    .Where(p => !string.IsNullOrEmpty(p))
+                    .ToList(),
+            };
+            // Merge into the existing list (don't clobber other device playlists) -
+            // find any with the same Key and replace; otherwise append.
+            var merged = device.Playlists
+                .Where(existing => existing.Key != pl.Key)
+                .Append(pl)
+                .ToList();
+            PublishDevicePlaylists(device, merged);
+
+            _log.Information("Playlist sent to device: Playlist={Name} Device={MountPath} Matched={Matched} Missed={Missed}",
+                playlistItem.Name, device.MountPath, matched, missed);
+        }
+        catch (Exception ex)
+        {
+            activity.Status = ActivityStatus.Failed;
+            activity.Error = ex.Message;
+            activity.Detail = "Send failed";
+            UpdateActivityBadge();
+            _log.Error(ex, "Failed to send playlist {Name} to {MountPath}", playlistItem.Name, device.MountPath);
+        }
+    }
+
+    internal static string NormalizeMatchKey(string? artist, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return string.Empty;
+        }
+        return $"{(artist ?? "").Trim()}|{title.Trim()}";
+    }
+
+    internal static string ToDeviceRelativePath(string absoluteDevicePath, string mountPath)
+    {
+        // Strip the mount prefix so the M3U uses Rockbox-style absolute-to-device paths
+        // ("/Music/Rush/Signals/01.mp3") rather than host-specific ones ("/run/media/...").
+        if (absoluteDevicePath.StartsWith(mountPath, StringComparison.OrdinalIgnoreCase))
+        {
+            var rel = absoluteDevicePath[mountPath.Length..].Replace('\\', '/');
+            return rel.StartsWith('/') ? rel : '/' + rel;
+        }
+        return absoluteDevicePath.Replace('\\', '/');
+    }
+
+    internal static string ToMountAbsolute(string deviceRelativePath, string mountPath)
+    {
+        var rel = deviceRelativePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        return Path.GetFullPath(Path.Combine(mountPath, rel));
+    }
+
+    internal static string SanitizeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new System.Text.StringBuilder(name.Length);
+        foreach (var c in name)
+        {
+            sb.Append(invalid.Contains(c) ? '_' : c);
+        }
+        return sb.ToString().Trim();
     }
 
     internal async Task ExportPlaylist(SidebarItem item, string format)
@@ -3054,6 +3394,234 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
+    // --- CD Rip / Burn ------------------------------------------------------
+
+    private static readonly char[] _cdIdDriveSep = [':'];
+
+    /// <summary>
+    /// Extracts the drive path ("D:") from a CD track ID ("cd:D::3").
+    /// Returns null if the ID is not a CD track.
+    /// </summary>
+    private static string? DrivePathFromCdTrackId(string id)
+    {
+        if (!id.StartsWith("cd:"))
+        {
+            return null;
+        }
+
+        var rest = id[3..];
+        var lastColon = rest.LastIndexOf(':');
+        if (lastColon < 0)
+        {
+            return null;
+        }
+
+        return rest[..lastColon];
+    }
+
+    /// <summary>
+    /// Stops playback if the currently-playing track comes from <paramref name="drivePath"/>.
+    /// LibVLC's cdda:// driver holds the drive handle while playing; we need it released
+    /// before SCSI passthrough can open the drive for rip/burn.
+    /// </summary>
+    private void EnsureCdDriveFree(string drivePath)
+    {
+        if (CurrentPlayingItem?.Source == "cdda" && CurrentPlayingItem.Id.StartsWith($"cd:{drivePath}:"))
+        {
+            ClearPlayback();
+        }
+    }
+
+    internal async Task RipSelectedCdTrackAsync()
+    {
+        var track = SelectedItem;
+        if (track?.Source != "cdda")
+        {
+            return;
+        }
+
+        var options = await PromptForRipOptionsAsync();
+        if (options == null)
+        {
+            return;
+        }
+
+        await RipCdTracksAsync([track], options);
+    }
+
+    internal async Task RipCurrentCdAsync()
+    {
+        var selected = SelectedItem;
+        if (selected?.Source != "cdda")
+        {
+            return;
+        }
+
+        var drivePath = DrivePathFromCdTrackId(selected.Id);
+        if (drivePath == null)
+        {
+            return;
+        }
+
+        var options = await PromptForRipOptionsAsync();
+        if (options == null)
+        {
+            return;
+        }
+
+        var tracks = _cdTracks.Where(t => DrivePathFromCdTrackId(t.Id) == drivePath).ToList();
+        await RipCdTracksAsync(tracks, options);
+    }
+
+    private async Task<CdRipOptions?> PromptForRipOptionsAsync()
+    {
+        var initial = LoadLastRipOptions();
+        var dialog = new RipOptionsDialog(initial);
+        var result = await dialog.ShowDialog<CdRipOptions?>(_window);
+        if (result != null)
+        {
+            SaveRipOptions(result);
+        }
+
+        return result;
+    }
+
+    private static CdRipOptions LoadLastRipOptions()
+    {
+        try
+        {
+            var json = Settings.Get<string>("OrgZ.Cd.LastRipOptions", "");
+            if (string.IsNullOrEmpty(json))
+            {
+                return CdRipOptions.Default;
+            }
+
+            return System.Text.Json.JsonSerializer.Deserialize<CdRipOptions>(json) ?? CdRipOptions.Default;
+        }
+        catch
+        {
+            return CdRipOptions.Default;
+        }
+    }
+
+    private static void SaveRipOptions(CdRipOptions options)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(options);
+        Settings.Set("OrgZ.Cd.LastRipOptions", json);
+        Settings.Save();
+    }
+
+    private async Task RipCdTracksAsync(IReadOnlyList<MediaItem> tracks, CdRipOptions options)
+    {
+        if (tracks.Count == 0)
+        {
+            return;
+        }
+
+        var drivePath = DrivePathFromCdTrackId(tracks[0].Id);
+        if (drivePath == null)
+        {
+            return;
+        }
+
+        var albumRoot = !string.IsNullOrWhiteSpace(App.FolderPath) ? App.FolderPath : Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
+        var artistDir = CdRipService.SanitizeForFileName(tracks[0].Artist) is { Length: > 0 } a ? a : "Unknown Artist";
+        var albumDir = CdRipService.SanitizeForFileName(tracks[0].Album) is { Length: > 0 } al ? al : $"Audio CD ({drivePath})";
+        var outputDir = Path.Combine(albumRoot, artistDir, albumDir);
+
+        var activity = AddActivity($"Ripping {tracks.Count} track(s) from {drivePath} — {options.ShortLabel}");
+
+        EnsureCdDriveFree(drivePath);
+
+        var progress = new Progress<RipTrackProgress>(p =>
+        {
+            activity.Detail = $"Track {p.TrackNumber} of {p.TrackCount}: {p.TrackTitle} ({p.TrackPercent:P0})";
+            activity.Progress = p.TrackPercent;
+        });
+
+        try
+        {
+            var outcomes = await CdRipService.RipTracksWithElevationAsync(drivePath, tracks, outputDir, options, progress);
+            var bad = outcomes.Count(o => o.HadErrors);
+            activity.Detail = bad == 0
+                ? $"Ripped {outcomes.Count} track(s) to {outputDir}"
+                : $"Ripped {outcomes.Count} track(s) with {bad} problem sector(s) — files are playable";
+            activity.Progress = 1.0;
+            activity.Status = ActivityStatus.Completed;
+            UpdateActivityBadge();
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Rip failed for {DrivePath}", drivePath);
+            activity.Error = ex.Message;
+            activity.Status = ActivityStatus.Failed;
+            UpdateActivityBadge();
+        }
+    }
+
+    internal async Task BurnTracksToCdAsync(IReadOnlyList<MediaItem> tracks)
+    {
+        if (tracks.Count == 0)
+        {
+            return;
+        }
+
+        var drive = CdAudioService.GetAllCdDrives().FirstOrDefault();
+        if (drive == null)
+        {
+            _log.Warning("Burn requested with no CD drive present");
+            return;
+        }
+
+        var drivePath = drive.Name.TrimEnd('\\', '/');
+        var burnTracks = new List<CdBurnTrack>(tracks.Count);
+        foreach (var t in tracks)
+        {
+            if (string.IsNullOrEmpty(t.FilePath))
+            {
+                _log.Warning("Burn: track {Id} has no FilePath; skipping", t.Id);
+                continue;
+            }
+
+            burnTracks.Add(new CdBurnTrack
+            {
+                WavFilePath = t.FilePath,
+                Title = t.Title,
+                Performer = t.Artist,
+            });
+        }
+
+        if (burnTracks.Count == 0)
+        {
+            return;
+        }
+
+        EnsureCdDriveFree(drivePath);
+
+        var activity = AddActivity($"Burning {burnTracks.Count} track(s) to {drivePath}");
+        var progress = new Progress<CdBurnProgress>(p =>
+        {
+            activity.Detail = $"Track {p.TrackNumber} of {p.TrackCount} ({p.DiscPercent:P0})";
+            activity.Progress = p.DiscPercent;
+        });
+
+        try
+        {
+            await CdBurnService.BurnWithElevationAsync(drivePath, burnTracks, progress);
+            activity.Detail = $"Burned {burnTracks.Count} track(s) to {drivePath}";
+            activity.Progress = 1.0;
+            activity.Status = ActivityStatus.Completed;
+            UpdateActivityBadge();
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Burn failed for {DrivePath}", drivePath);
+            activity.Error = ex.Message;
+            activity.Status = ActivityStatus.Failed;
+            UpdateActivityBadge();
+        }
+    }
+
     #endregion
 
     #region Portable Devices (iPod / Rockbox)
@@ -3069,7 +3637,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _connectedDevices[device.MountPath] = device;
 
         var viewKey = $"Device:{device.MountPath}";
+        var playlistsKey = $"Device:{device.MountPath}:Playlists";
         ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDeviceConfig(device.MountPath, device.DeviceType));
+        ListViewConfigs.Register(playlistsKey, ListViewConfigs.BuildDevicePlaylistsConfig(device.MountPath));
+
+        // The device row itself IS the music view (its ViewConfigKey = "Device:{mount}").
+        // Children under it are secondary views - currently just Playlists, expandable to
+        // future sub-views (Browse, Settings, Sync).
+        var playlistsChild = new SidebarItem
+        {
+            Name = "Playlists",
+            Icon = "fa-solid fa-list",
+            Category = "DEVICE",
+            IsEnabled = true,
+            ViewConfigKey = playlistsKey,
+        };
 
         var sidebarItem = new SidebarItem
         {
@@ -3079,6 +3661,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Category = "DEVICES",
             IsEnabled = true,
             ViewConfigKey = viewKey,
+            Children = { playlistsChild },
         };
         DeviceItems.Add(sidebarItem);
 
@@ -3108,13 +3691,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 });
             }
 
+            void PublishPlaylists(IReadOnlyList<DevicePlaylist> playlists)
+            {
+                PublishDevicePlaylists(device, playlists);
+            }
+
             if (device.DeviceType == DeviceType.StockIPod)
             {
-                scanned = await Task.Run(() => ScanStockIPod(device, activity, FlushBatch));
+                scanned = await Task.Run(() => ScanStockIPod(device, activity, FlushBatch, PublishPlaylists));
             }
             else
             {
-                scanned = await Task.Run(() => ScanRockboxDevice(device, activity, FlushBatch));
+                scanned = await Task.Run(() => ScanRockboxDevice(device, activity, FlushBatch, PublishPlaylists));
             }
 
             sw.Stop();
@@ -3240,6 +3828,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var source = $"device:{mountPath}";
         var viewKey = $"Device:{mountPath}";
+        var playlistsKey = $"Device:{mountPath}:Playlists";
 
         // Stop playback if we're playing from this device
         if (CurrentPlayingItem?.Source == source)
@@ -3249,6 +3838,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _allItems.RemoveAll(i => i.Source == source);
 
+        // The device entry is a tree parent - removing it drops the Music + Playlists
+        // children along with it, since they're just Children of the parent SidebarItem.
         var sidebarItem = DeviceItems.FirstOrDefault(d => d.ViewConfigKey == viewKey);
         if (sidebarItem != null)
         {
@@ -3256,9 +3847,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         ListViewConfigs.Remove(viewKey);
+        ListViewConfigs.Remove(playlistsKey);
 
-        // If the user was viewing this device, fall back to the default library view
-        if (SelectedSidebarItem?.ViewConfigKey == viewKey)
+        // If the user was viewing any part of this device tree, fall back to the library
+        var selectedKey = SelectedSidebarItem?.ViewConfigKey;
+        if (selectedKey == viewKey || selectedKey == playlistsKey)
         {
             SelectedSidebarItem = LibraryItems.FirstOrDefault() ?? null;
         }
@@ -3270,8 +3863,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// metadata (title/artist/album/play counts/ratings) comes from the DB. When the DB is
     /// missing or unreadable, falls back to a raw filesystem walk so the grid still fills
     /// with whatever audio we can find on the device.
+    ///
+    /// Stock iPods are treated as READ-ONLY - we never write to the device, not even a
+    /// cache file under <c>/.orgz/</c>. The iTunesDB parse runs every connect; it's fast
+    /// enough (~1s for a 14k-track library) that shaving it isn't worth the policy break.
     /// </summary>
-    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null)
+    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
     {
         var dbPath = Path.Combine(device.MountPath, "iPod_Control", "iTunes", "iTunesDB");
         if (!File.Exists(dbPath))
@@ -3281,9 +3878,28 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return ScanRockboxDevice(device, activity, flushBatch);
         }
 
-        activity.Detail = "Parsing iTunesDB...";
         var source = $"device:{device.MountPath}";
-        var tracks = ITunesDbReader.Read(dbPath, device.MountPath);
+        activity.Detail = "Parsing iTunesDB...";
+        ITunesDbReader.ReadAll(dbPath, device.MountPath, out var tracks, out var itunesPlaylists);
+
+        // Convert iTunesDB playlists into DevicePlaylist - their TrackIds are MediaItem Ids
+        // ("device:{mount}:{trackId}") so the per-playlist view config can filter by
+        // set membership directly.
+        var devicePlaylists = new List<DevicePlaylist>();
+        foreach (var pl in itunesPlaylists)
+        {
+            if (string.IsNullOrWhiteSpace(pl.Name))
+            {
+                continue;
+            }
+            devicePlaylists.Add(new DevicePlaylist
+            {
+                Name = pl.Name!,
+                Key = $"MHYP:{pl.PlaylistId}",
+                TrackIds = pl.TrackIds.Select(tid => $"device:{device.MountPath}:{tid}").ToList(),
+            });
+        }
+        publishPlaylists?.Invoke(devicePlaylists);
 
         var items = new List<MediaItem>(tracks.Count);
         var pending = new List<MediaItem>(capacity: 64);
@@ -3356,8 +3972,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// Uses <see cref="DeviceLibraryCache"/> to persist results to <c>{mount}/.orgz/library.db</c>
     /// and only re-analyze files whose size+mtime differ from the cached entry. First scan
     /// is full; every subsequent connect deltas in ~milliseconds unless the music changed.
+    /// Stock iPods do NOT use this - their iTunesDB is authoritative and fast to parse, and
+    /// we treat stock iPods as read-only (don't write anything to the device).
     /// </summary>
-    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null)
+    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
     {
         var source = $"device:{device.MountPath}";
 
@@ -3488,7 +4106,75 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // is never reached) so a partial run doesn't erase otherwise-valid rows.
         DeviceLibraryCache.PruneMissing(device.MountPath, items.Select(i => i.FilePath!).Where(p => !string.IsNullOrEmpty(p)));
 
+        // Read Rockbox-format M3U playlists from /Playlists/ - their TrackIds are
+        // absolute file paths, which match MediaItem.Id for Rockbox tracks (also the
+        // full path). Missing /Playlists/ folder is the common case; returns empty.
+        var playlists = M3UPlaylistReader.Read(device.MountPath);
+        publishPlaylists?.Invoke(playlists);
+
         return items;
+    }
+
+    /// <summary>
+    /// Marshals a batch of device-side playlists back to the UI thread, replaces the
+    /// device's current playlist list, and rebuilds the sidebar tree children under the
+    /// "Playlists" node. Also registers/unregisters the per-playlist view configs so
+    /// selecting a playlist in the sidebar filters the grid correctly.
+    /// </summary>
+    private void PublishDevicePlaylists(ConnectedDevice device, IReadOnlyList<DevicePlaylist> playlists)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var mountPath = device.MountPath;
+
+            // Swap the device's playlist collection atomically - callers can bind to it
+            // if we ever want a device-level playlist header.
+            device.Playlists.Clear();
+            foreach (var pl in playlists)
+            {
+                device.Playlists.Add(pl);
+            }
+
+            // Find the sidebar's "Playlists" child under the device parent. If the user
+            // disconnected the device between scan completion and this dispatch (unlikely
+            // but possible), the device item won't be there - just bail.
+            var deviceViewKey = $"Device:{mountPath}";
+            var playlistsViewKey = $"Device:{mountPath}:Playlists";
+            var deviceParent = DeviceItems.FirstOrDefault(d => d.ViewConfigKey == deviceViewKey);
+            var playlistsNode = deviceParent?.Children.FirstOrDefault(c => c.ViewConfigKey == playlistsViewKey);
+            if (playlistsNode == null)
+            {
+                return;
+            }
+
+            // Remove any previously-registered per-playlist view configs for this device
+            // so a rescan replaces them cleanly instead of accumulating duplicates.
+            foreach (var stale in playlistsNode.Children.ToList())
+            {
+                if (stale.ViewConfigKey != null)
+                {
+                    ListViewConfigs.Remove(stale.ViewConfigKey);
+                }
+            }
+            playlistsNode.Children.Clear();
+
+            foreach (var pl in playlists)
+            {
+                var viewKey = $"Device:{mountPath}:Playlist:{pl.Key}";
+                ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDevicePlaylistConfig(viewKey, pl.TrackIds));
+
+                playlistsNode.Children.Add(new SidebarItem
+                {
+                    Name = pl.Name,
+                    Icon = "fa-solid fa-list-ul",
+                    Category = "DEVICE",
+                    IsEnabled = true,
+                    ViewConfigKey = viewKey,
+                });
+            }
+
+            _log.Information("Device playlists published: MountPath={MountPath} Count={Count}", mountPath, playlists.Count);
+        });
     }
 
     #endregion

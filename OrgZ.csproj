@@ -84,4 +84,12 @@
 	<ItemGroup>
 		<InternalsVisibleTo Include="OrgZ.Tests" />
 	</ItemGroup>
+
+	<!-- FoxRainbowBooks is consumed as a sibling checkout: the published
+	     1.0.0-alpha.1 NuGets omit IScsiTransport, which FoxOrangebook.BurnSession
+	     depends on. Switch back to PackageReference once alpha.2+ ships. -->
+	<ItemGroup>
+		<ProjectReference Include="..\FoxRainbowBooks\src\FoxRedbook\FoxRedbook.csproj" />
+		<ProjectReference Include="..\FoxRainbowBooks\src\FoxOrangebook\FoxOrangebook.csproj" />
+	</ItemGroup>
 </Project>

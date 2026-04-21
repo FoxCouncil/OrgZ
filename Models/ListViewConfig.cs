@@ -107,6 +107,73 @@ public static class ListViewConfigs
         };
     }
 
+    /// <summary>
+    /// View config for a single device playlist (one tree leaf under the device's
+    /// Playlists node). Filters the main items list by the given Id set, preserving the
+    /// order from the source playlist so "Track 1, Track 2..." matches the device's own
+    /// display order rather than the library's sort.
+    /// </summary>
+    public static ListViewConfig BuildDevicePlaylistConfig(string viewKey, IReadOnlyList<string> orderedTrackIds)
+    {
+        var idSet = new HashSet<string>(orderedTrackIds);
+        var orderMap = new Dictionary<string, int>(orderedTrackIds.Count);
+        for (int i = 0; i < orderedTrackIds.Count; i++)
+        {
+            orderMap[orderedTrackIds[i]] = i;
+        }
+
+        return new ListViewConfig
+        {
+            Key = viewKey,
+            Columns =
+            [
+                new() { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new() { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40, Type = ColumnType.Centered },
+                new() { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+                new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+            ],
+            BaseFilter = item => idSet.Contains(item.Id),
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildDeviceContextMenu(),
+            Sorter = items => items.OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue),
+        };
+    }
+
+    /// <summary>
+    /// View config for the "Playlists" parent node under a connected device. Currently
+    /// a placeholder - clicking it doesn't show a master grid; the tree's route-to-first-
+    /// child behavior in the Sidebar.axaml.cs handler navigates to the first playlist
+    /// instead when the user clicks this row.
+    /// </summary>
+    public static ListViewConfig BuildDevicePlaylistsConfig(string mountPath)
+    {
+        var source = $"device:{mountPath}";
+        var key = $"Device:{mountPath}:Playlists";
+
+        return new ListViewConfig
+        {
+            Key = key,
+            Columns =
+            [
+                new() { Header = "Playlist", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+                new() { Header = "Tracks", BindingPath = "TotalTracks", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80 },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, StringFormat = "h\\:mm\\:ss" },
+            ],
+            // Device-playlists surface doesn't exist yet - keep the filter intentionally
+            // restrictive so nothing leaks in from the tracks view. When playlist reading
+            // is wired up, switch to matching Kind=Playlist or a dedicated marker.
+            BaseFilter = _ => false,
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = [],
+        };
+    }
+
     private static List<ContextMenuItemDef> BuildDeviceContextMenu()
     {
         return
@@ -161,13 +228,19 @@ public static class ListViewConfigs
             Columns =
             [
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                // Title / Artist / Track lead the media-style layout; Album, Rating, Year
+                // follow. Users can reorder via header drag and their preference persists.
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Track #", BindingPath = "TrackDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 65, Type = ColumnType.RightAligned, FontSize = 11, LetterSpacing = -0.5 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
                 new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
-                new ColumnDef { Header = "Year", BindingPath = "Year" },
-                new ColumnDef { Header = "Extension", BindingPath = "Extension" },
-                new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox },
+                new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
+                // Default-hidden columns - toggle via the column-header right-click menu
+                new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
+                new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
+                new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
             ],
             BaseFilter = item => item.Kind == MediaKind.Music,
             SearchFilter = (item, search) =>
@@ -312,6 +385,9 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
             new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
             new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Rip Track…", CommandName = "RipTrack" },
+            new ContextMenuItemDef { Header = "Rip Whole CD…", CommandName = "RipCd" },
         ];
     }
 
@@ -360,6 +436,8 @@ public static class ListViewConfigs
                 Header = "Add to Playlist",
                 IsAddToPlaylistMarker = true,
             },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Burn to CD…", CommandName = "BurnToCd" },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
             new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },

@@ -23,66 +23,69 @@ public static class SingleInstanceGuard
     private const string MprisRootInterface = "org.mpris.MediaPlayer2";
 
     private static readonly ILogger _log = Logging.For("SingleInstance");
+    private static readonly object _connectionLock = new();
 
     private static Connection? _connection;
 
     /// <summary>
-    /// Attempts to become the primary instance. Returns <c>true</c> if another instance
-    /// is already running (in which case it was asked to raise itself and this process
-    /// should exit). Returns <c>false</c> if this process is the primary and should
-    /// continue its normal startup.
-    ///
-    /// Linux only - other platforms return false without side effects. If the session
-    /// bus isn't available (headless, broken) we also return false so the app still
-    /// launches; you just lose the singleton guarantee.
+    /// Attempts to claim the singleton name. Returns <c>true</c> when this process is
+    /// the primary instance (call returns successfully holding the name); returns
+    /// <c>false</c> when another instance is already running - in which case that
+    /// existing instance has been asked to raise its window and this process should
+    /// exit. Non-Linux platforms always return <c>true</c> (no singleton guard applies;
+    /// Velopack + SMTC handle that on Windows). Bus unavailability also returns <c>true</c>
+    /// so a headless session still launches - you just lose the guarantee.
     /// </summary>
-    public static bool TryBecomePrimary()
+    public static bool TryAcquirePrimary()
     {
         if (!OperatingSystem.IsLinux())
         {
-            return false;
+            return true;
         }
 
         try
         {
-            return TryBecomePrimaryLinuxAsync().GetAwaiter().GetResult();
+            return TryAcquirePrimaryLinuxAsync().GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
             _log.Warning(ex, "Singleton check failed — allowing startup without guard");
-            return false;
+            return true;
         }
     }
 
-    private static async Task<bool> TryBecomePrimaryLinuxAsync()
+    private static async Task<bool> TryAcquirePrimaryLinuxAsync()
     {
         var conn = new Connection(new ClientConnectionOptions(Address.Session!));
         await conn.ConnectAsync();
 
-        // Request the singleton name WITHOUT ReplaceExisting. If someone else already
-        // owns it, we throw / get rejected and fall through to the raise-and-exit path.
-        try
+        // TryRequestNameAsync returns the explicit D-Bus RequestNameReply without throwing.
+        // The reply enum type is internal to Tmds.DBus.Protocol so we can't name it, but
+        // per D-Bus spec the values are stable: PrimaryOwner=1, InQueue=2, Exists=3,
+        // AlreadyOwner=4. Any reply other than PrimaryOwner means we didn't get the name.
+        var reply = await conn.TryRequestNameAsync(SingletonBusName, RequestNameOptions.None);
+
+        if ((int)(object)reply == 1)
         {
-            await conn.RequestNameAsync(SingletonBusName, RequestNameOptions.None);
-            _connection = conn;
+            lock (_connectionLock)
+            {
+                _connection = conn;
+            }
             _log.Information("Singleton bus name claimed: {BusName}", SingletonBusName);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log.Information("Singleton bus name already held — focusing running instance and exiting");
-            try
-            {
-                SendRaise(conn);
-            }
-            catch (Exception rex)
-            {
-                _log.Warning(rex, "Failed to send Raise to running instance (they may still be starting up)");
-            }
-            conn.Dispose();
-            _log.Debug(ex, "Detail on RequestName rejection");
             return true;
         }
+
+        _log.Information("Singleton bus name already held (reply={Reply}) — focusing running instance and exiting", reply);
+        try
+        {
+            SendRaise(conn);
+        }
+        catch (Exception rex)
+        {
+            _log.Warning(rex, "Failed to send Raise to running instance (they may still be starting up)");
+        }
+        conn.Dispose();
+        return false;
     }
 
     // Send a fire-and-forget method call to the existing MPRIS service asking it to raise.
@@ -108,14 +111,20 @@ public static class SingleInstanceGuard
     /// </summary>
     public static void Release()
     {
+        Connection? conn;
+        lock (_connectionLock)
+        {
+            conn = _connection;
+            _connection = null;
+        }
+
         try
         {
-            _connection?.Dispose();
+            conn?.Dispose();
         }
         catch (Exception ex)
         {
             _log.Warning(ex, "Error disposing singleton connection");
         }
-        _connection = null;
     }
 }

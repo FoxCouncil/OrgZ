@@ -8,7 +8,8 @@
 		x:CompileBindings="False"
 		Title="Syncing Radio Stations"
 		Width="420" Height="220"
-		CanResize="False"
+		MinWidth="360" MinHeight="200"
+		CanResize="True"
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">
 
