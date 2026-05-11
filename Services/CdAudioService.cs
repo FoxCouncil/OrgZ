@@ -107,15 +107,33 @@ public static class CdAudioService
 
         var info = new CdDiscInfo { DrivePath = drivePath };
 
+        // FoxRedbook wants a bare BSD name (disk4) or /dev/ path on macOS; .NET hands us
+        // the mount point (/Volumes/Audio CD). Resolve mount → device before opening.
+        var openPath = OperatingSystem.IsMacOS() ? ResolveMacBsdDevice(drivePath) ?? drivePath : drivePath;
+
+        // MacOpticalDrive ctor runs DA + IOKit work that doesn't belong on the
+        // UI thread (it shells diskutil, walks the IOKit tree, claims exclusive
+        // SCSI access). Run it on the thread pool.
+        //
+        // macOS dev note: SCSITaskUserClient access is gated on the calling
+        // binary's code signature. The .NET-generated apphost (`bin/.../OrgZ`)
+        // is ad-hoc signed and gets kIOReturnUnsupported. Launch via
+        // `scripts/run-mac.sh` (which uses `dotnet exec OrgZ.dll`) so the host
+        // process is Microsoft-signed `dotnet` and the kernel grants access.
+        // Once Developer ID signing is wired into Velopack pack this becomes
+        // a non-issue for released builds.
         DiscInfo? discInfo;
         try
         {
-            await using var optical = OpticalDrive.Open(drivePath);
-            discInfo = await optical.ReadDiscInfoAsync();
+            discInfo = await Task.Run(() =>
+            {
+                using var optical = OpticalDrive.Open(openPath);
+                return optical.ReadDiscInfoAsync().GetAwaiter().GetResult();
+            });
         }
         catch (Exception ex)
         {
-            _log.Warning(ex, "FoxRedbook ReadDiscInfo failed for {DrivePath}", drivePath);
+            _log.Warning(ex, "FoxRedbook ReadDiscInfo failed for {DrivePath} (open={OpenPath})", drivePath, openPath);
             return info;
         }
 
@@ -135,13 +153,19 @@ public static class CdAudioService
         info.TocString = DiscIdService.BuildTocString(info.FirstTrack, info.LastTrack, info.TrackOffsets, info.LeadOutOffset);
         _log.Debug("DiscID computed: {DiscId} for {DrivePath}", info.DiscId, info.DrivePath);
 
-        var label = string.IsNullOrWhiteSpace(volumeLabel)
-            ? $"Audio CD ({drivePath})"
-            : $"{volumeLabel} ({drivePath})";
+        var label = string.IsNullOrWhiteSpace(volumeLabel) ? "Audio CD" : volumeLabel;
 
         foreach (var track in audioTracks)
         {
             var duration = TimeSpan.FromSeconds(track.SectorCount / 75.0);
+            // On macOS libvlc's cdda:// access module asserts inside CoreFoundation
+            // and kills the host process. cddafs exposes each CDDA track as a
+            // synthetic AIFF file at the mount point, which libvlc plays cleanly.
+            // Until we move playback to FoxRedbook streaming, route through the
+            // AIFF on macOS only; Windows/Linux keep using libvlc's cdda module.
+            var streamUrl = OperatingSystem.IsMacOS()
+                ? new Uri(Path.Combine(drivePath, $"{track.Number} Audio Track.aiff")).AbsoluteUri
+                : $"cdda:///{drivePath}/";
             info.Tracks.Add(new MediaItem
             {
                 Id = $"cd:{drivePath}:{track.Number}",
@@ -150,7 +174,7 @@ public static class CdAudioService
                 Album = label,
                 Track = (uint)track.Number,
                 Duration = duration,
-                StreamUrl = $"cdda:///{drivePath}/",
+                StreamUrl = streamUrl,
                 Source = "cdda",
             });
         }
@@ -231,7 +255,6 @@ public static class CdAudioService
         {
             albumLabel += $" ({cached.Year})";
         }
-        albumLabel += $" ({info.DrivePath})";
 
         foreach (var track in info.Tracks)
         {
@@ -263,7 +286,6 @@ public static class CdAudioService
         {
             albumLabel += $" ({result.Year})";
         }
-        albumLabel += $" ({info.DrivePath})";
 
         foreach (var track in info.Tracks)
         {
@@ -283,6 +305,50 @@ public static class CdAudioService
                     track.Artist = mbTrack.Artist;
                 }
             }
+        }
+    }
+
+    // Translates a macOS mount point like "/Volumes/Audio CD" to the underlying BSD device
+    // ("/dev/disk4") by parsing `df -P` output. FoxRedbook's IOKit lookup needs the device,
+    // not the mount path. Shelling out keeps us off the moving target of statfs struct
+    // layouts across macOS ABIs; a single fork on disc-insert is fine.
+    private static string? ResolveMacBsdDevice(string mountPath)
+    {
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "/bin/df",
+                ArgumentList = { "-P", mountPath },
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (p is null)
+            {
+                return null;
+            }
+
+            var output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(2000);
+
+            // POSIX df output: header line, then "<filesystem> <blocks> <used> ... <mount>".
+            // First whitespace-separated token on line 2 is the device path.
+            var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length < 2)
+            {
+                return null;
+            }
+
+            var firstToken = lines[1].Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            return string.IsNullOrEmpty(firstToken) || !firstToken.StartsWith("/dev/", StringComparison.Ordinal)
+                ? null
+                : firstToken;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "df failed to resolve BSD device for {MountPath}", mountPath);
+            return null;
         }
     }
 }

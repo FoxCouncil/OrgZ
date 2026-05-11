@@ -46,6 +46,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #endif
 
     private MprisService? _mprisService;
+    private MacNowPlayingService? _macNowPlaying;
 
     private MusicFolderWatcher? _folderWatcher;
 
@@ -56,6 +57,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly List<MediaItem> _cdTracks = [];
     private bool _cdScanning;
     private Bitmap? _cdCoverArt;
+    private byte[]? _cdCoverArtBytes;
 
     private DeviceDetectionService? _deviceDetection;
     private readonly Dictionary<string, ConnectedDevice> _connectedDevices = new(StringComparer.OrdinalIgnoreCase);
@@ -76,6 +78,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive))]
     private SidebarItem? _selectedSidebarItem;
 
     [ObservableProperty]
@@ -845,6 +848,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _thumbBarService?.SetPlayingState(false);
 #endif
             _mprisService?.SetPlaybackStatus("Paused");
+            _macNowPlaying?.SetPlaybackStatus("Paused");
 
             UpdateMainStatus("Paused");
         });
@@ -859,16 +863,37 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _thumbBarService?.SetPlayingState(true);
 #endif
             _mprisService?.SetPlaybackStatus("Playing");
+            _macNowPlaying?.SetPlaybackStatus("Playing");
 
             UpdateMainStatus("Playing");
         });
 
+        long _lastMacNowPlayingPushMs = long.MinValue;
         _player.TimeChanged += (s, e) => UI(() =>
         {
             CurrentTrackTime = TimeSpan.FromMilliseconds(e.Time).ToString("mm\\:ss");
             if (!isSeeking)
             {
                 CurrentTrackTimeNumber = e.Time;
+            }
+
+            // Push pivots to macOS Now Playing: the very first TimeChanged (so
+            // the widget locks onto libvlc's clock instead of extrapolating from
+            // 0), every 5 s as a re-sync against any drift, and on a rewind
+            // (track change → e.Time resets to 0). The widget extrapolates
+            // smoothly between pivots at rate=1, which matches OrgZ's display
+            // much better than flooding macOS with 4 Hz updates — the widget
+            // appeared to coalesce / lag those, ending up several seconds behind.
+            if (_macNowPlaying is not null)
+            {
+                bool firstPush = _lastMacNowPlayingPushMs == long.MinValue;
+                bool rewound = e.Time < _lastMacNowPlayingPushMs;
+                bool resyncDue = e.Time - _lastMacNowPlayingPushMs >= 5000;
+                if (firstPush || rewound || resyncDue)
+                {
+                    _lastMacNowPlayingPushMs = e.Time;
+                    _macNowPlaying.SetPlaybackPosition(TimeSpan.FromMilliseconds(e.Time), 1.0);
+                }
             }
 
             // Stop time check for per-track options
@@ -892,6 +917,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _thumbBarService?.SetPlayingState(false);
 #endif
             _mprisService?.SetPlaybackStatus("Stopped");
+            _macNowPlaying?.SetPlaybackStatus("Stopped");
 
             UpdateMainStatus("Stopped");
         });
@@ -1002,6 +1028,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _window.Activate();
             });
             _ = _mprisService.InitializeAsync();
+        }
+
+        // macOS Control Center / lock screen / media-key widget. One-way for now
+        // (we publish metadata + transport state; remote commands need ObjC block
+        // bridging and arrive in a follow-up).
+        if (OperatingSystem.IsMacOS())
+        {
+            _macNowPlaying = new MacNowPlayingService();
+            // ObjC dispatches the remote-command callbacks on the main dispatch
+            // queue (the AppKit thread we're already on for UI work), but post
+            // anyway so a future libdispatch routing change doesn't crash us.
+            _macNowPlaying.PlayRequested      += () => Dispatcher.UIThread.Post(Play);
+            _macNowPlaying.PauseRequested     += () => Dispatcher.UIThread.Post(Pause);
+            _macNowPlaying.PlayPauseRequested += () => Dispatcher.UIThread.Post(ButtonPlayPause);
+            _macNowPlaying.NextRequested      += () => Dispatcher.UIThread.Post(ButtonNextTrack);
+            _macNowPlaying.PreviousRequested  += () => Dispatcher.UIThread.Post(ButtonPreviousTrack);
+            _macNowPlaying.StopRequested      += () => Dispatcher.UIThread.Post(Stop);
         }
     }
 
@@ -1187,7 +1230,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var logo = new Avalonia.Controls.Image
         {
-            Source = new Bitmap(AssetLoader.Open(new Uri("avares://Orgz/Assets/app.ico"))),
+            Source = new Bitmap(AssetLoader.Open(new Uri("avares://Orgz/Assets/app-icon-1024.png"))),
             Width = 64,
             Height = 64,
             HorizontalAlignment = HorizontalAlignment.Center
@@ -1286,7 +1329,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal async Task ShowSettings()
     {
         var dialog = new Views.SettingsDialog(_allItems, _audioOutput);
-        var result = await dialog.ShowDialog<bool?>(_window);
+        // The main window can be hidden when the mini-player is up — Avalonia 12 throws
+        // "Cannot show window with non-visible owner" if we use it as the dialog parent.
+        // Fall back to whichever visible top-level Avalonia knows about.
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+                     as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)
+                    ?.Windows.FirstOrDefault(w => w.IsVisible) ?? _window;
+        var result = await dialog.ShowDialog<bool?>(owner);
 
         if (result != true)
         {
@@ -1439,12 +1488,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _smtcService?.UpdateMetadata(track.Title, track.Artist, track.Album, null);
 #endif
         _mprisService?.SetMetadata(track.Title, track.Artist, track.Album, null);
+        _macNowPlaying?.SetMetadata(track.Title, track.Artist, track.Album, track.Duration, _cdCoverArtBytes);
 
         var previousMedia = _currentMedia;
         _currentMedia = new LibVLCSharp.Shared.Media(_vlc, track.StreamUrl!, LibVLCSharp.Shared.FromType.FromLocation);
         if (track.Track.HasValue)
         {
             _currentMedia.AddOption($":cdda-track={track.Track.Value}");
+        }
+        // CDDA reads from the optical drive at ~1× audio speed (~176 KB/s on a CD),
+        // and on macOS we route through cddafs's synthetic AIFFs which add SCSI seek
+        // overhead on top. libvlc's default file-caching (~300 ms) isn't enough — the
+        // playback stalls between buffer refills. 3 s headroom is comfortable.
+        if (track.Source == "cdda")
+        {
+            _currentMedia.AddOption(":file-caching=3000");
+            _currentMedia.AddOption(":disc-caching=3000");
         }
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia);
@@ -1612,6 +1671,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _smtcService?.UpdateMetadata(file.Title, file.Artist, file.Album, artBytes);
 #endif
         _mprisService?.SetMetadata(file.Title, file.Artist, file.Album, string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri);
+        _macNowPlaying?.SetMetadata(file.Title, file.Artist, file.Album, file.Duration, artBytes);
 
         var previousMedia = _currentMedia;
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
@@ -1642,6 +1702,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
 #endif
         _mprisService?.SetMetadata(station.Title, station.Tags, "Internet Radio", station.FaviconUrl);
+        _macNowPlaying?.SetMetadata(station.Title, station.Tags, "Internet Radio", null);
 
         if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
         {
@@ -3233,11 +3294,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 UI(() =>
                 {
                     // Don't dispose — Avalonia's ref-counted bitmap lifecycle handles cleanup.
-        // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
+                    // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
                     CurrentAlbumArt = bitmap;
 #if WINDOWS
                     _smtcService?.UpdateMetadata(CurrentStation?.Title, CurrentStation?.Tags, "Internet Radio", bytes);
 #endif
+                    // macOS Now Playing only learns about the artwork after the
+                    // favicon download finishes — push an updated metadata frame.
+                    _macNowPlaying?.SetMetadata(CurrentStation?.Title, CurrentStation?.Tags, "Internet Radio", null, bytes);
                 });
             }
         }
@@ -3343,6 +3407,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         if (_cdScanning)
         {
+            _log.Debug("ScanForCdAsync skipped: already scanning");
             return;
         }
 
@@ -3351,6 +3416,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             var drives = CdAudioService.GetCdDrivesWithMedia();
+            var all = CdAudioService.GetAllCdDrives();
+            _log.Information("ScanForCdAsync: AllCdDrives={All} WithMedia={WithMedia} (paths: {Paths})",
+                all.Count, drives.Count, string.Join(", ", all.Select(d => $"{d.Name}[ready={d.IsReady}]")));
 
             // Check for ejected discs
             if (_cdTracks.Count > 0)
@@ -3381,6 +3449,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                         }
 
                         _cdCoverArt = null;
+                        _cdCoverArtBytes = null;
                     }
                 }
 
@@ -3422,10 +3491,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     ViewConfigKey = "CdAudio",
                 });
 
-                // Store cover art for playback display
+                // Store cover art for playback display. Keep the raw bytes too — the
+                // macOS Now Playing widget needs them to build an MPMediaItemArtwork.
                 if (discInfo.CoverArtBytes != null)
                 {
                     _cdCoverArt = BitmapFromBytes(discInfo.CoverArtBytes);
+                    _cdCoverArtBytes = discInfo.CoverArtBytes;
                 }
 
                 ApplyFilter();
@@ -3512,15 +3583,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         await RipCdTracksAsync([track], options);
     }
 
+    [RelayCommand]
     internal async Task RipCurrentCdAsync()
     {
-        var selected = SelectedItem;
-        if (selected?.Source != "cdda")
-        {
-            return;
-        }
-
-        var drivePath = DrivePathFromCdTrackId(selected.Id);
+        // The user may not have selected a specific CD track — pull the drive from any
+        // tracked CD when nothing's selected, so the rip-toolbar button works from the
+        // CD sidebar view directly.
+        var drivePath = SelectedItem?.Source == "cdda" && DrivePathFromCdTrackId(SelectedItem.Id) is string p
+            ? p
+            : _cdTracks.Select(t => DrivePathFromCdTrackId(t.Id)).FirstOrDefault(d => d != null);
         if (drivePath == null)
         {
             return;
@@ -3535,6 +3606,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var tracks = _cdTracks.Where(t => DrivePathFromCdTrackId(t.Id) == drivePath).ToList();
         await RipCdTracksAsync(tracks, options);
     }
+
+    public bool IsCdViewActive => SelectedSidebarItem?.ViewConfigKey == "CdAudio";
 
     private async Task<CdRipOptions?> PromptForRipOptionsAsync()
     {
@@ -4251,6 +4324,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _smtcService?.Dispose();
 #endif
         _mprisService?.Dispose();
+        _macNowPlaying?.Dispose();
         _audioOutput.SavePersistedSelections();
         _audioTap.Dispose();
         _audioOutput.Dispose();
