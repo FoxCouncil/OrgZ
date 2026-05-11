@@ -158,4 +158,29 @@
 	<Style Selector="Menu">
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 	</Style>
+
+	<!-- Round LCD-toggle button (used to flip the track info / VU meter inside
+	     the LCD display of both mini-player and main-window now-playing).
+	     Visually stable: no hover tint, no press dent - only the icon glyph
+	     inside swaps to reflect state. -->
+	<Style Selector="Button.lcdToggle">
+		<Setter Property="Width" Value="20" />
+		<Setter Property="Height" Value="20" />
+		<Setter Property="CornerRadius" Value="10" />
+		<Setter Property="Padding" Value="0" />
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
+		<Setter Property="BorderThickness" Value="1" />
+		<Setter Property="Cursor" Value="Hand" />
+		<Setter Property="HorizontalContentAlignment" Value="Center" />
+		<Setter Property="VerticalContentAlignment" Value="Center" />
+	</Style>
+	<Style Selector="Button.lcdToggle:pointerover /template/ ContentPresenter">
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
+	</Style>
+	<Style Selector="Button.lcdToggle:pressed /template/ ContentPresenter">
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
+	</Style>
 </Styles>
