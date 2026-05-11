@@ -242,7 +242,14 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
                 new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
             ],
-            BaseFilter = item => item.Kind == MediaKind.Music,
+            // Local library view - must NOT include CD-audio tracks (Source="cdda")
+            // or connected-device tracks (Source="device:{mountPath}").  Those have
+            // their own sidebar entries and their own views.  Without this, typing
+            // in the search box while the Music tab is selected also matches iPod
+            // tracks and leaks them into the local results list.
+            BaseFilter = item => item.Kind == MediaKind.Music
+                                 && item.Source != "cdda"
+                                 && (item.Source == null || !item.Source.StartsWith("device:", StringComparison.Ordinal)),
             SearchFilter = (item, search) =>
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
