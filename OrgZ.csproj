@@ -20,24 +20,29 @@
 		<AvaloniaResource Include="Assets\**" />
 	</ItemGroup>
 
-	<!-- Exclude the test project's files (it lives in a subfolder of the OrgZ root) -->
+	<!-- Exclude the test project + tools/ helpers (both live in subfolders of the OrgZ root). -->
 	<ItemGroup>
 		<Compile Remove="OrgZ.Tests\**" />
 		<EmbeddedResource Remove="OrgZ.Tests\**" />
 		<None Remove="OrgZ.Tests\**" />
 		<AvaloniaResource Remove="OrgZ.Tests\**" />
 		<AvaloniaXaml Remove="OrgZ.Tests\**" />
+		<Compile Remove="tools\**" />
+		<EmbeddedResource Remove="tools\**" />
+		<None Remove="tools\**" />
+		<AvaloniaResource Remove="tools\**" />
+		<AvaloniaXaml Remove="tools\**" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Content Include="Assets\app.ico" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Avalonia" Version="12.0.0" />
+		<PackageReference Include="Avalonia" Version="12.0.3" />
 		<PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
-		<PackageReference Include="Avalonia.Desktop" Version="12.0.0" />
-		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.0" />
-		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.0" />
+		<PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
 		<PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.0">
 			<IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
 			<PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
@@ -92,4 +97,28 @@
 		<ProjectReference Include="..\FoxRainbowBooks\src\FoxRedbook\FoxRedbook.csproj" />
 		<ProjectReference Include="..\FoxRainbowBooks\src\FoxOrangebook\FoxOrangebook.csproj" />
 	</ItemGroup>
+
+	<!-- Strip runtime-specific native payloads we never load on the current OS.
+	     dotnet build emits every RID a referenced package supports - ~500 MB of
+	     Windows + Linux + musl + wasm + maccatalyst variants we'll never touch
+	     on a macOS dev box, and vice versa. The strip is per-host (each OS keeps
+	     its own runtimes and the shared "unix" bucket) and runs after every
+	     build, so `bin/Debug` doesn't bloat to 600 MB every session. -->
+	<Target Name="StripUnusedRuntimes" AfterTargets="Build" Condition="Exists('$(OutDir)runtimes')">
+		<Exec Condition="$([MSBuild]::IsOSPlatform('OSX'))"
+		      Command="find &quot;$(OutDir)runtimes&quot; -mindepth 1 -maxdepth 1 -type d ! -name 'osx*' ! -name 'unix' -exec rm -rf {} +"
+		      ConsoleToMsBuild="true"
+		      IgnoreExitCode="true" />
+		<Exec Condition="$([MSBuild]::IsOSPlatform('Linux'))"
+		      Command="find &quot;$(OutDir)runtimes&quot; -mindepth 1 -maxdepth 1 -type d ! -name 'linux*' ! -name 'unix' -exec rm -rf {} +"
+		      ConsoleToMsBuild="true"
+		      IgnoreExitCode="true" />
+		<!-- Windows: PowerShell removes anything that isn't a win-* or "unix"
+		     bucket. Quoting is fussy because MSBuild expands $(OutDir) with a
+		     trailing slash; the inner ${} keeps PowerShell happy. -->
+		<Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))"
+		      Command="powershell -NoProfile -Command &quot;Get-ChildItem -LiteralPath '$(OutDir)runtimes' -Directory | Where-Object { $_.Name -notlike 'win*' -and $_.Name -ne 'unix' } | Remove-Item -Recurse -Force&quot;"
+		      ConsoleToMsBuild="true"
+		      IgnoreExitCode="true" />
+	</Target>
 </Project>

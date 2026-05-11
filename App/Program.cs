@@ -52,6 +52,12 @@ internal class Program
                 Log.Fatal("libvlc (VLC runtime) not found. Install VLC and relaunch. Debian/Ubuntu: sudo apt install vlc | Fedora: sudo dnf install vlc | Arch: sudo pacman -S vlc");
                 Environment.Exit(1);
             }
+
+            if (OperatingSystem.IsMacOS() && !InitializeMacVlc())
+            {
+                Log.Fatal("libvlc (VLC runtime) not found. Install VLC.app (brew install --cask vlc, or download from videolan.org) and relaunch.");
+                Environment.Exit(1);
+            }
 #endif
 
             _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
@@ -69,6 +75,45 @@ internal class Program
 
         return 0;
     }
+
+    // No LibVLC NuGet ships native binaries for macOS arm64, and the x64 package's search paths
+    // (bin/.../libvlc/osx-x64/lib) won't match an Apple Silicon host anyway. Release builds ship
+    // libvlc + a filtered plugin set next to the executable (see scripts/fetch-vlc-mac.sh and
+    // .github/workflows/release.yml). Dev builds fall back to a system VLC.app install.
+    private static bool InitializeMacVlc()
+    {
+        var bundled = Path.Combine(AppContext.BaseDirectory, "vlc", "lib");
+        string[] candidates =
+        [
+            bundled,
+            "/Applications/VLC.app/Contents/MacOS/lib",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Applications/VLC.app/Contents/MacOS/lib"),
+        ];
+
+        foreach (var dir in candidates)
+        {
+            if (File.Exists(Path.Combine(dir, "libvlc.dylib")))
+            {
+                // libvlc_new() resolves plugins relative to the binary by default; for a
+                // dylib loaded out of VLC.app it can't find them, so point it explicitly.
+                var pluginsDir = Path.Combine(Path.GetDirectoryName(dir)!, "plugins");
+                if (Directory.Exists(pluginsDir))
+                {
+                    // Environment.SetEnvironmentVariable does not reliably propagate to libc
+                    // getenv() on macOS in time for libvlc_new(), so call setenv(3) directly.
+                    _ = MacSetEnv("VLC_PLUGIN_PATH", pluginsDir, 1);
+                }
+
+                LibVLCSharp.Shared.Core.Initialize(dir);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    [DllImport("libc", EntryPoint = "setenv")]
+    private static extern int MacSetEnv(string name, string value, int overwrite);
 
     // LibVLCSharp's P/Invoke asks for "libvlc" / "libvlccore" with no version suffix, but most
     // Linux distros only ship libvlc.so.5 / libvlccore.so.9. Redirect those loads instead of

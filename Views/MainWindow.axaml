@@ -136,9 +136,14 @@
 					</StackPanel>
 				</Border>
 				<Border Grid.Column="2" Margin="4" VerticalAlignment="Center" Cursor="Hand" PointerPressed="NowPlaying_PointerPressed">
+					<!-- Outer chrome stays dark for the "no art" placeholder. When real art
+					     is present a white inner backdrop renders behind it so transparent
+					     PNGs / radio favicons don't blend into the dark theme. -->
 					<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="6" Width="75" Height="75" ClipToBounds="True">
 						<Panel>
-							<Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}" />
+							<Border Background="White" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}">
+								<Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" />
+							</Border>
 							<i:Icon Value="fa-solid fa-music" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNull}}" Opacity="0.4" />
 						</Panel>
 					</Border>
@@ -230,6 +235,21 @@
 								DockPanel.Dock="Bottom"
 								DataContext="{Binding}"
 								IsVisible="False" />
+
+							<!-- CD audio action bar: same Bottom-docked convention as RadioFilterPanel.
+							     Shown only when the active sidebar entry is an Audio CD. -->
+							<Border DockPanel.Dock="Bottom"
+									IsVisible="{Binding IsCdViewActive}"
+									Padding="8,6">
+								<StackPanel Orientation="Horizontal" Spacing="8">
+									<Button Command="{Binding RipCurrentCdCommand}" Padding="10,4" Cursor="Hand" ToolTip.Tip="Rip the disc to disk">
+										<StackPanel Orientation="Horizontal" Spacing="6">
+											<i:Icon Value="fa-solid fa-compact-disc" FontSize="13" />
+											<TextBlock Text="Rip CD…" VerticalAlignment="Center" />
+										</StackPanel>
+									</Button>
+								</StackPanel>
+							</Border>
 
 							<ContentControl DockPanel.Dock="Top"
 								Content="{Binding SelectedDevice}"

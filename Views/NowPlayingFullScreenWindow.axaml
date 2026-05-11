@@ -28,8 +28,9 @@
                         <DropShadowEffect BlurRadius="40" OffsetX="0" OffsetY="10" Color="#000000" Opacity="0.8" />
                     </Border.Effect>
                     <Panel>
-                        <Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill"
-                               IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        <Border Background="White" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" />
+                        </Border>
                         <i:Icon Value="fa-solid fa-music" FontSize="128"
                                 HorizontalAlignment="Center" VerticalAlignment="Center"
                                 Foreground="White" Opacity="0.4"
