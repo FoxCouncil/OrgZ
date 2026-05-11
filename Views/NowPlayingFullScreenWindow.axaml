@@ -47,8 +47,8 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- Transport + seek bar -->
-            <StackPanel Grid.Row="1" Margin="64,0,64,56" Spacing="16">
+            <!-- Transport + seek bar (auto-hides after 3s of pointer idle) -->
+            <StackPanel x:Name="TransportLayer" Grid.Row="1" Margin="64,0,64,56" Spacing="16">
 
                 <Grid ColumnDefinitions="Auto,*,Auto">
                     <TextBlock Grid.Column="0" Text="{Binding CurrentTrackTime}" FontSize="14" Foreground="White" VerticalAlignment="Center" />

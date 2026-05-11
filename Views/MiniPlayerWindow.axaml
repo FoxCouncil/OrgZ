@@ -10,6 +10,8 @@
         Topmost="True"
         ShowInTaskbar="True"
         SystemDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
         WindowStartupLocation="CenterScreen">
 
     <Window.Styles>
@@ -53,6 +55,26 @@
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
+        <!-- Play button: visible ring outline that doesn't shift on hover /
+             press — the icon glyph swaps between play / pause, but the button
+             chrome itself holds still.  No pressed "dent", no hover tint. -->
+        <Style Selector="Button.xportPlay">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
+            <Setter Property="BorderBrush" Value="#5A5A5A" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.xportPlay:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
+            <Setter Property="BorderBrush" Value="#5A5A5A" />
+        </Style>
+        <Style Selector="Button.xportPlay:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
+            <Setter Property="BorderBrush" Value="#5A5A5A" />
+        </Style>
+
         <Style Selector="Button.winChrome">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="1" />
@@ -73,7 +95,23 @@
             Background="{StaticResource OrgZMetalBrush}" ClipToBounds="True"
             PointerPressed="Chassis_PointerPressed">
 
-        <Grid ColumnDefinitions="44,Auto,*" VerticalAlignment="Stretch">
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Play / Pause" Command="{Binding ButtonPlayPause}" />
+                <MenuItem Header="Previous Track" Command="{Binding ButtonPreviousTrack}" />
+                <MenuItem Header="Next Track" Command="{Binding ButtonNextTrack}" />
+                <Separator />
+                <MenuItem Header="Toggle VU Meter" Click="VuToggle_Click" />
+                <MenuItem Header="Now Playing Full-Screen…" Click="MenuFullScreen_Click" />
+                <Separator />
+                <MenuItem Header="Switch to Full Player" Click="MenuExpand_Click" />
+                <MenuItem Header="Always on Top" x:Name="MenuAlwaysOnTop" Click="MenuAlwaysOnTop_Click" />
+                <Separator />
+                <MenuItem Header="Close Mini-Player" Click="MenuClose_Click" />
+            </ContextMenu>
+        </Border.ContextMenu>
+
+        <Grid ColumnDefinitions="44,Auto,*,Auto" VerticalAlignment="Stretch">
 
             <!-- ===== Left chrome: platform-specific ===== -->
 
@@ -131,7 +169,7 @@
                             IsEnabled="{Binding IsBackTrackButtonEnabled}"
                             i:Attached.Icon="fa-solid fa-backward-step" FontSize="14"
                             Command="{Binding ButtonPreviousTrack}" ToolTip.Tip="Previous" />
-                    <Button Classes="xport" Width="40" Height="40" CornerRadius="20"
+                    <Button Classes="xportPlay" Width="40" Height="40" CornerRadius="20"
                             IsEnabled="{Binding IsButtonPlayPauseEnabled}"
                             i:Attached.Icon="{Binding ButtonPlayPauseIcon}" FontSize="18"
                             Padding="{Binding ButtonPlayPausePadding}"
@@ -158,37 +196,82 @@
             </StackPanel>
 
             <!-- ===== LCD display ===== -->
+            <!-- Click anywhere on the LCD (except the seek slider) toggles
+                 between track info and VU meter.  Double-click goes full-screen. -->
             <Border Grid.Column="2" Margin="6,10,10,10" CornerRadius="5"
                     Background="{StaticResource OrgZLcdBrush}"
                     BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" ClipToBounds="True"
-                    Cursor="Hand" PointerPressed="Lcd_PointerPressed" ToolTip.Tip="Double-click for full-screen">
+                    Cursor="Hand" PointerPressed="Lcd_PointerPressed"
+                    ToolTip.Tip="Click to toggle VU • Double-click for full-screen">
 
-                <Grid RowDefinitions="Auto,*,Auto" Margin="8,4,8,4">
+                <Grid>
+                    <!-- Display area (text OR VU meter) -->
+                    <Panel>
 
-                    <TextBlock Grid.Row="0" Text="{Binding CurrentTrackLine1}" FontSize="11" FontWeight="Bold"
-                               Foreground="{StaticResource OrgZLcdTextBrush}" TextTrimming="CharacterEllipsis"
-                               TextWrapping="NoWrap" HorizontalAlignment="Center" />
+                        <!-- Track-info layer -->
+                        <Grid x:Name="LcdTextLayer" RowDefinitions="Auto,*,Auto" Margin="8,4,8,4">
 
-                    <TextBlock Grid.Row="1" Text="{Binding CurrentTrackLine2}" FontSize="10" FontStyle="Italic"
-                               Foreground="{StaticResource OrgZLcdMutedTextBrush}" TextTrimming="CharacterEllipsis"
-                               TextWrapping="NoWrap" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <TextBlock Grid.Row="0" Text="{Binding CurrentTrackLine1}" FontSize="11" FontWeight="Bold"
+                                       Foreground="{StaticResource OrgZLcdTextBrush}" TextTrimming="CharacterEllipsis"
+                                       TextWrapping="NoWrap" HorizontalAlignment="Center" />
 
-                    <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Bottom">
-                        <TextBlock Grid.Column="0" Text="{Binding CurrentTrackTime}" FontSize="9"
-                                   Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
-                        <Grid Grid.Column="1" Margin="6,0" Height="14" VerticalAlignment="Center">
-                            <Slider Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}"
-                                    Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
-                                    IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
-                                    VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
-                            <Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True"
-                                    Background="{StaticResource OrgZLcdRimBrush}" Height="3" VerticalAlignment="Center" />
+                            <TextBlock Grid.Row="1" Text="{Binding CurrentTrackLine2}" FontSize="10" FontStyle="Italic"
+                                       Foreground="{StaticResource OrgZLcdMutedTextBrush}" TextTrimming="CharacterEllipsis"
+                                       TextWrapping="NoWrap" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                            <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Bottom">
+                                <TextBlock Grid.Column="0" Text="{Binding CurrentTrackTime}" FontSize="9"
+                                           Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
+                                <Grid Grid.Column="1" Margin="6,0" Height="14" VerticalAlignment="Center">
+                                    <Slider Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}"
+                                            Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
+                                            IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
+                                            VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
+                                    <Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True"
+                                            Background="{StaticResource OrgZLcdRimBrush}" Height="3" VerticalAlignment="Center" />
+                                </Grid>
+                                <TextBlock Grid.Column="2" Text="{Binding CurrentTrackDuration}" FontSize="9"
+                                           Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
+                            </Grid>
                         </Grid>
-                        <TextBlock Grid.Column="2" Text="{Binding CurrentTrackDuration}" FontSize="9"
-                                   Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
-                    </Grid>
+
+                        <!-- VU-meter layer (hidden by default).  Symmetric
+                             horizontal margins so the meter's self-centering
+                             math lands on the LCD's true midpoint — the
+                             text layer above uses 0,..,8,.. because its
+                             content centers itself independently. -->
+                        <Canvas x:Name="VuCanvas" IsVisible="False" Margin="8,4,8,4" ClipToBounds="True" />
+
+                    </Panel>
                 </Grid>
             </Border>
+
+            <!-- ===== Audio output picker (speaker icon) ===== -->
+            <Button Grid.Column="3" x:Name="AudioOutputButton" Click="AudioOutputButton_Click"
+                    Background="Transparent" BorderThickness="0" Padding="6,0" Margin="2,0,6,0"
+                    VerticalAlignment="Center" Cursor="Hand"
+                    ToolTip.Tip="Audio output devices">
+                <i:Icon Value="fa-solid fa-volume-high" FontSize="16"
+                        Foreground="{StaticResource OrgZMetalTextBrush}" />
+                <Button.Flyout>
+                    <Flyout Placement="BottomEdgeAlignedRight">
+                        <DockPanel MinWidth="320" MaxWidth="420" LastChildFill="True">
+                            <TextBlock DockPanel.Dock="Top" Text="Output Devices" FontWeight="Bold" FontSize="12"
+                                       Margin="6,4,6,6" Foreground="{StaticResource OrgZTextForegroundBrush}" />
+                            <TextBlock DockPanel.Dock="Top" x:Name="AudioOutputFlyoutHint"
+                                       Text="" Opacity="0.6" FontSize="10" Margin="6,0,6,6"
+                                       Foreground="{StaticResource OrgZMutedTextBrush}" />
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="6,6,6,6" Spacing="6">
+                                <Button Content="Refresh" Click="AudioOutputRefresh_Click" FontSize="11" Padding="8,4" />
+                                <Button Content="Open Settings…" Click="AudioOutputOpenSettings_Click" FontSize="11" Padding="8,4" />
+                            </StackPanel>
+                            <ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="AudioOutputDeviceList" Spacing="4" Margin="6,0,6,0" />
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
 
         </Grid>
     </Border>
