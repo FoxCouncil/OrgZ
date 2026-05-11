@@ -42,6 +42,27 @@ jobs:
       - name: Publish
         run: dotnet publish OrgZ.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish -p:Version=${{ steps.version.outputs.VERSION }}
 
+      - name: Strip cross-platform runtimes
+        shell: bash
+        # `dotnet publish -r <rid> --self-contained` mostly does this, but some
+        # NuGet packages still drop sibling-RID assets into publish/runtimes/.
+        # Trimming them shrinks the Velopack release by ~300 MB.
+        run: |
+          if [ -d publish/runtimes ]; then
+            case "${{ matrix.rid }}" in
+              osx-*)   keep_glob='osx*' ;;
+              linux-*) keep_glob='linux*' ;;
+              win-*)   keep_glob='win*' ;;
+              *)       keep_glob='*' ;;
+            esac
+            find publish/runtimes -mindepth 1 -maxdepth 1 -type d \
+              ! -name "$keep_glob" ! -name 'unix' -exec rm -rf {} +
+          fi
+
+      - name: Bundle libvlc (macOS)
+        if: matrix.rid == 'osx-arm64'
+        run: scripts/fetch-vlc-mac.sh publish arm64
+
       - name: Pack with Velopack
         shell: bash
         run: |

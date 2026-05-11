@@ -1,6 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
 			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 			 x:Class="OrgZ.App"
+			 Name="OrgZ"
 			 RequestedThemeVariant="Dark">
 	<!-- OrgZStyles.axaml is hand-authored dark-only (dark bg/fg color constants), so the
 	     FluentTheme variant is pinned to Dark to match. Switch to "Default" / "Light" only
