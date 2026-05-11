@@ -31,6 +31,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly MediaPlayer _player;
 
+    // Audio pipeline:
+    //   LibVLC decodes → AudioTap (SetAudioCallbacks) → AudioSinkBus → sinks
+    //                                               ↘ AudioAnalyzer (FFT)
+    // The sink bus fans PCM out to every user-selected output device (waveOut
+    // on Windows, CoreAudio on macOS, PulseAudio on Linux, AirPlay over LAN)
+    // with per-device volume control.  The analyzer drives the VU meter.
+    internal readonly OrgZ.Services.AudioOutput.AudioOutputManager _audioOutput = new();
+    private readonly OrgZ.Services.AudioVisualization.AudioTap _audioTap;
+
 #if WINDOWS
     private SmtcService? _smtcService;
     private TaskbarThumbBarService? _thumbBarService;
@@ -385,6 +394,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private MiniPlayerWindow? _miniPlayer;
     private NowPlayingFullScreenWindow? _fullScreen;
+
+    /// <summary>
+    /// Brings the main window back from the mini-player (iTunes-style) hidden
+    /// state.  Works whether the mini-player is currently open or not - useful
+    /// as a Window-menu fallback if the mini-player was closed while main was
+    /// still hidden and the user lost track of the app.
+    /// </summary>
+    [RelayCommand]
+    internal void ShowMainWindow()
+    {
+        _window.Show();
+        _window.Activate();
+
+        if (_miniPlayer != null)
+        {
+            _miniPlayer.Close();
+        }
+    }
 
     /// <summary>
     /// Opens the mini-player.  In <see cref="MiniPlayerMode.Replace"/> (iTunes-style)
@@ -759,7 +786,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _vlc.SetUserAgent($"OrgZ {App.Version}", $"orgz{App.Version}/player");
 
         _player = new(_vlc);
-        _player.Volume = (int)CurrentVolume;
+        // LibVLC's own volume is pinned at 100% - the audio tap sits
+        // downstream of LibVLC's volume filter, so any attenuation at this
+        // level would hit the FFT analyzer and make the VU meter scale
+        // with the user's volume slider.  Volume is applied ONLY in the
+        // sink bus (MasterVolume) and per-sink, which sit after the tap.
+        _player.Volume = 100;
+
+        // Attach the audio tap BEFORE any Play() call - LibVLC only routes
+        // samples through SetAudioCallbacks for media that start playing
+        // after the callbacks were registered.  Once wired, every track the
+        // user plays funnels through the sink bus (audible on selected
+        // devices) and the FFT analyzer (VU-meter data).
+        _audioTap = new OrgZ.Services.AudioVisualization.AudioTap(_audioOutput.Bus);
+        _audioTap.Attach(_player);
+        _audioOutput.LoadAndApplyPersistedSelections();
+        UpdateMasterVolume();
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
@@ -1243,7 +1285,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     internal async Task ShowSettings()
     {
-        var dialog = new Views.SettingsDialog(_allItems);
+        var dialog = new Views.SettingsDialog(_allItems, _audioOutput);
         var result = await dialog.ShowDialog<bool?>(_window);
 
         if (result != true)
@@ -1423,11 +1465,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         PlayItem(SelectedItem);
     }
 
+    // Per-track volume adjustment (positive = boost quiet tracks, negative =
+    // tame loud ones).  Combined with the global volume into a single
+    // MasterVolume on the sink bus; LibVLC stays at 100 so the FFT analyzer
+    // always sees the source's real amplitude.
+    private double _perTrackMultiplier = 1.0;
+
     internal void CurrentVolumeChanged()
     {
-        _player.Volume = (int)CurrentVolume;
+        UpdateMasterVolume();
         Settings.Set("OrgZ.Volume", (int)CurrentVolume);
         Settings.Save();
+    }
+
+    private void UpdateMasterVolume()
+    {
+        var gain = (CurrentVolume / 100.0) * _perTrackMultiplier;
+        _audioOutput.Bus.MasterVolume = (float)Math.Clamp(gain, 0.0, 1.0);
     }
 
     [RelayCommand]
@@ -1668,6 +1722,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UpdateNavigationButtons();
     }
+
+    /// <summary>
+    /// Exposes the audio visualization source to the UI (mini-player VU,
+    /// future shader/script visualizers).  The tap is permanently attached
+    /// to <see cref="_player"/> so spectrum data flows whenever anything
+    /// is playing - consumers just read whenever they need to render.
+    /// </summary>
+    internal OrgZ.Services.AudioVisualization.IAudioVisualizationSource AudioVisualization => _audioTap;
 
     /// <summary>
     /// Defers disposal of a LibVLC <see cref="Media"/> that's just been replaced
@@ -3187,10 +3249,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ApplyPerTrackOptions(MediaItem item)
     {
-        // Volume adjustment: multiplier on the current global volume
-        var multiplier = 1.0 + (item.VolumeAdjustment / 100.0);
-        var effectiveVolume = (int)Math.Clamp(CurrentVolume * multiplier, 0, 200);
-        _player.Volume = effectiveVolume;
+        // Per-track volume adjustment goes into the sink-bus master volume,
+        // not LibVLC - keeping LibVLC at 100 means the FFT analyzer always
+        // sees the source track's real amplitude regardless of playback gain.
+        _perTrackMultiplier = 1.0 + (item.VolumeAdjustment / 100.0);
+        UpdateMasterVolume();
 
         // Equalizer preset
         if (!string.IsNullOrEmpty(item.EqPreset))
@@ -4188,6 +4251,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _smtcService?.Dispose();
 #endif
         _mprisService?.Dispose();
+        _audioOutput.SavePersistedSelections();
+        _audioTap.Dispose();
+        _audioOutput.Dispose();
         _currentMedia?.Dispose();
         _player?.Dispose();
         _vlc?.Dispose();

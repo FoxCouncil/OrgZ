@@ -41,11 +41,44 @@ public partial class MainWindow : Window
     private MediaItem? _gridDragItem;
     private int _gridDragRowIndex = -1;
 
+    // iTunes-style stereo segmented VU: columns × rows of ticks per channel.
+    // Left channel mirrored so lows meet at the center, highs flare outward.
+    // Tick size derived from canvas dimensions so the meter scales with the
+    // LCD rather than sitting tiny in the middle.
+    private const int MainVuColumnsPerChannel = 16;
+    private const int MainVuRowsPerColumn = 16;
+    private const double MainVuChannelGap = 16;
+    private const double MainVuTickGap = 1;
+    private double _mainVuTickWidth = 6;
+    private double _mainVuTickHeight = 2;
+
+    private readonly Avalonia.Controls.Shapes.Rectangle[,] _mainVuTicksLeft = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel, MainVuRowsPerColumn];
+    private readonly Avalonia.Controls.Shapes.Rectangle[,] _mainVuTicksRight = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel, MainVuRowsPerColumn];
+    private readonly float[] _mainVuLevelsLeft = new float[MainVuColumnsPerChannel];
+    private readonly float[] _mainVuLevelsRight = new float[MainVuColumnsPerChannel];
+    private readonly int[] _mainVuLastLitLeft = new int[MainVuColumnsPerChannel];
+    private readonly int[] _mainVuLastLitRight = new int[MainVuColumnsPerChannel];
+    private readonly float[] _mainVuPeakLeft = new float[MainVuColumnsPerChannel];
+    private readonly float[] _mainVuPeakRight = new float[MainVuColumnsPerChannel];
+    private readonly Avalonia.Controls.Shapes.Rectangle[] _mainVuPeakMarkLeft = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel];
+    private readonly Avalonia.Controls.Shapes.Rectangle[] _mainVuPeakMarkRight = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel];
+
+    private const float MainVuDecayStep = 0.05f;
+    private const float MainVuPeakDecayStep = 0.012f;
+    private Avalonia.Threading.DispatcherTimer? _mainVuTimer;
+    private bool _mainVuMode;
+
+    private static readonly Avalonia.Media.IBrush MainVuOnBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#3A4A30"));
+    private static readonly Avalonia.Media.IBrush MainVuOffBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromArgb(80, 0x3A, 0x4A, 0x30));
+    private static readonly Avalonia.Media.IBrush MainVuPeakBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#1E2014"));
+
     public MainWindow()
     {
         InitializeComponent();
 
         WindowSizeTracker.Track(this, "Main");
+
+        BuildMainVuBars();
 
         var slider = this.FindControl<Slider>("CurrentTimeSlider")!;
 
@@ -1186,6 +1219,271 @@ public partial class MainWindow : Window
             catch
             {
                 // Invalid URL
+            }
+        }
+    }
+
+    // -- Main-window VU meter (mirror of MiniPlayer's LCD visualizer) -----
+
+    private void BuildMainVuBars()
+    {
+        MainVuCanvas.Children.Clear();
+        AllocateMainTicks(_mainVuTicksLeft);
+        AllocateMainTicks(_mainVuTicksRight);
+        AllocateMainPeakMarks(_mainVuPeakMarkLeft);
+        AllocateMainPeakMarks(_mainVuPeakMarkRight);
+
+        foreach (var t in _mainVuTicksLeft) MainVuCanvas.Children.Add(t);
+        foreach (var t in _mainVuTicksRight) MainVuCanvas.Children.Add(t);
+        foreach (var p in _mainVuPeakMarkLeft) MainVuCanvas.Children.Add(p);
+        foreach (var p in _mainVuPeakMarkRight) MainVuCanvas.Children.Add(p);
+
+        MainVuCanvas.SizeChanged += (_, _) => LayoutMainVuBars();
+    }
+
+    private static void AllocateMainPeakMarks(Avalonia.Controls.Shapes.Rectangle[] marks)
+    {
+        for (int c = 0; c < marks.Length; c++)
+        {
+            var r = new Avalonia.Controls.Shapes.Rectangle { Fill = MainVuPeakBrush, Opacity = 0 };
+            Avalonia.Media.RenderOptions.SetEdgeMode(r, Avalonia.Media.EdgeMode.Aliased);
+            marks[c] = r;
+        }
+    }
+
+    private static void AllocateMainTicks(Avalonia.Controls.Shapes.Rectangle[,] grid)
+    {
+        for (int c = 0; c < grid.GetLength(0); c++)
+        {
+            for (int r = 0; r < grid.GetLength(1); r++)
+            {
+                var rect = new Avalonia.Controls.Shapes.Rectangle { Fill = MainVuOffBrush };
+                Avalonia.Media.RenderOptions.SetEdgeMode(rect, Avalonia.Media.EdgeMode.Aliased);
+                grid[c, r] = rect;
+            }
+        }
+    }
+
+    private void LayoutMainVuBars()
+    {
+        var w = MainVuCanvas.Bounds.Width;
+        var h = MainVuCanvas.Bounds.Height;
+        if (w <= 0 || h <= 0)
+        {
+            return;
+        }
+
+        // All math in physical pixels so positions land on device-pixel
+        // boundaries.  Avalonia renders fractional DIP positions with AA
+        // that varies per column/row depending on their exact fraction -
+        // that's where the drifting row-spacing came from.
+        var scale = RenderScaling;
+
+        int canvasW_phys = (int)Math.Floor(w * scale);
+        int canvasH_phys = (int)Math.Floor(h * scale);
+        int channelGap_phys = (int)Math.Round(MainVuChannelGap * scale);
+        int tickGap_phys = Math.Max(1, (int)Math.Round(MainVuTickGap * scale));
+
+        int availableW_phys = (canvasW_phys - channelGap_phys) / 2;
+        int tickW_phys = Math.Max(2, (availableW_phys - (MainVuColumnsPerChannel - 1) * tickGap_phys) / MainVuColumnsPerChannel);
+        int tickH_phys = Math.Max(2, (canvasH_phys - (MainVuRowsPerColumn - 1) * tickGap_phys) / MainVuRowsPerColumn);
+
+        _mainVuTickWidth = tickW_phys / scale;
+        _mainVuTickHeight = tickH_phys / scale;
+
+        int channelW_phys = MainVuColumnsPerChannel * tickW_phys + (MainVuColumnsPerChannel - 1) * tickGap_phys;
+        int totalW_phys = channelW_phys * 2 + channelGap_phys;
+        int startX_phys = Math.Max(0, (canvasW_phys - totalW_phys) / 2);
+
+        int totalH_phys = MainVuRowsPerColumn * tickH_phys + (MainVuRowsPerColumn - 1) * tickGap_phys;
+        int bottomPad_phys = Math.Max(0, (canvasH_phys - totalH_phys) / 2);
+
+        PositionMainChannel(_mainVuTicksLeft, startX_phys, tickW_phys, tickH_phys, tickGap_phys, bottomPad_phys, scale, mirror: false);
+        PositionMainChannel(_mainVuTicksRight, startX_phys + channelW_phys + channelGap_phys, tickW_phys, tickH_phys, tickGap_phys, bottomPad_phys, scale, mirror: true);
+
+        PositionMainPeakMarks(_mainVuPeakMarkLeft, startX_phys, tickW_phys, tickH_phys, tickGap_phys, scale, mirror: false);
+        PositionMainPeakMarks(_mainVuPeakMarkRight, startX_phys + channelW_phys + channelGap_phys, tickW_phys, tickH_phys, tickGap_phys, scale, mirror: true);
+    }
+
+    private void PositionMainPeakMarks(Avalonia.Controls.Shapes.Rectangle[] marks, int originX_phys, int tickW_phys, int tickH_phys, int tickGap_phys, double scale, bool mirror)
+    {
+        double tickW = tickW_phys / scale;
+        double tickH = tickH_phys / scale;
+        for (int c = 0; c < MainVuColumnsPerChannel; c++)
+        {
+            int visualIndex = mirror ? (MainVuColumnsPerChannel - 1 - c) : c;
+            int colX_phys = originX_phys + visualIndex * (tickW_phys + tickGap_phys);
+            marks[c].Width = tickW;
+            marks[c].Height = tickH;
+            Canvas.SetLeft(marks[c], colX_phys / scale);
+        }
+    }
+
+    private void PositionMainChannel(Avalonia.Controls.Shapes.Rectangle[,] grid, int originX_phys, int tickW_phys, int tickH_phys, int tickGap_phys, int bottomPad_phys, double scale, bool mirror)
+    {
+        double tickW = tickW_phys / scale;
+        double tickH = tickH_phys / scale;
+
+        for (int c = 0; c < MainVuColumnsPerChannel; c++)
+        {
+            int visualIndex = mirror ? (MainVuColumnsPerChannel - 1 - c) : c;
+            int colX_phys = originX_phys + visualIndex * (tickW_phys + tickGap_phys);
+            double colX = colX_phys / scale;
+
+            for (int r = 0; r < MainVuRowsPerColumn; r++)
+            {
+                int rowY_phys = bottomPad_phys + r * (tickH_phys + tickGap_phys);
+                double rowY = rowY_phys / scale;
+
+                var rect = grid[c, r];
+                rect.Width = tickW;
+                rect.Height = tickH;
+                Canvas.SetLeft(rect, colX);
+                Canvas.SetBottom(rect, rowY);
+            }
+        }
+    }
+
+    private void MainLcd_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        // Skip clicks landing on the seek slider - the slider handles those.
+        if (IsWithinSeekSlider(e.Source as Avalonia.Visual))
+        {
+            return;
+        }
+
+        if (e.ClickCount >= 2)
+        {
+            _viewModel.NavigateToPlaying();
+            e.Handled = true;
+            return;
+        }
+
+        ToggleMainVuMode();
+        e.Handled = true;
+    }
+
+    private static bool IsWithinSeekSlider(Avalonia.Visual? source)
+    {
+        while (source != null)
+        {
+            if (source is Slider)
+            {
+                return true;
+            }
+            source = source.GetVisualParent();
+        }
+        return false;
+    }
+
+    private void ToggleMainVuMode()
+    {
+        _mainVuMode = !_mainVuMode;
+
+        // Opacity-swap so both layers stay in layout (LCD keeps its shape).
+        MainLcdTextLayer.Opacity = _mainVuMode ? 0 : 1;
+        MainLcdTextLayer.IsHitTestVisible = !_mainVuMode;
+        MainVuCanvas.Opacity = _mainVuMode ? 1 : 0;
+        MainVuCanvas.IsHitTestVisible = _mainVuMode;
+
+        if (_mainVuMode)
+        {
+            LayoutMainVuBars();
+            _mainVuTimer ??= new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(40), Avalonia.Threading.DispatcherPriority.Normal, (_, _) => TickMainVuMeter());
+            _mainVuTimer.Start();
+        }
+        else
+        {
+            _mainVuTimer?.Stop();
+            // Reset every tick to "off" and clear the last-lit cache so
+            // the next toggle-on starts from a known state.
+            foreach (var t in _mainVuTicksLeft) t.Fill = MainVuOffBrush;
+            foreach (var t in _mainVuTicksRight) t.Fill = MainVuOffBrush;
+            Array.Clear(_mainVuLastLitLeft);
+            Array.Clear(_mainVuLastLitRight);
+        }
+    }
+
+    private void TickMainVuMeter()
+    {
+        var source = (DataContext as OrgZ.ViewModels.MainWindowViewModel)?.AudioVisualization;
+        if (source == null)
+        {
+            return;
+        }
+
+        Span<float> left = stackalloc float[source.BandCount];
+        Span<float> right = stackalloc float[source.BandCount];
+        source.CopyBandLevelsStereo(left, right);
+
+        FoldAndRenderMain(left, _mainVuTicksLeft, _mainVuLevelsLeft, _mainVuLastLitLeft, _mainVuPeakLeft, _mainVuPeakMarkLeft);
+        FoldAndRenderMain(right, _mainVuTicksRight, _mainVuLevelsRight, _mainVuLastLitRight, _mainVuPeakRight, _mainVuPeakMarkRight);
+    }
+
+    private void FoldAndRenderMain(Span<float> source, Avalonia.Controls.Shapes.Rectangle[,] ticks, float[] smoothed, int[] lastLit, float[] peaks, Avalonia.Controls.Shapes.Rectangle[] peakMarks)
+    {
+        var srcLen = source.Length;
+        if (srcLen == 0)
+        {
+            return;
+        }
+
+        for (int c = 0; c < MainVuColumnsPerChannel; c++)
+        {
+            int start = c * srcLen / MainVuColumnsPerChannel;
+            int end = (c + 1) * srcLen / MainVuColumnsPerChannel;
+            if (end <= start) end = start + 1;
+
+            float sum = 0;
+            for (int i = start; i < end; i++)
+            {
+                sum += source[i];
+            }
+            float target = Math.Clamp(sum / (end - start), 0f, 1f);
+
+            // UI-side smoothing: fast attack, slow linear decay toward target.
+            if (target > smoothed[c])
+            {
+                smoothed[c] = target;
+            }
+            else
+            {
+                smoothed[c] = Math.Max(target, smoothed[c] - MainVuDecayStep);
+            }
+
+            if (smoothed[c] > peaks[c])
+            {
+                peaks[c] = smoothed[c];
+            }
+            else
+            {
+                peaks[c] = Math.Max(smoothed[c], peaks[c] - MainVuPeakDecayStep);
+            }
+
+            int lit = (int)Math.Round(smoothed[c] * MainVuRowsPerColumn);
+            int previousLit = lastLit[c];
+
+            if (lit != previousLit)
+            {
+                int low = Math.Min(previousLit, lit);
+                int high = Math.Max(previousLit, lit);
+                for (int r = low; r < high; r++)
+                {
+                    ticks[c, r].Fill = r < lit ? MainVuOnBrush : MainVuOffBrush;
+                }
+                lastLit[c] = lit;
+            }
+
+            int peakRow = Math.Min(MainVuRowsPerColumn - 1, (int)Math.Round(peaks[c] * MainVuRowsPerColumn));
+            var mark = peakMarks[c];
+            if (peakRow > lit && peaks[c] > 0.02f)
+            {
+                Canvas.SetBottom(mark, Canvas.GetBottom(ticks[c, peakRow]));
+                mark.Opacity = 1;
+            }
+            else
+            {
+                mark.Opacity = 0;
             }
         }
     }

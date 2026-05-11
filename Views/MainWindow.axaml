@@ -35,6 +35,8 @@
 			<NativeMenuItem Header="Window">
 				<NativeMenu>
 					<NativeMenuItem Header="Switch to Mini-Player" Command="{Binding ToggleMiniPlayerCommand}" Gesture="Alt+Shift+M" />
+					<NativeMenuItem Header="Show Full Player" Command="{Binding ShowMainWindowCommand}" Gesture="Alt+Shift+F" />
+					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Now Playing Full-Screen" Command="{Binding ShowNowPlayingFullScreenCommand}" Gesture="F11" />
 				</NativeMenu>
 			</NativeMenuItem>
@@ -141,36 +143,47 @@
 						</Panel>
 					</Border>
 				</Border>
-				<Border Grid.Column="3" Margin="4" Cursor="Hand" PointerPressed="NowPlaying_PointerPressed">
+				<!-- LCD: click anywhere (except the seek slider) toggles between
+				     track info and VU meter.  Double-click still navigates
+				     to the playing track.  See MainLcd_PointerPressed. -->
+				<Border Grid.Column="3" Margin="4" Cursor="Hand" PointerPressed="MainLcd_PointerPressed" ToolTip.Tip="Click to toggle VU • Double-click to jump to playing track">
 					<Border Background="{StaticResource OrgZLcdBrush}" BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" CornerRadius="6" Height="75">
-						<StackPanel VerticalAlignment="Center">
-							<StackPanel Width="420" Margin="10,0,10,0">
-								<Border ClipToBounds="True" Height="20">
-									<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
-								</Border>
-								<Border ClipToBounds="True" Height="20">
-									<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource OrgZLcdMutedTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
-								</Border>
-							</StackPanel>
-							<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,0" Spacing="12">
-								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
-								<Grid Width="420" Height="14">
-									<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}" VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
-									<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
-										<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
-											<Border.Background>
-												<LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
-													<GradientStop Color="Transparent" Offset="0" />
-													<GradientStop Color="#888888" Offset="0.5" />
-													<GradientStop Color="Transparent" Offset="1" />
-												</LinearGradientBrush>
-											</Border.Background>
+						<Grid>
+							<Panel MinWidth="440">
+								<StackPanel x:Name="MainLcdTextLayer" VerticalAlignment="Center">
+									<StackPanel Width="420" Margin="10,0,10,0">
+										<Border ClipToBounds="True" Height="20">
+											<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
 										</Border>
-									</Border>
-								</Grid>
-								<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
-							</StackPanel>
-						</StackPanel>
+										<Border ClipToBounds="True" Height="20">
+											<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource OrgZLcdMutedTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
+										</Border>
+									</StackPanel>
+									<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,0" Spacing="12">
+										<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
+										<Grid Width="420" Height="14">
+											<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}" VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
+											<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
+												<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
+													<Border.Background>
+														<LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
+															<GradientStop Color="Transparent" Offset="0" />
+															<GradientStop Color="#888888" Offset="0.5" />
+															<GradientStop Color="Transparent" Offset="1" />
+														</LinearGradientBrush>
+													</Border.Background>
+												</Border>
+											</Border>
+										</Grid>
+										<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
+									</StackPanel>
+								</StackPanel>
+								<!-- Canvas sits on top of the text layer; both stay in layout so
+								     the LCD doesn't collapse when we toggle visibility.  We swap
+								     Opacity + IsHitTestVisible instead of IsVisible. -->
+								<Canvas x:Name="MainVuCanvas" Opacity="0" IsHitTestVisible="False" Margin="10,8,10,8" ClipToBounds="True" />
+							</Panel>
+						</Grid>
 					</Border>
 				</Border>
 				<Border Grid.Column="5" Margin="4,4,25,4">
