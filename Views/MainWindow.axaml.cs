@@ -63,10 +63,14 @@ public partial class MainWindow : Window
     private readonly Avalonia.Controls.Shapes.Rectangle[] _mainVuPeakMarkLeft = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel];
     private readonly Avalonia.Controls.Shapes.Rectangle[] _mainVuPeakMarkRight = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel];
 
-    private const float MainVuDecayStep = 0.05f;
-    private const float MainVuPeakDecayStep = 0.012f;
-    private Avalonia.Threading.DispatcherTimer? _mainVuTimer;
+    // Decay rates expressed per second so they stay visually identical
+    // regardless of refresh rate (was per-40ms-tick before the RAF switch).
+    // 25 Hz × 0.05/tick → 1.25/sec; 25 Hz × 0.012/tick → 0.30/sec.
+    private const float MainVuDecayPerSecond = 1.25f;
+    private const float MainVuPeakDecayPerSecond = 0.30f;
     private bool _mainVuMode;
+    private bool _mainVuRafScheduled;
+    private long _mainVuLastFrameTicks;
 
     private static readonly Avalonia.Media.IBrush MainVuOnBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#3A4A30"));
     private static readonly Avalonia.Media.IBrush MainVuOffBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromArgb(80, 0x3A, 0x4A, 0x30));
@@ -100,6 +104,17 @@ public partial class MainWindow : Window
         GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
 
         DataContext = _viewModel = new MainWindowViewModel(this);
+
+        // Drive the VU repaint timer from the LCD page cycle: it should only
+        // tick while the VU page is the active one, otherwise we waste CPU
+        // analyzing audio whose meter isn't even visible.
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainWindowViewModel.CurrentLcdPage))
+            {
+                SetMainVuActive(_viewModel.CurrentLcdPage == MainWindowViewModel.LcdPage.Vu);
+            }
+        };
 
         _menuHandlers = new Dictionary<string, EventHandler<RoutedEventArgs>>
         {
@@ -1356,11 +1371,11 @@ public partial class MainWindow : Window
         {
             _viewModel.NavigateToPlaying();
             e.Handled = true;
-            return;
         }
-
-        ToggleMainVuMode();
-        e.Handled = true;
+        // Single-click LCD toggle is gone - the explicit left-chevron button
+        // on the LCD now cycles between Playback / VU / Rip pages via
+        // CycleLcdPageCommand. Click-to-toggle was easy to hit accidentally
+        // when reaching for the seek slider.
     }
 
     private static bool IsWithinSeekSlider(Avalonia.Visual? source)
@@ -1376,32 +1391,63 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private void ToggleMainVuMode()
+    private void SetMainVuActive(bool active)
     {
-        _mainVuMode = !_mainVuMode;
+        if (_mainVuMode == active)
+        {
+            return;
+        }
+        _mainVuMode = active;
 
-        // Opacity-swap so both layers stay in layout (LCD keeps its shape).
-        MainLcdTextLayer.Opacity = _mainVuMode ? 0 : 1;
-        MainLcdTextLayer.IsHitTestVisible = !_mainVuMode;
-        MainVuCanvas.Opacity = _mainVuMode ? 1 : 0;
-        MainVuCanvas.IsHitTestVisible = _mainVuMode;
-
-        if (_mainVuMode)
+        if (active)
         {
             LayoutMainVuBars();
-            _mainVuTimer ??= new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(40), Avalonia.Threading.DispatcherPriority.Normal, (_, _) => TickMainVuMeter());
-            _mainVuTimer.Start();
+            _mainVuLastFrameTicks = Environment.TickCount64;
+            ScheduleNextVuFrame();
         }
         else
         {
-            _mainVuTimer?.Stop();
-            // Reset every tick to "off" and clear the last-lit cache so
-            // the next toggle-on starts from a known state.
+            // The RAF loop checks _mainVuMode at the top of each tick and
+            // bails when false, so we don't need an explicit cancel handle.
             foreach (var t in _mainVuTicksLeft) t.Fill = MainVuOffBrush;
             foreach (var t in _mainVuTicksRight) t.Fill = MainVuOffBrush;
             Array.Clear(_mainVuLastLitLeft);
             Array.Clear(_mainVuLastLitRight);
         }
+    }
+
+    /// <summary>
+    /// Requests that <see cref="TickMainVuMeter"/> run on the next compositor
+    /// frame. Avalonia's TopLevel.RequestAnimationFrame is the equivalent of
+    /// the browser API of the same name - frame-synced (matches the display
+    /// refresh, typically 60 Hz on macOS/Linux, 120+ on ProMotion / high-
+    /// refresh monitors) and runs at render priority so layout/input work
+    /// can't preempt it. Way smoother than a 25 Hz DispatcherTimer at Normal.
+    /// </summary>
+    private void ScheduleNextVuFrame()
+    {
+        if (_mainVuRafScheduled || !_mainVuMode)
+        {
+            return;
+        }
+
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel == null)
+        {
+            return;
+        }
+
+        _mainVuRafScheduled = true;
+        topLevel.RequestAnimationFrame(_ =>
+        {
+            _mainVuRafScheduled = false;
+            if (!_mainVuMode)
+            {
+                return;
+            }
+            TickMainVuMeter();
+            ScheduleNextVuFrame();
+        });
     }
 
     private void TickMainVuMeter()
@@ -1412,15 +1458,24 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Frame-time delta in seconds - used to scale decay so the visual
+        // fall-off rate is identical on 30/60/120 Hz displays. Clamped to
+        // 100 ms so a one-off hitch doesn't slam every bar to zero.
+        var now = Environment.TickCount64;
+        var dtSec = Math.Min((now - _mainVuLastFrameTicks) / 1000f, 0.1f);
+        _mainVuLastFrameTicks = now;
+        float decay = MainVuDecayPerSecond * dtSec;
+        float peakDecay = MainVuPeakDecayPerSecond * dtSec;
+
         Span<float> left = stackalloc float[source.BandCount];
         Span<float> right = stackalloc float[source.BandCount];
         source.CopyBandLevelsStereo(left, right);
 
-        FoldAndRenderMain(left, _mainVuTicksLeft, _mainVuLevelsLeft, _mainVuLastLitLeft, _mainVuPeakLeft, _mainVuPeakMarkLeft);
-        FoldAndRenderMain(right, _mainVuTicksRight, _mainVuLevelsRight, _mainVuLastLitRight, _mainVuPeakRight, _mainVuPeakMarkRight);
+        FoldAndRenderMain(left, _mainVuTicksLeft, _mainVuLevelsLeft, _mainVuLastLitLeft, _mainVuPeakLeft, _mainVuPeakMarkLeft, decay, peakDecay);
+        FoldAndRenderMain(right, _mainVuTicksRight, _mainVuLevelsRight, _mainVuLastLitRight, _mainVuPeakRight, _mainVuPeakMarkRight, decay, peakDecay);
     }
 
-    private void FoldAndRenderMain(Span<float> source, Avalonia.Controls.Shapes.Rectangle[,] ticks, float[] smoothed, int[] lastLit, float[] peaks, Avalonia.Controls.Shapes.Rectangle[] peakMarks)
+    private void FoldAndRenderMain(Span<float> source, Avalonia.Controls.Shapes.Rectangle[,] ticks, float[] smoothed, int[] lastLit, float[] peaks, Avalonia.Controls.Shapes.Rectangle[] peakMarks, float decay, float peakDecay)
     {
         var srcLen = source.Length;
         if (srcLen == 0)
@@ -1448,7 +1503,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                smoothed[c] = Math.Max(target, smoothed[c] - MainVuDecayStep);
+                smoothed[c] = Math.Max(target, smoothed[c] - decay);
             }
 
             if (smoothed[c] > peaks[c])
@@ -1457,7 +1512,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                peaks[c] = Math.Max(smoothed[c], peaks[c] - MainVuPeakDecayStep);
+                peaks[c] = Math.Max(smoothed[c], peaks[c] - peakDecay);
             }
 
             int lit = (int)Math.Round(smoothed[c] * MainVuRowsPerColumn);

@@ -67,7 +67,78 @@ public sealed class DeviceDetectionService : IDisposable
         {
             StartLinuxMountWatchers();
         }
+        else if (OperatingSystem.IsMacOS())
+        {
+            StartMacVolumeWatcher();
+        }
 #endif
+    }
+
+    // macOS auto-mounts removable media (USB sticks, audio CDs, disk images)
+    // under /Volumes. Watching that directory for subdirectory creation/deletion
+    // covers hot-plug events without depending on DiskArbitration callbacks -
+    // good enough for the CD/iPod use cases without dragging in another runloop.
+    private FileSystemWatcher? _macVolumeWatcher;
+
+    private void StartMacVolumeWatcher()
+    {
+        const string Volumes = "/Volumes";
+        if (!Directory.Exists(Volumes))
+        {
+            _log.Information("/Volumes missing — macOS hot-plug detection disabled for this session");
+            return;
+        }
+
+        try
+        {
+            _macVolumeWatcher = new FileSystemWatcher(Volumes)
+            {
+                NotifyFilter = NotifyFilters.DirectoryName,
+                IncludeSubdirectories = false,
+                EnableRaisingEvents = true,
+            };
+            _macVolumeWatcher.Created += OnMacVolumeCreated;
+            _macVolumeWatcher.Deleted += OnMacVolumeDeleted;
+            _log.Debug("macOS /Volumes watcher installed");
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to install macOS /Volumes watcher — hot-plug detection disabled");
+        }
+    }
+
+    private void OnMacVolumeCreated(object sender, FileSystemEventArgs e)
+    {
+        // cddafs synthesizes the .aiff files lazily; give the kernel a beat to
+        // finish publishing the new volume before we ask DriveInfo about it.
+        _ = Task.Delay(TimeSpan.FromMilliseconds(600)).ContinueWith(_ =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    var drive = new DriveInfo(e.FullPath);
+                    if (drive.DriveType == DriveType.CDRom)
+                    {
+                        // CDs route through ScanForCdAsync just like the startup scan.
+                        CdDriveEvent?.Invoke();
+                    }
+                    else
+                    {
+                        TryAddDrive(drive);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Volume {MountPath} not readable shortly after mount-create event", e.FullPath);
+                }
+            });
+        });
+    }
+
+    private void OnMacVolumeDeleted(object sender, FileSystemEventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => RemoveDrive(e.FullPath));
     }
 
     // udisks2 auto-mounts removable media under /media/$USER on Debian/Ubuntu and

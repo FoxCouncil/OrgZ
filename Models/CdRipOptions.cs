@@ -46,9 +46,27 @@ public sealed record CdRipOptions
     /// </summary>
     public int Mp3Quality { get; init; } = 2;
 
+    /// <summary>
+    /// Per-sector re-read budget before FoxRedbook gives up and writes
+    /// best-effort (unverified) bytes for that sector. Higher = better chance
+    /// of recovering scratched / jittery sectors at the cost of slower rips.
+    /// Roughly: 10 = Fast, 40 = Standard, 100 = Paranoid. FoxRedbook's own
+    /// default is 20 - we default higher because audible glitches from
+    /// skipped sectors are the most common rip complaint.
+    /// </summary>
+    public int ReReadAttempts { get; init; } = 40;
+
     public static CdRipOptions Default => new();
 
     public static readonly int[] CbrBitrates = [64, 96, 128, 160, 192, 224, 256, 320];
+
+    /// <summary>Re-read presets exposed in the rip dialog.</summary>
+    public static readonly (string Label, int Value)[] ParanoiaPresets =
+    [
+        ("Fast (10)", 10),
+        ("Standard (40)", 40),
+        ("Paranoid (100)", 100),
+    ];
 
     /// <summary>
     /// Short label for UI and activity-panel display, e.g. "FLAC (best)" /

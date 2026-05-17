@@ -102,6 +102,12 @@ internal static class CoreAudioNative
     [DllImport(AudioToolbox, EntryPoint = "AudioQueueStop")]
     public static extern int AudioQueueStop(IntPtr inAudioQueue, bool inImmediate);
 
+    [DllImport(AudioToolbox, EntryPoint = "AudioQueueReset")]
+    public static extern int AudioQueueReset(IntPtr inAudioQueue);
+
+    [DllImport(AudioToolbox, EntryPoint = "AudioQueuePause")]
+    public static extern int AudioQueuePause(IntPtr inAudioQueue);
+
     [DllImport(AudioToolbox, EntryPoint = "AudioQueueSetProperty")]
     public static extern int AudioQueueSetProperty(IntPtr inAudioQueue, uint inID, IntPtr inData, uint inDataSize);
 

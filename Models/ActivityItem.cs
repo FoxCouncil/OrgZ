@@ -47,4 +47,13 @@ public partial class ActivityItem : ObservableObject
         ActivityStatus.Running => "#4A9EFF",
         _ => "#888888"
     };
+
+    public bool IsRunning => Status == ActivityStatus.Running;
+
+    partial void OnStatusChanged(ActivityStatus value)
+    {
+        OnPropertyChanged(nameof(StatusIcon));
+        OnPropertyChanged(nameof(StatusColor));
+        OnPropertyChanged(nameof(IsRunning));
+    }
 }

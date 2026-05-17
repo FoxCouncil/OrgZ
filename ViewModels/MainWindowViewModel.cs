@@ -216,6 +216,79 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isActivityPanelVisible;
 
+    // Rip-in-progress LCD state. iTunes-style: while a rip is running the
+    // now-playing LCD swaps to show "Importing 'Track'", a progress bar, and
+    // a "Time remaining: 0:15 (8.5×)" readout. Cleared on rip completion or
+    // failure. The activity panel still tracks the same data for history.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLcdCycleButton))]
+    private bool _isRipping;
+    [ObservableProperty] private string _ripTitle = string.Empty;
+    [ObservableProperty] private string _ripDetail = string.Empty;
+    [ObservableProperty] private double _ripPercent;
+
+    // Active rip's cancellation source. The Cancel X on the LCD's rip page
+    // trips this; CdRipService respects the token between sector reads, so the
+    // current sector finishes and the loop exits cleanly.
+    private CancellationTokenSource? _ripCts;
+
+    [RelayCommand]
+    private void CancelRip()
+    {
+        _ripCts?.Cancel();
+    }
+
+    // LCD "pages": the now-playing display has multiple modes the user cycles
+    // through with the left-chevron button. Playback (track info + scrubber)
+    // and Vu (FFT bars) are always available; Rip joins them only while a rip
+    // is in flight. Auto-snap to Rip when one starts so the user sees it
+    // immediately; snap back to Playback when it ends.
+    public enum LcdPage { Playback, Vu, Rip }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsLcdPlayback), nameof(IsLcdVu), nameof(IsLcdRip))]
+    private LcdPage _currentLcdPage = LcdPage.Playback;
+
+    public bool IsLcdPlayback => CurrentLcdPage == LcdPage.Playback;
+    public bool IsLcdVu => CurrentLcdPage == LcdPage.Vu;
+    public bool IsLcdRip => CurrentLcdPage == LcdPage.Rip;
+
+    private IReadOnlyList<LcdPage> AvailableLcdPages
+    {
+        get
+        {
+            var pages = new List<LcdPage> { LcdPage.Playback, LcdPage.Vu };
+            if (IsRipping) pages.Add(LcdPage.Rip);
+            return pages;
+        }
+    }
+
+    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1;
+
+    [RelayCommand]
+    private void CycleLcdPage()
+    {
+        var pages = AvailableLcdPages;
+        int i = 0;
+        for (; i < pages.Count; i++)
+        {
+            if (pages[i] == CurrentLcdPage) break;
+        }
+        CurrentLcdPage = pages[(i + 1) % pages.Count];
+    }
+
+    partial void OnIsRippingChanged(bool value)
+    {
+        if (value)
+        {
+            CurrentLcdPage = LcdPage.Rip;
+        }
+        else if (CurrentLcdPage == LcdPage.Rip)
+        {
+            CurrentLcdPage = LcdPage.Playback;
+        }
+    }
+
     internal ObservableCollection<ActivityItem> Activities { get; } = [];
 
     public int ActivityBadgeCount => Activities.Count(a => a.Status is ActivityStatus.Pending or ActivityStatus.Running);
@@ -1829,6 +1902,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _playbackContext?.Release();
         _playbackContext = null;
         OnPropertyChanged(nameof(PlaybackContextUpcoming));
+
+        // Stop libvlc before releasing the Media object - disposing Media alone
+        // leaves the MediaPlayer pointing at a freed source AND keeps the
+        // backing file handle open, which prevents EnsureCdDriveFree from
+        // actually freeing the CD for ripping.
+        _player.Stop();
 
         _currentMedia?.Dispose();
         _currentMedia = null;
@@ -3660,6 +3739,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // FoxRedbook on macOS wants a bare BSD name (disk4) / dev path, not the
+        // mount point. Same translation we do for TOC reads in CdAudioService.
+        var openPath = OperatingSystem.IsMacOS()
+            ? CdAudioService.ResolveMacBsdDevice(drivePath) ?? drivePath
+            : drivePath;
+
         var albumRoot = !string.IsNullOrWhiteSpace(App.FolderPath) ? App.FolderPath : Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
         var artistDir = CdRipService.SanitizeForFileName(tracks[0].Artist) is { Length: > 0 } a ? a : "Unknown Artist";
         var albumDir = CdRipService.SanitizeForFileName(tracks[0].Album) is { Length: > 0 } al ? al : $"Audio CD ({drivePath})";
@@ -3669,21 +3754,120 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         EnsureCdDriveFree(drivePath);
 
+        // Per-track timing for the speed readout. We need a reset each time the
+        // track number advances, otherwise the "8.5×" figure averages across the
+        // whole disc and stops being informative once a few tracks are done.
+        int speedTrackNum = -1;
+        var speedClock = System.Diagnostics.Stopwatch.StartNew();
+        long speedStartSectors = 0;
+
+        IsRipping = true;
+        RipTitle = $"Importing {tracks.Count} track(s)";
+        RipDetail = string.Empty;
+        RipPercent = 0;
+
         var progress = new Progress<RipTrackProgress>(p =>
         {
             activity.Detail = $"Track {p.TrackNumber} of {p.TrackCount}: {p.TrackTitle} ({p.TrackPercent:P0})";
             activity.Progress = p.TrackPercent;
+
+            if (p.TrackNumber != speedTrackNum)
+            {
+                speedTrackNum = p.TrackNumber;
+                speedClock.Restart();
+                speedStartSectors = p.SectorsDone;
+            }
+
+            // CDDA is 75 sectors/second at 1×; speed = (sectors/sec) / 75.
+            // Guard against the first tick (zero elapsed) so we don't divide by 0.
+            string speedStr;
+            string etaStr;
+            var elapsed = speedClock.Elapsed.TotalSeconds;
+            var sectorsThisTrack = p.SectorsDone - speedStartSectors;
+            if (elapsed > 0.5 && sectorsThisTrack > 0)
+            {
+                var sectorsPerSec = sectorsThisTrack / elapsed;
+                var speedX = sectorsPerSec / 75.0;
+                speedStr = $"{speedX:0.0}×";
+                var sectorsLeft = Math.Max(0, p.SectorsTotal - p.SectorsDone);
+                var ts = TimeSpan.FromSeconds(sectorsLeft / sectorsPerSec);
+                // "m:ss" by manual format - TimeSpan format strings don't accept
+                // literal digits the way numeric format strings do, and the previous
+                // attempt ("0\:ss") threw FormatException the moment a real progress
+                // tick came in. Manual interpolation sidesteps that entirely.
+                etaStr = $"{(int)ts.TotalMinutes}:{ts.Seconds:D2}";
+            }
+            else
+            {
+                speedStr = "—";
+                etaStr = "—";
+            }
+
+            RipTitle = $"Importing “{p.TrackTitle}”";
+            RipDetail = $"Track {p.TrackNumber} of {p.TrackCount} — Time remaining: {etaStr} ({speedStr})";
+            RipPercent = p.TrackPercent;
         });
 
+        // Per-track verification feed: each finished track appends a one-line
+        // verdict to the activity's Detail so the user can see, in order,
+        // which tracks ripped cleanly and which had skipped sectors. The same
+        // information is also flashed through the LCD's RipDetail line while
+        // the next track gets going.
+        var verificationLines = new List<string>(tracks.Count);
+        var trackCompleted = new Progress<RipOutcome>(o =>
+        {
+            string line;
+            if (o.Verified)
+            {
+                line = $"✓ Track {o.TrackNumber:D2} — AR2 {o.AccurateRipV2:X8}";
+            }
+            else if (o.SkippedSectors > 0)
+            {
+                line = $"⚠ Track {o.TrackNumber:D2} — {o.SkippedSectors} unverified sector(s) starting at LBA {o.FirstSkippedLba}";
+            }
+            else
+            {
+                line = $"⚠ Track {o.TrackNumber:D2} — {o.ReadErrorSectors} read error(s)";
+            }
+            verificationLines.Add(line);
+            RipDetail = line;
+            activity.Detail = string.Join("  •  ", verificationLines.TakeLast(3));
+        });
+
+        _ripCts = new CancellationTokenSource();
         try
         {
-            var outcomes = await CdRipService.RipTracksWithElevationAsync(drivePath, tracks, outputDir, options, progress);
-            var bad = outcomes.Count(o => o.HadErrors);
-            activity.Detail = bad == 0
-                ? $"Ripped {outcomes.Count} track(s) to {outputDir}"
-                : $"Ripped {outcomes.Count} track(s) with {bad} problem sector(s) — files are playable";
+            // CdRipService.RipTracksWithElevationAsync awaits async methods but
+            // its inner OpticalDrive.Open + per-sector SCSI reads run synchronously
+            // until they actually yield - when called from the UI thread that
+            // means a frozen window for the duration of the rip. Task.Run pushes
+            // the entire pipeline to the thread pool so the UI keeps animating;
+            // Progress<T> already routes its callbacks back to the UI dispatcher
+            // via the SynchronizationContext captured at construction.
+            var ct = _ripCts.Token;
+            var outcomes = await Task.Run(() =>
+                CdRipService.RipTracksWithElevationAsync(openPath, tracks, outputDir, options, progress, trackCompleted, _cdCoverArtBytes, ct), ct);
+
+            var unverified = outcomes.Where(o => !o.Verified).ToList();
+            if (unverified.Count == 0)
+            {
+                activity.Detail = $"✓ Ripped {outcomes.Count} track(s) — all verified — to {outputDir}";
+                activity.Status = ActivityStatus.Completed;
+            }
+            else
+            {
+                var badList = string.Join(", ", unverified.Select(o => o.TrackNumber.ToString("D2")));
+                activity.Detail = $"⚠ Ripped {outcomes.Count} track(s), {unverified.Count} unverified: {badList}. Re-rip with higher paranoia to recover.";
+                activity.Status = ActivityStatus.Completed;
+            }
             activity.Progress = 1.0;
-            activity.Status = ActivityStatus.Completed;
+            UpdateActivityBadge();
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Information("Rip cancelled by user for {DrivePath}", drivePath);
+            activity.Detail = "Rip cancelled";
+            activity.Status = ActivityStatus.Failed;
             UpdateActivityBadge();
         }
         catch (Exception ex)
@@ -3692,6 +3876,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             activity.Error = ex.Message;
             activity.Status = ActivityStatus.Failed;
             UpdateActivityBadge();
+        }
+        finally
+        {
+            _ripCts?.Dispose();
+            _ripCts = null;
+            IsRipping = false;
+            RipTitle = string.Empty;
+            RipDetail = string.Empty;
+            RipPercent = 0;
         }
     }
 

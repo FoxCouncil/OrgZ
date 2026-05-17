@@ -53,6 +53,7 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
     private bool _active;
     private bool _disposed;
     private long _buffersReceived;
+    private bool _qosBumped;
 
     private float[] _floatScratch = new float[4096];
 
@@ -103,6 +104,18 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         if (count == 0 || samples == IntPtr.Zero)
         {
             return;
+        }
+
+        // On the very first callback, ask the OS to bump this thread's QoS to
+        // USER_INTERACTIVE. We can't get hard real-time scheduling without
+        // joining coreaudiod's workgroup (Mach time-constraint policy is
+        // gated), but USER_INTERACTIVE puts us at the top of the user-space
+        // priority bands and makes preemption from background work far less
+        // likely. No entitlements / code signing required.
+        if (!_qosBumped)
+        {
+            _qosBumped = true;
+            ThreadQos.BumpToUserInteractive(_log);
         }
 
         var prev = System.Threading.Interlocked.Increment(ref _buffersReceived);
