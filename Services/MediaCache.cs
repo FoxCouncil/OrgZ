@@ -158,6 +158,7 @@ public static class MediaCache
                     Year        INTEGER,
                     TracksJson  TEXT,
                     CoverArt    BLOB,
+                    Genre       TEXT,
                     CachedAt    TEXT NOT NULL
                 );
 
@@ -167,6 +168,7 @@ public static class MediaCache
 
         MigrateOldTables(connection);
         MigrateAddColumns(connection);
+        MigrateAddCdCacheColumns(connection);
     }
 
     private static void MigrateOldTables(SqliteConnection connection)
@@ -265,6 +267,33 @@ public static class MediaCache
             {
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = $"ALTER TABLE Media ADD COLUMN {col}";
+                cmd.ExecuteNonQuery();
+            }
+            catch (SqliteException)
+            {
+                // Column already exists
+            }
+        }
+    }
+
+    /// <summary>
+    /// Idempotent column additions for the <c>CdMetadataCache</c> table.
+    /// New fields land here so older rows pick up nulls and get backfilled on
+    /// the next disc scan (CdAudioService treats null Genre as "go re-fetch").
+    /// </summary>
+    private static void MigrateAddCdCacheColumns(SqliteConnection connection)
+    {
+        var columns = new[]
+        {
+            "Genre TEXT",
+        };
+
+        foreach (var col in columns)
+        {
+            try
+            {
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"ALTER TABLE CdMetadataCache ADD COLUMN {col}";
                 cmd.ExecuteNonQuery();
             }
             catch (SqliteException)
@@ -1007,7 +1036,7 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt FROM CdMetadataCache WHERE DiscId = @id";
+        cmd.CommandText = "SELECT ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, Genre FROM CdMetadataCache WHERE DiscId = @id";
         cmd.Parameters.AddWithValue("@id", discId);
 
         using var reader = cmd.ExecuteReader();
@@ -1025,6 +1054,7 @@ public static class MediaCache
             Year = reader.IsDBNull(3) ? null : (uint?)reader.GetInt32(3),
             TracksJson = reader.IsDBNull(4) ? null : reader.GetString(4),
             CoverArt = reader.IsDBNull(5) ? null : (byte[])reader[5],
+            Genre = reader.IsDBNull(6) ? null : reader.GetString(6),
         };
     }
 
@@ -1036,9 +1066,9 @@ public static class MediaCache
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO CdMetadataCache
-                (DiscId, ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, CachedAt)
+                (DiscId, ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, Genre, CachedAt)
             VALUES
-                (@id, @mbid, @artist, @album, @year, @tracks, @art, @now)
+                (@id, @mbid, @artist, @album, @year, @tracks, @art, @genre, @now)
             """;
         cmd.Parameters.AddWithValue("@id", meta.DiscId);
         cmd.Parameters.AddWithValue("@mbid", (object?)meta.ReleaseMbid ?? DBNull.Value);
@@ -1047,6 +1077,7 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@year", meta.Year.HasValue ? (object)(int)meta.Year.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@tracks", (object?)meta.TracksJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@art", (object?)meta.CoverArt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@genre", (object?)meta.Genre ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
         cmd.ExecuteNonQuery();
     }
@@ -1060,6 +1091,7 @@ public class CachedCdMetadata
     public string? ReleaseMbid { get; set; }
     public string? Artist { get; set; }
     public string? Album { get; set; }
+    public string? Genre { get; set; }
     public uint? Year { get; set; }
     public string? TracksJson { get; set; }
     public byte[]? CoverArt { get; set; }

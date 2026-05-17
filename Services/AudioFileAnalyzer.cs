@@ -18,7 +18,9 @@ public class AudioFileAnalyzer
             item.Artist = file.Tag.FirstPerformer;
             item.Year = file.Tag.Year;
             item.Album = file.Tag.Album;
-            item.Title = file.Tag.Title;
+            item.Title = !string.IsNullOrWhiteSpace(file.Tag.Title)
+                ? file.Tag.Title
+                : Path.GetFileNameWithoutExtension(item.FilePath);
             item.Duration = file.Properties.Duration;
 
             item.Track = file.Tag.Track;

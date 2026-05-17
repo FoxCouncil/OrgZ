@@ -123,22 +123,36 @@ internal static class CdHelperMode
             FlacCompression = spec.FlacCompression,
             Mp3Mode = (Mp3Mode)spec.Mp3Mode,
             Mp3Quality = spec.Mp3Quality,
+            ReReadAttempts = spec.ReReadAttempts,
         };
 
-        var outcomes = CdRipService.RipTracksAsync(spec.DrivePath!, mediaItems, spec.OutputDirectory!, options, ripProgress).GetAwaiter().GetResult();
+        static CdHelperOutcome ToHelper(RipOutcome o) => new()
+        {
+            TrackNumber = o.TrackNumber,
+            TrackTitle = o.TrackTitle,
+            OutputPath = o.OutputPath,
+            SectorsRipped = o.SectorsRipped,
+            AccurateRipV1 = o.AccurateRipV1,
+            AccurateRipV2 = o.AccurateRipV2,
+            HadErrors = o.HadErrors,
+            SkippedSectors = o.SkippedSectors,
+            ReadErrorSectors = o.ReadErrorSectors,
+            JitterCorrectedSectors = o.JitterCorrectedSectors,
+            FirstSkippedLba = o.FirstSkippedLba,
+        };
+
+        var trackCompleted = new Progress<RipOutcome>(o => progress.WriteEvent(new CdHelperEvent
+        {
+            Type = "rip-track-done",
+            Outcomes = [ToHelper(o)],
+        }));
+
+        var outcomes = CdRipService.RipTracksAsync(spec.DrivePath!, mediaItems, spec.OutputDirectory!, options, ripProgress, trackCompleted, spec.CoverArt).GetAwaiter().GetResult();
 
         progress.WriteEvent(new CdHelperEvent
         {
             Type = "rip-done",
-            Outcomes = outcomes.Select(o => new CdHelperOutcome
-            {
-                TrackNumber = o.TrackNumber,
-                OutputPath = o.OutputPath,
-                SectorsRipped = o.SectorsRipped,
-                AccurateRipV1 = o.AccurateRipV1,
-                AccurateRipV2 = o.AccurateRipV2,
-                HadErrors = o.HadErrors,
-            }).ToList(),
+            Outcomes = outcomes.Select(ToHelper).ToList(),
         });
 
         log.Information("cd-helper: rip done, {Count} outcome(s)", outcomes.Count);
@@ -234,6 +248,9 @@ internal sealed class CdHelperSpec
     public int FlacCompression { get; set; } = 5;
     public int Mp3Mode { get; set; }
     public int Mp3Quality { get; set; } = 2;
+    public int ReReadAttempts { get; set; } = 40;
+    /// <summary>Front-cover image bytes, JSON-serialized as base64.</summary>
+    public byte[]? CoverArt { get; set; }
     public string? DiscTitle { get; set; }
     public string? DiscPerformer { get; set; }
     public bool TestWrite { get; set; }
@@ -273,11 +290,16 @@ internal sealed class CdHelperEvent
 internal sealed class CdHelperOutcome
 {
     public int TrackNumber { get; set; }
+    public string? TrackTitle { get; set; }
     public string OutputPath { get; set; } = "";
     public long SectorsRipped { get; set; }
     public uint AccurateRipV1 { get; set; }
     public uint AccurateRipV2 { get; set; }
     public bool HadErrors { get; set; }
+    public int SkippedSectors { get; set; }
+    public int ReadErrorSectors { get; set; }
+    public int JitterCorrectedSectors { get; set; }
+    public long FirstSkippedLba { get; set; } = -1;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = false)]
