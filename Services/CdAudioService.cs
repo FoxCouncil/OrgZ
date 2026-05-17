@@ -192,10 +192,23 @@ public static class CdAudioService
         }
 
         var cached = MediaCache.GetCdMetadata(info.DiscId);
-        if (cached != null)
+        // Force a fresh MusicBrainz hit when the cached row is missing data
+        // that a newer version of OrgZ now fetches — cover art via the
+        // release-group CAA fallback, and genre from MB's voted genres.
+        // Won't loop: the next save either fills the gap or persists a real
+        // null, and we don't retry until the row is invalidated.
+        bool needsRefetch = cached != null && (cached.CoverArt == null || string.IsNullOrEmpty(cached.Genre));
+        if (cached != null && !needsRefetch)
         {
             ApplyCachedMetadata(info, cached);
             return;
+        }
+        if (cached != null)
+        {
+            _log.Information("Cached CD metadata for disc {DiscId} missing {Missing} — re-running MusicBrainz lookup", info.DiscId,
+                cached.CoverArt == null && string.IsNullOrEmpty(cached.Genre) ? "cover art and genre"
+                : cached.CoverArt == null ? "cover art"
+                : "genre");
         }
 
         var result = await MusicBrainzService.LookupByDiscIdAsync(info.DiscId);
@@ -216,7 +229,7 @@ public static class CdAudioService
         byte[]? coverArt = null;
         if (!string.IsNullOrEmpty(result.ReleaseMbid))
         {
-            coverArt = await MusicBrainzService.FetchCoverArtAsync(result.ReleaseMbid);
+            coverArt = await MusicBrainzService.FetchCoverArtAsync(result.ReleaseMbid, result.ReleaseGroupMbid);
         }
 
         var tracksJson = System.Text.Json.JsonSerializer.Serialize(result.Tracks);
@@ -227,6 +240,7 @@ public static class CdAudioService
             Artist = result.Artist,
             Album = result.Title,
             Year = result.Year,
+            Genre = result.Genre,
             TracksJson = tracksJson,
             CoverArt = coverArt,
         });
@@ -260,6 +274,7 @@ public static class CdAudioService
         {
             track.Album = albumLabel;
             track.Artist = cached.Artist;
+            track.Genre = cached.Genre;
             if (cached.Year.HasValue)
             {
                 track.Year = cached.Year;
@@ -291,6 +306,7 @@ public static class CdAudioService
         {
             track.Album = albumLabel;
             track.Artist = result.Artist;
+            track.Genre = result.Genre;
             if (result.Year.HasValue)
             {
                 track.Year = result.Year;
@@ -312,7 +328,7 @@ public static class CdAudioService
     // ("/dev/disk4") by parsing `df -P` output. FoxRedbook's IOKit lookup needs the device,
     // not the mount path. Shelling out keeps us off the moving target of statfs struct
     // layouts across macOS ABIs; a single fork on disc-insert is fine.
-    private static string? ResolveMacBsdDevice(string mountPath)
+    internal static string? ResolveMacBsdDevice(string mountPath)
     {
         try
         {

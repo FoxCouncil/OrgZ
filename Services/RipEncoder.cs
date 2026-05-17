@@ -10,8 +10,24 @@ public sealed record RipTrackMetadata
     public string? Title { get; init; }
     public string? Artist { get; init; }
     public string? Album { get; init; }
+    public string? Genre { get; init; }
     public int? TrackNumber { get; init; }
     public uint? Year { get; init; }
+
+    /// <summary>
+    /// Encoded-by string (FLAC ENCODER tag / MP3 TENC frame). Defaulted to
+    /// "OrgZ {version}" by <see cref="CdRipService"/> when the caller leaves
+    /// it null, so every ripped file is self-identifying.
+    /// </summary>
+    public string? EncodedBy { get; init; }
+
+    /// <summary>
+    /// Front-cover image bytes (JPEG or PNG). Embedded into the output file
+    /// as a FLAC METADATA_BLOCK_PICTURE (FLAC output) or APIC frame (MP3).
+    /// For WAV output, the same bytes are dropped into the rip directory as
+    /// <c>cover.jpg</c> instead — WAV has no standard art tag.
+    /// </summary>
+    public byte[]? CoverArt { get; init; }
 }
 
 /// <summary>
@@ -49,20 +65,84 @@ public static class RipEncoder
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(options);
 
+        // The cover art bytes need to live on disk for the duration of the
+        // encoder run — both flac and lame take a file path, not stdin pic data.
+        // The temp file is deleted by SubprocessEncoder.DisposeAsync once the
+        // child has exited and the embedded copy is in the output.
+        string? coverArtTempFile = null;
+        if (metadata.CoverArt is { Length: > 0 } && options.Format != RipFormat.Wav)
+        {
+            coverArtTempFile = WriteCoverArtTempFile(metadata.CoverArt);
+        }
+
+        // WAV has no standard for embedded artwork. Drop the bytes into the
+        // output folder as cover.jpg / cover.png so any media player that
+        // looks for sidecar art (foobar2000, Plex, Jellyfin, …) picks it up.
+        if (metadata.CoverArt is { Length: > 0 } && options.Format == RipFormat.Wav)
+        {
+            WriteWavSidecarCover(outputPath, metadata.CoverArt);
+        }
+
         return options.Format switch
         {
             RipFormat.Wav => new WavEncoder(outputPath, pcmByteCount),
-            RipFormat.Flac => new SubprocessEncoder("flac", BuildFlacArgs(outputPath, metadata, options), outputPath, _log),
-            RipFormat.Mp3 => new SubprocessEncoder("lame", BuildLameArgs(outputPath, metadata, options), outputPath, _log),
+            RipFormat.Flac => new SubprocessEncoder("flac", BuildFlacArgs(outputPath, metadata, options, coverArtTempFile), outputPath, _log, coverArtTempFile),
+            RipFormat.Mp3 => new SubprocessEncoder("lame", BuildLameArgs(outputPath, metadata, options, coverArtTempFile), outputPath, _log, coverArtTempFile),
             _ => throw new ArgumentOutOfRangeException(nameof(options), "Unknown rip format"),
         };
+    }
+
+    /// <summary>
+    /// Writes the cover-art bytes to a temp file with the right extension so
+    /// flac/lame can sniff the MIME type. Returns the absolute path; caller
+    /// is responsible for cleaning it up.
+    /// </summary>
+    /// <summary>
+    /// Writes the album cover next to a WAV-format rip's output directory.
+    /// Idempotent — repeated calls overwrite. Track 1's cover wins (and is
+    /// identical to every other track's cover for a single-disc rip anyway).
+    /// </summary>
+    private static void WriteWavSidecarCover(string outputPath, byte[] bytes)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(outputPath);
+            if (string.IsNullOrEmpty(dir))
+            {
+                return;
+            }
+
+            var isPng = bytes.Length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47;
+            var coverName = isPng ? "cover.png" : "cover.jpg";
+            var coverPath = Path.Combine(dir, coverName);
+            if (!File.Exists(coverPath))
+            {
+                File.WriteAllBytes(coverPath, bytes);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Failed to write WAV sidecar cover for {Path}", outputPath);
+        }
+    }
+
+    private static string WriteCoverArtTempFile(byte[] bytes)
+    {
+        // JPEG magic FFD8 FF, PNG magic 89 50 4E 47. Default to .jpg — both
+        // encoders accept either and FLAC's parser uses the actual file bytes.
+        var ext = (bytes.Length >= 4 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+            ? ".png"
+            : ".jpg";
+        var path = Path.Combine(Path.GetTempPath(), $"orgz-cover-{Guid.NewGuid():N}{ext}");
+        File.WriteAllBytes(path, bytes);
+        return path;
     }
 
     /// <summary>
     /// Builds the command-line arguments passed to <c>flac</c> for stdin-piped
     /// raw PCM input.  Exposed for tests; no subprocess is spawned here.
     /// </summary>
-    internal static List<string> BuildFlacArgs(string outputPath, RipTrackMetadata metadata, CdRipOptions options)
+    internal static List<string> BuildFlacArgs(string outputPath, RipTrackMetadata metadata, CdRipOptions options, string? coverArtPath = null)
     {
         var compression = Math.Clamp(options.FlacCompression, 0, 8);
 
@@ -82,6 +162,8 @@ public static class RipEncoder
         AppendFlacTag(args, "TITLE", metadata.Title);
         AppendFlacTag(args, "ARTIST", metadata.Artist);
         AppendFlacTag(args, "ALBUM", metadata.Album);
+        AppendFlacTag(args, "GENRE", metadata.Genre);
+        AppendFlacTag(args, "ENCODER", metadata.EncodedBy);
 
         if (metadata.TrackNumber is int n && n > 0)
         {
@@ -93,6 +175,13 @@ public static class RipEncoder
             AppendFlacTag(args, "DATE", y.ToString());
         }
 
+        if (!string.IsNullOrEmpty(coverArtPath))
+        {
+            // --picture=FILE: flac auto-detects MIME and dimensions from the
+            // file contents and embeds as METADATA_BLOCK_PICTURE type 3 (front).
+            args.Add($"--picture={coverArtPath}");
+        }
+
         args.Add("-");
         return args;
     }
@@ -102,7 +191,7 @@ public static class RipEncoder
     /// raw PCM input.  VBR (<c>-V 0..9</c>, 0 is highest) or CBR
     /// (<c>-b &lt;kbps&gt;</c>) per <paramref name="options"/>.
     /// </summary>
-    internal static List<string> BuildLameArgs(string outputPath, RipTrackMetadata metadata, CdRipOptions options)
+    internal static List<string> BuildLameArgs(string outputPath, RipTrackMetadata metadata, CdRipOptions options, string? coverArtPath = null)
     {
         var args = new List<string>
         {
@@ -159,6 +248,29 @@ public static class RipEncoder
             args.Add(y.ToString());
         }
 
+        if (!string.IsNullOrEmpty(metadata.Genre))
+        {
+            args.Add("--tg");
+            args.Add(metadata.Genre);
+        }
+
+        if (!string.IsNullOrEmpty(metadata.EncodedBy))
+        {
+            // ID3v2 TENC frame = "Encoded by". --tv KEY=VALUE adds an arbitrary
+            // ID3v2 user-text frame; lame happily accepts the standard 4-letter
+            // codes here, so we get a real TENC frame in the output.
+            args.Add("--tv");
+            args.Add($"TENC={metadata.EncodedBy}");
+        }
+
+        if (!string.IsNullOrEmpty(coverArtPath))
+        {
+            // lame's --ti embeds the image as an ID3v2 APIC frame
+            // (picture type 0x03 = front cover).
+            args.Add("--ti");
+            args.Add(coverArtPath);
+        }
+
         args.Add("-");
         args.Add(outputPath);
         return args;
@@ -204,12 +316,14 @@ public static class RipEncoder
         private readonly Stream _stdin;
         private readonly string _outputPath;
         private readonly ILogger _log;
+        private readonly string? _coverArtTempFile;
         private bool _disposed;
 
-        public SubprocessEncoder(string exeName, List<string> args, string outputPath, ILogger log)
+        public SubprocessEncoder(string exeName, List<string> args, string outputPath, ILogger log, string? coverArtTempFile = null)
         {
             _outputPath = outputPath;
             _log = log;
+            _coverArtTempFile = coverArtTempFile;
 
             var psi = new ProcessStartInfo
             {
@@ -282,6 +396,11 @@ public static class RipEncoder
             finally
             {
                 _proc.Dispose();
+                if (_coverArtTempFile != null)
+                {
+                    try { File.Delete(_coverArtTempFile); }
+                    catch (Exception ex) { _log.Debug(ex, "Failed to clean up cover art temp file {Path}", _coverArtTempFile); }
+                }
             }
         }
 

@@ -3,6 +3,25 @@
              xmlns:i="https://github.com/projektanker/icons.avalonia"
              x:Class="OrgZ.Controls.ActivityPanel"
              x:CompileBindings="False">
+	<UserControl.Styles>
+		<!-- Spin the per-activity status icon while the activity is Running.
+		     The Classes.spin="{Binding IsRunning}" attribute below toggles the
+		     `spin` class on the icon, which this style hooks for the rotate
+		     animation. -->
+		<Style Selector="i|Icon.spin">
+			<Setter Property="RenderTransformOrigin" Value="50%,50%" />
+			<Style.Animations>
+				<Animation Duration="0:0:1" IterationCount="INFINITE">
+					<KeyFrame Cue="0%">
+						<Setter Property="RotateTransform.Angle" Value="0" />
+					</KeyFrame>
+					<KeyFrame Cue="100%">
+						<Setter Property="RotateTransform.Angle" Value="360" />
+					</KeyFrame>
+				</Animation>
+			</Style.Animations>
+		</Style>
+	</UserControl.Styles>
 	<Border Background="{DynamicResource SystemAltHighColor}" BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
 		<DockPanel>
 			<Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="8,8,8,4">
@@ -17,7 +36,7 @@
 					<DataTemplate>
 						<StackPanel Margin="4,4">
 							<StackPanel Orientation="Horizontal" Spacing="6">
-								<i:Icon Value="{Binding StatusIcon}" FontSize="12" Foreground="{Binding StatusColor}" VerticalAlignment="Center" />
+								<i:Icon Value="{Binding StatusIcon}" FontSize="12" Foreground="{Binding StatusColor}" VerticalAlignment="Center" Classes.spin="{Binding IsRunning}" />
 								<TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="12" FontWeight="SemiBold" />
 							</StackPanel>
 							<TextBlock Text="{Binding Detail}" TextTrimming="CharacterEllipsis" FontSize="10" Opacity="0.6" Margin="18,0,0,0"

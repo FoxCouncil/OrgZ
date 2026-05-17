@@ -25,11 +25,34 @@ public readonly record struct RipTrackProgress
 public sealed record RipOutcome
 {
     public required int TrackNumber { get; init; }
+    public required string TrackTitle { get; init; }
     public required string OutputPath { get; init; }
     public required long SectorsRipped { get; init; }
     public required uint AccurateRipV1 { get; init; }
     public required uint AccurateRipV2 { get; init; }
     public required bool HadErrors { get; init; }
+
+    /// <summary>
+    /// Sectors that exhausted the re-read budget and were written with
+    /// best-effort (unverified) data. These are the most likely source of
+    /// audible clicks / glitches in the output.
+    /// </summary>
+    public required int SkippedSectors { get; init; }
+
+    /// <summary>Sectors where the drive returned a SCSI sense error.</summary>
+    public required int ReadErrorSectors { get; init; }
+
+    /// <summary>
+    /// Sectors that needed jitter-overlap correction. These are still
+    /// verified — informational only, useful for diagnosing flaky drives.
+    /// </summary>
+    public required int JitterCorrectedSectors { get; init; }
+
+    /// <summary>LBA of the first <see cref="SkippedSectors"/>, or -1 if none.</summary>
+    public required long FirstSkippedLba { get; init; }
+
+    /// <summary>True when the track came out clean — no skipped / read-error sectors.</summary>
+    public bool Verified => !HadErrors && SkippedSectors == 0 && ReadErrorSectors == 0;
 }
 
 /// <summary>
@@ -60,11 +83,13 @@ public static class CdRipService
         string outputDirectory,
         CdRipOptions options,
         IProgress<RipTrackProgress>? progress = null,
+        IProgress<RipOutcome>? trackCompleted = null,
+        byte[]? coverArt = null,
         CancellationToken cancellationToken = default)
     {
         if (!CdElevation.RequiresElevation)
         {
-            return await RipTracksAsync(drivePath, tracks, outputDirectory, options, progress, cancellationToken);
+            return await RipTracksAsync(drivePath, tracks, outputDirectory, options, progress, trackCompleted, coverArt, cancellationToken);
         }
 
         var spec = new CdHelperSpec
@@ -76,6 +101,8 @@ public static class CdRipService
             FlacCompression = options.FlacCompression,
             Mp3Mode = (int)options.Mp3Mode,
             Mp3Quality = options.Mp3Quality,
+            ReReadAttempts = options.ReReadAttempts,
+            CoverArt = coverArt,
             Tracks = tracks.Where(t => t.Track.HasValue).Select(t => new CdHelperTrack
             {
                 TrackNumber = (int)t.Track!.Value,
@@ -106,17 +133,17 @@ public static class CdRipService
                     });
                     break;
                 }
+                case "rip-track-done":
+                {
+                    if (evt.Outcomes is { Count: > 0 } single)
+                    {
+                        trackCompleted?.Report(FromHelper(single[0]));
+                    }
+                    break;
+                }
                 case "rip-done":
                 {
-                    outcomes = evt.Outcomes?.Select(o => new RipOutcome
-                    {
-                        TrackNumber = o.TrackNumber,
-                        OutputPath = o.OutputPath,
-                        SectorsRipped = o.SectorsRipped,
-                        AccurateRipV1 = o.AccurateRipV1,
-                        AccurateRipV2 = o.AccurateRipV2,
-                        HadErrors = o.HadErrors,
-                    }).ToList() ?? [];
+                    outcomes = evt.Outcomes?.Select(FromHelper).ToList() ?? [];
                     break;
                 }
                 case "error":
@@ -142,12 +169,34 @@ public static class CdRipService
     /// <paramref name="format"/>.  FLAC and MP3 encoding runs through the
     /// external <c>flac</c> / <c>lame</c> binaries; WAV is written directly.
     /// </summary>
+    /// <summary>
+    /// Maps a helper-DTO outcome back to the in-process <see cref="RipOutcome"/>.
+    /// Defined as a local helper because both <c>rip-track-done</c> and
+    /// <c>rip-done</c> events carry the same payload shape.
+    /// </summary>
+    private static RipOutcome FromHelper(CdHelperOutcome o) => new()
+    {
+        TrackNumber = o.TrackNumber,
+        TrackTitle = o.TrackTitle ?? string.Empty,
+        OutputPath = o.OutputPath,
+        SectorsRipped = o.SectorsRipped,
+        AccurateRipV1 = o.AccurateRipV1,
+        AccurateRipV2 = o.AccurateRipV2,
+        HadErrors = o.HadErrors,
+        SkippedSectors = o.SkippedSectors,
+        ReadErrorSectors = o.ReadErrorSectors,
+        JitterCorrectedSectors = o.JitterCorrectedSectors,
+        FirstSkippedLba = o.FirstSkippedLba,
+    };
+
     public static async Task<List<RipOutcome>> RipTracksAsync(
         string drivePath,
         IReadOnlyList<MediaItem> tracks,
         string outputDirectory,
         CdRipOptions options,
         IProgress<RipTrackProgress>? progress = null,
+        IProgress<RipOutcome>? trackCompleted = null,
+        byte[]? coverArt = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(drivePath);
@@ -168,7 +217,9 @@ public static class CdRipService
         _log.Information("Opened {DrivePath} for rip: {Vendor} {Product} (fw {Rev}) format={Format}", drivePath, drive.Inquiry.Vendor, drive.Inquiry.Product, drive.Inquiry.Revision, options.ShortLabel);
 
         var toc = await drive.ReadTocAsync(cancellationToken);
-        using var session = RipSession.CreateAutoCorrected(drive);
+        var redbookOptions = new FoxRedbook.RipOptions { MaxReReads = options.ReReadAttempts };
+        using var session = RipSession.CreateAutoCorrected(drive, redbookOptions);
+        _log.Information("Rip options: ReReadAttempts={ReReadAttempts}", options.ReReadAttempts);
 
         for (int i = 0; i < tracks.Count; i++)
         {
@@ -201,20 +252,41 @@ public static class CdRipService
                 Title = requested.Title,
                 Artist = requested.Artist,
                 Album = requested.Album,
+                Genre = requested.Genre,
                 TrackNumber = trackNumber,
                 Year = requested.Year,
+                EncodedBy = $"OrgZ {App.Version}",
+                CoverArt = coverArt,
             };
 
             long sectorsDone = 0;
             bool hadErrors = false;
             int latestRetries = 0;
+            int skippedSectors = 0;
+            int readErrorSectors = 0;
+            int jitterCorrectedSectors = 0;
+            long firstSkippedLba = -1;
 
             var ripProgress = new Progress<RipProgress>(p =>
             {
                 latestRetries = p.RetryCount;
-                if ((p.Status & SectorStatus.ReadError) != 0 || (p.Status & SectorStatus.Skipped) != 0)
+                if ((p.Status & SectorStatus.Skipped) != 0)
                 {
+                    skippedSectors++;
+                    if (firstSkippedLba < 0)
+                    {
+                        firstSkippedLba = p.Lba;
+                    }
                     hadErrors = true;
+                }
+                if ((p.Status & SectorStatus.ReadError) != 0)
+                {
+                    readErrorSectors++;
+                    hadErrors = true;
+                }
+                if ((p.Status & SectorStatus.JitterCorrected) != 0)
+                {
+                    jitterCorrectedSectors++;
                 }
             });
 
@@ -246,15 +318,30 @@ public static class CdRipService
                 }
             }
 
-            outcomes.Add(new RipOutcome
+            var outcome = new RipOutcome
             {
                 TrackNumber = trackNumber,
+                TrackTitle = title,
                 OutputPath = outputPath,
                 SectorsRipped = sectorsDone,
                 AccurateRipV1 = session.GetAccurateRipV1Crc(tocTrack),
                 AccurateRipV2 = session.GetAccurateRipV2Crc(tocTrack),
                 HadErrors = hadErrors,
-            });
+                SkippedSectors = skippedSectors,
+                ReadErrorSectors = readErrorSectors,
+                JitterCorrectedSectors = jitterCorrectedSectors,
+                FirstSkippedLba = firstSkippedLba,
+            };
+            outcomes.Add(outcome);
+            if (outcome.Verified)
+            {
+                _log.Information("Track {Track} verified: AR1={AR1:X8} AR2={AR2:X8} jitter-corrected={Jitter}", trackNumber, outcome.AccurateRipV1, outcome.AccurateRipV2, jitterCorrectedSectors);
+            }
+            else
+            {
+                _log.Warning("Track {Track} HAS UNVERIFIED SECTORS: skipped={Skipped} read-errors={ReadErrors} first-bad-LBA={FirstBad} AR1={AR1:X8} AR2={AR2:X8}", trackNumber, skippedSectors, readErrorSectors, firstSkippedLba, outcome.AccurateRipV1, outcome.AccurateRipV2);
+            }
+            trackCompleted?.Report(outcome);
         }
 
         return outcomes;

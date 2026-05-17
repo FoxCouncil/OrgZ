@@ -36,7 +36,7 @@ public static class MusicBrainzService
     /// </summary>
     public static async Task<DiscLookupResult?> LookupByDiscIdAsync(string discId)
     {
-        var json = await RateLimitedGetAsync($"discid/{discId}?inc=recordings+artist-credits&fmt=json");
+        var json = await RateLimitedGetAsync($"discid/{discId}?inc=recordings+artist-credits+release-groups+genres&fmt=json");
         if (json == null)
         {
             return null;
@@ -53,7 +53,7 @@ public static class MusicBrainzService
     {
         // TOC separators must be literal + in the URL, not decoded as spaces.
         // Uri.EscapeDataString encodes + as %2B which MusicBrainz also accepts.
-        var url = $"discid/-?toc={Uri.EscapeDataString(tocString)}&inc=recordings+artist-credits&fmt=json";
+        var url = $"discid/-?toc={Uri.EscapeDataString(tocString)}&inc=recordings+artist-credits+release-groups+genres&fmt=json";
         var json = await RateLimitedGetAsync(url);
         if (json == null)
         {
@@ -64,22 +64,82 @@ public static class MusicBrainzService
     }
 
     /// <summary>
-    /// Fetch front cover art from the Cover Art Archive. Returns image bytes or null.
+    /// Fetch front cover art from the Cover Art Archive. Tries the release
+    /// first; on miss, falls back to the parent release-group (different
+    /// pressings of the same album share artwork there far more often than
+    /// individual releases do). Returns null if neither has art.
     /// </summary>
-    public static async Task<byte[]?> FetchCoverArtAsync(string releaseMbid)
+    public static async Task<byte[]?> FetchCoverArtAsync(string releaseMbid, string? releaseGroupMbid = null)
+    {
+        var art = await TryFetchCaaAsync($"https://coverartarchive.org/release/{releaseMbid}/front", $"release {releaseMbid}");
+        if (art != null)
+        {
+            return art;
+        }
+
+        if (!string.IsNullOrEmpty(releaseGroupMbid))
+        {
+            art = await TryFetchCaaAsync($"https://coverartarchive.org/release-group/{releaseGroupMbid}/front", $"release-group {releaseGroupMbid}");
+            if (art != null)
+            {
+                return art;
+            }
+        }
+
+        _log.Information("Cover Art Archive has no front art for release={ReleaseMbid} group={GroupMbid} — disc will display without artwork", releaseMbid, releaseGroupMbid ?? "(none)");
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the highest-voted genre name from a MusicBrainz entity's
+    /// <c>genres</c> array, or null if the entity has no genres recorded.
+    /// Each genre object looks like <c>{ "name": "rock", "count": 12, ... }</c>;
+    /// we pick the largest count, breaking ties by array order (i.e. MB's
+    /// own ordering, which is already by count desc).
+    /// </summary>
+    private static string? PickTopGenre(JsonElement entity)
+    {
+        if (!entity.TryGetProperty("genres", out var genres) || genres.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        string? bestName = null;
+        int bestCount = -1;
+        foreach (var g in genres.EnumerateArray())
+        {
+            int count = g.TryGetProperty("count", out var c) && c.TryGetInt32(out var ci) ? ci : 0;
+            var name = g.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (!string.IsNullOrEmpty(name) && count > bestCount)
+            {
+                bestCount = count;
+                bestName = name;
+            }
+        }
+
+        // Title-case the genre — MB stores lowercase ("rock", "alternative rock")
+        // which looks unbalanced next to MB titles that are already cased.
+        return bestName is null ? null : System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(bestName);
+    }
+
+    private static async Task<byte[]?> TryFetchCaaAsync(string url, string label)
     {
         try
         {
             await EnforceRateLimit();
-            var response = await _http.GetAsync($"https://coverartarchive.org/release/{releaseMbid}/front");
+            var response = await _http.GetAsync(url);
             if (!response.IsSuccessStatusCode)
             {
+                _log.Debug("Cover Art Archive miss for {Label}: HTTP {Status}", label, (int)response.StatusCode);
                 return null;
             }
-            return await response.Content.ReadAsByteArrayAsync();
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            _log.Information("Cover Art Archive hit for {Label}: {Bytes} bytes", label, bytes.Length);
+            return bytes;
         }
-        catch
+        catch (Exception ex)
         {
+            _log.Warning(ex, "Cover Art Archive fetch failed for {Label}", label);
             return null;
         }
     }
@@ -119,6 +179,23 @@ public static class MusicBrainzService
             ReleaseMbid = release.GetProperty("id").GetString() ?? "",
             Title = release.GetProperty("title").GetString() ?? "Unknown Album",
         };
+
+        // Capture the release-group MBID so the Cover Art Archive fallback can
+        // try the group when this specific release has no art uploaded. Also
+        // mine genres from there (release.genres is usually empty;
+        // release-group.genres holds the voted top genres).
+        if (release.TryGetProperty("release-group", out var group))
+        {
+            if (group.TryGetProperty("id", out var groupId))
+            {
+                result.ReleaseGroupMbid = groupId.GetString();
+            }
+            result.Genre = PickTopGenre(group);
+        }
+        if (result.Genre is null)
+        {
+            result.Genre = PickTopGenre(release);
+        }
 
         if (release.TryGetProperty("date", out var date))
         {
@@ -231,8 +308,10 @@ public static class MusicBrainzService
 public class DiscLookupResult
 {
     public string ReleaseMbid { get; set; } = "";
+    public string? ReleaseGroupMbid { get; set; }
     public string Title { get; set; } = "";
     public string? Artist { get; set; }
+    public string? Genre { get; set; }
     public uint? Year { get; set; }
     public List<TrackInfo> Tracks { get; set; } = [];
 }
