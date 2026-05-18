@@ -333,11 +333,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Animate: slide the glow bar back and forth across the track (420px wide, indicator is 120px)
+        // Animate: slide the glow bar back and forth across the track (420px wide, indicator is 120px).
+        // Avalonia's Animation.RunAsync rejects IterationCount.Infinite ("Looping animations must
+        // not use the Run method"); use a finite-but-astronomical count so RepeatType=Many and the
+        // check passes. ~18 quintillion iterations is forever for any plausible session.
         var animation = new Animation
         {
             Duration = TimeSpan.FromSeconds(2),
-            IterationCount = IterationCount.Infinite,
+            IterationCount = new IterationCount(ulong.MaxValue),
             PlaybackDirection = PlaybackDirection.Alternate,
             Easing = new SineEaseInOut(),
             Children =
@@ -463,10 +466,11 @@ public partial class MainWindow : Window
 
         double CueFrac(double seconds) => Math.Min(seconds / totalSec, 1.0);
 
+        // See UpdateLiveBarAnimation for the IterationCount(ulong.MaxValue) trick — same reason.
         var animation = new Animation
         {
             Duration = TimeSpan.FromSeconds(totalSec),
-            IterationCount = IterationCount.Infinite,
+            IterationCount = new IterationCount(ulong.MaxValue),
             Children =
             {
                 // Dwell at start
