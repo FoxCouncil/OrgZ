@@ -59,13 +59,11 @@ public static class SingleInstanceGuard
         var conn = new Connection(new ClientConnectionOptions(Address.Session!));
         await conn.ConnectAsync();
 
-        // TryRequestNameAsync returns the explicit D-Bus RequestNameReply without throwing.
-        // The reply enum type is internal to Tmds.DBus.Protocol so we can't name it, but
-        // per D-Bus spec the values are stable: PrimaryOwner=1, InQueue=2, Exists=3,
-        // AlreadyOwner=4. Any reply other than PrimaryOwner means we didn't get the name.
-        var reply = await conn.TryRequestNameAsync(SingletonBusName, RequestNameOptions.None);
+        // TryRequestNameAsync returns Task<bool>: true if we became the primary owner,
+        // false otherwise (name already held, in queue, etc).
+        var becamePrimary = await conn.TryRequestNameAsync(SingletonBusName, RequestNameOptions.None);
 
-        if ((int)(object)reply == 1)
+        if (becamePrimary)
         {
             lock (_connectionLock)
             {
@@ -75,7 +73,7 @@ public static class SingleInstanceGuard
             return true;
         }
 
-        _log.Information("Singleton bus name already held (reply={Reply}) — focusing running instance and exiting", reply);
+        _log.Information("Singleton bus name already held — focusing running instance and exiting");
         try
         {
             SendRaise(conn);
