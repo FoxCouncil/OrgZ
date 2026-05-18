@@ -1785,6 +1785,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var previousMedia = _currentMedia;
         _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
 
+        // Radio streams over flaky uplinks need more headroom than libvlc's 1s
+        // default network buffer. Without this, the smallest server-side jitter
+        // starves the decoder and libvlc cancels the HTTP/2 stream rather than
+        // waiting for more data - observed as `local stream 1 error: Cancellation
+        // (0x8)` right after the first audio buffer arrives. 3s matches the CD
+        // path's :file-caching=3000 and is the conventional value across VLC
+        // radio guides.
+        _currentMedia.AddOption(":network-caching=3000");
+        // Auto-reconnect when the upstream drops the TCP connection. Many shoutcast
+        // / icecast servers cycle connections aggressively (especially behind CDNs);
+        // without this, a single drop ends playback instead of seamlessly resuming.
+        _currentMedia.AddOption(":http-reconnect");
+        // Stream the body in chunks instead of trying to fully buffer the response
+        // before playback starts. Required for live audio (no Content-Length).
+        _currentMedia.AddOption(":http-continuous");
+
         // Capture THIS specific Media instance. When the user switches stations rapidly,
         // LibVLC can still deliver late MetaChanged events from the previous (disposed)
         // Media object. If the handler read from _currentMedia directly, it would either

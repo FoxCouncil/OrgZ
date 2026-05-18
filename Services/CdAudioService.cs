@@ -65,6 +65,24 @@ public static class CdAudioService
         CloseHandle(handle);
         return hasMedia;
 #else
+        if (OperatingSystem.IsLinux())
+        {
+            // /sys/block/srN/size reports sectors visible on the device. Zero means
+            // the tray is empty (or the disc isn't seated); non-zero means media is
+            // present. Cheap, no privileged ioctl, no need to open /dev/srN.
+            var name = Path.GetFileName(drive.Name.TrimEnd('/'));
+            var sizePath = $"/sys/block/{name}/size";
+            try
+            {
+                return File.Exists(sizePath)
+                    && long.TryParse(File.ReadAllText(sizePath).Trim(), out var sectors)
+                    && sectors > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
         return drive.IsReady;
 #endif
     }
@@ -74,6 +92,32 @@ public static class CdAudioService
     /// </summary>
     public static List<DriveInfo> GetAllCdDrives()
     {
+        if (OperatingSystem.IsLinux())
+        {
+            // DriveInfo.GetDrives on Linux enumerates mount points, not block
+            // devices - and an audio CD has no filesystem to mount, so it never
+            // shows up. Scan /dev/sr* directly; that's how the kernel exposes
+            // optical drives. Synthetic DriveInfo objects work because the rest
+            // of the pipeline only consumes .Name (passed to FoxRedbook).
+            var drives = new List<DriveInfo>();
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles("/dev", "sr*"))
+                {
+                    var suffix = Path.GetFileName(path)[2..];
+                    if (int.TryParse(suffix, out _))
+                    {
+                        drives.Add(new DriveInfo(path));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Failed to enumerate /dev/sr* optical drives");
+            }
+            return drives;
+        }
+
         return DriveInfo.GetDrives()
             .Where(d => d.DriveType == DriveType.CDRom)
             .ToList();
@@ -163,9 +207,25 @@ public static class CdAudioService
             // synthetic AIFF file at the mount point, which libvlc plays cleanly.
             // Until we move playback to FoxRedbook streaming, route through the
             // AIFF on macOS only; Windows/Linux keep using libvlc's cdda module.
-            var streamUrl = OperatingSystem.IsMacOS()
-                ? new Uri(Path.Combine(drivePath, $"{track.Number} Audio Track.aiff")).AbsoluteUri
-                : $"cdda:///{drivePath}/";
+            // libvlc CDDA MRL is `cdda://<device>`. On Windows drivePath is `D:`
+            // (no leading slash), so `cdda:///D:/` parses to authority="" path="/D:/".
+            // On Linux drivePath is `/dev/sr0`; appending it after `cdda://` keeps the
+            // single leading slash and yields `cdda:///dev/sr0` (path="/dev/sr0").
+            // The old `cdda:///{drivePath}/` form double-slashed Linux paths into
+            // `cdda:////dev/sr0/`, which libvlc rejects with "input can't be opened".
+            string streamUrl;
+            if (OperatingSystem.IsMacOS())
+            {
+                streamUrl = new Uri(Path.Combine(drivePath, $"{track.Number} Audio Track.aiff")).AbsoluteUri;
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                streamUrl = $"cdda://{drivePath}";
+            }
+            else
+            {
+                streamUrl = $"cdda:///{drivePath}/";
+            }
             info.Tracks.Add(new MediaItem
             {
                 Id = $"cd:{drivePath}:{track.Number}",

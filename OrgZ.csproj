@@ -90,12 +90,9 @@
 		<InternalsVisibleTo Include="OrgZ.Tests" />
 	</ItemGroup>
 
-	<!-- FoxRainbowBooks is consumed as a sibling checkout: the published
-	     1.0.0-alpha.1 NuGets omit IScsiTransport, which FoxOrangebook.BurnSession
-	     depends on. Switch back to PackageReference once alpha.2+ ships. -->
 	<ItemGroup>
-		<ProjectReference Include="..\FoxRainbowBooks\src\FoxRedbook\FoxRedbook.csproj" />
-		<ProjectReference Include="..\FoxRainbowBooks\src\FoxOrangebook\FoxOrangebook.csproj" />
+		<PackageReference Include="FoxRedbook" Version="1.0.0-alpha.2" />
+		<PackageReference Include="FoxOrangebook" Version="1.0.0-alpha.2" />
 	</ItemGroup>
 
 	<!-- Strip runtime-specific native payloads we never load on the current OS.
@@ -119,6 +116,33 @@
 		<Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))"
 		      Command="powershell -NoProfile -Command &quot;Get-ChildItem -LiteralPath '$(OutDir)runtimes' -Directory | Where-Object { $_.Name -notlike 'win*' -and $_.Name -ne 'unix' } | Remove-Item -Recurse -Force&quot;"
 		      ConsoleToMsBuild="true"
+		      IgnoreExitCode="true" />
+	</Target>
+
+	<!-- Bundle Linux flac/lame binaries next to the build output. Picked up at
+	     runtime by RipEncoder.ResolveExecutable as the fallback when neither
+	     binary is found on PATH - the case AppImage installs hit on distros
+	     without flac/lame preinstalled. The repo tools/linux-x64/ directory
+	     ships only a README; whoever produces the AppImage is expected to
+	     drop static-linked binaries in there (see tools/linux-x64/README.md).
+	     If the directory has nothing copyable, MSBuild's no-match is silent
+	     and dev builds still work via PATH. -->
+	<ItemGroup>
+		<LinuxEncoderBinary Include="tools\linux-x64\*"
+		                    Exclude="tools\linux-x64\*.md;tools\linux-x64\.gitkeep" />
+	</ItemGroup>
+	<Target Name="BundleLinuxEncoders"
+	        AfterTargets="Build"
+	        Condition="$([MSBuild]::IsOSPlatform('Linux')) Or $(RuntimeIdentifier.StartsWith('linux-'))"
+	        Inputs="@(LinuxEncoderBinary)"
+	        Outputs="@(LinuxEncoderBinary->'$(OutDir)tools\%(Filename)%(Extension)')">
+		<Copy SourceFiles="@(LinuxEncoderBinary)"
+		      DestinationFolder="$(OutDir)tools"
+		      SkipUnchangedFiles="true" />
+		<!-- ELFs need the executable bit. .NET's Copy doesn't preserve mode,
+		     so set it explicitly. No-op on files that were never copied. -->
+		<Exec Command="chmod +x &quot;$(OutDir)tools&quot;/*"
+		      Condition="'@(LinuxEncoderBinary)' != ''"
 		      IgnoreExitCode="true" />
 	</Target>
 </Project>

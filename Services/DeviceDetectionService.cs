@@ -256,6 +256,13 @@ public sealed class DeviceDetectionService : IDisposable
             TryAddDrive(drive);
         }
 
+        // DriveInfo doesn't expose Linux optical drives (they're block devices,
+        // not mount points), so consult the CD service directly there.
+        if (!sawCdDrive && OperatingSystem.IsLinux() && CdAudioService.GetAllCdDrives().Count > 0)
+        {
+            sawCdDrive = true;
+        }
+
         // Trigger one CD scan at startup if the machine has any CD drives.
         // The scan itself figures out which drives actually contain audio media.
         if (sawCdDrive)

@@ -33,7 +33,11 @@ internal sealed class PulseAudioSink : IAudioSink
     private readonly string? _deviceName;
     private IntPtr _stream;
     private float _volume = 1f;
-    private bool _muted;
+    // User-controlled mute (Settings dialog checkbox) - only the IsMuted
+    // setter touches this. Stays sticky across track changes. Previously this
+    // field was shared with the LibVLC Pause() soft-mute, which meant a missed
+    // OnAudioResume callback would silently flip the user-facing mute on.
+    private bool _userMuted;
     private bool _disposed;
     private byte[]? _scratch;
 
@@ -57,8 +61,8 @@ internal sealed class PulseAudioSink : IAudioSink
 
     public bool IsMuted
     {
-        get => _muted;
-        set => _muted = value;
+        get => _userMuted;
+        set => _userMuted = value;
     }
 
     public void Open(AudioFormat format)
@@ -105,36 +109,49 @@ internal sealed class PulseAudioSink : IAudioSink
 
     public void Write(ReadOnlySpan<byte> pcm)
     {
-        if (_disposed || pcm.Length == 0 || _stream == IntPtr.Zero)
+        if (pcm.Length == 0)
         {
             return;
         }
 
-        ReadOnlySpan<byte> output = pcm;
-
-        if (_muted || _volume < 0.999f)
+        // Hold _lifecycle across the native call. VLC's audio thread races
+        // with view-switch teardown (Close → pa_simple_free); without the lock
+        // the worker reads _stream as non-zero, Close frees it, then pa_simple_write
+        // hits the freed pa_stream and libpulse asserts (process abort).
+        lock (_lifecycle)
         {
-            if (_scratch == null || _scratch.Length < pcm.Length)
+            if (_disposed || _stream == IntPtr.Zero)
             {
-                _scratch = new byte[pcm.Length];
+                return;
             }
 
-            if (_muted)
-            {
-                _scratch.AsSpan(0, pcm.Length).Clear();
-            }
-            else
-            {
-                ScaleS16(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
-            }
-            output = _scratch.AsSpan(0, pcm.Length);
-        }
+            ReadOnlySpan<byte> output = pcm;
+            bool silence = _userMuted;
 
-        unsafe
-        {
-            fixed (byte* p = output)
+            if (silence || _volume < 0.999f)
             {
-                PulseNative.pa_simple_write(_stream, (IntPtr)p, (UIntPtr)output.Length, out _);
+                if (_scratch == null || _scratch.Length < pcm.Length)
+                {
+                    _scratch = new byte[pcm.Length];
+                }
+
+                if (silence)
+                {
+                    _scratch.AsSpan(0, pcm.Length).Clear();
+                }
+                else
+                {
+                    ScaleS16(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
+                }
+                output = _scratch.AsSpan(0, pcm.Length);
+            }
+
+            unsafe
+            {
+                fixed (byte* p = output)
+                {
+                    PulseNative.pa_simple_write(_stream, (IntPtr)p, (UIntPtr)output.Length, out _);
+                }
             }
         }
     }
@@ -151,23 +168,47 @@ internal sealed class PulseAudioSink : IAudioSink
 
     public void Pause()
     {
-        // pa_simple doesn't expose cork/pause - the best we can do is set a
-        // mute flag so future Writes emit silence.  Latency is still bounded
-        // by PulseAudio's ~50ms default buffer, which is fine.
-        _muted = true;
+        // pa_simple doesn't expose cork/pause. Drop whatever is queued in the
+        // server-side buffer so the listener doesn't hear the next ~50ms after
+        // they hit pause. LibVLC also stops calling OnAudioPlay until Resume,
+        // so flushing is sufficient - we don't need a "paused" flag that gates
+        // Write (the old design did, and a missed Resume left audio stuck off).
+        lock (_lifecycle)
+        {
+            if (_stream != IntPtr.Zero)
+            {
+                PulseNative.pa_simple_flush(_stream, out _);
+            }
+        }
     }
 
     public void Resume()
     {
-        _muted = false;
+        // No-op: Pause() flushes the queue, and LibVLC resumes calling
+        // OnAudioPlay on its own. Kept on the interface for parity with other
+        // sinks (Core Audio, WaveOut) where Resume does real work.
     }
 
     public void Flush()
     {
-        // pa_simple_flush would let us drop queued audio; for now, flip mute
-        // so incoming frames drop until Resume.  Full flush support would
-        // require the async API - polish-phase work.
-        _muted = true;
+        // pa_simple_flush drops whatever audio is queued in the server buffer
+        // so the listener doesn't hear the tail of the previous track after a
+        // seek / source switch. Earlier this method latched _muted=true and
+        // relied on Resume() to clear it - but seek/track-switch paths don't
+        // call Resume(), so the "Default" sink could end up permanently silent
+        // while a freshly-Open()ed sink (selected by hand) still worked.
+        lock (_lifecycle)
+        {
+            if (_stream == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (PulseNative.pa_simple_flush(_stream, out var err) < 0)
+            {
+                _log.Warning("pa_simple_flush failed: pa error {Error}", err);
+            }
+        }
     }
 
     public void Close()

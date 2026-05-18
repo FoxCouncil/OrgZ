@@ -1,0 +1,6 @@
+# Static-linked flac / lame binaries are bundled at AppImage pack time but
+# not redistributed via this repo - see README.md for why. Allow only the
+# README and this .gitignore through.
+*
+!.gitignore
+!README.md
