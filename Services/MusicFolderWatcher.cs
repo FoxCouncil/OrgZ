@@ -185,7 +185,7 @@ public sealed class MusicFolderWatcher : IDisposable
         }
     }
 
-    private static void Coalesce(Dictionary<string, FsChangeKind> pending, FsEvent evt)
+    internal static void Coalesce(Dictionary<string, FsChangeKind> pending, FsEvent evt)
     {
         if (pending.TryGetValue(evt.Path, out var existing))
         {
@@ -211,7 +211,7 @@ public sealed class MusicFolderWatcher : IDisposable
         }
     }
 
-    private static bool IsTempFile(string path)
+    internal static bool IsTempFile(string path)
     {
         var name = Path.GetFileName(path);
 
@@ -230,9 +230,9 @@ public sealed class MusicFolderWatcher : IDisposable
         return TempSuffixes.Contains(ext);
     }
 
-    private enum FsChangeKind { Created, Deleted, Changed }
+    internal enum FsChangeKind { Created, Deleted, Changed }
 
-    private readonly record struct FsEvent(FsChangeKind Kind, string Path);
+    internal readonly record struct FsEvent(FsChangeKind Kind, string Path);
 }
 
 public sealed record WatcherChangeSet(

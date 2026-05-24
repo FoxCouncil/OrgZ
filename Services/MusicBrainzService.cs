@@ -144,7 +144,7 @@ public static class MusicBrainzService
         }
     }
 
-    private static DiscLookupResult? ParseDiscResponse(string json)
+    internal static DiscLookupResult? ParseDiscResponse(string json)
     {
         try
         {
