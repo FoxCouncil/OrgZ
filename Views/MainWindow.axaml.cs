@@ -29,8 +29,6 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, EventHandler<RoutedEventArgs>> _menuHandlers;
 
     private CancellationTokenSource? _liveBarAnimationCts;
-    private CancellationTokenSource? _marquee1Cts;
-    private CancellationTokenSource? _marquee2Cts;
 
     private string? _lastViewConfigKey;
     private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
@@ -43,15 +41,6 @@ public partial class MainWindow : Window
     private Point? _gridDragOrigin;
     private MediaItem? _gridDragItem;
     private int _gridDragRowIndex = -1;
-
-    // Decay rates expressed per second so they stay visually identical
-    // regardless of refresh rate (was per-40ms-tick before the RAF switch).
-    // 25 Hz × 0.05/tick → 1.25/sec; 25 Hz × 0.012/tick → 0.30/sec.
-    private const float MainVuDecayPerSecond = 1.25f;
-    private const float MainVuPeakDecayPerSecond = 0.30f;
-    private bool _mainVuMode;
-    private bool _mainVuRafScheduled;
-    private long _mainVuLastFrameTicks;
 
     // Set by the docs-screenshot harness via the internal ctor: skips the live
     // library load and OS-service init in Loaded so the window renders with
@@ -69,11 +58,6 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         WindowSizeTracker.Track(this, "Main");
-
-        var slider = this.FindControl<Slider>("CurrentTimeSlider")!;
-
-        slider.AddHandler(InputElement.PointerPressedEvent, Slider_PointerPressed, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
-        slider.AddHandler(InputElement.PointerReleasedEvent, Slider_PointerReleased, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
 
         MainDataGrid.AddHandler(InputElement.PointerPressedEvent, MainDataGrid_PointerPressed, RoutingStrategies.Tunnel);
         MainDataGrid.AddHandler(InputElement.PointerMovedEvent, MainDataGrid_PointerMoved, RoutingStrategies.Tunnel);
@@ -98,19 +82,9 @@ public partial class MainWindow : Window
         {
             if (e.PropertyName == nameof(MainWindowViewModel.CurrentLcdPage))
             {
-                SetMainVuActive(_viewModel.CurrentLcdPage == MainWindowViewModel.LcdPage.Vu);
+                // VU activation is owned by LcdDisplay itself.
             }
         };
-
-        // The LCD column stretches with the window, so the marquee's container
-        // width changes on resize. Re-measure + re-run the marquees whenever the
-        // text-row container resizes - restoring centered alignment for short
-        // text and recomputing scroll overflow for long text.
-        var trackTextWrap = this.FindControl<StackPanel>("MainLcdTrackTextWrap");
-        if (trackTextWrap != null)
-        {
-            trackTextWrap.SizeChanged += (_, _) => RestartMarquees();
-        }
 
         // The LCD itself stays at 588 by default but shrinks down to its
         // MinWidth (380) when the window can no longer fit the play controls,
@@ -243,12 +217,6 @@ public partial class MainWindow : Window
         if (e.PropertyName == nameof(MainWindowViewModel.IsSeekEnabled))
         {
             UpdateLiveBarAnimation();
-            return;
-        }
-
-        if (e.PropertyName == nameof(MainWindowViewModel.CurrentTrackLine1) || e.PropertyName == nameof(MainWindowViewModel.CurrentTrackLine2))
-        {
-            RestartMarquees();
             return;
         }
 
@@ -475,16 +443,6 @@ public partial class MainWindow : Window
         {
             MainLcdPanel.Width = target;
         }
-    }
-
-    private void RestartMarquees()
-    {
-        var tb1 = this.FindControl<TextBlock>("TrackLine1");
-        var tb2 = this.FindControl<TextBlock>("TrackLine2");
-        var tb1Container = this.FindControl<Border>("TrackLine1Container");
-        var tb2Container = this.FindControl<Border>("TrackLine2Container");
-        _marquee1Cts = OrgZ.Helpers.MarqueeHelper.Restart(tb1, tb2, tb1Container, tb2Container, _marquee1Cts);
-        _marquee2Cts = _marquee1Cts;
     }
 
     private void ApplyViewConfig(ListViewConfig config)
@@ -1275,85 +1233,6 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private void SetMainVuActive(bool active)
-    {
-        if (_mainVuMode == active)
-        {
-            return;
-        }
-        _mainVuMode = active;
-
-        if (active)
-        {
-            _mainVuLastFrameTicks = Environment.TickCount64;
-            ScheduleNextVuFrame();
-        }
-        else
-        {
-            // The RAF loop checks _mainVuMode at the top of each tick and
-            // bails when false, so we don't need an explicit cancel handle.
-            MainVuControl.Clear();
-        }
-    }
-
-    /// <summary>
-    /// Requests that <see cref="TickMainVuMeter"/> run on the next compositor
-    /// frame. Avalonia's TopLevel.RequestAnimationFrame is the equivalent of
-    /// the browser API of the same name - frame-synced (matches the display
-    /// refresh, typically 60 Hz on macOS/Linux, 120+ on ProMotion / high-
-    /// refresh monitors) and runs at render priority so layout/input work
-    /// can't preempt it. Way smoother than a 25 Hz DispatcherTimer at Normal.
-    /// </summary>
-    private void ScheduleNextVuFrame()
-    {
-        if (_mainVuRafScheduled || !_mainVuMode)
-        {
-            return;
-        }
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel == null)
-        {
-            return;
-        }
-
-        _mainVuRafScheduled = true;
-        topLevel.RequestAnimationFrame(_ =>
-        {
-            _mainVuRafScheduled = false;
-            if (!_mainVuMode)
-            {
-                return;
-            }
-            TickMainVuMeter();
-            ScheduleNextVuFrame();
-        });
-    }
-
-    private void TickMainVuMeter()
-    {
-        var source = (DataContext as OrgZ.ViewModels.MainWindowViewModel)?.AudioVisualization;
-        if (source == null)
-        {
-            return;
-        }
-
-        // Frame-time delta in seconds - used to scale decay so the visual
-        // fall-off rate is identical on 30/60/120 Hz displays. Clamped to
-        // 100 ms so a one-off hitch doesn't slam every bar to zero.
-        var now = Environment.TickCount64;
-        var dtSec = Math.Min((now - _mainVuLastFrameTicks) / 1000f, 0.1f);
-        _mainVuLastFrameTicks = now;
-        float decay = MainVuDecayPerSecond * dtSec;
-        float peakDecay = MainVuPeakDecayPerSecond * dtSec;
-
-        Span<float> left = stackalloc float[source.BandCount];
-        Span<float> right = stackalloc float[source.BandCount];
-        source.CopyBandLevelsStereo(left, right);
-
-        MainVuControl.Update(left, right, decay, peakDecay);
-    }
-
     private void NowPlaying_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         _viewModel.NavigateToPlaying();
@@ -1373,16 +1252,6 @@ public partial class MainWindow : Window
         }
 
         await _viewModel.BurnTracksToCdAsync(tracks);
-    }
-
-    private void Slider_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        _viewModel.CurrentTrackTimeNumberPointerPressed();
-    }
-
-    private void Slider_PointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        _viewModel.CurrentTrackTimeNumberPointerReleased();
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

@@ -99,6 +99,9 @@
 		<Style Selector="ProgressBar.lcdRip">
 			<Setter Property="MinHeight" Value="8" />
 		</Style>
+
+		<!-- The Slider.lcdSeek style itself lives in App/OrgZStyles.axaml so
+		     the mini-player can reuse it too. -->
 	</Window.Styles>
 
 	<DockPanel>
@@ -166,133 +169,13 @@
 				<!-- LCD: click anywhere (except the seek slider) toggles between
 				     track info and VU meter.  Double-click still navigates
 				     to the playing track.  See MainLcd_PointerPressed. -->
-				<Border Grid.Column="3" Margin="4" Cursor="Hand" PointerPressed="MainLcd_PointerPressed" ToolTip.Tip="Double-click to jump to playing track">
+				<Border Grid.Column="3" Margin="4" Cursor="Hand" PointerPressed="MainLcd_PointerPressed">
 					<!-- LCD: Width is set in code-behind on Window.SizeChanged (see
 					     UpdateLcdWidth). Default 588, shrinks down to MinWidth=380 when
 					     the window can't fit everything at 588. The chevron / cancel
 					     gutter (14px on each side, set on the inner Panel below) and the
 					     content layers ride along. -->
-					<Border x:Name="MainLcdPanel" Background="{StaticResource OrgZLcdBrush}" BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" CornerRadius="6" Width="588" MinWidth="380" Height="75" BoxShadow="inset 0 2 5 0 #55000000, inset 0 -1 2 0 #25FFFFFF">
-						<Panel>
-							<!-- Inner content area: insets the page layers by the gutter width so
-							     the chevron (left) and cancel-X (right) don't overlap the active
-							     page's content. -->
-							<Panel Margin="14,0,14,0">
-								<StackPanel x:Name="MainLcdTextLayer" VerticalAlignment="Center"
-								            HorizontalAlignment="Stretch"
-								            IsVisible="{Binding IsLcdPlayback}">
-									<StackPanel x:Name="MainLcdTrackTextWrap" HorizontalAlignment="Stretch" Margin="10,0,10,0">
-										<!-- OpacityMask + HorizontalAlignment are applied from code-behind
-										     (RestartMarquees). Only when the text actually overflows does
-										     the 10px edge fade get attached; short titles stay centered
-										     with no mask. -->
-										<Border x:Name="TrackLine1Container" ClipToBounds="True" Height="20">
-											<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" TextWrapping="NoWrap" />
-										</Border>
-										<Border x:Name="TrackLine2Container" ClipToBounds="True" Height="20">
-											<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource OrgZLcdMutedTextBrush}" TextWrapping="NoWrap" />
-										</Border>
-									</StackPanel>
-									<Grid HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="10,0,10,0" ColumnDefinitions="Auto,*,Auto">
-										<TextBlock Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0" Text="{Binding CurrentTrackTime}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
-										<Grid Grid.Column="1" Height="14" MinWidth="200">
-											<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}" VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
-											<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
-												<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
-													<Border.Background>
-														<LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
-															<GradientStop Color="Transparent" Offset="0" />
-															<GradientStop Color="#888888" Offset="0.5" />
-															<GradientStop Color="Transparent" Offset="1" />
-														</LinearGradientBrush>
-													</Border.Background>
-												</Border>
-											</Border>
-										</Grid>
-										<TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,0,0" Text="{Binding CurrentTrackDuration}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
-									</Grid>
-								</StackPanel>
-								<!-- VU page. Visibility now driven by IsLcdVu; the control itself
-								     stays in layout so the LCD doesn't reflow. -->
-								<controls:VuMeterControl x:Name="MainVuControl" Margin="10,8,10,8" ClipToBounds="True"
-								                         IsVisible="{Binding IsLcdVu}" />
-
-								<!-- Rip page: iTunes-style "Importing 'Track' / Time remaining"
-								     readout with a progress bar. -->
-								<StackPanel VerticalAlignment="Center" Spacing="4" Margin="14,0,14,0"
-								            IsVisible="{Binding IsLcdRip}"
-								            Background="{StaticResource OrgZLcdBrush}">
-									<TextBlock Text="{Binding RipTitle}" FontSize="14" FontWeight="Bold"
-									           Foreground="{StaticResource OrgZLcdTextBrush}"
-									           HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
-									<TextBlock Text="{Binding RipDetail}" FontSize="12" FontStyle="Italic"
-									           Foreground="{StaticResource OrgZLcdMutedTextBrush}"
-									           HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
-									<ProgressBar Classes="lcdRip" Minimum="0" Maximum="1" Value="{Binding RipPercent}"
-									             Height="8" Margin="40,2,40,0"
-									             Foreground="{StaticResource OrgZLcdProgressBrush}"
-									             Background="{StaticResource OrgZLcdProgressTrackBrush}"
-									             BorderBrush="{StaticResource OrgZLcdTextBrush}"
-									             BorderThickness="1" CornerRadius="4" />
-								</StackPanel>
-							</Panel>
-
-							<!-- LCD-page cycler: small circular overlay pinned to the LCD's left
-							     edge. Floats above the content (HorizontalAlignment + Margin only,
-							     not part of any layout column), so track-info / VU / rip panels stay
-							     centered in the LCD's full width and don't shift when the chevron
-							     hides for the single-page case. -->
-							<Button HorizontalAlignment="Left" VerticalAlignment="Center"
-							        Margin="6,0,0,0" Width="18" Height="18" CornerRadius="9"
-							        Padding="0" BorderThickness="0"
-							        Background="#B0B69E"
-							        Command="{Binding CycleLcdPageCommand}"
-							        IsVisible="{Binding ShowLcdCycleButton}"
-							        Cursor="Hand"
-							        ToolTip.Tip="Cycle LCD display">
-								<Button.Styles>
-									<Style Selector="Button">
-										<Setter Property="Background" Value="#B0B69E" />
-									</Style>
-									<Style Selector="Button:pointerover /template/ ContentPresenter">
-										<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
-									</Style>
-									<Style Selector="Button:pressed /template/ ContentPresenter">
-										<Setter Property="Background" Value="#6B7160" />
-									</Style>
-								</Button.Styles>
-								<i:Icon Value="fa-solid fa-chevron-left" FontSize="9"
-								        Foreground="{StaticResource OrgZLcdTextBrush}" />
-							</Button>
-
-							<!-- Cancel-rip X: mirrors the chevron on the right gutter, only
-							     visible while a rip is in flight. Posts CancelRipCommand which
-							     trips the rip's CancellationToken - current track finishes its
-							     in-flight sector read, then the loop exits cleanly. -->
-							<Button HorizontalAlignment="Right" VerticalAlignment="Center"
-							        Margin="0,0,6,0" Width="18" Height="18" CornerRadius="9"
-							        Padding="0" BorderThickness="0"
-							        Background="#B0B69E"
-							        Command="{Binding CancelRipCommand}"
-							        IsVisible="{Binding IsRipping}"
-							        Cursor="Hand"
-							        ToolTip.Tip="Cancel rip">
-								<Button.Styles>
-									<Style Selector="Button">
-										<Setter Property="Background" Value="#B0B69E" />
-									</Style>
-									<Style Selector="Button:pointerover /template/ ContentPresenter">
-										<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
-									</Style>
-									<Style Selector="Button:pressed /template/ ContentPresenter">
-										<Setter Property="Background" Value="#6B7160" />
-									</Style>
-								</Button.Styles>
-								<i:Icon Value="fa-solid fa-xmark" FontSize="9"
-								        Foreground="{StaticResource OrgZLcdTextBrush}" />
-							</Button>
-						</Panel>
-					</Border>
+					<controls:LcdDisplay x:Name="MainLcdPanel" Width="588" MinWidth="380" Height="75" />
 				</Border>
 				<Border Grid.Column="5" Margin="4,4,25,4">
 					<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
