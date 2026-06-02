@@ -44,28 +44,6 @@ public partial class MainWindow : Window
     private MediaItem? _gridDragItem;
     private int _gridDragRowIndex = -1;
 
-    // iTunes-style stereo segmented VU: columns × rows of ticks per channel.
-    // Left channel mirrored so lows meet at the center, highs flare outward.
-    // Tick size derived from canvas dimensions so the meter scales with the
-    // LCD rather than sitting tiny in the middle.
-    private const int MainVuColumnsPerChannel = 16;
-    private const int MainVuRowsPerColumn = 16;
-    private const double MainVuChannelGap = 16;
-    private const double MainVuTickGap = 1;
-    private double _mainVuTickWidth = 6;
-    private double _mainVuTickHeight = 2;
-
-    private readonly Avalonia.Controls.Shapes.Rectangle[,] _mainVuTicksLeft = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel, MainVuRowsPerColumn];
-    private readonly Avalonia.Controls.Shapes.Rectangle[,] _mainVuTicksRight = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel, MainVuRowsPerColumn];
-    private readonly float[] _mainVuLevelsLeft = new float[MainVuColumnsPerChannel];
-    private readonly float[] _mainVuLevelsRight = new float[MainVuColumnsPerChannel];
-    private readonly int[] _mainVuLastLitLeft = new int[MainVuColumnsPerChannel];
-    private readonly int[] _mainVuLastLitRight = new int[MainVuColumnsPerChannel];
-    private readonly float[] _mainVuPeakLeft = new float[MainVuColumnsPerChannel];
-    private readonly float[] _mainVuPeakRight = new float[MainVuColumnsPerChannel];
-    private readonly Avalonia.Controls.Shapes.Rectangle[] _mainVuPeakMarkLeft = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel];
-    private readonly Avalonia.Controls.Shapes.Rectangle[] _mainVuPeakMarkRight = new Avalonia.Controls.Shapes.Rectangle[MainVuColumnsPerChannel];
-
     // Decay rates expressed per second so they stay visually identical
     // regardless of refresh rate (was per-40ms-tick before the RAF switch).
     // 25 Hz × 0.05/tick → 1.25/sec; 25 Hz × 0.012/tick → 0.30/sec.
@@ -74,10 +52,6 @@ public partial class MainWindow : Window
     private bool _mainVuMode;
     private bool _mainVuRafScheduled;
     private long _mainVuLastFrameTicks;
-
-    private static readonly Avalonia.Media.IBrush MainVuOnBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#3A4A30"));
-    private static readonly Avalonia.Media.IBrush MainVuOffBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromArgb(80, 0x3A, 0x4A, 0x30));
-    private static readonly Avalonia.Media.IBrush MainVuPeakBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#1E2014"));
 
     // Set by the docs-screenshot harness via the internal ctor: skips the live
     // library load and OS-service init in Loaded so the window renders with
@@ -95,8 +69,6 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         WindowSizeTracker.Track(this, "Main");
-
-        BuildMainVuBars();
 
         var slider = this.FindControl<Slider>("CurrentTimeSlider")!;
 
@@ -130,6 +102,24 @@ public partial class MainWindow : Window
             }
         };
 
+        // The LCD column stretches with the window, so the marquee's container
+        // width changes on resize. Re-measure + re-run the marquees whenever the
+        // text-row container resizes - restoring centered alignment for short
+        // text and recomputing scroll overflow for long text.
+        var trackTextWrap = this.FindControl<StackPanel>("MainLcdTrackTextWrap");
+        if (trackTextWrap != null)
+        {
+            trackTextWrap.SizeChanged += (_, _) => RestartMarquees();
+        }
+
+        // The LCD itself stays at 588 by default but shrinks down to its
+        // MinWidth (380) when the window can no longer fit the play controls,
+        // album art, LCD, and search bar at full size. Driven from code-behind
+        // because Avalonia 12's Grid crashes during measure when a *-sized
+        // ColumnDefinition carries both MinWidth and MaxWidth.
+        this.SizeChanged += (_, _) => UpdateLcdWidth();
+        Loaded += (_, _) => UpdateLcdWidth();
+
         _menuHandlers = new Dictionary<string, EventHandler<RoutedEventArgs>>
         {
             ["Play"] = ContextMenu_Play,
@@ -153,10 +143,38 @@ public partial class MainWindow : Window
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                if (_viewModel.SelectedItem != null)
+                if (_viewModel.SelectedItem == null)
                 {
-                    MainDataGrid.ScrollIntoView(_viewModel.SelectedItem, null);
+                    return;
                 }
+
+                var grid = GetActiveDataGrid();
+                grid.ScrollIntoView(_viewModel.SelectedItem, null);
+
+                // Avalonia's DataGrid lands the target at the closest viewport edge
+                // rather than centering. After ScrollIntoView realizes the row,
+                // shift the scroll offset so the row sits mid-viewport.
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    var sv = grid.FindDescendantOfType<ScrollViewer>();
+                    if (sv == null)
+                    {
+                        return;
+                    }
+
+                    var idx = _viewModel.FilteredItems.IndexOf(_viewModel.SelectedItem);
+                    if (idx < 0)
+                    {
+                        return;
+                    }
+
+                    var rowHeight = grid.RowHeight > 0 ? grid.RowHeight : 22.0;
+                    var rowTop = idx * rowHeight;
+                    var viewportH = sv.Viewport.Height;
+                    var maxOffset = Math.Max(0, sv.Extent.Height - viewportH);
+                    var centered = Math.Clamp(rowTop - (viewportH - rowHeight) / 2, 0, maxOffset);
+                    sv.Offset = new Vector(sv.Offset.X, centered);
+                }, Avalonia.Threading.DispatcherPriority.Background);
             }, Avalonia.Threading.DispatcherPriority.Background);
         };
         _viewModel.GetScrollOffset = () => GetDataGridScrollViewer()?.Offset.Y ?? 0;
@@ -268,9 +286,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private DataGrid GetActiveDataGrid()
+    {
+        return GroupedDataGrid.IsVisible ? GroupedDataGrid : MainDataGrid;
+    }
+
     private ScrollViewer? GetDataGridScrollViewer()
     {
-        return MainDataGrid.FindDescendantOfType<ScrollViewer>();
+        return GetActiveDataGrid().FindDescendantOfType<ScrollViewer>();
     }
 
     private void SaveViewState()
@@ -384,6 +407,53 @@ public partial class MainWindow : Window
         animation.RunAsync(indicator, _liveBarAnimationCts.Token);
     }
 
+    /// <summary>
+    /// Drives the LCD's width based on available horizontal space in the top
+    /// controls row. Keeps the LCD at <c>588</c> by default, shrinks down to
+    /// <c>MinWidth=380</c> when the window can't fit play + art + LCD + search
+    /// at full size. Left + right cells stay anchored to their respective edges
+    /// because cols 1 and 4 are <c>*</c> spacers that absorb any growth slack
+    /// once the LCD reaches its 588 ceiling.
+    /// </summary>
+    private void UpdateLcdWidth()
+    {
+        if (TopControlsGrid == null || MainLcdPanel == null) return;
+        var gridWidth = TopControlsGrid.Bounds.Width;
+        if (gridWidth <= 0) return;
+
+        Control? play = null, art = null, search = null;
+        foreach (var child in TopControlsGrid.Children)
+        {
+            if (child is not Control c) continue;
+            var col = Grid.GetColumn(c);
+            if (col == 0) play = c;
+            else if (col == 2) art = c;
+            else if (col == 5) search = c;
+        }
+
+        static double SumWithMargin(Control? ctrl)
+        {
+            if (ctrl == null) return 0;
+            return ctrl.Bounds.Width + ctrl.Margin.Left + ctrl.Margin.Right;
+        }
+
+        var otherCols = SumWithMargin(play) + SumWithMargin(art) + SumWithMargin(search);
+        var lcdHostMargin = MainLcdPanel.Parent is Control parent
+            ? parent.Margin.Left + parent.Margin.Right
+            : 8;
+
+        var available = gridWidth - otherCols - lcdHostMargin;
+        var target = Math.Clamp(available, 380, 588);
+
+        // Skip the assignment when nothing meaningfully changed - Width writes
+        // re-trigger a layout pass, and SizeChanged fires within that pass, so
+        // any oscillation here turns into a layout loop.
+        if (Math.Abs(MainLcdPanel.Width - target) > 0.5)
+        {
+            MainLcdPanel.Width = target;
+        }
+    }
+
     private void RestartMarquees()
     {
         _marquee1Cts?.Cancel();
@@ -391,15 +461,19 @@ public partial class MainWindow : Window
 
         var tb1 = this.FindControl<TextBlock>("TrackLine1");
         var tb2 = this.FindControl<TextBlock>("TrackLine2");
-        const double containerWidth = 420;
-
-        ResetMarqueeTextBlock(tb1);
-        ResetMarqueeTextBlock(tb2);
+        var tb1Container = this.FindControl<Border>("TrackLine1Container");
+        var tb2Container = this.FindControl<Border>("TrackLine2Container");
 
         var cts = new CancellationTokenSource();
         _marquee1Cts = cts;
         _marquee2Cts = cts;
 
+        // All TextBlock mutation happens inside the dispatch - no pre-reset of
+        // RenderTransform/Width, since that briefly leaves the text left-aligned
+        // and was the source of the resize-time jump. Each pass clears the
+        // explicit Width (so the new measure picks up the natural desired size),
+        // measures, then assigns the final alignment + mask + scroll state in a
+        // single layout cycle.
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             if (cts.IsCancellationRequested)
@@ -407,12 +481,20 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var overflow1 = MeasureOverflow(tb1, containerWidth);
-            var overflow2 = MeasureOverflow(tb2, containerWidth);
+            if (tb1 != null) tb1.Width = double.NaN;
+            if (tb2 != null) tb2.Width = double.NaN;
 
-            // Center or extend each line
-            SetupMarqueeTextBlock(tb1, overflow1, containerWidth);
-            SetupMarqueeTextBlock(tb2, overflow2, containerWidth);
+            // Container width is dynamic: the LCD column stretches with the
+            // window, so the available marquee space changes on every resize.
+            // Fall back to the legacy 420 if the layout hasn't run yet.
+            var containerWidth1 = tb1Container?.Bounds.Width > 0 ? tb1Container.Bounds.Width : 420;
+            var containerWidth2 = tb2Container?.Bounds.Width > 0 ? tb2Container.Bounds.Width : 420;
+
+            var overflow1 = MeasureOverflow(tb1, containerWidth1);
+            var overflow2 = MeasureOverflow(tb2, containerWidth2);
+
+            ApplyMarqueeState(tb1, tb1Container, overflow1, containerWidth1);
+            ApplyMarqueeState(tb2, tb2Container, overflow2, containerWidth2);
 
             if (overflow1 <= 0 && overflow2 <= 0)
             {
@@ -439,17 +521,6 @@ public partial class MainWindow : Window
         }, Avalonia.Threading.DispatcherPriority.Render);
     }
 
-    private static void ResetMarqueeTextBlock(TextBlock? tb)
-    {
-        if (tb == null)
-        {
-            return;
-        }
-
-        tb.RenderTransform = null;
-        tb.Width = double.NaN;
-    }
-
     private static double MeasureOverflow(TextBlock? tb, double containerWidth)
     {
         if (tb == null || string.IsNullOrEmpty(tb.Text))
@@ -461,22 +532,62 @@ public partial class MainWindow : Window
         return Math.Max(0, tb.DesiredSize.Width - containerWidth);
     }
 
-    private static void SetupMarqueeTextBlock(TextBlock? tb, double overflow, double containerWidth)
+    /// <summary>
+    /// Brings the TextBlock + its container into the correct visual state for
+    /// the new measured overflow. No transient state ever - the previous frame
+    /// has whatever it had until this returns, then the next frame has the
+    /// final state. Avoids the left→center jump from a pre-step reset.
+    /// </summary>
+    private static void ApplyMarqueeState(TextBlock? tb, Border? container, double overflow, double containerWidth)
     {
-        if (tb == null || string.IsNullOrEmpty(tb.Text))
+        if (tb == null)
         {
             return;
         }
 
         if (overflow <= 0)
         {
-            tb.RenderTransform = new TranslateTransform((containerWidth - tb.DesiredSize.Width) / 2, 0);
+            // Text fits: drop scroll animation transform and center natively.
+            // HorizontalAlignment is more stable than translating because it
+            // survives resize without intermediate updates.
+            tb.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
+            tb.Width = double.NaN;
+            tb.RenderTransform = null;
+            if (container != null) container.OpacityMask = null;
         }
         else
         {
+            // Text overflows: pin left, give the TextBlock an explicit width so
+            // its translate transform sees a stable bounding box, and attach the
+            // edge fade - capped at 10px so wide containers don't grow it.
+            tb.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
             tb.Width = tb.DesiredSize.Width;
             tb.RenderTransform = new TranslateTransform();
+            if (container != null) container.OpacityMask = BuildEdgeFadeMask(containerWidth);
         }
+    }
+
+    /// <summary>
+    /// Builds a fixed-pixel edge-fade gradient (≤ 10px on each side) sized
+    /// against the current container width.
+    /// </summary>
+    private static IBrush BuildEdgeFadeMask(double containerWidth)
+    {
+        // Cap the fade at 10 px or 25 % of the container, whichever is smaller -
+        // keeps the fade from swallowing the text on very narrow containers.
+        var fadeWidth = Math.Min(10.0, containerWidth * 0.25);
+        var fadePct = fadeWidth / Math.Max(1.0, containerWidth);
+
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative),
+        };
+        brush.GradientStops.Add(new GradientStop(Colors.Transparent, 0));
+        brush.GradientStops.Add(new GradientStop(Colors.Black, fadePct));
+        brush.GradientStops.Add(new GradientStop(Colors.Black, 1 - fadePct));
+        brush.GradientStops.Add(new GradientStop(Colors.Transparent, 1));
+        return brush;
     }
 
     private static void RunSyncedMarquee(TextBlock tb, double overflow, double totalSec, double dwellSec, double maxScrollSec, CancellationTokenSource cts)
@@ -1264,125 +1375,8 @@ public partial class MainWindow : Window
     }
 
     // -- Main-window VU meter (mirror of MiniPlayer's LCD visualizer) -----
-
-    private void BuildMainVuBars()
-    {
-        MainVuCanvas.Children.Clear();
-        AllocateMainTicks(_mainVuTicksLeft);
-        AllocateMainTicks(_mainVuTicksRight);
-        AllocateMainPeakMarks(_mainVuPeakMarkLeft);
-        AllocateMainPeakMarks(_mainVuPeakMarkRight);
-
-        foreach (var t in _mainVuTicksLeft) MainVuCanvas.Children.Add(t);
-        foreach (var t in _mainVuTicksRight) MainVuCanvas.Children.Add(t);
-        foreach (var p in _mainVuPeakMarkLeft) MainVuCanvas.Children.Add(p);
-        foreach (var p in _mainVuPeakMarkRight) MainVuCanvas.Children.Add(p);
-
-        MainVuCanvas.SizeChanged += (_, _) => LayoutMainVuBars();
-    }
-
-    private static void AllocateMainPeakMarks(Avalonia.Controls.Shapes.Rectangle[] marks)
-    {
-        for (int c = 0; c < marks.Length; c++)
-        {
-            var r = new Avalonia.Controls.Shapes.Rectangle { Fill = MainVuPeakBrush, Opacity = 0 };
-            Avalonia.Media.RenderOptions.SetEdgeMode(r, Avalonia.Media.EdgeMode.Aliased);
-            marks[c] = r;
-        }
-    }
-
-    private static void AllocateMainTicks(Avalonia.Controls.Shapes.Rectangle[,] grid)
-    {
-        for (int c = 0; c < grid.GetLength(0); c++)
-        {
-            for (int r = 0; r < grid.GetLength(1); r++)
-            {
-                var rect = new Avalonia.Controls.Shapes.Rectangle { Fill = MainVuOffBrush };
-                Avalonia.Media.RenderOptions.SetEdgeMode(rect, Avalonia.Media.EdgeMode.Aliased);
-                grid[c, r] = rect;
-            }
-        }
-    }
-
-    private void LayoutMainVuBars()
-    {
-        var w = MainVuCanvas.Bounds.Width;
-        var h = MainVuCanvas.Bounds.Height;
-        if (w <= 0 || h <= 0)
-        {
-            return;
-        }
-
-        // All math in physical pixels so positions land on device-pixel
-        // boundaries.  Avalonia renders fractional DIP positions with AA
-        // that varies per column/row depending on their exact fraction -
-        // that's where the drifting row-spacing came from.
-        var scale = RenderScaling;
-
-        int canvasW_phys = (int)Math.Floor(w * scale);
-        int canvasH_phys = (int)Math.Floor(h * scale);
-        int channelGap_phys = (int)Math.Round(MainVuChannelGap * scale);
-        int tickGap_phys = Math.Max(1, (int)Math.Round(MainVuTickGap * scale));
-
-        int availableW_phys = (canvasW_phys - channelGap_phys) / 2;
-        int tickW_phys = Math.Max(2, (availableW_phys - (MainVuColumnsPerChannel - 1) * tickGap_phys) / MainVuColumnsPerChannel);
-        int tickH_phys = Math.Max(2, (canvasH_phys - (MainVuRowsPerColumn - 1) * tickGap_phys) / MainVuRowsPerColumn);
-
-        _mainVuTickWidth = tickW_phys / scale;
-        _mainVuTickHeight = tickH_phys / scale;
-
-        int channelW_phys = MainVuColumnsPerChannel * tickW_phys + (MainVuColumnsPerChannel - 1) * tickGap_phys;
-        int totalW_phys = channelW_phys * 2 + channelGap_phys;
-        int startX_phys = Math.Max(0, (canvasW_phys - totalW_phys) / 2);
-
-        int totalH_phys = MainVuRowsPerColumn * tickH_phys + (MainVuRowsPerColumn - 1) * tickGap_phys;
-        int bottomPad_phys = Math.Max(0, (canvasH_phys - totalH_phys) / 2);
-
-        PositionMainChannel(_mainVuTicksLeft, startX_phys, tickW_phys, tickH_phys, tickGap_phys, bottomPad_phys, scale, mirror: false);
-        PositionMainChannel(_mainVuTicksRight, startX_phys + channelW_phys + channelGap_phys, tickW_phys, tickH_phys, tickGap_phys, bottomPad_phys, scale, mirror: true);
-
-        PositionMainPeakMarks(_mainVuPeakMarkLeft, startX_phys, tickW_phys, tickH_phys, tickGap_phys, scale, mirror: false);
-        PositionMainPeakMarks(_mainVuPeakMarkRight, startX_phys + channelW_phys + channelGap_phys, tickW_phys, tickH_phys, tickGap_phys, scale, mirror: true);
-    }
-
-    private void PositionMainPeakMarks(Avalonia.Controls.Shapes.Rectangle[] marks, int originX_phys, int tickW_phys, int tickH_phys, int tickGap_phys, double scale, bool mirror)
-    {
-        double tickW = tickW_phys / scale;
-        double tickH = tickH_phys / scale;
-        for (int c = 0; c < MainVuColumnsPerChannel; c++)
-        {
-            int visualIndex = mirror ? (MainVuColumnsPerChannel - 1 - c) : c;
-            int colX_phys = originX_phys + visualIndex * (tickW_phys + tickGap_phys);
-            marks[c].Width = tickW;
-            marks[c].Height = tickH;
-            Canvas.SetLeft(marks[c], colX_phys / scale);
-        }
-    }
-
-    private void PositionMainChannel(Avalonia.Controls.Shapes.Rectangle[,] grid, int originX_phys, int tickW_phys, int tickH_phys, int tickGap_phys, int bottomPad_phys, double scale, bool mirror)
-    {
-        double tickW = tickW_phys / scale;
-        double tickH = tickH_phys / scale;
-
-        for (int c = 0; c < MainVuColumnsPerChannel; c++)
-        {
-            int visualIndex = mirror ? (MainVuColumnsPerChannel - 1 - c) : c;
-            int colX_phys = originX_phys + visualIndex * (tickW_phys + tickGap_phys);
-            double colX = colX_phys / scale;
-
-            for (int r = 0; r < MainVuRowsPerColumn; r++)
-            {
-                int rowY_phys = bottomPad_phys + r * (tickH_phys + tickGap_phys);
-                double rowY = rowY_phys / scale;
-
-                var rect = grid[c, r];
-                rect.Width = tickW;
-                rect.Height = tickH;
-                Canvas.SetLeft(rect, colX);
-                Canvas.SetBottom(rect, rowY);
-            }
-        }
-    }
+    // Rendering and bar-layout math lives in VuMeterControl. This class only
+    // drives the RAF loop and feeds audio frames in.
 
     private void MainLcd_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -1426,7 +1420,6 @@ public partial class MainWindow : Window
 
         if (active)
         {
-            LayoutMainVuBars();
             _mainVuLastFrameTicks = Environment.TickCount64;
             ScheduleNextVuFrame();
         }
@@ -1434,10 +1427,7 @@ public partial class MainWindow : Window
         {
             // The RAF loop checks _mainVuMode at the top of each tick and
             // bails when false, so we don't need an explicit cancel handle.
-            foreach (var t in _mainVuTicksLeft) t.Fill = MainVuOffBrush;
-            foreach (var t in _mainVuTicksRight) t.Fill = MainVuOffBrush;
-            Array.Clear(_mainVuLastLitLeft);
-            Array.Clear(_mainVuLastLitRight);
+            MainVuControl.Clear();
         }
     }
 
@@ -1496,76 +1486,7 @@ public partial class MainWindow : Window
         Span<float> right = stackalloc float[source.BandCount];
         source.CopyBandLevelsStereo(left, right);
 
-        FoldAndRenderMain(left, _mainVuTicksLeft, _mainVuLevelsLeft, _mainVuLastLitLeft, _mainVuPeakLeft, _mainVuPeakMarkLeft, decay, peakDecay);
-        FoldAndRenderMain(right, _mainVuTicksRight, _mainVuLevelsRight, _mainVuLastLitRight, _mainVuPeakRight, _mainVuPeakMarkRight, decay, peakDecay);
-    }
-
-    private void FoldAndRenderMain(Span<float> source, Avalonia.Controls.Shapes.Rectangle[,] ticks, float[] smoothed, int[] lastLit, float[] peaks, Avalonia.Controls.Shapes.Rectangle[] peakMarks, float decay, float peakDecay)
-    {
-        var srcLen = source.Length;
-        if (srcLen == 0)
-        {
-            return;
-        }
-
-        for (int c = 0; c < MainVuColumnsPerChannel; c++)
-        {
-            int start = c * srcLen / MainVuColumnsPerChannel;
-            int end = (c + 1) * srcLen / MainVuColumnsPerChannel;
-            if (end <= start) end = start + 1;
-
-            float sum = 0;
-            for (int i = start; i < end; i++)
-            {
-                sum += source[i];
-            }
-            float target = Math.Clamp(sum / (end - start), 0f, 1f);
-
-            // UI-side smoothing: fast attack, slow linear decay toward target.
-            if (target > smoothed[c])
-            {
-                smoothed[c] = target;
-            }
-            else
-            {
-                smoothed[c] = Math.Max(target, smoothed[c] - decay);
-            }
-
-            if (smoothed[c] > peaks[c])
-            {
-                peaks[c] = smoothed[c];
-            }
-            else
-            {
-                peaks[c] = Math.Max(smoothed[c], peaks[c] - peakDecay);
-            }
-
-            int lit = (int)Math.Round(smoothed[c] * MainVuRowsPerColumn);
-            int previousLit = lastLit[c];
-
-            if (lit != previousLit)
-            {
-                int low = Math.Min(previousLit, lit);
-                int high = Math.Max(previousLit, lit);
-                for (int r = low; r < high; r++)
-                {
-                    ticks[c, r].Fill = r < lit ? MainVuOnBrush : MainVuOffBrush;
-                }
-                lastLit[c] = lit;
-            }
-
-            int peakRow = Math.Min(MainVuRowsPerColumn - 1, (int)Math.Round(peaks[c] * MainVuRowsPerColumn));
-            var mark = peakMarks[c];
-            if (peakRow > lit && peaks[c] > 0.02f)
-            {
-                Canvas.SetBottom(mark, Canvas.GetBottom(ticks[c, peakRow]));
-                mark.Opacity = 1;
-            }
-            else
-            {
-                mark.Opacity = 0;
-            }
-        }
+        MainVuControl.Update(left, right, decay, peakDecay);
     }
 
     private void NowPlaying_PointerPressed(object? sender, PointerPressedEventArgs e)
