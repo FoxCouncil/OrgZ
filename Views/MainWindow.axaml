@@ -8,7 +8,7 @@
 		x:Class="OrgZ.Views.MainWindow"
 		Title="OrgZ"
 		Width="1100" Height="700"
-		MinWidth="800" MinHeight="500"
+		MinWidth="1080" MinHeight="500"
 		x:CompileBindings="False">
 
 	<NativeMenu.Menu>
@@ -118,8 +118,14 @@
 
 		<DockPanel>
 
-		<!-- Top controls row -->
-		<Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
+		<!-- Top controls row. Original column layout — play (Auto), spacer (*),
+		     art (Auto), LCD (Auto), spacer (*), search (Auto). Spacers absorb
+		     growth slack so play stays anchored left and search stays anchored
+		     right. The LCD's Width is driven from code-behind via SizeChanged
+		     so it can shrink between 380 and 588 as the window resizes, without
+		     touching ColumnDefinition.MinWidth/MaxWidth (Avalonia 12's Grid
+		     crashes during measure when a *-column carries both). -->
+		<Grid DockPanel.Dock="Top" x:Name="TopControlsGrid" ColumnDefinitions="Auto,*,Auto,Auto,*,Auto">
 				<Border Grid.Column="0" Margin="25,4,4,4">
 					<StackPanel HorizontalAlignment="Center">
 						<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="5">
@@ -161,31 +167,35 @@
 				     track info and VU meter.  Double-click still navigates
 				     to the playing track.  See MainLcd_PointerPressed. -->
 				<Border Grid.Column="3" Margin="4" Cursor="Hand" PointerPressed="MainLcd_PointerPressed" ToolTip.Tip="Double-click to jump to playing track">
-					<!-- LCD: fixed width matching the natural playback layout (current-time
-					     label + 420 slider + duration label + side margins) plus a 14px
-					     gutter on each side reserved for the chevron and cancel buttons.
-					     Locks the toolbar's shape regardless of track-name length, active
-					     page, or button visibility; non-playback pages center inside the
-					     inner content area. -->
-					<Border Background="{StaticResource OrgZLcdBrush}" BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" CornerRadius="6" Width="588" Height="75">
+					<!-- LCD: Width is set in code-behind on Window.SizeChanged (see
+					     UpdateLcdWidth). Default 588, shrinks down to MinWidth=380 when
+					     the window can't fit everything at 588. The chevron / cancel
+					     gutter (14px on each side, set on the inner Panel below) and the
+					     content layers ride along. -->
+					<Border x:Name="MainLcdPanel" Background="{StaticResource OrgZLcdBrush}" BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" CornerRadius="6" Width="588" MinWidth="380" Height="75" BoxShadow="inset 0 2 5 0 #55000000, inset 0 -1 2 0 #25FFFFFF">
 						<Panel>
 							<!-- Inner content area: insets the page layers by the gutter width so
 							     the chevron (left) and cancel-X (right) don't overlap the active
 							     page's content. -->
 							<Panel Margin="14,0,14,0">
 								<StackPanel x:Name="MainLcdTextLayer" VerticalAlignment="Center"
+								            HorizontalAlignment="Stretch"
 								            IsVisible="{Binding IsLcdPlayback}">
-									<StackPanel Width="420" Margin="10,0,10,0">
-										<Border ClipToBounds="True" Height="20">
-											<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
+									<StackPanel x:Name="MainLcdTrackTextWrap" HorizontalAlignment="Stretch" Margin="10,0,10,0">
+										<!-- OpacityMask + HorizontalAlignment are applied from code-behind
+										     (RestartMarquees). Only when the text actually overflows does
+										     the 10px edge fade get attached; short titles stay centered
+										     with no mask. -->
+										<Border x:Name="TrackLine1Container" ClipToBounds="True" Height="20">
+											<TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" TextWrapping="NoWrap" />
 										</Border>
-										<Border ClipToBounds="True" Height="20">
-											<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource OrgZLcdMutedTextBrush}" HorizontalAlignment="Left" TextWrapping="NoWrap" />
+										<Border x:Name="TrackLine2Container" ClipToBounds="True" Height="20">
+											<TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="12" FontStyle="Italic" Foreground="{StaticResource OrgZLcdMutedTextBrush}" TextWrapping="NoWrap" />
 										</Border>
 									</StackPanel>
-									<StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10,0,10,0" Spacing="12">
-										<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackTime}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
-										<Grid Width="420" Height="14">
+									<Grid HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="10,0,10,0" ColumnDefinitions="Auto,*,Auto">
+										<TextBlock Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0" Text="{Binding CurrentTrackTime}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
+										<Grid Grid.Column="1" Height="14" MinWidth="200">
 											<Slider x:Name="CurrentTimeSlider" Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}" Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}" IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}" VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
 											<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" Height="6" VerticalAlignment="Center">
 												<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
@@ -199,13 +209,13 @@
 												</Border>
 											</Border>
 										</Grid>
-										<TextBlock VerticalAlignment="Center" Text="{Binding CurrentTrackDuration}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
-									</StackPanel>
+										<TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,0,0" Text="{Binding CurrentTrackDuration}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource OrgZLcdTextBrush}" />
+									</Grid>
 								</StackPanel>
-								<!-- VU page. Visibility now driven by IsLcdVu; the canvas itself
+								<!-- VU page. Visibility now driven by IsLcdVu; the control itself
 								     stays in layout so the LCD doesn't reflow. -->
-								<Canvas x:Name="MainVuCanvas" Margin="10,8,10,8" ClipToBounds="True"
-								        IsVisible="{Binding IsLcdVu}" />
+								<controls:VuMeterControl x:Name="MainVuControl" Margin="10,8,10,8" ClipToBounds="True"
+								                         IsVisible="{Binding IsLcdVu}" />
 
 								<!-- Rip page: iTunes-style "Importing 'Track' / Time remaining"
 								     readout with a progress bar. -->
