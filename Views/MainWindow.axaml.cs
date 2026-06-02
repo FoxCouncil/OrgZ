@@ -23,6 +23,9 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
 
+    /// <summary>Exposed for the docs-screenshot harness to seed view-model state.</summary>
+    internal MainWindowViewModel ViewModel => _viewModel;
+
     private readonly Dictionary<string, EventHandler<RoutedEventArgs>> _menuHandlers;
 
     private CancellationTokenSource? _liveBarAnimationCts;
@@ -76,8 +79,19 @@ public partial class MainWindow : Window
     private static readonly Avalonia.Media.IBrush MainVuOffBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromArgb(80, 0x3A, 0x4A, 0x30));
     private static readonly Avalonia.Media.IBrush MainVuPeakBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#1E2014"));
 
-    public MainWindow()
+    // Set by the docs-screenshot harness via the internal ctor: skips the live
+    // library load and OS-service init in Loaded so the window renders with
+    // seeded data only.
+    private readonly bool _screenshotMode;
+
+    public MainWindow() : this(false)
     {
+    }
+
+    internal MainWindow(bool screenshotMode)
+    {
+        _screenshotMode = screenshotMode;
+
         InitializeComponent();
 
         WindowSizeTracker.Track(this, "Main");
@@ -103,7 +117,7 @@ public partial class MainWindow : Window
         MainDataGrid.ColumnReordered += DataGrid_ColumnReordered;
         GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
 
-        DataContext = _viewModel = new MainWindowViewModel(this);
+        DataContext = _viewModel = new MainWindowViewModel(this, _screenshotMode);
 
         // Drive the VU repaint timer from the LCD page cycle: it should only
         // tick while the VU page is the active one, otherwise we waste CPU
@@ -179,6 +193,13 @@ public partial class MainWindow : Window
 
         Loaded += async (s, e) =>
         {
+            // Screenshot harness seeds state directly; don't scan the real library
+            // or spin up OS media-service integrations.
+            if (_screenshotMode)
+            {
+                return;
+            }
+
 #if WINDOWS
             var handle = TryGetPlatformHandle();
             if (handle != null)

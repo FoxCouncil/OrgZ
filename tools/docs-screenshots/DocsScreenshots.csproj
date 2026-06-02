@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Headless screenshot harness for the manual. Renders self-contained OrgZ
+       views with seeded data to PNG. NOT part of the app build (OrgZ.csproj
+       excludes tools/**); build/run this project on its own. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OrgZ.DocsScreenshots</RootNamespace>
+    <!-- The referenced OrgZ app is WinExe; silence the "exe referencing exe" notice. -->
+    <NoWarn>$(NoWarn);NETSDK1086</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\OrgZ.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Headless" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Skia" Version="12.0.3" />
+  </ItemGroup>
+
+</Project>

@@ -2,6 +2,8 @@
 
 OrgZ scans your selected folder for audio files and extracts metadata using TagLib.
 
+![The OrgZ music library](../assets/screenshots/library-overview.png)
+
 ## Supported Formats
 
 | Format | Extensions |

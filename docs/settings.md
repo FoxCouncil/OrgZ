@@ -2,6 +2,8 @@
 
 Access settings via **File > Settings** or the native menu bar.
 
+![The Settings dialog](assets/screenshots/settings.png)
+
 ## General
 
 - **Music Library Folder Location** - Change or reset the folder OrgZ scans for music

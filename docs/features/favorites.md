@@ -2,6 +2,8 @@
 
 Star any music track or radio station to add it to your Favorites list.
 
+![The Favorites view](../assets/screenshots/favorites.png)
+
 ## Adding Favorites
 
 - Right-click a track or station and select **Toggle Favorite**

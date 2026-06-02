@@ -88,6 +88,7 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="OrgZ.Tests" />
+		<InternalsVisibleTo Include="DocsScreenshots" />
 	</ItemGroup>
 
 	<ItemGroup>

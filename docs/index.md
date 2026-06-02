@@ -2,6 +2,16 @@
 
 **GATTA ORGANIzE** - A cross-platform music and radio player built with .NET and Avalonia.
 
+<div class="hero" markdown="0">
+  <div class="hero-slides">
+    <img src="assets/screenshots/library-overview.png" alt="Music library" />
+    <img src="assets/screenshots/now-playing.png" alt="Now playing" />
+    <img src="assets/screenshots/cd-rip-progress.png" alt="Ripping a CD" />
+    <img src="assets/screenshots/radio-browser.png" alt="Radio stations" />
+  </div>
+  <div class="hero-dots"><span></span><span></span><span></span><span></span></div>
+</div>
+
 OrgZ helps you manage your local music library and discover internet radio stations from Radio Browser and SHOUTcast, all in one place.
 
 ## Key Features
