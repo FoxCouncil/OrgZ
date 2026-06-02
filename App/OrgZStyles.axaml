@@ -159,6 +159,61 @@
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
 	</Style>
 
+	<!-- ===== iTunes-style LCD seek bar ===== =================================
+	     Shared between MainWindow and MiniPlayerWindow. The 1px frame is a
+	     sibling Border in the layout; this style handles the track + diamond
+	     thumb. Foreground == Background so the elapsed (decrease) and remaining
+	     (increase) halves render identically - only the diamond shows progress. -->
+	<Style Selector="Slider.lcdSeek">
+		<Setter Property="Background" Value="{StaticResource OrgZLcdBrush}" />
+		<Setter Property="Foreground" Value="{StaticResource OrgZLcdBrush}" />
+		<Setter Property="Margin" Value="0" />
+	</Style>
+	<Style Selector="Slider.lcdSeek /template/ Track#PART_Track">
+		<Setter Property="Height" Value="12" />
+	</Style>
+	<!-- Collapse the Fluent RepeatButton (decrease/increase track halves) so
+	     it renders nothing but its Background. The /template/ selector is
+	     required because the RepeatButton lives in the Slider's template -
+	     flat descendant selectors don't penetrate templates in Avalonia 12. -->
+	<Style Selector="Slider.lcdSeek /template/ RepeatButton">
+		<Setter Property="Padding" Value="0" />
+		<Setter Property="MinWidth" Value="0" />
+		<Setter Property="MinHeight" Value="0" />
+		<Setter Property="BorderThickness" Value="0" />
+		<Setter Property="Margin" Value="0" />
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="Template">
+			<ControlTemplate>
+				<Border Background="{TemplateBinding Background}" />
+			</ControlTemplate>
+		</Setter>
+	</Style>
+	<Style Selector="Slider.lcdSeek /template/ RepeatButton:pointerover">
+		<Setter Property="Background" Value="Transparent" />
+	</Style>
+	<Style Selector="Slider.lcdSeek /template/ RepeatButton:pressed">
+		<Setter Property="Background" Value="Transparent" />
+	</Style>
+	<!-- Diamond thumb. The Template + transparent chrome come from the style;
+	     the Thumb's own Margin (1px top, sits the diamond inside the frame)
+	     is set as a local value from code-behind in LcdDisplay.TemplateApplied,
+	     because the Track's manual arrange ignores Style-set Margin on the
+	     Thumb. -->
+	<Style Selector="Slider.lcdSeek /template/ Thumb#thumb">
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="BorderBrush" Value="Transparent" />
+		<Setter Property="BorderThickness" Value="0" />
+		<Setter Property="Template">
+			<ControlTemplate>
+				<Path Width="12" Height="12" Margin="0,2,0,0"
+				      HorizontalAlignment="Center" VerticalAlignment="Top"
+				      Stretch="Fill" Fill="{StaticResource OrgZLcdTextBrush}"
+				      Data="M 6,0 L 12,6 L 6,12 L 0,6 Z" />
+			</ControlTemplate>
+		</Setter>
+	</Style>
+
 	<!-- Round LCD-toggle button (used to flip the track info / VU meter inside
 	     the LCD display of both mini-player and main-window now-playing).
 	     Visually stable: no hover tint, no press dent - only the icon glyph

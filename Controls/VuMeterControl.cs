@@ -35,6 +35,19 @@ public sealed class VuMeterControl : Control
     private readonly float[] _peakRight = new float[ColumnsPerChannel];
 
     /// <summary>
+    /// Fill the available space (clamped by Min/Max constraints applied by the
+    /// layout system on top). Without an explicit DesiredSize, an alignment of
+    /// Center / Right / Left in the parent collapses the meter to 0×0 because
+    /// the base Layoutable returns Size.Zero from MeasureOverride.
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        var w = double.IsInfinity(availableSize.Width) ? 360 : availableSize.Width;
+        var h = double.IsInfinity(availableSize.Height) ? 60 : availableSize.Height;
+        return new Size(w, h);
+    }
+
+    /// <summary>
     /// Pushes a new audio frame into the meter. <paramref name="decay"/> and
     /// <paramref name="peakDecay"/> are per-frame deltas (rate × dtSec) so the
     /// fall-off speed is identical across 30 / 60 / 120 Hz displays. Triggers a

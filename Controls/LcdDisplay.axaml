@@ -1,0 +1,232 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:controls="using:OrgZ.Controls"
+             x:Class="OrgZ.Controls.LcdDisplay"
+             x:CompileBindings="False">
+
+	<!-- Class-based styling: default font sizes match the main player. When
+	     hosted in the mini-player, the consumer sets Classes="mini" to shrink
+	     everything. Everything that varies between the two surfaces lives here
+	     so the markup below stays free of branching. -->
+	<UserControl.Styles>
+		<Style Selector="TextBlock.lcdTrack1">
+			<Setter Property="FontSize" Value="14" />
+			<Setter Property="FontWeight" Value="Bold" />
+			<Setter Property="Foreground" Value="{StaticResource OrgZLcdTextBrush}" />
+			<Setter Property="TextWrapping" Value="NoWrap" />
+		</Style>
+		<Style Selector="TextBlock.lcdTrack2">
+			<Setter Property="FontSize" Value="12" />
+			<Setter Property="FontStyle" Value="Italic" />
+			<Setter Property="Foreground" Value="{StaticResource OrgZLcdMutedTextBrush}" />
+			<Setter Property="TextWrapping" Value="NoWrap" />
+		</Style>
+		<Style Selector="TextBlock.lcdTime">
+			<Setter Property="FontSize" Value="14" />
+			<Setter Property="FontWeight" Value="Bold" />
+			<Setter Property="Foreground" Value="{StaticResource OrgZLcdTextBrush}" />
+			<Setter Property="VerticalAlignment" Value="Center" />
+		</Style>
+		<Style Selector="TextBlock.lcdRipTitle">
+			<Setter Property="FontSize" Value="14" />
+			<Setter Property="FontWeight" Value="Bold" />
+			<Setter Property="Foreground" Value="{StaticResource OrgZLcdTextBrush}" />
+			<Setter Property="HorizontalAlignment" Value="Center" />
+			<Setter Property="TextTrimming" Value="CharacterEllipsis" />
+		</Style>
+		<Style Selector="TextBlock.lcdRipDetail">
+			<Setter Property="FontSize" Value="12" />
+			<Setter Property="FontStyle" Value="Italic" />
+			<Setter Property="Foreground" Value="{StaticResource OrgZLcdMutedTextBrush}" />
+			<Setter Property="HorizontalAlignment" Value="Center" />
+			<Setter Property="TextTrimming" Value="CharacterEllipsis" />
+		</Style>
+		<Style Selector="Border.lcdTrackLineContainer">
+			<Setter Property="Height" Value="20" />
+			<Setter Property="ClipToBounds" Value="True" />
+		</Style>
+
+		<!-- ===== Mini variant ===== mini player needs everything tighter. -->
+		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdTrack1">
+			<Setter Property="FontSize" Value="11" />
+		</Style>
+		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdTrack2">
+			<Setter Property="FontSize" Value="10" />
+		</Style>
+		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdTime">
+			<Setter Property="FontSize" Value="11" />
+		</Style>
+		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdRipTitle">
+			<Setter Property="FontSize" Value="11" />
+		</Style>
+		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdRipDetail">
+			<Setter Property="FontSize" Value="10" />
+		</Style>
+		<Style Selector="controls|LcdDisplay.mini Border.lcdTrackLineContainer">
+			<Setter Property="Height" Value="16" />
+		</Style>
+		<!-- Default seek-slider host floor (main player): 200 keeps the slider
+		     usable on a wide LCD. The MinWidth is set via style (not inline)
+		     so the mini variant can override - inline values are local and
+		     outrank style setters. -->
+		<Style Selector="Grid#SeekHost">
+			<Setter Property="MinWidth" Value="200" />
+		</Style>
+		<!-- Mini-player has a narrower LCD, so the seek slider can't demand
+		     200 px minimum without colliding with the time labels. Drop the
+		     floor enough that the inner row stays uncollided at the window's
+		     480 px MinWidth. -->
+		<Style Selector="controls|LcdDisplay.mini Grid#SeekHost">
+			<Setter Property="MinWidth" Value="80" />
+		</Style>
+
+		<!-- LCD-styled rip progress bar: forces the indicator fill to the dark
+		     LCD green (Foreground alone doesn't pierce the FluentTheme template). -->
+		<Style Selector="ProgressBar.lcdRip /template/ Border#PART_Indicator">
+			<Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
+		</Style>
+		<Style Selector="ProgressBar.lcdRip">
+			<Setter Property="MinHeight" Value="8" />
+		</Style>
+	</UserControl.Styles>
+
+	<!-- LCD chrome: rounded LCD-green Border with the inset shadow that gives
+	     the recessed-screen look. Same chrome in both surfaces; differences
+	     are font sizes (driven by the .mini class) and the host-supplied
+	     overlay buttons (chevron / cancel-X on the main, none on the mini). -->
+	<Border x:Name="LcdPanel"
+	        Background="{StaticResource OrgZLcdBrush}"
+	        BorderBrush="{StaticResource OrgZLcdRimBrush}"
+	        BorderThickness="1" CornerRadius="6"
+	        ClipToBounds="True"
+	        BoxShadow="inset 0 2 5 0 #55000000, inset 0 -1 2 0 #25FFFFFF">
+		<Panel>
+			<!-- Inner content area: 14px gutter on each side reserves space for
+			     the host's optional left/right overlay buttons. -->
+			<Panel Margin="14,0,14,0">
+				<!-- ===== Playback page ===== -->
+				<StackPanel x:Name="PlaybackPage" VerticalAlignment="Center" HorizontalAlignment="Stretch"
+				            IsVisible="{Binding IsLcdPlayback}">
+					<StackPanel x:Name="TrackTextWrap" HorizontalAlignment="Stretch" Margin="10,0,10,0">
+						<Border x:Name="TrackLine1Container" Classes="lcdTrackLineContainer">
+							<TextBlock x:Name="TrackLine1" Classes="lcdTrack1" Text="{Binding CurrentTrackLine1}" />
+						</Border>
+						<Border x:Name="TrackLine2Container" Classes="lcdTrackLineContainer">
+							<TextBlock x:Name="TrackLine2" Classes="lcdTrack2" Text="{Binding CurrentTrackLine2}" />
+						</Border>
+					</StackPanel>
+					<Grid HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="10,0,10,0" ColumnDefinitions="Auto,*,Auto">
+						<TextBlock Grid.Column="0" Classes="lcdTime" Margin="0,0,12,0" Text="{Binding CurrentTrackTime}" />
+						<Grid x:Name="SeekHost" Grid.Column="1" Height="14">
+							<Border BorderBrush="{StaticResource OrgZLcdTextBrush}" BorderThickness="1"
+							        IsVisible="{Binding IsSeekEnabled}" Height="14" VerticalAlignment="Center" />
+							<Slider x:Name="SeekSlider" Classes="lcdSeek"
+							        Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}"
+							        Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
+							        IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
+							        VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
+							<!-- Live-stream indicator for radio (when seeking is disabled). -->
+							<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True"
+							        Background="{DynamicResource SystemControlBackgroundBaseLowBrush}"
+							        Height="6" VerticalAlignment="Center">
+								<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
+									<Border.Background>
+										<LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
+											<GradientStop Color="Transparent" Offset="0" />
+											<GradientStop Color="#888888" Offset="0.5" />
+											<GradientStop Color="Transparent" Offset="1" />
+										</LinearGradientBrush>
+									</Border.Background>
+								</Border>
+							</Border>
+						</Grid>
+						<TextBlock Grid.Column="2" Classes="lcdTime" Margin="12,0,0,0" Text="{Binding CurrentTrackDuration}" />
+					</Grid>
+				</StackPanel>
+
+				<!-- ===== VU page ===== -->
+				<controls:VuMeterControl x:Name="VuControl" Margin="10,8,10,8"
+				                         MaxWidth="360" HorizontalAlignment="Center"
+				                         ClipToBounds="True"
+				                         IsVisible="{Binding IsLcdVu}" />
+
+				<!-- ===== Rip / burn / sync activity page =====
+				     Visible whenever IsLcdRip is true. The viewmodel pushes
+				     CurrentLcdPage to Rip when a long-running activity starts and
+				     restores it to Playback when it ends, so both surfaces show
+				     activity automatically. -->
+				<StackPanel x:Name="RipPage" VerticalAlignment="Center" Spacing="4"
+				            IsVisible="{Binding IsLcdRip}"
+				            Background="{StaticResource OrgZLcdBrush}">
+					<TextBlock Classes="lcdRipTitle" Text="{Binding RipTitle}" />
+					<TextBlock Classes="lcdRipDetail" Text="{Binding RipDetail}" />
+					<ProgressBar Classes="lcdRip" Minimum="0" Maximum="1" Value="{Binding RipPercent}"
+					             Height="8" Margin="40,2,40,0"
+					             Foreground="{StaticResource OrgZLcdProgressBrush}"
+					             Background="{StaticResource OrgZLcdProgressTrackBrush}"
+					             BorderBrush="{StaticResource OrgZLcdTextBrush}"
+					             BorderThickness="1" CornerRadius="4" />
+				</StackPanel>
+			</Panel>
+
+			<!-- LCD-page cycler: small circular overlay pinned to the LCD's left edge.
+			     Floats above the content (HorizontalAlignment + Margin only, not part
+			     of any layout column), so track-info / VU / rip panels stay centered
+			     in the LCD's full width and don't shift when the chevron hides for
+			     the single-page case. PointerPressed marks the event handled so the
+			     host's LCD click handler doesn't also fire and double-cycle. -->
+			<Button x:Name="CyclePageButton" HorizontalAlignment="Left" VerticalAlignment="Center"
+			        Margin="6,0,0,0" Width="18" Height="18" CornerRadius="9"
+			        Padding="0" BorderThickness="0"
+			        Background="#B0B69E"
+			        Command="{Binding CycleLcdPageCommand}"
+			        IsVisible="{Binding ShowLcdCycleButton}"
+			        Cursor="Hand"
+			        PointerPressed="ChromeButton_PointerPressed"
+			        ToolTip.Tip="Switch LCD view">
+				<Button.Styles>
+					<Style Selector="Button">
+						<Setter Property="Background" Value="#B0B69E" />
+					</Style>
+					<Style Selector="Button:pointerover /template/ ContentPresenter">
+						<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
+					</Style>
+					<Style Selector="Button:pressed /template/ ContentPresenter">
+						<Setter Property="Background" Value="#6B7160" />
+					</Style>
+				</Button.Styles>
+				<i:Icon Value="fa-solid fa-chevron-left" FontSize="9"
+				        Foreground="{StaticResource OrgZLcdTextBrush}" />
+			</Button>
+
+			<!-- Cancel-rip X: mirrors the chevron on the right gutter, only visible
+			     while a rip is in flight. Posts CancelRipCommand which trips the
+			     rip's CancellationToken - current track finishes its in-flight
+			     sector read, then the loop exits cleanly. -->
+			<Button x:Name="CancelRipButton" HorizontalAlignment="Right" VerticalAlignment="Center"
+			        Margin="0,0,6,0" Width="18" Height="18" CornerRadius="9"
+			        Padding="0" BorderThickness="0"
+			        Background="#B0B69E"
+			        Command="{Binding CancelRipCommand}"
+			        IsVisible="{Binding IsRipping}"
+			        Cursor="Hand"
+			        PointerPressed="ChromeButton_PointerPressed"
+			        ToolTip.Tip="Cancel rip">
+				<Button.Styles>
+					<Style Selector="Button">
+						<Setter Property="Background" Value="#B0B69E" />
+					</Style>
+					<Style Selector="Button:pointerover /template/ ContentPresenter">
+						<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
+					</Style>
+					<Style Selector="Button:pressed /template/ ContentPresenter">
+						<Setter Property="Background" Value="#6B7160" />
+					</Style>
+				</Button.Styles>
+				<i:Icon Value="fa-solid fa-xmark" FontSize="9"
+				        Foreground="{StaticResource OrgZLcdTextBrush}" />
+			</Button>
+		</Panel>
+	</Border>
+</UserControl>
