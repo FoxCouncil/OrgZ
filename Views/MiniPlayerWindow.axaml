@@ -16,6 +16,13 @@
 
     <Window.Styles>
 
+        <!-- Consolas across all text so the mini-player matches the main window's
+             LCD typography (size and weight differ per element; only the family
+             is unified). Mirrors the equivalent style in MainWindow.axaml. -->
+        <Style Selector="ContentPresenter, TextBlock, TextBox">
+            <Setter Property="TextElement.FontFamily" Value="Consolas" />
+        </Style>
+
         <!-- Duplicate of MainWindow's slider style so the mini-player's seek and
              volume sliders match the full player exactly.  Keep in sync with
              MainWindow.axaml by hand - NOT merged into a shared resource because
@@ -201,6 +208,7 @@
             <Border Grid.Column="2" Margin="6,10,10,10" CornerRadius="5"
                     Background="{StaticResource OrgZLcdBrush}"
                     BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" ClipToBounds="True"
+                    BoxShadow="inset 0 2 5 0 #55000000, inset 0 -1 2 0 #25FFFFFF"
                     Cursor="Hand" PointerPressed="Lcd_PointerPressed"
                     ToolTip.Tip="Click to toggle VU • Double-click for full-screen">
 
@@ -211,13 +219,20 @@
                         <!-- Track-info layer -->
                         <Grid x:Name="LcdTextLayer" RowDefinitions="Auto,*,Auto" Margin="8,4,8,4">
 
-                            <TextBlock Grid.Row="0" Text="{Binding CurrentTrackLine1}" FontSize="11" FontWeight="Bold"
-                                       Foreground="{StaticResource OrgZLcdTextBrush}" TextTrimming="CharacterEllipsis"
-                                       TextWrapping="NoWrap" HorizontalAlignment="Center" />
+                            <!-- Marquee containers: TextTrimming gone (the helper scrolls
+                                 long text instead of ellipsing) and HorizontalAlignment is
+                                 driven from code-behind based on overflow. -->
+                            <Border Grid.Row="0" x:Name="TrackLine1Container" ClipToBounds="True">
+                                <TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="11" FontWeight="Bold"
+                                           Foreground="{StaticResource OrgZLcdTextBrush}"
+                                           TextWrapping="NoWrap" />
+                            </Border>
 
-                            <TextBlock Grid.Row="1" Text="{Binding CurrentTrackLine2}" FontSize="10" FontStyle="Italic"
-                                       Foreground="{StaticResource OrgZLcdMutedTextBrush}" TextTrimming="CharacterEllipsis"
-                                       TextWrapping="NoWrap" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Border Grid.Row="1" x:Name="TrackLine2Container" ClipToBounds="True" VerticalAlignment="Center">
+                                <TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="10" FontStyle="Italic"
+                                           Foreground="{StaticResource OrgZLcdMutedTextBrush}"
+                                           TextWrapping="NoWrap" />
+                            </Border>
 
                             <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Bottom">
                                 <TextBlock Grid.Column="0" Text="{Binding CurrentTrackTime}" FontSize="9"
@@ -272,6 +287,19 @@
                     </Flyout>
                 </Button.Flyout>
             </Button>
+
+            <!-- ===== Edge resize grips =====
+                 SystemDecorations=None means the window has no native chrome to
+                 grab for resize. These transparent 6px overlays span all columns
+                 and float at the left / right edges; PointerPressed kicks off a
+                 native BeginResizeDrag so the user can pull the mini-player
+                 wider or narrower like a normal resizable window. -->
+            <Border Grid.Column="0" Grid.ColumnSpan="4" HorizontalAlignment="Left"
+                    Width="6" Background="Transparent" Cursor="SizeWestEast"
+                    PointerPressed="LeftEdgeResize_PointerPressed" />
+            <Border Grid.Column="0" Grid.ColumnSpan="4" HorizontalAlignment="Right"
+                    Width="6" Background="Transparent" Cursor="SizeWestEast"
+                    PointerPressed="RightEdgeResize_PointerPressed" />
 
         </Grid>
     </Border>

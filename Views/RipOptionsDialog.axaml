@@ -71,21 +71,6 @@
             <TextBlock Text="VBR (V0–V9) adjusts bitrate per frame; V2 is the community standard.  CBR keeps a fixed bitrate across the file and is best for streaming." TextWrapping="Wrap" Opacity="0.7" />
         </StackPanel>
 
-        <Border BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
-                BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,4,0,0">
-            <StackPanel Spacing="6">
-                <Grid ColumnDefinitions="100,*">
-                    <TextBlock Grid.Column="0" Text="Paranoia:" VerticalAlignment="Center" />
-                    <ComboBox x:Name="ParanoiaCombo" Grid.Column="1">
-                        <ComboBoxItem Content="Fast (10 re-reads)" Tag="10" />
-                        <ComboBoxItem Content="Standard (40 re-reads)" Tag="40" />
-                        <ComboBoxItem Content="Paranoid (100 re-reads)" Tag="100" />
-                    </ComboBox>
-                </Grid>
-                <TextBlock Text="Sets the per-sector re-read budget. Higher levels recover scratched or jittery sectors that would otherwise be written as best-effort (audible glitches), at the cost of slower rips on damaged discs." TextWrapping="Wrap" Opacity="0.7" />
-            </StackPanel>
-        </Border>
-
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
             <Button Content="Rip" Width="80" IsDefault="True" Click="OkButton_Click" />
             <Button Content="Cancel" Width="80" IsCancel="True" Click="CancelButton_Click" />

@@ -64,6 +64,8 @@ public partial class MiniPlayerWindow : Window
     private DispatcherTimer? _vuTimer;
     private bool _vuMode;
 
+    private CancellationTokenSource? _marqueeCts;
+
     // Per-frame smoothing at the UI layer - lets bars fall gracefully when
     // playback pauses or a song goes quiet, instead of snapping to zero.
     private const float VuDecayStep = 0.05f;   // linear drop per frame
@@ -95,6 +97,39 @@ public partial class MiniPlayerWindow : Window
                 Fill = Topmost ? Avalonia.Media.Brushes.Gray : Avalonia.Media.Brushes.Transparent,
             };
         }
+
+        // Hook into the shared MainWindowViewModel so the mini-player's LCD
+        // marquee + edge-fade tracks the same Now-Playing text as the main
+        // window. Re-runs on track change and on LCD width change.
+        DataContextChanged += (_, _) => AttachMarqueeWatch();
+        TrackLine1Container.SizeChanged += (_, _) => RestartMarquees();
+        TrackLine2Container.SizeChanged += (_, _) => RestartMarquees();
+    }
+
+    private void AttachMarqueeWatch()
+    {
+        if (DataContext is not OrgZ.ViewModels.MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OrgZ.ViewModels.MainWindowViewModel.CurrentTrackLine1)
+                || e.PropertyName == nameof(OrgZ.ViewModels.MainWindowViewModel.CurrentTrackLine2))
+            {
+                RestartMarquees();
+            }
+        };
+        RestartMarquees();
+    }
+
+    private void RestartMarquees()
+    {
+        _marqueeCts = OrgZ.Helpers.MarqueeHelper.Restart(
+            TrackLine1, TrackLine2,
+            TrackLine1Container, TrackLine2Container,
+            _marqueeCts);
     }
 
     // -- Drag region -----------------------------------------------------
@@ -104,6 +139,24 @@ public partial class MiniPlayerWindow : Window
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             BeginMoveDrag(e);
+        }
+    }
+
+    private void LeftEdgeResize_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            BeginResizeDrag(WindowEdge.West, e);
+            e.Handled = true;
+        }
+    }
+
+    private void RightEdgeResize_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            BeginResizeDrag(WindowEdge.East, e);
+            e.Handled = true;
         }
     }
 
@@ -228,120 +281,12 @@ public partial class MiniPlayerWindow : Window
 
     private void PopulateAudioOutputFlyout()
     {
-        var vm = DataContext as OrgZ.ViewModels.MainWindowViewModel;
-        if (vm == null)
+        if (DataContext is not OrgZ.ViewModels.MainWindowViewModel vm)
         {
             return;
         }
 
-        var manager = vm._audioOutput;
-        AudioOutputDeviceList.Children.Clear();
-
-        var devices = manager.EnumerateAllDevices();
-        var activeSinks = manager.Bus.Sinks.ToDictionary(s => s.Id, s => s);
-        AudioOutputFlyoutHint.Text = $"{devices.Count} device(s). Tick to route audio.";
-
-        string? lastProvider = null;
-        foreach (var device in devices)
-        {
-            if (device.ProviderName != lastProvider)
-            {
-                lastProvider = device.ProviderName;
-                AudioOutputDeviceList.Children.Add(new TextBlock
-                {
-                    Text = device.ProviderName,
-                    FontWeight = FontWeight.Bold,
-                    FontSize = 11,
-                    Opacity = 0.75,
-                    Margin = new Thickness(0, 6, 0, 2),
-                });
-            }
-
-            AudioOutputDeviceList.Children.Add(BuildFlyoutRow(manager, device, activeSinks));
-        }
-    }
-
-    private Control BuildFlyoutRow(AudioOutputManager manager, AudioDeviceInfo device, Dictionary<string, IAudioSink> activeSinks)
-    {
-        var active = activeSinks.TryGetValue(device.QualifiedId, out var sink);
-        var initialVolume = sink?.Volume ?? 1f;
-
-        var grid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Margin = new Thickness(0, 1, 0, 1),
-        };
-
-        var check = new CheckBox { IsChecked = active, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(check, 0);
-        grid.Children.Add(check);
-
-        var label = new TextBlock
-        {
-            Text = device.DisplayName,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(6, 0, 6, 0),
-            FontSize = 11,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        };
-        Grid.SetColumn(label, 1);
-        grid.Children.Add(label);
-
-        var slider = new Slider
-        {
-            Minimum = 0,
-            Maximum = 100,
-            Value = initialVolume * 100,
-            VerticalAlignment = VerticalAlignment.Center,
-            Width = 100,
-            IsEnabled = active,
-        };
-        Grid.SetColumn(slider, 2);
-        grid.Children.Add(slider);
-
-        check.IsCheckedChanged += (_, _) =>
-        {
-            slider.IsEnabled = check.IsChecked == true;
-            ApplyFlyoutSelection(manager, device, check, slider);
-        };
-
-        slider.PropertyChanged += (_, ev) =>
-        {
-            if (ev.Property.Name == nameof(Slider.Value))
-            {
-                ApplyFlyoutSelection(manager, device, check, slider);
-            }
-        };
-
-        return grid;
-    }
-
-    private static void ApplyFlyoutSelection(AudioOutputManager manager, AudioDeviceInfo device, CheckBox check, Slider slider)
-    {
-        // Rebuild from the currently-active sinks so toggling one device
-        // doesn't drop the others.  The bus owns the full selection state.
-        var selections = manager.Bus.Sinks
-            .Where(s => s.Id != device.QualifiedId)
-            .Select(s => new AudioOutputManager.SinkSelection
-            {
-                QualifiedId = s.Id,
-                Volume = s.Volume,
-                IsMuted = s.IsMuted,
-            })
-            .ToList();
-
-        if (check.IsChecked == true)
-        {
-            selections.Add(new AudioOutputManager.SinkSelection
-            {
-                QualifiedId = device.QualifiedId,
-                Volume = (float)(slider.Value / 100.0),
-                IsMuted = false,
-            });
-        }
-
-        manager.ApplySelections(selections);
-        manager.SavePersistedSelections();
+        AudioOutputFlyoutHelper.Populate(vm._audioOutput, AudioOutputDeviceList, AudioOutputFlyoutHint);
     }
 
     // -- VU meter --------------------------------------------------------
