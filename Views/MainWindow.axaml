@@ -296,7 +296,29 @@
 				</Border>
 				<Border Grid.Column="5" Margin="4,4,25,4">
 					<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-						<Button Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="10,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Browse by Artist">
+						<!-- Audio output picker: mirrors the mini-player's speaker icon so
+						     users can route audio to different output devices without
+						     opening Settings. Flyout contents are populated on click by
+						     AudioOutputFlyoutHelper. -->
+						<Button x:Name="AudioOutputButton" Click="AudioOutputButton_Click" Background="Transparent" BorderThickness="0" Padding="4" Margin="10,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Audio output devices">
+							<i:Icon Value="fa-solid fa-volume-high" FontSize="16" />
+							<Button.Flyout>
+								<Flyout Placement="BottomEdgeAlignedRight">
+									<DockPanel MinWidth="320" MaxWidth="420" LastChildFill="True">
+										<TextBlock DockPanel.Dock="Top" Text="Output Devices" FontWeight="Bold" FontSize="12" Margin="6,4,6,6" />
+										<TextBlock DockPanel.Dock="Top" x:Name="AudioOutputFlyoutHint" Text="" Opacity="0.6" FontSize="10" Margin="6,0,6,6" />
+										<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="6,6,6,6" Spacing="6">
+											<Button Content="Refresh" Click="AudioOutputRefresh_Click" FontSize="11" Padding="8,4" />
+											<Button Content="Open Settings…" Click="AudioOutputOpenSettings_Click" FontSize="11" Padding="8,4" />
+										</StackPanel>
+										<ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+											<StackPanel x:Name="AudioOutputDeviceList" Spacing="4" Margin="6,0,6,0" />
+										</ScrollViewer>
+									</DockPanel>
+								</Flyout>
+							</Button.Flyout>
+						</Button>
+						<Button Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Browse by Artist">
 							<i:Icon Value="fa-solid fa-folder-tree" FontSize="16" />
 						</Button>
 						<Button Command="{Binding ToggleQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Up Next">

@@ -56,13 +56,6 @@ public partial class RipOptionsDialog : Window
         var cbrIdx = Array.IndexOf(CdRipOptions.CbrBitrates, options.Mp3Quality);
         Mp3CbrCombo.SelectedIndex = cbrIdx >= 0 ? cbrIdx : 4; // 192 kbps default
 
-        ParanoiaCombo.SelectedIndex = options.ReReadAttempts switch
-        {
-            <= 10 => 0,
-            <= 40 => 1,
-            _ => 2,
-        };
-
         ApplyMp3ModeVisibility();
     }
 
@@ -136,18 +129,15 @@ public partial class RipOptionsDialog : Window
                 : 2;
         }
 
-        var reReads = (ParanoiaCombo.SelectedItem as ComboBoxItem)?.Tag is string paraTag
-            && int.TryParse(paraTag, out var pa)
-            ? pa
-            : 40;
-
         return new CdRipOptions
         {
             Format = format,
             FlacCompression = flacCompression,
             Mp3Mode = mp3Mode,
             Mp3Quality = mp3Quality,
-            ReReadAttempts = reReads,
+            // Paranoia (re-read attempts) is no longer user-facing - keep whatever
+            // the caller supplied (defaults to CdRipOptions.Default's value).
+            ReReadAttempts = _result.ReReadAttempts,
         };
     }
 }

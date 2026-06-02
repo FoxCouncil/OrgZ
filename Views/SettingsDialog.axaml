@@ -7,8 +7,8 @@
 		x:Class="OrgZ.Views.SettingsDialog"
 		x:CompileBindings="False"
 		Title="OrgZ Settings"
-		Width="560" Height="520"
-		MinWidth="480" MinHeight="440"
+		Width="720" Height="620"
+		MinWidth="560" MinHeight="500"
 		CanResize="True"
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">
@@ -24,7 +24,8 @@
 		<TabControl>
 			<!-- ===== General Tab ===== -->
 			<TabItem Header="General">
-				<StackPanel Margin="8,12" Spacing="16">
+				<ScrollViewer Padding="0,0,12,0">
+					<StackPanel Margin="8,12" Spacing="16">
 					<!-- Music Library Folder Location (mirrors iTunes Advanced tab) -->
 					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
@@ -58,12 +59,13 @@
 							<CheckBox x:Name="BadFormatLossyCheck" Content="Lossy formats (.mp3, .wma, .aac, .ogg, .m4a)" />
 						</StackPanel>
 					</Border>
-				</StackPanel>
+					</StackPanel>
+				</ScrollViewer>
 			</TabItem>
 
 			<!-- ===== Playback Tab ===== -->
 			<TabItem Header="Playback">
-				<ScrollViewer>
+				<ScrollViewer Padding="0,0,12,0">
 					<StackPanel Margin="8,12" Spacing="16">
 						<!-- Streaming Buffer Size (like iTunes) -->
 						<StackPanel Orientation="Horizontal" Spacing="12">
@@ -88,37 +90,28 @@
 						<CheckBox x:Name="AutoAdvanceCheck" Content="Auto-advance to next track" IsChecked="True" />
 
 						<!-- Mini-Player Mode -->
-						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
-							<StackPanel Spacing="8">
-								<TextBlock Text="Mini-Player Mode" FontWeight="Bold" FontSize="13" />
-								<TextBlock Text="What happens when you switch to the mini-player from the Window menu (Alt+Shift+M)."
-								           TextWrapping="Wrap" Opacity="0.7" FontSize="11" />
-								<StackPanel Spacing="4" Margin="0,4,0,0">
-									<RadioButton x:Name="MiniPlayerModeReplace" GroupName="MiniPlayerMode" Content="Replace main window (iTunes-style)" />
-									<RadioButton x:Name="MiniPlayerModeSideBySide" GroupName="MiniPlayerMode" Content="Show alongside main window" />
-								</StackPanel>
+						<StackPanel Spacing="4">
+							<TextBlock Text="Mini-player switches from the Window menu (Alt+Shift+M):" FontSize="11" Opacity="0.7" />
+							<StackPanel Spacing="4" Margin="16,2,0,0">
+								<RadioButton x:Name="MiniPlayerModeReplace" GroupName="MiniPlayerMode" Content="Replace main window (iTunes-style)" />
+								<RadioButton x:Name="MiniPlayerModeSideBySide" GroupName="MiniPlayerMode" Content="Show alongside main window" />
 							</StackPanel>
-						</Border>
+						</StackPanel>
 
 						<!-- Visualizer (LibVLC built-in) -->
-						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
-							<StackPanel Spacing="8">
-								<TextBlock Text="LibVLC Audio Visualizer" FontWeight="Bold" FontSize="13" />
-								<CheckBox x:Name="VisualizerEnabledCheck" Content="Show visualizer while playing audio" />
-								<StackPanel Orientation="Horizontal" Spacing="8" IsEnabled="{Binding #VisualizerEnabledCheck.IsChecked}">
-									<TextBlock Text="Style:" VerticalAlignment="Center" />
-									<ComboBox x:Name="VisualizerNameCombo" Width="200">
-										<ComboBoxItem Content="Spectrum bars" Tag="spectrum" />
-										<ComboBoxItem Content="Spectrometer" Tag="spectrometer" />
-										<ComboBoxItem Content="Oscilloscope" Tag="scope" />
-										<ComboBoxItem Content="VU meter" Tag="vumeter" />
-										<ComboBoxItem Content="Goom" Tag="goom" />
-									</ComboBox>
-								</StackPanel>
-								<TextBlock Text="Note: this is LibVLC's built-in visualizer (opens a separate render window).  The mini-player's LCD VU meter uses our own FFT pipeline and doesn't require this."
-								           TextWrapping="Wrap" Opacity="0.6" FontSize="10" Margin="0,4,0,0" />
+						<StackPanel Spacing="6">
+							<CheckBox x:Name="VisualizerEnabledCheck" Content="Show LibVLC audio visualizer while playing" />
+							<StackPanel Orientation="Horizontal" Spacing="8" Margin="22,0,0,0" IsEnabled="{Binding #VisualizerEnabledCheck.IsChecked}">
+								<TextBlock Text="Style:" VerticalAlignment="Center" />
+								<ComboBox x:Name="VisualizerNameCombo" Width="200">
+									<ComboBoxItem Content="Spectrum bars" Tag="spectrum" />
+									<ComboBoxItem Content="Spectrometer" Tag="spectrometer" />
+									<ComboBoxItem Content="Oscilloscope" Tag="scope" />
+									<ComboBoxItem Content="VU meter" Tag="vumeter" />
+									<ComboBoxItem Content="Goom" Tag="goom" />
+								</ComboBox>
 							</StackPanel>
-						</Border>
+						</StackPanel>
 					</StackPanel>
 				</ScrollViewer>
 			</TabItem>
@@ -133,7 +126,7 @@
 						<Button x:Name="RefreshDevicesButton" Content="Refresh Devices" Click="RefreshDevicesButton_Click" />
 						<TextBlock x:Name="DeviceDiscoveryHint" Text="" Opacity="0.6" FontSize="11" VerticalAlignment="Center" />
 					</StackPanel>
-					<ScrollViewer>
+					<ScrollViewer Padding="0,0,12,0">
 						<StackPanel x:Name="DeviceListPanel" Spacing="6" />
 					</ScrollViewer>
 				</DockPanel>
@@ -147,7 +140,7 @@
 						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="8">
 								<TextBlock Text="Library Overview" FontWeight="Bold" FontSize="13" />
-								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="8,4,0,0">
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto" Margin="8,4,0,0">
 									<TextBlock Grid.Row="0" Grid.Column="0" Text="Music Tracks:" Opacity="0.6" />
 									<Button Grid.Row="0" Grid.Column="1" Classes="link" Click="LinkMusicCount_Click">
 										<TextBlock x:Name="StatMusicCount" Text="0" Foreground="#4A9EFF" />
@@ -157,12 +150,6 @@
 									<Button Grid.Row="1" Grid.Column="1" Classes="link" Click="LinkRadioCount_Click">
 										<TextBlock x:Name="StatRadioCount" Text="0" Foreground="#4A9EFF" />
 									</Button>
-
-									<TextBlock Grid.Row="2" Grid.Column="0" Text="Podcasts:" Opacity="0.6" />
-									<TextBlock Grid.Row="2" Grid.Column="1" Text="0" Opacity="0.4" />
-
-									<TextBlock Grid.Row="3" Grid.Column="0" Text="Audiobooks:" Opacity="0.6" />
-									<TextBlock Grid.Row="3" Grid.Column="1" Text="0" Opacity="0.4" />
 								</Grid>
 							</StackPanel>
 						</Border>
@@ -222,28 +209,14 @@
 							</StackPanel>
 						</Border>
 
-						<!-- Podcasts placeholder -->
-						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12" Opacity="0.4">
-							<StackPanel Spacing="8">
-								<TextBlock Text="Podcasts" FontWeight="Bold" FontSize="13" />
-								<TextBlock Text="Coming soon" FontSize="11" Opacity="0.5" Margin="8,0,0,0" />
-							</StackPanel>
-						</Border>
-
-						<!-- Audiobooks placeholder -->
-						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12" Opacity="0.4">
-							<StackPanel Spacing="8">
-								<TextBlock Text="Audiobooks" FontWeight="Bold" FontSize="13" />
-								<TextBlock Text="Coming soon" FontSize="11" Opacity="0.5" Margin="8,0,0,0" />
-							</StackPanel>
-						</Border>
 					</StackPanel>
 				</ScrollViewer>
 			</TabItem>
 
 			<!-- ===== Advanced Tab ===== -->
 			<TabItem Header="Advanced">
-				<StackPanel Margin="8,12" Spacing="16">
+				<ScrollViewer Padding="0,0,12,0">
+					<StackPanel Margin="8,12" Spacing="16">
 					<!-- Database Location -->
 					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
@@ -275,7 +248,8 @@
 							</StackPanel>
 						</StackPanel>
 					</Border>
-				</StackPanel>
+					</StackPanel>
+				</ScrollViewer>
 			</TabItem>
 		</TabControl>
 	</DockPanel>
