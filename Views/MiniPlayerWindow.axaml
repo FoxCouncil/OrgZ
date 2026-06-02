@@ -1,11 +1,12 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:i="https://github.com/projektanker/icons.avalonia"
+        xmlns:controls="using:OrgZ.Controls"
         x:Class="OrgZ.Views.MiniPlayerWindow"
         x:CompileBindings="False"
         Title="OrgZ Mini-Player"
-        Width="440" Height="82"
-        MinWidth="360" MinHeight="82" MaxHeight="82"
+        Width="480" Height="82"
+        MinWidth="480" MinHeight="82" MaxHeight="82"
         CanResize="True"
         Topmost="True"
         ShowInTaskbar="True"
@@ -108,7 +109,7 @@
                 <MenuItem Header="Previous Track" Command="{Binding ButtonPreviousTrack}" />
                 <MenuItem Header="Next Track" Command="{Binding ButtonNextTrack}" />
                 <Separator />
-                <MenuItem Header="Toggle VU Meter" Click="VuToggle_Click" />
+                <MenuItem Header="Switch LCD View" Command="{Binding CycleLcdPageCommand}" />
                 <MenuItem Header="Now Playing Full-Screen…" Click="MenuFullScreen_Click" />
                 <Separator />
                 <MenuItem Header="Switch to Full Player" Click="MenuExpand_Click" />
@@ -202,64 +203,15 @@
                 </Grid>
             </StackPanel>
 
-            <!-- ===== LCD display ===== -->
-            <!-- Click anywhere on the LCD (except the seek slider) toggles
-                 between track info and VU meter.  Double-click goes full-screen. -->
-            <Border Grid.Column="2" Margin="6,10,10,10" CornerRadius="5"
-                    Background="{StaticResource OrgZLcdBrush}"
-                    BorderBrush="{StaticResource OrgZLcdRimBrush}" BorderThickness="1" ClipToBounds="True"
-                    BoxShadow="inset 0 2 5 0 #55000000, inset 0 -1 2 0 #25FFFFFF"
-                    Cursor="Hand" PointerPressed="Lcd_PointerPressed"
-                    ToolTip.Tip="Click to toggle VU • Double-click for full-screen">
-
-                <Grid>
-                    <!-- Display area (text OR VU meter) -->
-                    <Panel>
-
-                        <!-- Track-info layer -->
-                        <Grid x:Name="LcdTextLayer" RowDefinitions="Auto,*,Auto" Margin="8,4,8,4">
-
-                            <!-- Marquee containers: TextTrimming gone (the helper scrolls
-                                 long text instead of ellipsing) and HorizontalAlignment is
-                                 driven from code-behind based on overflow. -->
-                            <Border Grid.Row="0" x:Name="TrackLine1Container" ClipToBounds="True">
-                                <TextBlock x:Name="TrackLine1" Text="{Binding CurrentTrackLine1}" FontSize="11" FontWeight="Bold"
-                                           Foreground="{StaticResource OrgZLcdTextBrush}"
-                                           TextWrapping="NoWrap" />
-                            </Border>
-
-                            <Border Grid.Row="1" x:Name="TrackLine2Container" ClipToBounds="True" VerticalAlignment="Center">
-                                <TextBlock x:Name="TrackLine2" Text="{Binding CurrentTrackLine2}" FontSize="10" FontStyle="Italic"
-                                           Foreground="{StaticResource OrgZLcdMutedTextBrush}"
-                                           TextWrapping="NoWrap" />
-                            </Border>
-
-                            <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Bottom">
-                                <TextBlock Grid.Column="0" Text="{Binding CurrentTrackTime}" FontSize="9"
-                                           Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
-                                <Grid Grid.Column="1" Margin="6,0" Height="14" VerticalAlignment="Center">
-                                    <Slider Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}"
-                                            Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
-                                            IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
-                                            VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
-                                    <Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True"
-                                            Background="{StaticResource OrgZLcdRimBrush}" Height="3" VerticalAlignment="Center" />
-                                </Grid>
-                                <TextBlock Grid.Column="2" Text="{Binding CurrentTrackDuration}" FontSize="9"
-                                           Foreground="{StaticResource OrgZLcdTextBrush}" VerticalAlignment="Center" />
-                            </Grid>
-                        </Grid>
-
-                        <!-- VU-meter layer (hidden by default).  Symmetric
-                             horizontal margins so the meter's self-centering
-                             math lands on the LCD's true midpoint — the
-                             text layer above uses 0,..,8,.. because its
-                             content centers itself independently. -->
-                        <Canvas x:Name="VuCanvas" IsVisible="False" Margin="8,4,8,4" ClipToBounds="True" />
-
-                    </Panel>
-                </Grid>
-            </Border>
+            <!-- ===== LCD display =====
+                 Shared with the main window via the LcdDisplay UserControl. The .mini
+                 class shrinks the fonts + track-line heights so the same chrome fits
+                 in the 82px-tall mini-player chassis. Page cycling lives on the
+                 chevron button inside the LCD; double-click on the LCD body
+                 still goes full-screen. -->
+            <controls:LcdDisplay Grid.Column="2" Classes="mini"
+                                 Margin="6,10,10,10" Cursor="Hand"
+                                 PointerPressed="Lcd_PointerPressed" />
 
             <!-- ===== Audio output picker (speaker icon) ===== -->
             <Button Grid.Column="3" x:Name="AudioOutputButton" Click="AudioOutputButton_Click"
