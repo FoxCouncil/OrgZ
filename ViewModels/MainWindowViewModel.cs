@@ -54,6 +54,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private Media? _currentMedia;
 
+    // Tracks the MetaChanged delegate attached to _currentMedia (radio path only).
+    // Captured so DeferDispose can detach it before Dispose() to avoid leaks and
+    // late-event reentrancy onto a disposed native handle.
+    private EventHandler<MediaMetaChangedEventArgs>? _currentMediaMetaHandler;
+
+    // Coalesces rapid radio-station clicks. Each click cancels the previous
+    // pending switch and schedules a fresh one; only the final click survives
+    // the debounce window. Pairs with _playbackSwitchLock for race-safety
+    // against libvlc's worker thread mid-transition.
+    private CancellationTokenSource? _radioSwitchCts;
+
+    // Serializes the swap of _currentMedia + _player.Play() + DeferDispose so
+    // concurrent paths can't interleave the steps and orphan a Media reference
+    // or call Play() while libvlc is still transitioning off the previous one.
+    private readonly Lock _playbackSwitchLock = new();
+
     private PlaybackContext? _playbackContext;
 
     private readonly List<MediaItem> _cdTracks = [];
@@ -1606,6 +1622,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _macNowPlaying?.SetMetadata(track.Title, track.Artist, track.Album, track.Duration, _cdCoverArtBytes);
 
         var previousMedia = _currentMedia;
+        var previousHandler = _currentMediaMetaHandler;
+        _currentMediaMetaHandler = null;
         _currentMedia = new LibVLCSharp.Shared.Media(_vlc, track.StreamUrl!, LibVLCSharp.Shared.FromType.FromLocation);
         if (track.Track.HasValue)
         {
@@ -1621,7 +1639,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _currentMedia.AddOption(":disc-caching=3000");
         }
         _ = _player.Play(_currentMedia);
-        DeferDispose(previousMedia);
+        DeferDispose(previousMedia, previousHandler);
 
         ButtonPlayPauseIcon = ICON_PAUSE;
         ButtonPlayPausePadding = new Avalonia.Thickness(0);
@@ -1739,20 +1757,42 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        UI(() =>
+        // Debounce rapid clicks: cancel any pending switch, schedule a fresh one.
+        // 120 ms is short enough to feel responsive on deliberate clicks, long
+        // enough to coalesce double-clicks and mouse-wheel scrubs through the list.
+        var freshCts = new CancellationTokenSource();
+        var previousCts = Interlocked.Exchange(ref _radioSwitchCts, freshCts);
+        previousCts?.Cancel();
+        previousCts?.Dispose();
+        var token = freshCts.Token;
+
+        _ = Task.Delay(TimeSpan.FromMilliseconds(120), token).ContinueWith(t =>
         {
-            if (_playbackContext != null && _playbackContext.JumpTo(station))
+            if (t.IsCanceled || token.IsCancellationRequested)
             {
-                OnPropertyChanged(nameof(PlaybackContextUpcoming));
-                ExecutePlayRadio(station);
                 return;
             }
 
-            _playbackContext?.Release();
-            _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
-            OnPropertyChanged(nameof(PlaybackContextUpcoming));
-            ExecutePlayRadio(station);
-        });
+            UI(() =>
+            {
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (_playbackContext != null && _playbackContext.JumpTo(station))
+                {
+                    OnPropertyChanged(nameof(PlaybackContextUpcoming));
+                    ExecutePlayRadio(station);
+                    return;
+                }
+
+                _playbackContext?.Release();
+                _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+                OnPropertyChanged(nameof(PlaybackContextUpcoming));
+                ExecutePlayRadio(station);
+            });
+        }, TaskScheduler.Default);
     }
 
     /// <summary>
@@ -1789,11 +1829,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _macNowPlaying?.SetMetadata(file.Title, file.Artist, file.Album, file.Duration, artBytes);
 
         var previousMedia = _currentMedia;
+        var previousHandler = _currentMediaMetaHandler;
+        _currentMediaMetaHandler = null;
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
         ApplyVisualizerOption(_currentMedia);
 
         _ = _player.Play(_currentMedia);
-        DeferDispose(previousMedia);
+        DeferDispose(previousMedia, previousHandler);
 
         ApplyPerTrackOptions(file);
 
@@ -1824,86 +1866,110 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _ = LoadFaviconAsync(station.FaviconUrl);
         }
 
-        var previousMedia = _currentMedia;
-        _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
-
-        // Radio streams over flaky uplinks need more headroom than libvlc's 1s
-        // default network buffer. Without this, the smallest server-side jitter
-        // starves the decoder and libvlc cancels the HTTP/2 stream rather than
-        // waiting for more data - observed as `local stream 1 error: Cancellation
-        // (0x8)` right after the first audio buffer arrives. 3s matches the CD
-        // path's :file-caching=3000 and is the conventional value across VLC
-        // radio guides.
-        _currentMedia.AddOption(":network-caching=3000");
-        // Auto-reconnect when the upstream drops the TCP connection. Many shoutcast
-        // / icecast servers cycle connections aggressively (especially behind CDNs);
-        // without this, a single drop ends playback instead of seamlessly resuming.
-        _currentMedia.AddOption(":http-reconnect");
-        // Stream the body in chunks instead of trying to fully buffer the response
-        // before playback starts. Required for live audio (no Content-Length).
-        _currentMedia.AddOption(":http-continuous");
-
-        // Capture THIS specific Media instance. When the user switches stations rapidly,
-        // LibVLC can still deliver late MetaChanged events from the previous (disposed)
-        // Media object. If the handler read from _currentMedia directly, it would either
-        // (a) pull metadata from the new station's Media when the old one fired, or
-        // (b) invoke Meta() on a disposed native handle. We guard both by comparing
-        // the event sender to this captured local - events from any other instance get
-        // silently dropped.
-        var thisMedia = _currentMedia;
-
-        thisMedia.MetaChanged += (s, e) =>
+        // Atomic swap: capture previous, build new Media, halt libvlc on the old
+        // one, hand the new one to the player, then defer the dispose of the old.
+        // The lock keeps any concurrent path out of the swap; Stop() forces libvlc's
+        // worker thread to settle on the previous Media before we Play() the next,
+        // closing the race window where Play() was being called mid-transition.
+        lock (_playbackSwitchLock)
         {
-            if (e.MetadataType != MetadataType.NowPlaying)
-            {
-                return;
-            }
-            // Drop late events from a disposed predecessor. Referential equality on the
-            // managed wrapper is enough - even if LibVLC recycles a native handle, the
-            // managed Media is unique per ExecutePlayRadio call.
-            if (!ReferenceEquals(s, thisMedia) || !ReferenceEquals(_currentMedia, thisMedia))
-            {
-                return;
-            }
+            var previousMedia = _currentMedia;
+            var previousHandler = _currentMediaMetaHandler;
 
-            var nowPlaying = thisMedia.Meta(MetadataType.NowPlaying);
-            if (string.IsNullOrWhiteSpace(nowPlaying))
-            {
-                return;
-            }
+            _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
 
-            UI(() =>
+            // Radio streams over flaky uplinks need more headroom than libvlc's 1s
+            // default network buffer. Without this, the smallest server-side jitter
+            // starves the decoder and libvlc cancels the HTTP/2 stream rather than
+            // waiting for more data - observed as `local stream 1 error: Cancellation
+            // (0x8)` right after the first audio buffer arrives. 3s matches the CD
+            // path's :file-caching=3000 and is the conventional value across VLC
+            // radio guides.
+            _currentMedia.AddOption(":network-caching=3000");
+            // Auto-reconnect when the upstream drops the TCP connection. Many shoutcast
+            // / icecast servers cycle connections aggressively (especially behind CDNs);
+            // without this, a single drop ends playback instead of seamlessly resuming.
+            _currentMedia.AddOption(":http-reconnect");
+            // Stream the body in chunks instead of trying to fully buffer the response
+            // before playback starts. Required for live audio (no Content-Length).
+            _currentMedia.AddOption(":http-continuous");
+
+            // Capture THIS specific Media instance. When the user switches stations rapidly,
+            // LibVLC can still deliver late MetaChanged events from the previous (disposed)
+            // Media object. The ReferenceEquals checks below guard against that; storing
+            // the delegate lets DeferDispose detach it before Dispose(), preventing both
+            // the latent reentrancy and a closure-per-switch memory leak.
+            var thisMedia = _currentMedia;
+
+            EventHandler<MediaMetaChangedEventArgs> handler = (s, e) =>
             {
-                // Re-check on the UI thread - a station switch could have landed between
-                // the handler firing and this continuation running.
-                if (!ReferenceEquals(_currentMedia, thisMedia))
+                if (e.MetadataType != MetadataType.NowPlaying)
                 {
                     return;
                 }
 
-                UpdateMainStatus($"Playing: {nowPlaying}");
+                string? nowPlaying;
 
-                string? artist = null;
-                string? title = nowPlaying;
-
-                var dashIdx = nowPlaying.IndexOf(" - ", StringComparison.Ordinal);
-                if (dashIdx > 0)
+                // Take the playback-swap lock so this libvlc-thread callback can't
+                // race with DeferDispose freeing the native Media handle. Without
+                // this, ReferenceEquals lets us through but Meta() reads from a
+                // disposed pointer when disposal lands between the check and the
+                // call - that's the rapid-switch segfault.
+                lock (_playbackSwitchLock)
                 {
-                    artist = nowPlaying[..dashIdx].Trim();
-                    title = nowPlaying[(dashIdx + 3)..].Trim();
+                    if (!ReferenceEquals(_currentMedia, thisMedia))
+                    {
+                        return;
+                    }
+
+                    nowPlaying = thisMedia.Meta(MetadataType.NowPlaying);
                 }
 
-                CurrentTrackLine1 = title ?? nowPlaying;
-                CurrentTrackLine2 = artist ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(nowPlaying))
+                {
+                    return;
+                }
+
+                UI(() =>
+                {
+                    // Re-check on the UI thread - a station switch could have landed between
+                    // the handler firing and this continuation running.
+                    if (!ReferenceEquals(_currentMedia, thisMedia))
+                    {
+                        return;
+                    }
+
+                    UpdateMainStatus($"Playing: {nowPlaying}");
+
+                    string? artist = null;
+                    string? title = nowPlaying;
+
+                    var dashIdx = nowPlaying.IndexOf(" - ", StringComparison.Ordinal);
+                    if (dashIdx > 0)
+                    {
+                        artist = nowPlaying[..dashIdx].Trim();
+                        title = nowPlaying[(dashIdx + 3)..].Trim();
+                    }
+
+                    CurrentTrackLine1 = title ?? nowPlaying;
+                    CurrentTrackLine2 = artist ?? string.Empty;
 
 #if WINDOWS
-                _smtcService?.UpdateMetadata(title, artist, CurrentStation?.Title, null);
+                    _smtcService?.UpdateMetadata(title, artist, CurrentStation?.Title, null);
 #endif
-            });
-        };
+                });
+            };
+            thisMedia.MetaChanged += handler;
+            _currentMediaMetaHandler = handler;
 
-        _ = _player.Play(thisMedia);
-        DeferDispose(previousMedia);
+            // Note: don't call _player.Stop() before Play(thisMedia). libvlcsharp's
+            // Stop+Play sequence triggers two native transitions back-to-back which
+            // is more crash-prone than the single transition Play(newMedia) performs
+            // internally. The 120 ms debounce in PlayRadioStation + the lock here +
+            // the deferred dispose under the same lock is the safe combination.
+            _ = _player.Play(thisMedia);
+            DeferDispose(previousMedia, previousHandler);
+        }
 
         ApplyPerTrackOptions(station);
 
@@ -1934,7 +2000,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// to the UI dispatcher at Background priority lets the player claim its
     /// new ref and release the old one before we free the native handle.
     /// </summary>
-    private static void DeferDispose(Media? media)
+    private void DeferDispose(Media? media, EventHandler<MediaMetaChangedEventArgs>? metaHandler = null)
     {
         if (media == null)
         {
@@ -1943,14 +2009,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         Dispatcher.UIThread.Post(() =>
         {
-            try
+            // Hold the playback-swap lock for detach + dispose so a concurrent
+            // MetaChanged callback on libvlc's worker thread can't read from the
+            // native handle while we're freeing it.
+            lock (_playbackSwitchLock)
             {
-                media.Dispose();
-            }
-            catch
-            {
-                // Best-effort: the native handle may already be gone if a
-                // previous deferred dispose got there first.
+                try
+                {
+                    if (metaHandler != null)
+                    {
+                        media.MetaChanged -= metaHandler;
+                    }
+                    media.Dispose();
+                }
+                catch
+                {
+                    // Best-effort: the native handle may already be gone if a
+                    // previous deferred dispose got there first.
+                }
             }
         }, DispatcherPriority.Background);
     }
@@ -1967,8 +2043,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // actually freeing the CD for ripping.
         _player.Stop();
 
-        _currentMedia?.Dispose();
-        _currentMedia = null;
+        if (_currentMedia != null)
+        {
+            if (_currentMediaMetaHandler != null)
+            {
+                _currentMedia.MetaChanged -= _currentMediaMetaHandler;
+                _currentMediaMetaHandler = null;
+            }
+            _currentMedia.Dispose();
+            _currentMedia = null;
+        }
 
         // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
         // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
@@ -4579,6 +4663,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioOutput.SavePersistedSelections();
         _audioTap?.Dispose();
         _audioOutput.Dispose();
+        var pendingCts = Interlocked.Exchange(ref _radioSwitchCts, null);
+        pendingCts?.Cancel();
+        pendingCts?.Dispose();
+        if (_currentMedia != null && _currentMediaMetaHandler != null)
+        {
+            _currentMedia.MetaChanged -= _currentMediaMetaHandler;
+            _currentMediaMetaHandler = null;
+        }
         _currentMedia?.Dispose();
         _player?.Dispose();
         _vlc?.Dispose();

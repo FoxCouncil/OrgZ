@@ -6,8 +6,8 @@
 		x:Class="OrgZ.Views.MediaInfoDialog"
 		x:CompileBindings="False"
 		Title="Media Info"
-		Width="560" Height="500"
-		MinWidth="480" MinHeight="440"
+		Width="720" Height="620"
+		MinWidth="560" MinHeight="500"
 		CanResize="True"
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">
@@ -25,7 +25,7 @@
 		<TabControl>
 			<!-- ===== Summary Tab ===== -->
 			<TabItem Header="Summary">
-				<ScrollViewer Margin="8,12">
+				<ScrollViewer Margin="8,12,0,12" Padding="0,0,12,0">
 					<StackPanel Spacing="12">
 						<!-- Top section: art + basic info -->
 						<Grid ColumnDefinitions="100,*" Margin="0,0,0,8">
@@ -93,7 +93,7 @@
 
 			<!-- ===== Info Tab ===== -->
 			<TabItem Header="Info">
-				<ScrollViewer Margin="8,12">
+				<ScrollViewer Margin="8,12,0,12" Padding="0,0,12,0">
 					<!-- Music Info Panel -->
 					<StackPanel x:Name="MusicInfoPanel" Spacing="8">
 						<TextBlock Text="Name" FontSize="11" Opacity="0.6" />
@@ -161,7 +161,7 @@
 
 			<!-- ===== Radio Info Tab (hidden by default, shown for radio items) ===== -->
 			<TabItem x:Name="RadioInfoTab" Header="Station" IsVisible="False">
-				<ScrollViewer Margin="8,12">
+				<ScrollViewer Margin="8,12,0,12" Padding="0,0,12,0">
 					<StackPanel Spacing="8">
 						<TextBlock Text="Name" FontSize="11" Opacity="0.6" />
 						<TextBox x:Name="RadioInfoName" />
