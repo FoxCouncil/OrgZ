@@ -407,6 +407,29 @@ public partial class MainWindow : Window
         animation.RunAsync(indicator, _liveBarAnimationCts.Token);
     }
 
+    // -- Audio output flyout (mirrors MiniPlayerWindow's) --------------------
+
+    private void AudioOutputButton_Click(object? sender, RoutedEventArgs e)
+    {
+        PopulateAudioOutputFlyout();
+    }
+
+    private void AudioOutputRefresh_Click(object? sender, RoutedEventArgs e)
+    {
+        PopulateAudioOutputFlyout();
+    }
+
+    private async void AudioOutputOpenSettings_Click(object? sender, RoutedEventArgs e)
+    {
+        AudioOutputButton.Flyout?.Hide();
+        await _viewModel.ShowSettings();
+    }
+
+    private void PopulateAudioOutputFlyout()
+    {
+        OrgZ.Services.AudioOutput.AudioOutputFlyoutHelper.Populate(_viewModel._audioOutput, AudioOutputDeviceList, AudioOutputFlyoutHint);
+    }
+
     /// <summary>
     /// Drives the LCD's width based on available horizontal space in the top
     /// controls row. Keeps the LCD at <c>588</c> by default, shrinks down to
@@ -456,170 +479,12 @@ public partial class MainWindow : Window
 
     private void RestartMarquees()
     {
-        _marquee1Cts?.Cancel();
-        _marquee2Cts?.Cancel();
-
         var tb1 = this.FindControl<TextBlock>("TrackLine1");
         var tb2 = this.FindControl<TextBlock>("TrackLine2");
         var tb1Container = this.FindControl<Border>("TrackLine1Container");
         var tb2Container = this.FindControl<Border>("TrackLine2Container");
-
-        var cts = new CancellationTokenSource();
-        _marquee1Cts = cts;
-        _marquee2Cts = cts;
-
-        // All TextBlock mutation happens inside the dispatch — no pre-reset of
-        // RenderTransform/Width, since that briefly leaves the text left-aligned
-        // and was the source of the resize-time jump. Each pass clears the
-        // explicit Width (so the new measure picks up the natural desired size),
-        // measures, then assigns the final alignment + mask + scroll state in a
-        // single layout cycle.
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (cts.IsCancellationRequested)
-            {
-                return;
-            }
-
-            if (tb1 != null) tb1.Width = double.NaN;
-            if (tb2 != null) tb2.Width = double.NaN;
-
-            // Container width is dynamic: the LCD column stretches with the
-            // window, so the available marquee space changes on every resize.
-            // Fall back to the legacy 420 if the layout hasn't run yet.
-            var containerWidth1 = tb1Container?.Bounds.Width > 0 ? tb1Container.Bounds.Width : 420;
-            var containerWidth2 = tb2Container?.Bounds.Width > 0 ? tb2Container.Bounds.Width : 420;
-
-            var overflow1 = MeasureOverflow(tb1, containerWidth1);
-            var overflow2 = MeasureOverflow(tb2, containerWidth2);
-
-            ApplyMarqueeState(tb1, tb1Container, overflow1, containerWidth1);
-            ApplyMarqueeState(tb2, tb2Container, overflow2, containerWidth2);
-
-            if (overflow1 <= 0 && overflow2 <= 0)
-            {
-                return;
-            }
-
-            // Both lines scroll at the same speed (40px/s).
-            // Shorter one waits at each end for the longer one to finish.
-            // Full cycle: 5s dwell -> scroll forward -> 5s dwell -> scroll back
-            var maxOverflow = Math.Max(overflow1, overflow2);
-            var maxScrollSec = maxOverflow / 40.0;
-            var dwellSec = 5.0;
-            var totalSec = 2 * dwellSec + 2 * maxScrollSec;
-
-            if (overflow1 > 0 && tb1 != null)
-            {
-                RunSyncedMarquee(tb1, overflow1, totalSec, dwellSec, maxScrollSec, cts);
-            }
-
-            if (overflow2 > 0 && tb2 != null)
-            {
-                RunSyncedMarquee(tb2, overflow2, totalSec, dwellSec, maxScrollSec, cts);
-            }
-        }, Avalonia.Threading.DispatcherPriority.Render);
-    }
-
-    private static double MeasureOverflow(TextBlock? tb, double containerWidth)
-    {
-        if (tb == null || string.IsNullOrEmpty(tb.Text))
-        {
-            return 0;
-        }
-
-        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return Math.Max(0, tb.DesiredSize.Width - containerWidth);
-    }
-
-    /// <summary>
-    /// Brings the TextBlock + its container into the correct visual state for
-    /// the new measured overflow. No transient state ever — the previous frame
-    /// has whatever it had until this returns, then the next frame has the
-    /// final state. Avoids the left→center jump from a pre-step reset.
-    /// </summary>
-    private static void ApplyMarqueeState(TextBlock? tb, Border? container, double overflow, double containerWidth)
-    {
-        if (tb == null)
-        {
-            return;
-        }
-
-        if (overflow <= 0)
-        {
-            // Text fits: drop scroll animation transform and center natively.
-            // HorizontalAlignment is more stable than translating because it
-            // survives resize without intermediate updates.
-            tb.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
-            tb.Width = double.NaN;
-            tb.RenderTransform = null;
-            if (container != null) container.OpacityMask = null;
-        }
-        else
-        {
-            // Text overflows: pin left, give the TextBlock an explicit width so
-            // its translate transform sees a stable bounding box, and attach the
-            // edge fade — capped at 10px so wide containers don't grow it.
-            tb.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
-            tb.Width = tb.DesiredSize.Width;
-            tb.RenderTransform = new TranslateTransform();
-            if (container != null) container.OpacityMask = BuildEdgeFadeMask(containerWidth);
-        }
-    }
-
-    /// <summary>
-    /// Builds a fixed-pixel edge-fade gradient (≤ 10px on each side) sized
-    /// against the current container width.
-    /// </summary>
-    private static IBrush BuildEdgeFadeMask(double containerWidth)
-    {
-        // Cap the fade at 10 px or 25 % of the container, whichever is smaller —
-        // keeps the fade from swallowing the text on very narrow containers.
-        var fadeWidth = Math.Min(10.0, containerWidth * 0.25);
-        var fadePct = fadeWidth / Math.Max(1.0, containerWidth);
-
-        var brush = new LinearGradientBrush
-        {
-            StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
-            EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative),
-        };
-        brush.GradientStops.Add(new GradientStop(Colors.Transparent, 0));
-        brush.GradientStops.Add(new GradientStop(Colors.Black, fadePct));
-        brush.GradientStops.Add(new GradientStop(Colors.Black, 1 - fadePct));
-        brush.GradientStops.Add(new GradientStop(Colors.Transparent, 1));
-        return brush;
-    }
-
-    private static void RunSyncedMarquee(TextBlock tb, double overflow, double totalSec, double dwellSec, double maxScrollSec, CancellationTokenSource cts)
-    {
-        // This line scrolls at 40px/s for its own distance, then waits for the longer line.
-        // Cycle: 5s dwell | scroll fwd | wait | 5s dwell | scroll back | wait
-        var lineScrollSec = overflow / 40.0;
-
-        double CueFrac(double seconds) => Math.Min(seconds / totalSec, 1.0);
-
-        // See UpdateLiveBarAnimation for the IterationCount(ulong.MaxValue) trick — same reason.
-        var animation = new Animation
-        {
-            Duration = TimeSpan.FromSeconds(totalSec),
-            IterationCount = new IterationCount(ulong.MaxValue),
-            Children =
-            {
-                // Dwell at start
-                new KeyFrame { Cue = new Cue(0), Setters = { new Setter(TranslateTransform.XProperty, 0.0) } },
-                new KeyFrame { Cue = new Cue(CueFrac(dwellSec)), Setters = { new Setter(TranslateTransform.XProperty, 0.0) } },
-                // Scroll forward (arrives early if shorter, holds at -overflow)
-                new KeyFrame { Cue = new Cue(CueFrac(dwellSec + lineScrollSec)), Setters = { new Setter(TranslateTransform.XProperty, -overflow) } },
-                // Dwell at end (starts when the longer line finishes forward scroll)
-                new KeyFrame { Cue = new Cue(CueFrac(dwellSec + maxScrollSec + dwellSec)), Setters = { new Setter(TranslateTransform.XProperty, -overflow) } },
-                // Scroll back (arrives early if shorter, holds at 0)
-                new KeyFrame { Cue = new Cue(CueFrac(dwellSec + maxScrollSec + dwellSec + lineScrollSec)), Setters = { new Setter(TranslateTransform.XProperty, 0.0) } },
-                // Wait for longer line to finish scrolling back
-                new KeyFrame { Cue = new Cue(1.0), Setters = { new Setter(TranslateTransform.XProperty, 0.0) } },
-            }
-        };
-
-        animation.RunAsync(tb, cts.Token);
+        _marquee1Cts = OrgZ.Helpers.MarqueeHelper.Restart(tb1, tb2, tb1Container, tb2Container, _marquee1Cts);
+        _marquee2Cts = _marquee1Cts;
     }
 
     private void ApplyViewConfig(ListViewConfig config)
