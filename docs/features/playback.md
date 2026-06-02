@@ -2,6 +2,8 @@
 
 OrgZ uses LibVLC for audio playback, supporting a wide range of formats and streaming protocols.
 
+![Now playing](../assets/screenshots/now-playing.png)
+
 ## Controls
 
 - **Play/Pause** — Toggle playback
@@ -25,6 +27,12 @@ Radio streams show a "LIVE" duration and an animated progress indicator instead 
 ## Navigate to Playing
 
 Click the album art or track info area at the top to jump to the currently playing item in its source view.
+
+## Mini-Player
+
+A compact always-handy player strip with transport controls, the seek bar, and now-playing info — for when you don't need the full window.
+
+![The mini-player](../assets/screenshots/mini-player.png)
 
 ## Per-Track Options
 

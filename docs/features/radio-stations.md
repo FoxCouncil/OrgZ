@@ -2,6 +2,8 @@
 
 OrgZ integrates with two radio station directories to give you access to thousands of internet radio streams.
 
+![Browsing radio stations](../assets/screenshots/radio-browser.png)
+
 ## Sources
 
 - **Radio Browser** — Community-maintained directory of internet radio stations

@@ -27,9 +27,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly MainWindow _window;
 
-    private readonly LibVLC _vlc;
+    // Null in headless/screenshot mode (InitializePlayback is skipped); never
+    // dereferenced there because no playback path runs.
+    private LibVLC _vlc = null!;
 
-    private readonly MediaPlayer _player;
+    private MediaPlayer _player = null!;
 
     // Audio pipeline:
     //   LibVLC decodes → AudioTap (SetAudioCallbacks) → AudioSinkBus → sinks
@@ -38,7 +40,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // on Windows, CoreAudio on macOS, PulseAudio on Linux, AirPlay over LAN)
     // with per-device volume control.  The analyzer drives the VU meter.
     internal readonly OrgZ.Services.AudioOutput.AudioOutputManager _audioOutput = new();
-    private readonly OrgZ.Services.AudioVisualization.AudioTap _audioTap;
+    private OrgZ.Services.AudioVisualization.AudioTap _audioTap = null!;
 
 #if WINDOWS
     private SmtcService? _smtcService;
@@ -853,10 +855,62 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public MainWindowViewModel(MainWindow window)
+    // -- Headless seeding seam --
+    // Generic hooks the docs-screenshot runner uses to drive views. No
+    // screenshot-specific data or orchestration lives in the app: UpdateData,
+    // AddActivity, DeviceItems/LibraryItems/PlaylistItems, and the playback/LCD
+    // properties are already internal/public, so the runner composes scenes from
+    // those plus the four primitives below.
+
+    /// <summary>Replaces the backing item list. Pair with <see cref="RefreshView"/>
+    /// or a sidebar selection to re-run the filter.</summary>
+    internal void SetItems(IReadOnlyList<MediaItem> items) => _allItems = items.ToList();
+
+    /// <summary>Re-applies the active view's filter.</summary>
+    internal void RefreshView() => ApplyFilter();
+
+    /// <summary>The CD-track backing list, for seeding an inserted disc.</summary>
+    internal IList<MediaItem> CdTrackList => _cdTracks;
+
+    /// <summary>Sets the transport control to its playing (pause) glyph.</summary>
+    internal void ShowPlayingState()
+    {
+        ButtonPlayPauseIcon = ICON_PAUSE;
+        ButtonPlayPausePadding = ICON_PAUSE_PADDING;
+    }
+
+    public MainWindowViewModel(MainWindow window) : this(window, headless: false)
+    {
+    }
+
+    // Headless/screenshot construction skips LibVLC + audio output + OS-shell
+    // wiring (MPRIS, macOS Now Playing) so the docs-screenshot harness can render
+    // the window with seeded data and no native dependencies. The player fields
+    // stay null because no playback path runs in this mode.
+    internal MainWindowViewModel(MainWindow window, bool headless)
     {
         _window = window;
 
+        if (!headless)
+        {
+            InitializePlayback();
+        }
+
+        ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+        // Initialize shuffle/repeat visual state from saved settings
+        ShuffleOpacity = ShuffleMode == ShuffleMode.On ? 1.0 : 0.4;
+        RepeatIcon = RepeatMode == RepeatMode.One ? "fa-solid fa-arrow-rotate-left" : "fa-solid fa-repeat";
+        RepeatOpacity = RepeatMode == RepeatMode.Off ? 0.4 : 1.0;
+
+        RebuildLibraryItems();
+
+        var savedView = Settings.Get("OrgZ.ActiveView", "Music");
+        SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
+    }
+
+    private void InitializePlayback()
+    {
         _vlc = new();
         _vlc.SetAppId("com.foxcouncil.orgz", App.Version, "Assets/app.ico");
         _vlc.SetUserAgent($"OrgZ {App.Version}", $"orgz{App.Version}/player");
@@ -878,18 +932,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioTap.Attach(_player);
         _audioOutput.LoadAndApplyPersistedSelections();
         UpdateMasterVolume();
-
-        ButtonPlayPausePadding = ICON_PLAY_PADDING;
-
-        // Initialize shuffle/repeat visual state from saved settings
-        ShuffleOpacity = ShuffleMode == ShuffleMode.On ? 1.0 : 0.4;
-        RepeatIcon = RepeatMode == RepeatMode.One ? "fa-solid fa-arrow-rotate-left" : "fa-solid fa-repeat";
-        RepeatOpacity = RepeatMode == RepeatMode.Off ? 0.4 : 1.0;
-
-        RebuildLibraryItems();
-
-        var savedView = Settings.Get("OrgZ.ActiveView", "Music");
-        SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
 
         _player.EndReached += (s, e) => UI(() =>
         {
@@ -4535,7 +4577,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _mprisService?.Dispose();
         _macNowPlaying?.Dispose();
         _audioOutput.SavePersistedSelections();
-        _audioTap.Dispose();
+        _audioTap?.Dispose();
         _audioOutput.Dispose();
         _currentMedia?.Dispose();
         _player?.Dispose();
