@@ -206,7 +206,7 @@
 		<Setter Property="BorderThickness" Value="0" />
 		<Setter Property="Template">
 			<ControlTemplate>
-				<Path Width="12" Height="12" Margin="0,2,0,0"
+				<Path Width="11" Height="11" Margin="0,3,0,0"
 				      HorizontalAlignment="Center" VerticalAlignment="Top"
 				      Stretch="Fill" Fill="{StaticResource OrgZLcdTextBrush}"
 				      Data="M 6,0 L 12,6 L 6,12 L 0,6 Z" />

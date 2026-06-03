@@ -164,22 +164,77 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private Thickness _buttonPlayPausePadding;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTrackDurationDisplay))]
     private long _currentTrackTimeNumber = 0;
 
     [ObservableProperty]
     private string _currentTrackTime = "00:00";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsLcdIdle), nameof(IsLcdPlaybackIdle), nameof(IsLcdPlaybackActive), nameof(ShowLcdCycleButton))]
     private string _currentTrackLine1 = string.Empty;
+
+    /// <summary>
+    /// True when there's no active track on the LCD (fresh boot, after Stop,
+    /// between tracks before metadata lands). LcdDisplay shows a centered
+    /// BW app icon over the Playback page in this state.
+    /// </summary>
+    public bool IsLcdIdle => string.IsNullOrEmpty(CurrentTrackLine1);
+
+    /// <summary>
+    /// Playback page is active AND there's no track loaded - the LCD body
+    /// should show the BW app icon instead of empty text rows.
+    /// </summary>
+    public bool IsLcdPlaybackIdle => IsLcdPlayback && IsLcdIdle;
+
+    /// <summary>
+    /// Playback page is active AND a track is loaded - the standard track
+    /// text + seek bar should render.
+    /// </summary>
+    public bool IsLcdPlaybackActive => IsLcdPlayback && !IsLcdIdle;
 
     [ObservableProperty]
     private string _currentTrackLine2 = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTrackDurationDisplay))]
     private string _currentTrackDuration = "00:00";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTrackDurationDisplay))]
     private long _currentTrackDurationNumber = 0;
+
+    /// <summary>
+    /// Right-side time label toggles between total duration ("3:45") and
+    /// remaining-time countdown ("-1:22") when the user clicks on it. Persists
+    /// across tracks within a session - most apps keep this preference sticky.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentTrackDurationDisplay))]
+    private bool _showRemainingTime = true;
+
+    /// <summary>
+    /// Renders the right-side LCD time label. Honours <see cref="ShowRemainingTime"/>
+    /// and falls back to the raw duration string when there's no track loaded
+    /// (durationNumber == 0) - the "-X:XX" form would be meaningless there.
+    /// </summary>
+    public string CurrentTrackDurationDisplay
+    {
+        get
+        {
+            // Both branches return the duration string with one leading character
+            // so toggling between them never changes the rendered width - only
+            // the leading glyph swaps between "-" (remaining) and " " (total).
+            if (!ShowRemainingTime || CurrentTrackDurationNumber <= 0)
+            {
+                return " " + CurrentTrackDuration;
+            }
+            var remainingMs = Math.Max(0, CurrentTrackDurationNumber - CurrentTrackTimeNumber);
+            return "-" + TimeSpan.FromMilliseconds(remainingMs).ToString(@"m\:ss");
+        }
+    }
+
+    internal void ToggleDurationDisplay() => ShowRemainingTime = !ShowRemainingTime;
 
     [ObservableProperty]
     private uint _currentVolume = (uint)Settings.Get("OrgZ.Volume", 100);
@@ -264,7 +319,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     public enum LcdPage { Playback, Vu, Rip }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsLcdPlayback), nameof(IsLcdVu), nameof(IsLcdRip))]
+    [NotifyPropertyChangedFor(nameof(IsLcdPlayback), nameof(IsLcdVu), nameof(IsLcdRip), nameof(IsLcdPlaybackIdle), nameof(IsLcdPlaybackActive))]
     private LcdPage _currentLcdPage = LcdPage.Playback;
 
     public bool IsLcdPlayback => CurrentLcdPage == LcdPage.Playback;
@@ -281,7 +336,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1;
+    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1 && !IsLcdIdle;
 
     [RelayCommand]
     private void CycleLcdPage()
@@ -1002,7 +1057,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         long _lastMacNowPlayingPushMs = long.MinValue;
         _player.TimeChanged += (s, e) => UI(() =>
         {
-            CurrentTrackTime = TimeSpan.FromMilliseconds(e.Time).ToString("mm\\:ss");
+            CurrentTrackTime = TimeSpan.FromMilliseconds(e.Time).ToString("m\\:ss");
             if (!isSeeking)
             {
                 CurrentTrackTimeNumber = e.Time;
@@ -1082,7 +1137,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 if (e.Media != null && e.Media.Duration > 0)
                 {
-                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"mm\:ss");
+                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"m\:ss");
                     CurrentTrackDurationNumber = e.Media.Duration;
                 }
                 return;
@@ -1100,7 +1155,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     {
                         _ = await e.Media.Parse();
                     }
-                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"mm\:ss");
+                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"m\:ss");
                     CurrentTrackDurationNumber = e.Media.Duration;
                 }
 
@@ -1126,7 +1181,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _ = await e.Media.Parse();
             }
 
-            CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString("mm\\:ss");
+            CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString("m\\:ss");
             CurrentTrackDurationNumber = e.Media.Duration;
 
             CurrentTrackLine1 = CurrentMusicItem?.Title ?? "Unknown Title";
@@ -1610,7 +1665,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentTrackLine2 = !string.IsNullOrWhiteSpace(track.Artist)
             ? (string.IsNullOrWhiteSpace(track.Album) ? track.Artist : $"{track.Artist} \u2014 {track.Album}")
             : track.Album ?? "";
-        CurrentTrackDuration = track.Duration?.ToString(@"mm\:ss") ?? "--:--";
+        CurrentTrackDuration = track.Duration?.ToString(@"m\:ss") ?? "--:--";
         CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
 
         CurrentAlbumArt = _cdCoverArt;
@@ -2059,8 +2114,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentAlbumArt = null;
         CurrentTrackLine1 = string.Empty;
         CurrentTrackLine2 = string.Empty;
-        CurrentTrackTime = "00:00";
-        CurrentTrackDuration = "00:00";
+        CurrentTrackTime = "0:00";
+        CurrentTrackDuration = "0:00";
         CurrentTrackTimeNumber = 0;
         CurrentTrackDurationNumber = 0;
 

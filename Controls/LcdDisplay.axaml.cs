@@ -92,6 +92,12 @@ public partial class LcdDisplay : UserControl
         e.Handled = true;
     }
 
+    private void DurationLabel_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _watchedViewModel?.ToggleDurationDisplay();
+        e.Handled = true;
+    }
+
     private void AttachToViewModel()
     {
         if (_watchedViewModel != null)
