@@ -27,6 +27,10 @@
 			<Setter Property="FontWeight" Value="Bold" />
 			<Setter Property="Foreground" Value="{StaticResource OrgZLcdTextBrush}" />
 			<Setter Property="VerticalAlignment" Value="Center" />
+			<!-- LineHeight ≈ the digit cap-height so the baseline sits aligned
+			     with the seek bar's centre. Mini override below uses the full
+			     14px since the smaller font needs the extra leading. -->
+			<Setter Property="LineHeight" Value="12.5" />
 		</Style>
 		<Style Selector="TextBlock.lcdRipTitle">
 			<Setter Property="FontSize" Value="14" />
@@ -80,6 +84,18 @@
 		<Style Selector="controls|LcdDisplay.mini Grid#SeekHost">
 			<Setter Property="MinWidth" Value="80" />
 		</Style>
+		<!-- Time-label MinWidth: same on both sides so the gaps between each
+		     time and the slider are visually identical regardless of how many
+		     digits each label currently shows. Right side reserves room for
+		     "-X:XX"; left mirrors so they look matched. Lives in styles so
+		     the mini override beats the inline value (which would otherwise
+		     outrank style setters). -->
+		<Style Selector="TextBlock#CurrentTimeLabel, TextBlock#DurationLabel">
+			<Setter Property="MinWidth" Value="42" />
+		</Style>
+		<Style Selector="controls|LcdDisplay.mini TextBlock#CurrentTimeLabel, controls|LcdDisplay.mini TextBlock#DurationLabel">
+			<Setter Property="MinWidth" Value="32" />
+		</Style>
 
 		<!-- LCD-styled rip progress bar: forces the indicator fill to the dark
 		     LCD green (Foreground alone doesn't pierce the FluentTheme template). -->
@@ -105,9 +121,22 @@
 			<!-- Inner content area: 14px gutter on each side reserves space for
 			     the host's optional left/right overlay buttons. -->
 			<Panel Margin="14,0,14,0">
-				<!-- ===== Playback page ===== -->
+				<!-- ===== Playback page =====
+				     Two layered states: an idle BW app icon (no track loaded) and
+				     the standard track text + seek row. The icon uses an ImageBrush
+				     as an OpacityMask over a solid LCD-text-colored Border so it
+				     reads as monochrome regardless of the source asset's colors. -->
+				<Border x:Name="IdleAppIcon" HorizontalAlignment="Center" VerticalAlignment="Center"
+				        Width="42" Height="42"
+				        Background="{StaticResource OrgZLcdMutedTextBrush}"
+				        IsHitTestVisible="False"
+				        IsVisible="{Binding IsLcdPlaybackIdle}">
+					<Border.OpacityMask>
+						<ImageBrush Source="avares://Orgz/Assets/app-icon-1024.png" Stretch="Uniform" />
+					</Border.OpacityMask>
+				</Border>
 				<StackPanel x:Name="PlaybackPage" VerticalAlignment="Center" HorizontalAlignment="Stretch"
-				            IsVisible="{Binding IsLcdPlayback}">
+				            IsVisible="{Binding IsLcdPlaybackActive}">
 					<StackPanel x:Name="TrackTextWrap" HorizontalAlignment="Stretch" Margin="10,0,10,0">
 						<Border x:Name="TrackLine1Container" Classes="lcdTrackLineContainer">
 							<TextBlock x:Name="TrackLine1" Classes="lcdTrack1" Text="{Binding CurrentTrackLine1}" />
@@ -117,7 +146,11 @@
 						</Border>
 					</StackPanel>
 					<Grid HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="10,0,10,0" ColumnDefinitions="Auto,*,Auto">
-						<TextBlock Grid.Column="0" Classes="lcdTime" Margin="0,0,12,0" Text="{Binding CurrentTrackTime}" />
+						<!-- Right-aligned with a MinWidth buffer matching the duration label
+						     on the other side, so both gaps to the slider are the same width
+						     regardless of how many digits each label currently shows. -->
+						<TextBlock Grid.Column="0" x:Name="CurrentTimeLabel" Classes="lcdTime" Margin="0,0,8,0"
+						           TextAlignment="Right" Text="{Binding CurrentTrackTime}" />
 						<Grid x:Name="SeekHost" Grid.Column="1" Height="14">
 							<Border BorderBrush="{StaticResource OrgZLcdTextBrush}" BorderThickness="1"
 							        IsVisible="{Binding IsSeekEnabled}" Height="14" VerticalAlignment="Center" />
@@ -126,22 +159,58 @@
 							        Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
 							        IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
 							        VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
-							<!-- Live-stream indicator for radio (when seeking is disabled). -->
-							<Border IsVisible="{Binding !IsSeekEnabled}" CornerRadius="2" ClipToBounds="True"
-							        Background="{DynamicResource SystemControlBackgroundBaseLowBrush}"
-							        Height="6" VerticalAlignment="Center">
-								<Border x:Name="LiveStreamIndicator" Width="120" Height="6" CornerRadius="2" HorizontalAlignment="Left">
-									<Border.Background>
-										<LinearGradientBrush StartPoint="0%,50%" EndPoint="100%,50%">
-											<GradientStop Color="Transparent" Offset="0" />
-											<GradientStop Color="#888888" Offset="0.5" />
-											<GradientStop Color="Transparent" Offset="1" />
-										</LinearGradientBrush>
-									</Border.Background>
-								</Border>
+							<!-- Live-stream indicator for radio (no seek). 1px frame matching
+							     the seek bar style; inside, a wide Rectangle filled with a
+							     tiled diagonal-stripe VisualBrush. Canvas.Left is animated
+							     from 0 to -16 on infinite loop — one tile width, no visible
+							     seam. Outer Border clips so only the visible viewport shows. -->
+							<Border IsVisible="{Binding !IsSeekEnabled}"
+							        BorderBrush="{StaticResource OrgZLcdTextBrush}" BorderThickness="1"
+							        Background="{StaticResource OrgZLcdBrush}"
+							        Height="14" VerticalAlignment="Center" ClipToBounds="True">
+								<Canvas>
+									<Rectangle x:Name="LiveStreamIndicator"
+									           Canvas.Left="0" Canvas.Top="0"
+									           Width="2048" Height="12">
+										<Rectangle.Fill>
+											<VisualBrush TileMode="Tile" SourceRect="0,0,16,12" DestinationRect="0,0,16,12" Stretch="None">
+												<VisualBrush.Visual>
+													<Canvas Width="16" Height="12">
+														<Polygon Points="0,0 8,0 16,12 8,12" Fill="{StaticResource OrgZLcdProgressBrush}" />
+													</Canvas>
+												</VisualBrush.Visual>
+											</VisualBrush>
+										</Rectangle.Fill>
+										<Rectangle.Styles>
+											<Style Selector="Rectangle#LiveStreamIndicator">
+												<Style.Animations>
+													<Animation Duration="0:0:1.5" IterationCount="INFINITE">
+														<KeyFrame Cue="0%">
+															<Setter Property="Canvas.Left" Value="0" />
+														</KeyFrame>
+														<KeyFrame Cue="100%">
+															<Setter Property="Canvas.Left" Value="-16" />
+														</KeyFrame>
+													</Animation>
+												</Style.Animations>
+											</Style>
+										</Rectangle.Styles>
+									</Rectangle>
+								</Canvas>
 							</Border>
 						</Grid>
-						<TextBlock Grid.Column="2" Classes="lcdTime" Margin="12,0,0,0" Text="{Binding CurrentTrackDuration}" />
+						<!-- MinWidth is set in styles below — main 42px / mini 32px — so
+						     the right slot reserves just enough for "-X:XX" at each
+						     variant's font size. Left-aligned so the leftmost character
+						     sits at the same offset from the slider whether or not the
+						     "-" is showing; the slider stays the same width across the
+						     toggle. -->
+						<TextBlock Grid.Column="2" x:Name="DurationLabel" Classes="lcdTime" Margin="8,0,0,0"
+						           TextAlignment="Left"
+						           Text="{Binding CurrentTrackDurationDisplay}"
+						           Cursor="Hand"
+						           PointerPressed="DurationLabel_PointerPressed"
+						           ToolTip.Tip="Click to toggle remaining / total" />
 					</Grid>
 				</StackPanel>
 
