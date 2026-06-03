@@ -28,7 +28,6 @@ public partial class MainWindow : Window
 
     private readonly Dictionary<string, EventHandler<RoutedEventArgs>> _menuHandlers;
 
-    private CancellationTokenSource? _liveBarAnimationCts;
 
     private string? _lastViewConfigKey;
     private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
@@ -214,11 +213,6 @@ public partial class MainWindow : Window
 
     private async void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.IsSeekEnabled))
-        {
-            UpdateLiveBarAnimation();
-            return;
-        }
 
         if (e.PropertyName == nameof(MainWindowViewModel.IsDrillDownActive) || e.PropertyName == nameof(MainWindowViewModel.DrillDownEntries))
         {
@@ -326,53 +320,6 @@ public partial class MainWindow : Window
                 sv.Offset = new Vector(sv.Offset.X, savedScroll);
             }
         }
-    }
-
-    private void UpdateLiveBarAnimation()
-    {
-        _liveBarAnimationCts?.Cancel();
-        _liveBarAnimationCts = null;
-
-        var indicator = this.FindControl<Border>("LiveStreamIndicator");
-        if (indicator == null)
-        {
-            return;
-        }
-
-        if (_viewModel.IsSeekEnabled)
-        {
-            indicator.RenderTransform = null;
-            return;
-        }
-
-        // Animate: slide the glow bar back and forth across the track (420px wide, indicator is 120px).
-        // Avalonia's Animation.RunAsync rejects IterationCount.Infinite ("Looping animations must
-        // not use the Run method"); use a finite-but-astronomical count so RepeatType=Many and the
-        // check passes. ~18 quintillion iterations is forever for any plausible session.
-        var animation = new Animation
-        {
-            Duration = TimeSpan.FromSeconds(2),
-            IterationCount = new IterationCount(ulong.MaxValue),
-            PlaybackDirection = PlaybackDirection.Alternate,
-            Easing = new SineEaseInOut(),
-            Children =
-            {
-                new KeyFrame
-                {
-                    Cue = new Cue(0),
-                    Setters = { new Setter(TranslateTransform.XProperty, 0.0) }
-                },
-                new KeyFrame
-                {
-                    Cue = new Cue(1),
-                    Setters = { new Setter(TranslateTransform.XProperty, 300.0) }
-                },
-            }
-        };
-
-        indicator.RenderTransform = new TranslateTransform();
-        _liveBarAnimationCts = new CancellationTokenSource();
-        animation.RunAsync(indicator, _liveBarAnimationCts.Token);
     }
 
     // -- Audio output flyout (mirrors MiniPlayerWindow's) --------------------
