@@ -25,17 +25,6 @@
                     VerticalAlignment="Center">
                 <i:Icon Value="fa-solid fa-plus" FontSize="14" />
             </Button>
-            <Button Command="{Binding FetchPopularStationsCommand}"
-                    ToolTip.Tip="Fetch Popular Stations"
-                    VerticalAlignment="Center">
-                <i:Icon Value="fa-solid fa-arrows-rotate" FontSize="14" />
-            </Button>
-            <Button Click="SyncButton_Click"
-                    ToolTip.Tip="Sync All Stations (~95k)"
-                    VerticalAlignment="Center"
-                    IsEnabled="{Binding !IsSyncing}">
-                <i:Icon Value="fa-solid fa-cloud-arrow-down" FontSize="14" />
-            </Button>
         </StackPanel>
     </Border>
 </UserControl>

@@ -87,7 +87,7 @@
             </Grid>
 
             <!-- Radio mode status -->
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto"
+            <Grid ColumnDefinitions="*,Auto,Auto"
                   IsVisible="{Binding ActiveKind, Converter={StaticResource MediaKindMatch}, ConverterParameter=Radio}">
                 <Grid.Styles>
                     <Style Selector="Grid > Border">
@@ -112,11 +112,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="2" IsVisible="{Binding SyncStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                    <TextBlock Text="{Binding SyncStatus}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
-                </Border>
-
-                <Border Grid.Column="3" IsVisible="{Binding !!ErrorCount}">
+                <Border Grid.Column="2" IsVisible="{Binding !!ErrorCount}">
                     <Button Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />

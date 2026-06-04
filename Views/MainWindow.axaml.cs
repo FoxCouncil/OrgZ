@@ -172,9 +172,6 @@ public partial class MainWindow : Window
             ApplyViewConfig(initialConfig);
         }
 
-        var radioFilterPanel = this.FindControl<Controls.RadioFilterPanel>("RadioFilterPanel")!;
-        radioFilterPanel.SyncRequested += () => _viewModel.LaunchRadioSync();
-
         var breadcrumb = this.FindControl<Controls.BreadcrumbBar>("BreadcrumbBar")!;
         breadcrumb.RootClicked += () => _viewModel.DrillUpToRoot();
         breadcrumb.ArtistClicked += () => _viewModel.DrillUpToArtist();
@@ -211,9 +208,8 @@ public partial class MainWindow : Window
         };
     }
 
-    private async void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-
         if (e.PropertyName == nameof(MainWindowViewModel.IsDrillDownActive) || e.PropertyName == nameof(MainWindowViewModel.DrillDownEntries))
         {
             UpdateDrillDownView();
@@ -239,13 +235,6 @@ public partial class MainWindow : Window
         // Restore state of the view we're entering (deferred until items are bound)
         _lastViewConfigKey = sidebarItem?.ViewConfigKey;
         Avalonia.Threading.Dispatcher.UIThread.Post(() => RestoreViewState(_lastViewConfigKey), Avalonia.Threading.DispatcherPriority.Render);
-
-        // First-run only: if DB had no radio stations, fetch popular ones
-        var kind = sidebarItem?.Kind;
-        if (kind == MediaKind.Radio && _viewModel.FilteredItems.Count == 0 && !_viewModel.IsLoading)
-        {
-            await _viewModel.FetchPopularStationsAsync();
-        }
     }
 
     private DataGrid GetActiveDataGrid()
@@ -432,6 +421,7 @@ public partial class MainWindow : Window
             _groupExpansion = string.IsNullOrEmpty(_currentGroupedViewKey)
                 ? new Dictionary<string, bool>(StringComparer.Ordinal)
                 : GroupExpansionState.Load(_currentGroupedViewKey!);
+            _appliedExpansionKeys.Clear();
 
             GroupedDataGrid.LoadingRowGroup -= AutoCollapseRowGroup;
             GroupedDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
@@ -439,6 +429,7 @@ public partial class MainWindow : Window
         else
         {
             _currentGroupedViewKey = null;
+            _appliedExpansionKeys.Clear();
         }
 
         // Reset drill-down when switching views
@@ -464,6 +455,16 @@ public partial class MainWindow : Window
     /// </summary>
     private readonly HashSet<DataGridRowGroupHeader> _observedHeaders = new();
 
+    /// <summary>
+    /// Group keys we've already applied the saved expansion state to during this view
+    /// session. LoadingRowGroup fires every time a header re-enters the viewport -
+    /// without this guard we'd re-apply the saved state on every scroll-in, and a
+    /// programmatic Expand snaps the viewport to the expanded group (the cause of the
+    /// "jumps up + opens first genre" bug when the user collapses a group further down).
+    /// Reset on every view switch in <see cref="ApplyViewConfig"/>.
+    /// </summary>
+    private readonly HashSet<string> _appliedExpansionKeys = new(StringComparer.Ordinal);
+
     private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
     {
         var header = e.RowGroupHeader;
@@ -473,6 +474,20 @@ public partial class MainWindow : Window
         }
 
         var keyString = group.Key?.ToString() ?? string.Empty;
+
+        // Wire the tap observer once per realized header so user toggles still update
+        // the persisted dict, even if we skip applying state below.
+        if (_observedHeaders.Add(header))
+        {
+            header.Tapped += OnGroupHeaderTapped;
+        }
+
+        // Skip if we've already applied saved state for this key this session.
+        // Re-applying on every realization is what causes the viewport to snap.
+        if (!_appliedExpansionKeys.Add(keyString))
+        {
+            return;
+        }
 
         // Decide target state: saved value if we've seen the key before, else default
         // to collapsed (and record it so next time we load, we don't keep re-collapsing).
@@ -502,17 +517,6 @@ public partial class MainWindow : Window
                 GroupedDataGrid.CollapseRowGroup(group, true);
             }
         });
-
-        // Avalonia's DataGridRowGroupHeader doesn't publicly expose its expansion state
-        // as a styled property, so we can't observe user toggles via PropertyChanged.
-        // Instead: our dict IS the source of truth. Every Tapped on the header is a
-        // toggle - rows inside the group don't bubble up to the header's Tapped since
-        // they're siblings in the grid's visual tree, not children. We flip our dict
-        // on each tap and trust that Avalonia flips the visual to match.
-        if (_observedHeaders.Add(header))
-        {
-            header.Tapped += OnGroupHeaderTapped;
-        }
     }
 
     private void OnGroupHeaderTapped(object? sender, Avalonia.Input.TappedEventArgs e)
@@ -738,6 +742,47 @@ public partial class MainWindow : Window
                         ApplyColumnTextOverrides(tb, def);
                         tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
                         return tb;
+                    }),
+                },
+                ColumnType.Badge => new DataGridTemplateColumn
+                {
+                    Header = def.Header,
+                    CellTemplate = new FuncDataTemplate<MediaItem>((item, _) =>
+                    {
+                        var tb = new TextBlock
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Foreground = new SolidColorBrush(Color.Parse("#E0E0E0")),
+                            FontWeight = FontWeight.SemiBold,
+                            FontSize = 10,
+                            LetterSpacing = 0.5,
+                        };
+                        ApplyColumnTextOverrides(tb, def);
+                        tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
+
+                        var pill = new Border
+                        {
+                            Background = new SolidColorBrush(Color.Parse("#2A2A2A")),
+                            BorderBrush = new SolidColorBrush(Color.Parse("#3F3F3F")),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(3),
+                            Padding = new Thickness(0, 2),
+                            Width = 44,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Child = tb,
+                        };
+
+                        // Hide the brick entirely when the cell value is blank so empty
+                        // rows don't show a tiny empty pill.
+                        pill.Bind(IsVisibleProperty,
+                            new Binding(def.BindingPath)
+                            {
+                                Converter = Avalonia.Data.Converters.StringConverters.IsNotNullOrEmpty,
+                            });
+
+                        return pill;
                     }),
                 },
                 _ => new DataGridTextColumn

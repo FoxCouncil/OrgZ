@@ -2,6 +2,11 @@
 		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
 	<Styles.Resources>
+		<!-- Override fluent DataGrid sort-icon reserved width: the default value
+		     forces every header to reserve ~24px for the sort glyph even when
+		     no sort is active, truncating headers in narrow columns. -->
+		<x:Double x:Key="DataGridSortIconMinWidth">0</x:Double>
+
 		<!-- Colors -->
 		<Color x:Key="OrgZDialogBackground">#1A1A1A</Color>
 		<Color x:Key="OrgZTextForeground">#E0E0E0</Color>
@@ -237,5 +242,18 @@
 	<Style Selector="Button.lcdToggle:pressed /template/ ContentPresenter">
 		<Setter Property="Background" Value="Transparent" />
 		<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
+	</Style>
+
+	<!-- DataGrid column headers: fluent default uses Padding="12,0,0,0" (left-only),
+	     which leaves header text flush against the right edge with no room for
+	     ellipsis when a column is narrow. Symmetric padding + min-height for breathing room.
+	     HorizontalContentAlignment=Stretch is critical: the template binds its inner
+	     Grid alignment to that, and the default (Left) makes the content size to
+	     text only instead of filling the column width. -->
+	<Style Selector="DataGridColumnHeader">
+		<Setter Property="Padding" Value="8,4" />
+		<Setter Property="MinHeight" Value="28" />
+		<Setter Property="HorizontalContentAlignment" Value="Stretch" />
+		<Setter Property="VerticalContentAlignment" Value="Center" />
 	</Style>
 </Styles>

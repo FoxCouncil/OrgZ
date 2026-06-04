@@ -26,9 +26,6 @@ internal partial class StatusBarViewModel : ObservableObject
     private string _stationCount = "0";
 
     [ObservableProperty]
-    private string _syncStatus = string.Empty;
-
-    [ObservableProperty]
     private int _errorCount;
 
     // Generic stats for non-Music/Radio views (Favorites, Playlists, Ignored, Bad Format)
