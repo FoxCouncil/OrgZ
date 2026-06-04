@@ -18,7 +18,6 @@ public partial class SettingsDialog : Window
 
     public bool FolderChanged { get; private set; }
     public bool SettingsReset { get; private set; }
-    public bool RadioCacheCleared { get; private set; }
 
     public SettingsDialog() : this([], null) { }
 
@@ -479,13 +478,6 @@ public partial class SettingsDialog : Window
         FolderPathText.Text = "(No folder selected)";
     }
 
-    private void ClearRadioCacheButton_Click(object? sender, RoutedEventArgs e)
-    {
-        RadioCacheCleared = true;
-        ClearRadioCacheButton.IsEnabled = false;
-        ClearRadioCacheButton.Content = "Cleared";
-    }
-
     private void ResetWindowSizesButton_Click(object? sender, RoutedEventArgs e)
     {
         WindowSizeTracker.ResetAll();
@@ -519,7 +511,6 @@ public partial class SettingsDialog : Window
     private void CancelButton_Click(object? sender, RoutedEventArgs e)
     {
         FolderChanged = false;
-        RadioCacheCleared = false;
         SettingsReset = false;
         Close(false);
     }

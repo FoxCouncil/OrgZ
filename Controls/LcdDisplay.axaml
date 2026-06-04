@@ -167,36 +167,56 @@
 							<Border IsVisible="{Binding !IsSeekEnabled}"
 							        BorderBrush="{StaticResource OrgZLcdTextBrush}" BorderThickness="1"
 							        Background="{StaticResource OrgZLcdBrush}"
-							        Height="14" VerticalAlignment="Center" ClipToBounds="True">
-								<Canvas>
-									<Rectangle x:Name="LiveStreamIndicator"
-									           Canvas.Left="0" Canvas.Top="0"
-									           Width="2048" Height="12">
-										<Rectangle.Fill>
-											<VisualBrush TileMode="Tile" SourceRect="0,0,16,12" DestinationRect="0,0,16,12" Stretch="None">
-												<VisualBrush.Visual>
-													<Canvas Width="16" Height="12">
-														<Polygon Points="0,0 8,0 16,12 8,12" Fill="{StaticResource OrgZLcdProgressBrush}" />
-													</Canvas>
-												</VisualBrush.Visual>
-											</VisualBrush>
-										</Rectangle.Fill>
-										<Rectangle.Styles>
-											<Style Selector="Rectangle#LiveStreamIndicator">
-												<Style.Animations>
-													<Animation Duration="0:0:1.5" IterationCount="INFINITE">
-														<KeyFrame Cue="0%">
-															<Setter Property="Canvas.Left" Value="0" />
-														</KeyFrame>
-														<KeyFrame Cue="100%">
-															<Setter Property="Canvas.Left" Value="-16" />
-														</KeyFrame>
-													</Animation>
-												</Style.Animations>
-											</Style>
-										</Rectangle.Styles>
-									</Rectangle>
-								</Canvas>
+							        Height="14" VerticalAlignment="Center">
+								<!-- Inner clipper: the outer Border's ClipToBounds clips to its outer
+								     edge (including the 1px stroke), letting the stripes paint over
+								     the border. A nested transparent Border sits inside the stroke
+								     and clips at its own bounds, so stripes can only fill the 12px
+								     inner channel. -->
+								<Border ClipToBounds="True" Background="Transparent">
+									<Canvas>
+										<Rectangle x:Name="LiveStreamIndicator"
+										           Classes.loading="{Binding IsStreamLoading}"
+										           Canvas.Left="0" Canvas.Top="0"
+										           Width="2048" Height="12">
+											<Rectangle.Fill>
+												<VisualBrush TileMode="Tile" SourceRect="0,0,16,12" DestinationRect="0,0,16,12" Stretch="None">
+													<VisualBrush.Visual>
+														<Canvas Width="16" Height="12">
+															<Polygon Points="0,0 8,0 16,12 8,12" Fill="{StaticResource OrgZLcdProgressBrush}" />
+														</Canvas>
+													</VisualBrush.Visual>
+												</VisualBrush>
+											</Rectangle.Fill>
+											<Rectangle.Styles>
+												<Style Selector="Rectangle#LiveStreamIndicator">
+													<Style.Animations>
+														<Animation Duration="0:0:1.5" IterationCount="INFINITE">
+															<KeyFrame Cue="0%">
+																<Setter Property="Canvas.Left" Value="0" />
+															</KeyFrame>
+															<KeyFrame Cue="100%">
+																<Setter Property="Canvas.Left" Value="-16" />
+															</KeyFrame>
+														</Animation>
+													</Style.Animations>
+												</Style>
+												<Style Selector="Rectangle#LiveStreamIndicator.loading">
+													<Style.Animations>
+														<Animation Duration="0:0:0.75" IterationCount="INFINITE">
+															<KeyFrame Cue="0%">
+																<Setter Property="Canvas.Left" Value="0" />
+															</KeyFrame>
+															<KeyFrame Cue="100%">
+																<Setter Property="Canvas.Left" Value="-16" />
+															</KeyFrame>
+														</Animation>
+													</Style.Animations>
+												</Style>
+											</Rectangle.Styles>
+										</Rectangle>
+									</Canvas>
+								</Border>
 							</Border>
 						</Grid>
 						<!-- MinWidth is set in styles below — main 42px / mini 32px — so

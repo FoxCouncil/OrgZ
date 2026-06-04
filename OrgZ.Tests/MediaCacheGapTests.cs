@@ -7,8 +7,7 @@ namespace OrgZ.Tests;
 /// <summary>
 /// Coverage-gap tests for MediaCache, complementing the playlist-focused MediaCacheTests.
 /// Targets: SetFavorite, SetRating, IncrementPlayCount, SetLastPlayed, RemoveMusic,
-/// LoadAllRadio + UpsertRadioStations, RemoveRadioBySource, GetLastSync + RecordSync,
-/// GetCdMetadata + SaveCdMetadata.
+/// UpsertRadioStations, GetCdMetadata + SaveCdMetadata.
 /// </summary>
 [Collection("MediaCache")]
 public class MediaCacheGapTests : IDisposable
@@ -149,24 +148,25 @@ public class MediaCacheGapTests : IDisposable
 
         MediaCache.RemoveMusic(["track-1", "station-1"]);   // try removing both as music
 
-        Assert.DoesNotContain(MediaCache.LoadAll().Where(i => i.Kind == MediaKind.Music), i => i.Id == "track-1");
+        var loaded = MediaCache.LoadAll();
+        Assert.DoesNotContain(loaded.Where(i => i.Kind == MediaKind.Music), i => i.Id == "track-1");
         // station-1 is in the Radio kind, so the music DELETE should not have touched it
-        Assert.Contains(MediaCache.LoadAllRadio(), i => i.Id == "station-1");
+        Assert.Contains(loaded.Where(i => i.Kind == MediaKind.Radio), i => i.Id == "station-1");
     }
 
-    // ===== LoadAllRadio + UpsertRadioStations =====
+    // ===== UpsertRadioStations =====
 
     [Fact]
-    public void UpsertRadioStations_then_LoadAllRadio_round_trips()
+    public void UpsertRadioStations_round_trips_via_LoadAll()
     {
         var stations = new List<MediaItem>
         {
-            Radio("rb-1", title: "BBC Radio 1", country: "United Kingdom", source: "radiobrowser", codec: "mp3", bitrate: 128),
-            Radio("rb-2", title: "SomaFM Drone Zone", country: "United States",   source: "shoutcast", codec: "aac", bitrate: 64),
+            Radio("rb-1", title: "BBC Radio 1", country: "United Kingdom", source: "user", codec: "mp3", bitrate: 128),
+            Radio("rb-2", title: "SomaFM Drone Zone", country: "United States",   source: "user", codec: "aac", bitrate: 64),
         };
 
         MediaCache.UpsertRadioStations(stations);
-        var loaded = MediaCache.LoadAllRadio();
+        var loaded = MediaCache.LoadAll().Where(i => i.Kind == MediaKind.Radio).ToList();
 
         Assert.Equal(2, loaded.Count);
         Assert.Contains(loaded, s => s.Id == "rb-1" && s.Title == "BBC Radio 1");
@@ -179,70 +179,9 @@ public class MediaCacheGapTests : IDisposable
         MediaCache.UpsertRadioStations([Radio("rb-1", title: "Original")]);
         MediaCache.UpsertRadioStations([Radio("rb-1", title: "Updated")]);
 
-        var loaded = MediaCache.LoadAllRadio();
+        var loaded = MediaCache.LoadAll().Where(i => i.Kind == MediaKind.Radio).ToList();
         Assert.Single(loaded);
         Assert.Equal("Updated", loaded[0].Title);
-    }
-
-    // ===== RemoveRadioBySource =====
-
-    [Fact]
-    public void RemoveRadioBySource_deletes_only_matching_source_non_favorites()
-    {
-        MediaCache.UpsertRadioStations([
-            Radio("rb-1", source: "radiobrowser"),
-            Radio("rb-2", source: "radiobrowser", isFavorite: true),
-            Radio("sc-1", source: "shoutcast"),
-        ]);
-
-        MediaCache.RemoveRadioBySource("radiobrowser");
-
-        var loaded = MediaCache.LoadAllRadio();
-        Assert.DoesNotContain(loaded, s => s.Id == "rb-1");        // non-favorite, removed
-        Assert.Contains(loaded, s => s.Id == "rb-2");              // favorite, retained
-        Assert.Contains(loaded, s => s.Id == "sc-1");              // different source, retained
-    }
-
-    // ===== GetLastSync + RecordSync =====
-
-    [Fact]
-    public void GetLastSync_returns_null_when_no_history()
-    {
-        Assert.Null(MediaCache.GetLastSync("never-synced"));
-    }
-
-    [Fact]
-    public void RecordSync_then_GetLastSync_round_trips()
-    {
-        MediaCache.RecordSync("radiobrowser", count: 4500, durationMs: 12_345);
-        var entry = MediaCache.GetLastSync("radiobrowser");
-
-        Assert.NotNull(entry);
-        Assert.Equal(4500, entry!.Value.StationCount);
-        Assert.Equal(12_345, entry.Value.DurationMs);
-        // LastSync should be very recent (within the last minute)
-        Assert.True((DateTime.UtcNow - entry.Value.LastSync).TotalMinutes < 1);
-    }
-
-    [Fact]
-    public void RecordSync_overwrites_previous_for_same_source()
-    {
-        MediaCache.RecordSync("radiobrowser", count: 100, durationMs: 1000);
-        MediaCache.RecordSync("radiobrowser", count: 200, durationMs: 2000);
-
-        var entry = MediaCache.GetLastSync("radiobrowser");
-        Assert.Equal(200, entry!.Value.StationCount);
-        Assert.Equal(2000, entry.Value.DurationMs);
-    }
-
-    [Fact]
-    public void RecordSync_keeps_independent_rows_per_source()
-    {
-        MediaCache.RecordSync("radiobrowser", count: 100, durationMs: 1000);
-        MediaCache.RecordSync("shoutcast",    count: 50,  durationMs: 500);
-
-        Assert.Equal(100, MediaCache.GetLastSync("radiobrowser")!.Value.StationCount);
-        Assert.Equal(50,  MediaCache.GetLastSync("shoutcast")!.Value.StationCount);
     }
 
     // ===== CD metadata cache =====

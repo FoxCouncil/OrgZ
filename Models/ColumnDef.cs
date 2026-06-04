@@ -12,6 +12,7 @@ public enum ColumnType
     FavoriteTitle,
     Centered,
     RightAligned,
+    Badge,
 }
 
 public record ColumnDef

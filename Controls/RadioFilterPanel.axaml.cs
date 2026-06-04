@@ -15,8 +15,6 @@ public partial class RadioFilterPanel : UserControl
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
 
-    internal event Func<Task>? SyncRequested;
-
     private async void AddStation_Click(object? sender, RoutedEventArgs e)
     {
         if (TopLevel.GetTopLevel(this) is not Window window)
@@ -91,14 +89,6 @@ public partial class RadioFilterPanel : UserControl
         if (result != null)
         {
             ViewModel?.AddUserStationCommand.Execute(result);
-        }
-    }
-
-    private async void SyncButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (SyncRequested != null)
-        {
-            await SyncRequested.Invoke();
         }
     }
 }

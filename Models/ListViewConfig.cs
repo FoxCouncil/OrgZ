@@ -288,9 +288,9 @@ public static class ListViewConfigs
             [
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
                 new ColumnDef { Header = "Stream", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
-                new ColumnDef { Header = "Country", BindingPath = "Country", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Bit Rate", BindingPath = "BitrateLabel", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80 },
-                new ColumnDef { Header = "Codec", BindingPath = "CodecLabel", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
+                new ColumnDef { Header = "Country", BindingPath = "CountryCode", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
+                new ColumnDef { Header = "Bit Rate", BindingPath = "BitrateLabel", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70, FontSize = 11 },
+                new ColumnDef { Header = "Codec", BindingPath = "CodecLabel", Type = ColumnType.Badge, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
             ],
             BaseFilter = item => item.Kind == MediaKind.Radio,
             SearchFilter = (item, search) =>
@@ -299,7 +299,11 @@ public static class ListViewConfigs
                 (item.Country?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildRadioContextMenu(),
             ShowRadioFilterPanel = true,
-            GroupByPath = "NormalizedGenre",
+            // Tags carries the canonical RadioGenre display name set by the
+            // bundled-stations loader. Grouping by it gives clean headers
+            // matching the nubango taxonomy ("Alternative Rock", "Top 40 / Pop",
+            // etc.) without going through GenreNormalizer's fuzzy rules.
+            GroupByPath = "Tags",
         };
     }
 
