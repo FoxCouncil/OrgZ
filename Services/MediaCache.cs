@@ -115,18 +115,6 @@ public static class MediaCache
             cmd.ExecuteNonQuery();
         }
 
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.CommandText = """
-                CREATE TABLE IF NOT EXISTS SyncHistory (
-                    Source          TEXT PRIMARY KEY,
-                    LastSyncUtc     TEXT NOT NULL,
-                    StationCount    INTEGER NOT NULL,
-                    DurationMs      INTEGER NOT NULL
-                )
-                """;
-            cmd.ExecuteNonQuery();
-        }
 
         using (var cmd = connection.CreateCommand())
         {
@@ -367,31 +355,6 @@ public static class MediaCache
 
     // -- Radio operations --
 
-    public static List<MediaItem> LoadAllRadio()
-    {
-        var result = new List<MediaItem>();
-
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            SELECT Id, Title, StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
-                   Country, CountryCode, Tags, Codec, Bitrate, Votes, ClickCount,
-                   IsHls, IsFavorite, IsIgnored, LastPlayed, DateAdded,
-                   Rating, PlayCount
-            FROM Media WHERE Kind = 'Radio'
-            """;
-
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            result.Add(ReadRadioItem(reader));
-        }
-
-        return result;
-    }
-
     public static void UpsertRadioStations(IEnumerable<MediaItem> stations)
     {
         using var connection = new SqliteConnection(ConnectionString);
@@ -500,60 +463,20 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
-    public static void RemoveRadioBySource(string source)
+    /// <summary>
+    /// Drops every non-user radio row. Bundled stations live in memory only -
+    /// anything in SQLite that isn't <c>Source = 'user'</c> is stale (legacy
+    /// radio-browser/SHOUTcast sync rows, or bundled rows from when we
+    /// briefly persisted the curated list). NULL Source counts as legacy too.
+    /// </summary>
+    public static int RemoveLegacyRadioSources()
     {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM Media WHERE Kind = 'Radio' AND Source = @Source AND IsFavorite = 0";
-        cmd.Parameters.AddWithValue("@Source", source);
-        cmd.ExecuteNonQuery();
-    }
-
-    // -- Sync history --
-
-    public static (DateTime LastSync, int StationCount, long DurationMs)? GetLastSync(string source)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT LastSyncUtc, StationCount, DurationMs FROM SyncHistory WHERE Source = @Source";
-        cmd.Parameters.AddWithValue("@Source", source);
-
-        using var reader = cmd.ExecuteReader();
-        if (reader.Read())
-        {
-            return (
-                DateTime.Parse(reader.GetString(0), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                reader.GetInt32(1),
-                reader.GetInt64(2)
-            );
-        }
-
-        return null;
-    }
-
-    public static void RecordSync(string source, int count, long durationMs)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO SyncHistory (Source, LastSyncUtc, StationCount, DurationMs)
-            VALUES (@Source, @LastSync, @Count, @Duration)
-            ON CONFLICT(Source) DO UPDATE SET
-                LastSyncUtc = excluded.LastSyncUtc,
-                StationCount = excluded.StationCount,
-                DurationMs = excluded.DurationMs
-            """;
-        cmd.Parameters.AddWithValue("@Source", source);
-        cmd.Parameters.AddWithValue("@LastSync", DateTime.UtcNow.ToString("O"));
-        cmd.Parameters.AddWithValue("@Count", count);
-        cmd.Parameters.AddWithValue("@Duration", durationMs);
-        cmd.ExecuteNonQuery();
+        cmd.CommandText = "DELETE FROM Media WHERE Kind = 'Radio' AND (Source IS NULL OR Source <> 'user')";
+        return cmd.ExecuteNonQuery();
     }
 
     // -- Internal helpers --
@@ -697,40 +620,6 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@UseStopTime", item.UseStopTime ? 1 : 0);
 
         cmd.ExecuteNonQuery();
-    }
-
-    private static MediaItem ReadRadioItem(SqliteDataReader reader)
-    {
-        var item = new MediaItem
-        {
-            Id = reader.GetString(reader.GetOrdinal("Id")),
-            Kind = MediaKind.Radio,
-            DateAdded = DateTime.Parse(reader.GetString(reader.GetOrdinal("DateAdded")), null, System.Globalization.DateTimeStyles.RoundtripKind),
-            StreamUrl = GetNullableString(reader, "StreamUrl"),
-            Source = GetNullableString(reader, "Source"),
-            SourceId = GetNullableString(reader, "SourceId"),
-            HomepageUrl = GetNullableString(reader, "HomepageUrl"),
-            FaviconUrl = GetNullableString(reader, "FaviconUrl"),
-            Country = GetNullableString(reader, "Country"),
-            CountryCode = GetNullableString(reader, "CountryCode"),
-            Tags = GetNullableString(reader, "Tags"),
-            Codec = GetNullableString(reader, "Codec"),
-            Bitrate = GetNullableInt(reader, "Bitrate"),
-            Votes = GetNullableInt(reader, "Votes"),
-            ClickCount = GetNullableInt(reader, "ClickCount"),
-            IsHls = reader.GetInt32(reader.GetOrdinal("IsHls")) != 0,
-        };
-
-        item.Title = GetNullableString(reader, "Title");
-        item.IsFavorite = reader.GetInt32(reader.GetOrdinal("IsFavorite")) != 0;
-        item.Rating = GetNullableInt(reader, "Rating");
-        item.PlayCount = reader.GetInt32(reader.GetOrdinal("PlayCount"));
-        item.IsIgnored = (GetNullableInt(reader, "IsIgnored") ?? 0) != 0;
-
-        var lastPlayedOrd = reader.GetOrdinal("LastPlayed");
-        item.LastPlayed = reader.IsDBNull(lastPlayedOrd) ? null : DateTime.Parse(reader.GetString(lastPlayedOrd), null, System.Globalization.DateTimeStyles.RoundtripKind);
-
-        return item;
     }
 
     private static MediaItem ReadMediaItem(SqliteDataReader reader)

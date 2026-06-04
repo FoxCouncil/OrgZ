@@ -242,7 +242,6 @@
 						<StackPanel Spacing="8">
 							<TextBlock Text="Maintenance" FontWeight="Bold" FontSize="13" Foreground="#FF8888" />
 							<StackPanel Orientation="Horizontal" Spacing="8">
-								<Button x:Name="ClearRadioCacheButton" Content="Clear Radio Cache" Click="ClearRadioCacheButton_Click" />
 								<Button x:Name="ResetWindowSizesButton" Content="Reset Window Sizes" Click="ResetWindowSizesButton_Click" />
 								<Button x:Name="ResetSettingsButton" Content="Reset All Settings" Click="ResetSettingsButton_Click" />
 							</StackPanel>

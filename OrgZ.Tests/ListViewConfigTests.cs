@@ -67,9 +67,9 @@ public class ListViewConfigTests
     }
 
     [Fact]
-    public void RadioConfig_GroupsByNormalizedGenre()
+    public void RadioConfig_GroupsByTags()
     {
-        Assert.Equal("NormalizedGenre", ListViewConfigs.Get("Radio")!.GroupByPath);
+        Assert.Equal("Tags", ListViewConfigs.Get("Radio")!.GroupByPath);
     }
 
     [Fact]

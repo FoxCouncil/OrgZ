@@ -247,6 +247,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isSeekEnabled = true;
 
+    /// <summary>
+    /// True while the player is preparing media (between Play() call and the libvlc
+    /// Playing event). Drives the LCD's live-indicator barber-pole animation to run
+    /// 2x faster as a "buffering" cue. Reset on Playing / Stopped / EndReached.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isStreamLoading;
+
     // -- Shuffle / Repeat --
 
     [ObservableProperty]
@@ -867,7 +875,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                 if (SelectedGenre != "All")
                 {
-                    items = items.Where(s => s.NormalizedGenre == SelectedGenre);
+                    items = items.Where(s =>
+                        string.Equals(s.Tags, SelectedGenre, StringComparison.OrdinalIgnoreCase));
                 }
             }
 
@@ -888,11 +897,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             FilteredItems = items.ToList();
 
             // Build the DataGridCollectionView wrapper. If the view config asks for grouping,
-            // wire it up so Avalonia's DataGrid renders collapsible group headers.
+            // wire it up so Avalonia's DataGrid renders collapsible group headers, and add a
+            // matching SortDescription so the group headers appear in alphabetical order
+            // (otherwise DataGridCollectionView falls back to insertion order, which means
+            // the first-seen genre wins the top slot regardless of name).
             var view = new DataGridCollectionView(FilteredItems);
             if (_activeViewConfig.GroupByPath != null)
             {
                 view.GroupDescriptions.Add(new DataGridPathGroupDescription(_activeViewConfig.GroupByPath));
+                view.SortDescriptions.Add(DataGridSortDescription.FromPath(
+                    _activeViewConfig.GroupByPath,
+                    System.ComponentModel.ListSortDirection.Ascending));
             }
             FilteredItemsView = view;
 
@@ -1041,6 +1056,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player.Playing += (s, e) => UI(() =>
         {
+            IsStreamLoading = false;
             ButtonPlayPauseIcon = ICON_PAUSE;
             ButtonPlayPausePadding = ICON_PAUSE_PADDING;
 
@@ -1095,6 +1111,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player.Stopped += (s, e) => UI(() =>
         {
+            IsStreamLoading = false;
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
@@ -1564,30 +1581,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        if (dialog.RadioCacheCleared)
-        {
-            Services.MediaCache.RemoveRadioBySource("radiobrowser");
-
-            _allItems.RemoveAll(i => i.Kind == MediaKind.Radio && !i.IsFavorite);
-
-            if (SelectedSidebarItem?.Kind == MediaKind.Radio)
-            {
-                ApplyFilter();
-            }
-        }
-    }
-
-    internal async Task LaunchRadioSync()
-    {
-        if (IsSyncing)
-        {
-            return;
-        }
-
-        var dialog = new Views.SyncProgressDialog();
-        var syncTask = RunSyncWithDialog(dialog);
-        await dialog.ShowDialog(_window);
-        await syncTask;
     }
 
     internal async Task ShowMessageLog()
@@ -1693,6 +1686,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _currentMedia.AddOption(":file-caching=3000");
             _currentMedia.AddOption(":disc-caching=3000");
         }
+        IsStreamLoading = true;
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -1889,6 +1883,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
         ApplyVisualizerOption(_currentMedia);
 
+        IsStreamLoading = true;
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -2022,6 +2017,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // is more crash-prone than the single transition Play(newMedia) performs
             // internally. The 120 ms debounce in PlayRadioStation + the lock here +
             // the deferred dispose under the same lock is the safe combination.
+            IsStreamLoading = true;
             _ = _player.Play(thisMedia);
             DeferDispose(previousMedia, previousHandler);
         }
@@ -2179,113 +2175,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     #region Radio Station Management
 
     [RelayCommand]
-    internal async Task FetchPopularStationsAsync()
-    {
-        var radioItems = _allItems.Where(i => i.Kind == MediaKind.Radio);
-        if (radioItems.Any() || IsLoading)
-        {
-            return;
-        }
-
-        IsLoading = true;
-
-        try
-        {
-            UpdateMainStatus("Fetching popular stations...");
-
-            try
-            {
-                var stations = await RadioBrowserService.GetTopStationsAsync(250);
-                if (stations.Count > 0)
-                {
-                    await Task.Run(() => MediaCache.UpsertRadioStations(stations));
-                    _allItems.AddRange(stations);
-                }
-            }
-            catch (Exception ex)
-            {
-                Messages.Add($"Fetch failed: {ex.Message}");
-            }
-
-            RebuildRadioFilterOptions();
-            ApplyFilter();
-
-            StatusBar.ErrorCount = Messages.Count;
-            StatusBar.SyncStatus = "Sync for full library (~95k)";
-        }
-        catch (Exception ex)
-        {
-            Messages.Add($"Load error: {ex.Message}");
-            StatusBar.ErrorCount = Messages.Count;
-        }
-        finally
-        {
-            IsLoading = false;
-        }
-    }
-
-    internal async Task RunSyncWithDialog(Views.SyncProgressDialog dialog)
-    {
-        if (IsSyncing)
-        {
-            return;
-        }
-
-        IsSyncing = true;
-        var ct = dialog.CancellationToken;
-        int totalSynced = 0;
-
-        try
-        {
-            dialog.UpdateSource("Syncing radio stations...");
-            dialog.SetIndeterminate(true);
-
-            await foreach (var batch in RadioBrowserService.GetAllStationsAsync(ct))
-            {
-                await Task.Run(() => MediaCache.UpsertRadioStations(batch), ct);
-                totalSynced += batch.Count;
-                dialog.UpdateProgress(totalSynced, $"{totalSynced:N0} stations");
-            }
-
-            MediaCache.RecordSync("radiobrowser", totalSynced, dialog.ElapsedMs);
-
-            // Reload radio items from DB
-            var freshRadio = await Task.Run(() => MediaCache.LoadAllRadio());
-            _allItems.RemoveAll(i => i.Kind == MediaKind.Radio);
-            _allItems.AddRange(freshRadio);
-
-            RebuildRadioFilterOptions();
-            ApplyFilter();
-
-            dialog.Finish($"Done! {totalSynced:N0} stations synced");
-            UI(() => StatusBar.SyncStatus = "Last synced: just now");
-        }
-        catch (OperationCanceledException)
-        {
-            var freshRadio = await Task.Run(() => MediaCache.LoadAllRadio());
-            _allItems.RemoveAll(i => i.Kind == MediaKind.Radio);
-            _allItems.AddRange(freshRadio);
-
-            RebuildRadioFilterOptions();
-            ApplyFilter();
-
-            dialog.Finish($"Cancelled ({totalSynced:N0} stations synced)");
-            Messages.Add($"Sync cancelled after {totalSynced:N0} stations");
-            StatusBar.ErrorCount = Messages.Count;
-        }
-        catch (Exception ex)
-        {
-            Messages.Add($"Sync error: {ex.Message}");
-            StatusBar.ErrorCount = Messages.Count;
-            dialog.Finish($"Error: {ex.Message}");
-        }
-        finally
-        {
-            IsSyncing = false;
-        }
-    }
-
-    [RelayCommand]
     internal void ToggleFavorite(MediaItem? station)
     {
         if (station == null)
@@ -2367,16 +2256,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         Genres.Clear();
         Genres.Add("All");
-        // Only show canonical genres that actually appear in the current dataset.
+        // Genre dropdown lists the 26 RadioGenre display names that actually
+        // appear in the current dataset, in canonical (alphabetical-by-id) order.
         var activeGenres = radioItems
-            .Select(s => s.NormalizedGenre)
-            .Distinct()
-            .ToHashSet();
-        foreach (var canonical in GenreNormalizer.AllCanonical)
+            .Where(s => !string.IsNullOrWhiteSpace(s.Tags))
+            .Select(s => s.Tags!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var genre in RadioGenres.All)
         {
-            if (activeGenres.Contains(canonical))
+            var name = genre.DisplayName();
+            if (activeGenres.Contains(name))
             {
-                Genres.Add(canonical);
+                Genres.Add(name);
             }
         }
 
@@ -3170,10 +3061,46 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         MediaCache.EnsureCreated();
 
+        // One-time cleanup: drop any leftover radio rows from the old runtime
+        // sync sources. The new world keeps bundled stations in memory only;
+        // SQLite is reserved for user-added personal streams.
+        try
+        {
+            var purged = await Task.Run(MediaCache.RemoveLegacyRadioSources);
+            if (purged > 0)
+            {
+                _log.Information("Purged {Purged} legacy radio rows from cache", purged);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Legacy radio purge failed");
+        }
+
         UpdateMainStatus("Loading library...");
+
 
         var loadSw = System.Diagnostics.Stopwatch.StartNew();
         _allItems = await Task.Run(() => MediaCache.LoadAll());
+
+        // Append bundled radio stations from the embedded JSON. They live in
+        // memory only - never persisted - and are re-loaded fresh every launch.
+        // Sorted by genre name (alphabetical) then station name so the grouped
+        // DataGrid renders genres alphabetically.
+        try
+        {
+            var bundled = await Task.Run(() => BundledStationsService.LoadAll());
+            var ordered = bundled
+                .OrderBy(s => s.Tags, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(s => s.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _allItems.AddRange(ordered);
+            _log.Information("BundledStations: loaded {Count} into memory", ordered.Count);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "BundledStations: load failed");
+        }
         loadSw.Stop();
         _log.Information("MediaCache.LoadAll: {Count} items in {ElapsedMs}ms", _allItems.Count, loadSw.ElapsedMilliseconds);
 
@@ -3183,26 +3110,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (radioItems.Count > 0)
         {
             RebuildRadioFilterOptions();
-
-            var rbSync = MediaCache.GetLastSync("radiobrowser");
-            var scSync = MediaCache.GetLastSync("shoutcast");
-            var staleDays = 7;
-
-            if (rbSync == null || scSync == null ||
-                (DateTime.UtcNow - rbSync.Value.LastSync).TotalDays > staleDays ||
-                (DateTime.UtcNow - scSync.Value.LastSync).TotalDays > staleDays)
-            {
-                StatusBar.SyncStatus = "Stations may be stale";
-            }
-            else
-            {
-                var ago = DateTime.UtcNow - new[] { rbSync.Value.LastSync, scSync.Value.LastSync }.Min();
-                StatusBar.SyncStatus = $"Last synced: {FormatHelper.FormatTimeAgo(ago)}";
-            }
-        }
-        else
-        {
-            StatusBar.SyncStatus = "Sync for full library (~95k)";
         }
 
         // Load playlists
