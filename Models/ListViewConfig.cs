@@ -41,7 +41,23 @@ public static class ListViewConfigs
         ["Ignored"] = BuildIgnoredConfig(),
         ["BadFormat"] = BuildBadFormatConfig(),
         ["CdAudio"] = BuildCdAudioConfig(),
+        ["Podcasts"] = BuildPodcastsConfig(),
     };
+
+    private static ListViewConfig BuildPodcastsConfig()
+    {
+        // Podcasts uses the PodcastsPanel UserControl instead of a DataGrid. The
+        // config exists so ApplyViewConfig + state restoration find a record for
+        // the key; columns / filters are inert (the panel manages its own data).
+        return new ListViewConfig
+        {
+            Key = "Podcasts",
+            Columns = [],
+            BaseFilter = static _ => false,
+            SearchFilter = static (_, _) => false,
+            ContextMenuItems = [],
+        };
+    }
 
     public static ListViewConfig? Get(string? key)
     {
@@ -288,7 +304,7 @@ public static class ListViewConfigs
             [
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
                 new ColumnDef { Header = "Stream", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
-                new ColumnDef { Header = "Country", BindingPath = "CountryCode", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
+                new ColumnDef { Header = "Country", BindingPath = "CountryCode", Type = ColumnType.Flag, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60 },
                 new ColumnDef { Header = "Bit Rate", BindingPath = "BitrateLabel", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70, FontSize = 11 },
                 new ColumnDef { Header = "Codec", BindingPath = "CodecLabel", Type = ColumnType.Badge, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
             ],

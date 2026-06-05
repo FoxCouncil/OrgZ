@@ -110,7 +110,6 @@
                 <MenuItem Header="Next Track" Command="{Binding ButtonNextTrack}" />
                 <Separator />
                 <MenuItem Header="Switch LCD View" Command="{Binding CycleLcdPageCommand}" />
-                <MenuItem Header="Now Playing Full-Screen…" Click="MenuFullScreen_Click" />
                 <Separator />
                 <MenuItem Header="Switch to Full Player" Click="MenuExpand_Click" />
                 <MenuItem Header="Always on Top" x:Name="MenuAlwaysOnTop" Click="MenuAlwaysOnTop_Click" />
@@ -119,7 +118,7 @@
             </ContextMenu>
         </Border.ContextMenu>
 
-        <Grid ColumnDefinitions="44,Auto,*,Auto" VerticalAlignment="Stretch">
+        <Grid ColumnDefinitions="44,Auto,Auto,*,Auto" VerticalAlignment="Stretch">
 
             <!-- ===== Left chrome: platform-specific ===== -->
 
@@ -203,19 +202,39 @@
                 </Grid>
             </StackPanel>
 
+            <!-- ===== Album art (matches MainWindow Now-Playing thumbnail) =====
+                 62px square so it sits inside the 82px chassis with 10px above /
+                 below. Dark outer chrome shows when there's no art; when art is
+                 present a white inner backdrop renders behind it so transparent
+                 PNGs / radio favicons don't blend into the dark chassis. -->
+            <Border Grid.Column="2" Margin="0,10,6,10" VerticalAlignment="Center"
+                    Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="4"
+                    Width="62" Height="62" ClipToBounds="True">
+                <Panel>
+                    <Border Background="White"
+                            IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" />
+                    </Border>
+                    <i:Icon Value="fa-solid fa-music" FontSize="22"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNull}}"
+                            Opacity="0.4" />
+                </Panel>
+            </Border>
+
             <!-- ===== LCD display =====
                  Shared with the main window via the LcdDisplay UserControl. The .mini
                  class shrinks the fonts + track-line heights so the same chrome fits
                  in the 82px-tall mini-player chassis. Page cycling lives on the
-                 chevron button inside the LCD; double-click on the LCD body
-                 still goes full-screen. -->
-            <controls:LcdDisplay Grid.Column="2" Classes="mini"
-                                 Margin="6,10,10,10" Cursor="Hand"
-                                 PointerPressed="Lcd_PointerPressed" />
+                 chevron button inside the LCD. -->
+            <controls:LcdDisplay Grid.Column="3" Classes="mini"
+                                 Margin="0,10,0,10" />
 
-            <!-- ===== Audio output picker (speaker icon) ===== -->
-            <Button Grid.Column="3" x:Name="AudioOutputButton" Click="AudioOutputButton_Click"
-                    Background="Transparent" BorderThickness="0" Padding="6,0" Margin="2,0,6,0"
+            <!-- ===== Audio output picker (speaker icon) =====
+                 6px left margin matches the 6px right margin so the speaker icon
+                 sits an equal distance from the LCD as from the window edge. -->
+            <Button Grid.Column="4" x:Name="AudioOutputButton" Click="AudioOutputButton_Click"
+                    Background="Transparent" BorderThickness="0" Padding="0" Margin="6,0,6,0"
                     VerticalAlignment="Center" Cursor="Hand"
                     ToolTip.Tip="Audio output devices">
                 <i:Icon Value="fa-solid fa-volume-high" FontSize="16"
@@ -246,10 +265,10 @@
                  and float at the left / right edges; PointerPressed kicks off a
                  native BeginResizeDrag so the user can pull the mini-player
                  wider or narrower like a normal resizable window. -->
-            <Border Grid.Column="0" Grid.ColumnSpan="4" HorizontalAlignment="Left"
+            <Border Grid.Column="0" Grid.ColumnSpan="5" HorizontalAlignment="Left"
                     Width="6" Background="Transparent" Cursor="SizeWestEast"
                     PointerPressed="LeftEdgeResize_PointerPressed" />
-            <Border Grid.Column="0" Grid.ColumnSpan="4" HorizontalAlignment="Right"
+            <Border Grid.Column="0" Grid.ColumnSpan="5" HorizontalAlignment="Right"
                     Width="6" Background="Transparent" Cursor="SizeWestEast"
                     PointerPressed="RightEdgeResize_PointerPressed" />
 

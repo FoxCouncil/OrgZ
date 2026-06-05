@@ -36,8 +36,6 @@
 				<NativeMenu>
 					<NativeMenuItem Header="Switch to Mini-Player" Command="{Binding ToggleMiniPlayerCommand}" Gesture="Alt+Shift+M" />
 					<NativeMenuItem Header="Show Full Player" Command="{Binding ShowMainWindowCommand}" Gesture="Alt+Shift+F" />
-					<NativeMenuItemSeparator />
-					<NativeMenuItem Header="Now Playing Full-Screen" Command="{Binding ShowNowPlayingFullScreenCommand}" Gesture="F11" />
 				</NativeMenu>
 			</NativeMenuItem>
 			<NativeMenuItem Header="Help">
@@ -358,6 +356,11 @@
 							           FontSize="16"
 							           Opacity="0.6"
 							           IsHitTestVisible="False" />
+
+							<!-- Podcasts panel: replaces the data grids entirely when the
+							     Podcasts sidebar item is active. Has its own internal store /
+							     subscriptions / feed-detail navigation. -->
+							<controls:PodcastsPanel x:Name="PodcastsPanel" DataContext="{Binding Podcasts}" IsVisible="False" />
 
 							<!-- Separate DataGrid for grouped views (Radio) - never shares column state with MainDataGrid -->
 							<DataGrid x:Name="GroupedDataGrid"

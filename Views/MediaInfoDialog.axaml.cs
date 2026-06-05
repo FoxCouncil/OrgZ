@@ -53,15 +53,16 @@ public partial class MediaInfoDialog : Window
 
         var isMusic = item.Kind == MediaKind.Music;
         var isRadio = item.Kind == MediaKind.Radio;
+        var isPodcast = item.Kind == MediaKind.Podcast;
 
-        // Tab visibility
+        // Tab + panel visibility. The Info tab hosts kind-specific sub-panels;
+        // exactly one is visible at a time. Radio still uses its own "Station"
+        // tab because the field set is unrelated.
         MusicInfoPanel.IsVisible = isMusic;
+        PodcastInfoPanel.IsVisible = isPodcast;
         RadioInfoTab.IsVisible = isRadio;
         ArtworkTab.IsVisible = isMusic;
-        StartStopPanel.IsVisible = isMusic;
-
-        // Make sure Info tab (index 1) is the music info tab
-        // RadioInfoTab will only show for radio items
+        StartStopPanel.IsVisible = isMusic || isPodcast;
 
         LoadSummary(item);
 
@@ -73,6 +74,10 @@ public partial class MediaInfoDialog : Window
         {
             LoadRadioInfo(item);
         }
+        else if (isPodcast)
+        {
+            LoadPodcastInfo(item);
+        }
 
         LoadOptions(item);
         LoadArtwork(item);
@@ -83,17 +88,44 @@ public partial class MediaInfoDialog : Window
     private void LoadSummary(MediaItem item)
     {
         var isMusic = item.Kind == MediaKind.Music;
+        var isRadio = item.Kind == MediaKind.Radio;
+        var isPodcast = item.Kind == MediaKind.Podcast;
 
         // Title line
-        var durationStr = item.Duration.HasValue ? $" ({item.Duration.Value:m\\:ss})" : "";
+        var durationStr = item.Duration.HasValue
+            ? $" ({FormatHelper.FormatDurationCompact(item.Duration.Value)})"
+            : "";
         SummaryTitle.Text = $"{item.Title ?? item.FileName ?? "Unknown"}{durationStr}";
-        SummaryArtist.Text = isMusic ? (item.Artist ?? "") : (item.Country ?? "");
-        SummaryAlbum.Text = isMusic ? (item.Album ?? "") : (item.Country ?? "");
 
-        // Album art
+        if (isMusic)
+        {
+            SummaryArtist.Text = item.Artist ?? "";
+            SummaryAlbum.Text = item.Album ?? "";
+        }
+        else if (isPodcast)
+        {
+            // For podcasts: Artist is the show name, Album mirrors it; we
+            // surface them under the title so the dialog clearly says "this
+            // is an episode of <show>".
+            SummaryArtist.Text = item.Artist ?? "";
+            SummaryAlbum.Text = "";
+        }
+        else
+        {
+            SummaryArtist.Text = item.Country ?? "";
+            SummaryAlbum.Text = item.Country ?? "";
+        }
+
+        // Album art -- music reads from local file tags, radio/podcast pull
+        // from a URL (FaviconUrl carries the feed/episode image for podcasts).
         if (isMusic && !string.IsNullOrEmpty(item.FilePath))
         {
             SummaryArt.Source = LoadAlbumArtBitmap(item.FilePath);
+        }
+        else if ((isRadio || isPodcast) && !string.IsNullOrWhiteSpace(item.FaviconUrl))
+        {
+            SummaryArt.Source = null;
+            _ = LoadSummaryArtFromUrlAsync(item.FaviconUrl!);
         }
         else
         {
@@ -104,6 +136,10 @@ public partial class MediaInfoDialog : Window
         {
             LoadMusicSummary(item);
         }
+        else if (isPodcast)
+        {
+            LoadPodcastSummary(item);
+        }
         else
         {
             LoadRadioSummary(item);
@@ -112,7 +148,9 @@ public partial class MediaInfoDialog : Window
         // Common date/usage fields
         SummaryDateModified.Text = FormatHelper.FormatDateWithRelative(isMusic ? item.LastModified : null);
         SummaryPlayCount.Text = item.PlayCount.ToString();
-        SummaryLastPlayed.Text = item.LastPlayed.HasValue ? FormatHelper.FormatDateWithRelative(item.LastPlayed) : "Never";
+        SummaryLastPlayed.Text = item.LastPlayed.HasValue
+            ? FormatHelper.FormatDateWithRelative(item.LastPlayed)
+            : "Never";
         SummaryDateAdded.Text = FormatHelper.FormatDateWithRelative(item.DateAdded);
 
         // Where / Stream
@@ -121,10 +159,41 @@ public partial class MediaInfoDialog : Window
             SummaryWhereLabel.Text = "Where:";
             SummaryWherePath.Text = item.FilePath ?? "-";
         }
+        else if (isPodcast && !string.IsNullOrWhiteSpace(item.FilePath))
+        {
+            SummaryWhereLabel.Text = "Downloaded:";
+            SummaryWherePath.Text = item.FilePath!;
+        }
         else
         {
             SummaryWhereLabel.Text = "Stream:";
             SummaryWherePath.Text = item.StreamUrl ?? "-";
+        }
+    }
+
+    private async Task LoadSummaryArtFromUrlAsync(string url)
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(10),
+            };
+            http.DefaultRequestHeaders.Add("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+            var bytes = await http.GetByteArrayAsync(url);
+
+            using var stream = new MemoryStream(bytes);
+            var bmp = Bitmap.DecodeToWidth(stream, 200);
+
+            if (SummaryArt is not null)
+            {
+                SummaryArt.Source = bmp;
+            }
+        }
+        catch
+        {
+            // Best-effort: if the image host is down, leave the placeholder.
         }
     }
 
@@ -174,6 +243,45 @@ public partial class MediaInfoDialog : Window
         SummaryR4C2Value.Text = "";
     }
 
+    /// <summary>
+    /// Podcast variant of the Summary tab. Fills the same grid slots the radio
+    /// path uses, with podcast-appropriate labels: show name, duration, publish
+    /// date. Hides codec/votes/clicks (radio-only). Type label reads "Podcast".
+    /// </summary>
+    private void LoadPodcastSummary(MediaItem item)
+    {
+        SummaryMediaKind.Text = item.Kind.ToString();
+
+        // Row 1: Size (file size when downloaded, otherwise blank) + Show
+        SummarySize.Text = item.FileSize.HasValue
+            ? FormatHelper.FormatFileSize(item.FileSize.Value)
+            : "-";
+
+        SummaryR1C2Label.Text = "Show:";
+        SummaryR1C2Value.Text = !string.IsNullOrEmpty(item.Artist) ? item.Artist : "-";
+
+        // Row 2: Duration + Published
+        SummaryR2C0Label.Text = "Duration:";
+        SummaryR2C0Value.Text = item.Duration.HasValue
+            ? FormatHelper.FormatDurationCompact(item.Duration.Value)
+            : "-";
+
+        SummaryR2C2Label.Text = "Published:";
+        SummaryR2C2Value.Text = FormatHelper.FormatDateWithRelative(item.DateAdded);
+
+        // Row 3: leave first slot blank, Type column populated by shared row
+        SummaryR3C0Label.Text = "";
+        SummaryR3C0Value.Text = "";
+        SummaryKind.Text = "Podcast";
+
+        // Row 4 reserved for Podcast 2.0 augmentations (chapters URL, transcript
+        // URL, persons) once the DTO carries them; blank for now.
+        SummaryR4C0Label.Text = "";
+        SummaryR4C0Value.Text = "";
+        SummaryR4C2Label.Text = "";
+        SummaryR4C2Value.Text = "";
+    }
+
     #endregion
 
     #region Info Tab
@@ -204,6 +312,51 @@ public partial class MediaInfoDialog : Window
         RadioInfoHomepage.Text = item.HomepageUrl ?? "";
         RadioInfoCodec.Text = item.CodecLabel;
         RadioInfoBitrate.Text = item.Bitrate is > 0 ? $"{item.Bitrate} kbps" : "-";
+    }
+
+    private void LoadPodcastInfo(MediaItem item)
+    {
+        PodcastInfoTitle.Text = item.Title ?? "";
+        PodcastInfoShow.Text = item.Artist ?? "";
+        PodcastInfoDuration.Text = item.Duration.HasValue
+            ? FormatHelper.FormatDurationCompact(item.Duration.Value)
+            : "-";
+        PodcastInfoPublished.Text = FormatHelper.FormatDateWithRelative(item.DateAdded);
+
+        // Show notes ride on the Comment field -- it's the canonical "long
+        // description" slot on MediaItem so we don't add a podcast-only field
+        // just for this. PodcastIndex serves HTML, so we strip tags + unescape
+        // basic entities so the readout looks like text the user expects.
+        PodcastInfoNotes.Text = StripHtml(item.Comment ?? "");
+
+        PodcastInfoStreamUrl.Text = item.StreamUrl ?? "";
+        PodcastInfoHomepage.Text = item.HomepageUrl ?? "";
+    }
+
+    private static string StripHtml(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return "";
+        }
+
+        // Replace block tags with newlines so paragraphs survive the strip.
+        var withBreaks = System.Text.RegularExpressions.Regex.Replace(
+            html,
+            @"</?(p|br|li|div|h[1-6])[^>]*>",
+            "\n",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Drop the rest of the tags.
+        var stripped = System.Text.RegularExpressions.Regex.Replace(withBreaks, @"<[^>]+>", "");
+
+        // Unescape standard entities the API ships verbatim.
+        stripped = System.Net.WebUtility.HtmlDecode(stripped);
+
+        // Collapse 3+ consecutive newlines down to 2 so spacing looks normal.
+        stripped = System.Text.RegularExpressions.Regex.Replace(stripped, @"\n{3,}", "\n\n");
+
+        return stripped.Trim();
     }
 
     #endregion
@@ -341,7 +494,16 @@ public partial class MediaInfoDialog : Window
         }
 
         SaveOptions();
-        Services.MediaCache.UpsertMusic(_item);
+
+        // Podcasts aren't persisted in the main library cache yet, so skip the
+        // upsert -- saving an Options edit on a podcast still updates the live
+        // MediaItem, just not the DB. (The deeper consolidation will route
+        // podcasts through MediaCache like everything else.)
+        if (_item.Kind != MediaKind.Podcast)
+        {
+            Services.MediaCache.UpsertMusic(_item);
+        }
+
         ItemChanged = true;
     }
 

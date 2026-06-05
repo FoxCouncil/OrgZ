@@ -13,6 +13,7 @@ public enum ColumnType
     Centered,
     RightAligned,
     Badge,
+    Flag,
 }
 
 public record ColumnDef
