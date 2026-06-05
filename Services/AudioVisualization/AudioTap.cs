@@ -57,6 +57,27 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
 
     private float[] _floatScratch = new float[4096];
 
+    // --- Realtime-paced analyzer feed ------------------------------------
+    // libvlc's audio callback fires in bursts whose size depends on the
+    // decoder (MP3 frames ~1152, FLAC blocks ~4096), which makes the FFT
+    // pipeline see one big lump every 25ms or one bigger lump every ~93ms.
+    // To decouple visualization pacing from delivery pacing, the callback
+    // just stashes samples into this ring buffer; a periodic timer drains
+    // it at realtime rate (one frame per 1/sampleRate seconds) and feeds
+    // the analyzer in steady ~16ms chunks. The meter looks identical
+    // regardless of whether the source is a 26ms-callback radio stream or
+    // a 93ms-callback FLAC file.
+    private const int RingCapacityFrames = 8192;  // ~186ms @ 44.1 kHz
+    private readonly float[] _ringInterleaved = new float[RingCapacityFrames * 2];
+    private int _ringWriteIdx;
+    private int _ringFillFrames;
+    private readonly object _ringLock = new();
+    private System.Threading.Timer? _drainTimer;
+    private long _lastDrainTicks;
+    private int _drainBusy;
+    private const int DrainPeriodMs = 16;
+    private float[] _drainScratch = new float[2048 * 2];
+
     public AudioTap(AudioSinkBus bus, AudioAnalyzer? analyzer = null)
     {
         ArgumentNullException.ThrowIfNull(bus);
@@ -76,6 +97,26 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
 
     public event AudioFrameHandler? RawFrameAvailable;
 
+    /// <summary>
+    /// Fires once per playback session the first time libvlc actually delivers
+    /// PCM samples to the tap. The viewmodel uses this to know "playback is
+    /// truly under way" -- a more reliable signal than libvlc's Playing event,
+    /// which can fire before any audio reaches the output.
+    /// </summary>
+    public event Action? AudioStarted;
+
+    private int _audioStartedNotified;
+
+    /// <summary>
+    /// Arms <see cref="AudioStarted"/> to fire on the next OnAudioPlay buffer.
+    /// Called by the viewmodel at the start of every Play call so the LCD's
+    /// loading state can be cleared exactly when sound begins.
+    /// </summary>
+    public void ResetAudioStartTracking()
+    {
+        System.Threading.Interlocked.Exchange(ref _audioStartedNotified, 0);
+    }
+
     public void CopyBandLevels(Span<float> destination) => _analyzer.CopyBands(destination);
 
     public void CopyBandLevelsStereo(Span<float> left, Span<float> right) => _analyzer.CopyBandsStereo(left, right);
@@ -94,6 +135,10 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         player.SetAudioCallbacks(_playCb, _pauseCb, _resumeCb, _flushCb, _drainCb);
         _attachedPlayer = player;
         _bus.SetFormat(AudioFormat.CdDaStereo16);
+
+        _lastDrainTicks = Environment.TickCount64;
+        _drainTimer ??= new System.Threading.Timer(OnDrainTick, null, DrainPeriodMs, DrainPeriodMs);
+
         _log.Information("AudioTap attached to MediaPlayer (format={Format} rate={Rate} ch={Ch})", TapFormat, TapSampleRate, TapChannels);
     }
 
@@ -119,9 +164,15 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         }
 
         var prev = System.Threading.Interlocked.Increment(ref _buffersReceived);
+
         if (prev == 1)
         {
             _log.Information("AudioTap receiving samples: first buffer {Count} frames @ pts={Pts}", count, pts);
+        }
+
+        if (System.Threading.Interlocked.Exchange(ref _audioStartedNotified, 1) == 0)
+        {
+            AudioStarted?.Invoke();
         }
 
         _active = true;
@@ -146,13 +197,106 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
             _floatScratch[i] = shortSpan[i] * Inv32k;
         }
         var floatSpan = new ReadOnlySpan<float>(_floatScratch, 0, totalShorts);
-        _analyzer.FeedInterleavedStereo(floatSpan);
+
+        // Stash into the ring instead of feeding the analyzer directly --
+        // the drain timer delivers samples at a steady realtime cadence
+        // regardless of how libvlc batches them.
+        WriteToRing(floatSpan, (int)count);
 
         var handler = RawFrameAvailable;
         if (handler != null)
         {
             var frame = new AudioFrame(floatSpan, (int)TapSampleRate, (int)TapChannels, pts);
             handler(frame);
+        }
+    }
+
+    private void WriteToRing(ReadOnlySpan<float> interleaved, int frames)
+    {
+        if (frames <= 0)
+        {
+            return;
+        }
+
+        lock (_ringLock)
+        {
+            for (int i = 0; i < frames; i++)
+            {
+                int dst = _ringWriteIdx * 2;
+                _ringInterleaved[dst]     = interleaved[i * 2];
+                _ringInterleaved[dst + 1] = interleaved[i * 2 + 1];
+                _ringWriteIdx = (_ringWriteIdx + 1) % RingCapacityFrames;
+            }
+
+            _ringFillFrames = Math.Min(RingCapacityFrames, _ringFillFrames + frames);
+        }
+    }
+
+    /// <summary>
+    /// Drains realtime-paced frames from the ring buffer into the analyzer.
+    /// Wakes every <see cref="DrainPeriodMs"/> ms and computes the target
+    /// drain amount from wall-clock dt so the analyzer always receives audio
+    /// at the same rate as playback regardless of timer drift or how libvlc
+    /// chose to chunk the source.
+    /// </summary>
+    private void OnDrainTick(object? state)
+    {
+        // Skip if a previous tick is still running. Drain work is <1ms in
+        // practice so this is just belt-and-braces for system pauses.
+        if (System.Threading.Interlocked.Exchange(ref _drainBusy, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            long now = Environment.TickCount64;
+            long dtMs = now - _lastDrainTicks;
+            _lastDrainTicks = now;
+
+            if (dtMs <= 0)
+            {
+                return;
+            }
+
+            // Target frames = sample-rate * dt. Cap at one second of audio
+            // so a long system pause doesn't dump a giant block into the
+            // analyzer in one tick (which would model a discontinuity).
+            int targetFrames = (int)Math.Min(dtMs * TapSampleRate / 1000, TapSampleRate);
+
+            int frames;
+            lock (_ringLock)
+            {
+                frames = Math.Min(targetFrames, _ringFillFrames);
+                if (frames <= 0)
+                {
+                    return;
+                }
+
+                int neededFloats = frames * 2;
+                if (_drainScratch.Length < neededFloats)
+                {
+                    _drainScratch = new float[neededFloats];
+                }
+
+                int readIdx = (_ringWriteIdx - _ringFillFrames + RingCapacityFrames) % RingCapacityFrames;
+                for (int i = 0; i < frames; i++)
+                {
+                    int src = readIdx * 2;
+                    _drainScratch[i * 2]     = _ringInterleaved[src];
+                    _drainScratch[i * 2 + 1] = _ringInterleaved[src + 1];
+                    readIdx = (readIdx + 1) % RingCapacityFrames;
+                }
+
+                _ringFillFrames -= frames;
+            }
+
+            var span = new ReadOnlySpan<float>(_drainScratch, 0, frames * 2);
+            _analyzer.FeedInterleavedStereo(span);
+        }
+        finally
+        {
+            System.Threading.Interlocked.Exchange(ref _drainBusy, 0);
         }
     }
 
@@ -163,12 +307,14 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         // Clear analyzer bands so the VU meter has a zero target to decay
         // toward.  Without this, paused playback leaves the bars pinned at
         // the last level they were showing, which looks broken.
+        ClearRing();
         _analyzer.Reset();
     }
 
     private void OnAudioResume(IntPtr data, long pts)
     {
         _active = true;
+        _lastDrainTicks = Environment.TickCount64;
         _bus.ResumeAll();
     }
 
@@ -177,6 +323,7 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         // Seek / track change — drop both the analyzer's windowed state and
         // every sink's pending hardware queue so the user hears the new
         // position right away instead of the last buffered chunk of the old.
+        ClearRing();
         _analyzer.Reset();
         _bus.FlushAll();
     }
@@ -184,8 +331,18 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
     private void OnAudioDrain(IntPtr data)
     {
         _active = false;
+        ClearRing();
         _analyzer.Reset();
         _bus.FlushAll();
+    }
+
+    private void ClearRing()
+    {
+        lock (_ringLock)
+        {
+            _ringFillFrames = 0;
+            _ringWriteIdx = 0;
+        }
     }
 
     public void Dispose()
@@ -196,6 +353,8 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         }
 
         _disposed = true;
+        _drainTimer?.Dispose();
+        _drainTimer = null;
         _attachedPlayer = null;
     }
 }

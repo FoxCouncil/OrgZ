@@ -29,6 +29,27 @@ internal static class FormatHelper
         return ts.ToString(@"m\:ss\.fff");
     }
 
+    /// <summary>
+    /// LCD-style duration: <c>m:ss</c> when under an hour, <c>h:mm:ss</c> when
+    /// equal to or above. Hides the hours segment until needed so music tracks
+    /// look natural (3:24) while a 2-hour podcast or audiobook chapter shows
+    /// the hours segment without forcing music to a 0:03:24 layout.
+    /// </summary>
+    public static string FormatDurationCompact(TimeSpan ts)
+    {
+        if (ts.TotalHours >= 1)
+        {
+            return ts.ToString(@"h\:mm\:ss");
+        }
+        return ts.ToString(@"m\:ss");
+    }
+
+    public static string FormatDurationCompact(long milliseconds)
+        => FormatDurationCompact(TimeSpan.FromMilliseconds(milliseconds));
+
+    public static string FormatDurationCompact(int seconds)
+        => FormatDurationCompact(TimeSpan.FromSeconds(seconds));
+
     public static TimeSpan? TryParseTimeSpan(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

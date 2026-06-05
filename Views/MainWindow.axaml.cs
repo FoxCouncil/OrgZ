@@ -383,14 +383,23 @@ public partial class MainWindow : Window
 
     private void ApplyViewConfig(ListViewConfig config)
     {
+        bool isPodcasts = config.Key == "Podcasts";
         bool isGrouped = config.GroupByPath != null;
 
-        // Toggle between two DataGrids — grouped views use GroupedDataGrid (columns set once),
-        // non-grouped views use MainDataGrid (columns rebuilt per view). This avoids an Avalonia
-        // bug where the DataGrid's internal RowGroupSpacerColumn state corrupts column insertion
-        // after a grouped view was bound.
-        MainDataGrid.IsVisible = !isGrouped;
-        GroupedDataGrid.IsVisible = isGrouped;
+        // Podcasts uses its own UserControl instead of a DataGrid. Hide both grids
+        // and show the panel; the panel's internal nav switches between store /
+        // subscriptions / feed-detail without touching the DataGrid pipeline.
+        PodcastsPanel.IsVisible = isPodcasts;
+        MainDataGrid.IsVisible = !isPodcasts && !isGrouped;
+        GroupedDataGrid.IsVisible = !isPodcasts && isGrouped;
+
+        if (isPodcasts)
+        {
+            _ = _viewModel.Podcasts.LoadStoreAsync();
+            _viewModel.Podcasts.ReloadSubscriptions();
+            _viewModel.Podcasts.ReloadDownloads();
+            return;
+        }
 
         if (isGrouped)
         {
@@ -753,36 +762,34 @@ public partial class MainWindow : Window
                         {
                             HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Center,
-                            Foreground = new SolidColorBrush(Color.Parse("#E0E0E0")),
                             FontWeight = FontWeight.SemiBold,
                             FontSize = 10,
-                            LetterSpacing = 0.5,
                         };
                         ApplyColumnTextOverrides(tb, def);
                         tb.Bind(TextBlock.TextProperty, new Binding(def.BindingPath) { StringFormat = def.StringFormat });
-
-                        var pill = new Border
+                        return tb;
+                    }),
+                },
+                ColumnType.Flag => new DataGridTemplateColumn
+                {
+                    Header = def.Header,
+                    CellTemplate = new FuncDataTemplate<MediaItem>((item, _) =>
+                    {
+                        var img = new Image
                         {
-                            Background = new SolidColorBrush(Color.Parse("#2A2A2A")),
-                            BorderBrush = new SolidColorBrush(Color.Parse("#3F3F3F")),
-                            BorderThickness = new Thickness(1),
-                            CornerRadius = new CornerRadius(3),
-                            Padding = new Thickness(0, 2),
-                            Width = 44,
+                            Width = 24,
+                            Height = 16,
+                            Stretch = Stretch.Uniform,
                             HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Center,
-                            Child = tb,
                         };
-
-                        // Hide the brick entirely when the cell value is blank so empty
-                        // rows don't show a tiny empty pill.
-                        pill.Bind(IsVisibleProperty,
+                        img.Bind(Image.SourceProperty,
                             new Binding(def.BindingPath)
                             {
-                                Converter = Avalonia.Data.Converters.StringConverters.IsNotNullOrEmpty,
+                                Converter = Converters.CountryCodeToFlagConverter.Instance,
                             });
-
-                        return pill;
+                        img.Bind(ToolTip.TipProperty, new Binding(nameof(MediaItem.CountryTooltip)));
+                        return img;
                     }),
                 },
                 _ => new DataGridTextColumn

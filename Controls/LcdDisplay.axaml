@@ -60,6 +60,7 @@
 		</Style>
 		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdTime">
 			<Setter Property="FontSize" Value="11" />
+			<Setter Property="LineHeight" Value="8" />
 		</Style>
 		<Style Selector="controls|LcdDisplay.mini TextBlock.lcdRipTitle">
 			<Setter Property="FontSize" Value="11" />
@@ -153,18 +154,18 @@
 						           TextAlignment="Right" Text="{Binding CurrentTrackTime}" />
 						<Grid x:Name="SeekHost" Grid.Column="1" Height="14">
 							<Border BorderBrush="{StaticResource OrgZLcdTextBrush}" BorderThickness="1"
-							        IsVisible="{Binding IsSeekEnabled}" Height="14" VerticalAlignment="Center" />
+							        IsVisible="{Binding ShowSeekSlider}" Height="14" VerticalAlignment="Center" />
 							<Slider x:Name="SeekSlider" Classes="lcdSeek"
 							        Minimum="0" Maximum="{Binding CurrentTrackDurationNumber}"
 							        Value="{Binding CurrentTrackTimeNumber, Mode=TwoWay}"
-							        IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding IsSeekEnabled}"
+							        IsEnabled="{Binding IsSeekEnabled}" IsVisible="{Binding ShowSeekSlider}"
 							        VerticalAlignment="Center" Height="14" Padding="0,-12,0,0" />
 							<!-- Live-stream indicator for radio (no seek). 1px frame matching
 							     the seek bar style; inside, a wide Rectangle filled with a
 							     tiled diagonal-stripe VisualBrush. Canvas.Left is animated
 							     from 0 to -16 on infinite loop — one tile width, no visible
 							     seam. Outer Border clips so only the visible viewport shows. -->
-							<Border IsVisible="{Binding !IsSeekEnabled}"
+							<Border IsVisible="{Binding ShowBarberPole}"
 							        BorderBrush="{StaticResource OrgZLcdTextBrush}" BorderThickness="1"
 							        Background="{StaticResource OrgZLcdBrush}"
 							        Height="14" VerticalAlignment="Center">
@@ -176,7 +177,7 @@
 								<Border ClipToBounds="True" Background="Transparent">
 									<Canvas>
 										<Rectangle x:Name="LiveStreamIndicator"
-										           Classes.loading="{Binding IsStreamLoading}"
+										           Classes.loading="{Binding IsPlaybackLoading}"
 										           Canvas.Left="0" Canvas.Top="0"
 										           Width="2048" Height="12">
 											<Rectangle.Fill>

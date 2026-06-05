@@ -33,7 +33,6 @@ namespace OrgZ.Views;
 public partial class MiniPlayerWindow : Window
 {
     public event Action? RestoreMainRequested;
-    public event Action? FullScreenRequested;
 
     public MiniPlayerWindow()
     {
@@ -85,39 +84,23 @@ public partial class MiniPlayerWindow : Window
         }
     }
 
-    private void Lcd_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        // Single-click is a no-op — the chevron button inside the LCD owns
-        // page cycling now. Double-click still goes full-screen. Clicks on
-        // the seek slider are owned by the slider itself.
-        if (IsWithinSeekSlider(e.Source as Avalonia.Visual))
-        {
-            return;
-        }
-
-        if (e.ClickCount >= 2)
-        {
-            FullScreenRequested?.Invoke();
-            e.Handled = true;
-        }
-    }
-
-    private static bool IsWithinSeekSlider(Avalonia.Visual? source)
-    {
-        while (source != null)
-        {
-            if (source is Slider)
-            {
-                return true;
-            }
-            source = source.GetVisualParent();
-        }
-        return false;
-    }
-
     // -- Windows / Linux chrome ------------------------------------------
 
-    private void Close_Click(object? sender, RoutedEventArgs e) => Close();
+    /// <summary>
+    /// The X button on the mini-player chassis quits the whole app, mirroring
+    /// what the OS-native X on a regular window does. Use "Switch to Full Player"
+    /// or the menu's "Close Mini-Player" to drop the mini-player without exiting.
+    /// </summary>
+    private void Close_Click(object? sender, RoutedEventArgs e) => ShutdownApplication();
+
+    private static void ShutdownApplication()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime
+            is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
+    }
 
     private void Expand_Click(object? sender, RoutedEventArgs e)
     {
@@ -131,7 +114,7 @@ public partial class MiniPlayerWindow : Window
 
     private void MacClose_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        Close();
+        ShutdownApplication();
         e.Handled = true;
     }
 
@@ -149,11 +132,6 @@ public partial class MiniPlayerWindow : Window
     }
 
     // -- Context menu ----------------------------------------------------
-
-    private void MenuFullScreen_Click(object? sender, RoutedEventArgs e)
-    {
-        FullScreenRequested?.Invoke();
-    }
 
     private void MenuExpand_Click(object? sender, RoutedEventArgs e)
     {

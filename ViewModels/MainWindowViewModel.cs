@@ -92,6 +92,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private MediaItem? CurrentStation => CurrentPlayingItem?.Kind == MediaKind.Radio ? CurrentPlayingItem : null;
 
+    /// <summary>
+    /// Set by <see cref="PlayPodcastEpisodeStream"/> while a podcast stream is
+    /// active. Used as the "I'm a podcast right now" signal in MediaChanged
+    /// (so it doesn't overwrite the LCD with music metadata) and ButtonPlayPause
+    /// (so the user can actually pause / resume). Podcasts don't use the
+    /// PlaybackContext system, so this is the source of truth.
+    /// </summary>
+    private (Models.PodcastFeed Feed, Models.PodcastEpisode Episode)? _currentPodcastStream;
+
+    /// <summary>
+    /// Duration captured during MediaChanged (or seeded by API for podcasts)
+    /// but held back from the LCD until the first audio buffer reaches the
+    /// tap. The AudioStarted handler writes this into
+    /// <see cref="CurrentTrackDuration"/> at the moment the loading indicator
+    /// clears, so time labels stay blank during the load.
+    /// </summary>
+    private long? _pendingDurationMs;
+
     [ObservableProperty]
     private StatusBarViewModel _statusBar = new();
 
@@ -107,6 +125,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal ObservableCollection<SidebarItem> DeviceItems { get; } = [];
 
     /// <summary>
+    public PodcastsViewModel Podcasts { get; private set; } = null!;
+
+    /// <summary>
     /// Rebuilds the LibraryItems list. Called on startup and when settings like "Show Ignored in sidebar" change.
     /// </summary>
     internal void RebuildLibraryItems()
@@ -116,7 +137,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         LibraryItems.Add(new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" });
         LibraryItems.Add(new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" });
-        LibraryItems.Add(new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = false });
+        LibraryItems.Add(new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Podcast, ViewConfigKey = "Podcasts" });
         LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false });
 
         if (Settings.Get("OrgZ.ShowIgnored", true))
@@ -230,7 +251,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return " " + CurrentTrackDuration;
             }
             var remainingMs = Math.Max(0, CurrentTrackDurationNumber - CurrentTrackTimeNumber);
-            return "-" + TimeSpan.FromMilliseconds(remainingMs).ToString(@"m\:ss");
+            return "-" + FormatHelper.FormatDurationCompact(remainingMs);
         }
     }
 
@@ -245,15 +266,35 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private Bitmap? _currentAlbumArt;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSeekSlider), nameof(ShowBarberPole))]
     private bool _isSeekEnabled = true;
 
     /// <summary>
-    /// True while the player is preparing media (between Play() call and the libvlc
-    /// Playing event). Drives the LCD's live-indicator barber-pole animation to run
-    /// 2x faster as a "buffering" cue. Reset on Playing / Stopped / EndReached.
+    /// True while the player is preparing media -- between the Play() call and
+    /// the first PCM buffer reaching <see cref="AudioTap"/>. Covers every kind
+    /// of "load": network buffering for radio / podcasts, disk read for music
+    /// on slow HDDs, the CD spinning up to deliver the first sector. Drives
+    /// the LCD's barber pole at 2x speed as a buffering cue, and flips the
+    /// seek-bar slot from the slider to the barber pole regardless of whether
+    /// the source supports seeking.
     /// </summary>
     [ObservableProperty]
-    private bool _isStreamLoading;
+    [NotifyPropertyChangedFor(nameof(ShowSeekSlider), nameof(ShowBarberPole))]
+    private bool _isPlaybackLoading;
+
+    /// <summary>
+    /// LCD seek slider is shown when the source supports seeking AND playback
+    /// has actually begun. During the load (<see cref="IsPlaybackLoading"/>) it
+    /// hides so the barber pole owns the slot.
+    /// </summary>
+    public bool ShowSeekSlider => IsSeekEnabled && !IsPlaybackLoading;
+
+    /// <summary>
+    /// LCD barber-pole indicator: visible during the load AND for live radio
+    /// streams (which never expose a duration). One animation, one stripe
+    /// pattern, two speeds chosen by the .loading class on the rectangle.
+    /// </summary>
+    public bool ShowBarberPole => IsPlaybackLoading || !IsSeekEnabled;
 
     // -- Shuffle / Repeat --
 
@@ -550,7 +591,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private MiniPlayerWindow? _miniPlayer;
-    private NowPlayingFullScreenWindow? _fullScreen;
 
     /// <summary>
     /// Brings the main window back from the mini-player (iTunes-style) hidden
@@ -593,11 +633,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _window.Show();
             _window.Activate();
         };
-        _miniPlayer.FullScreenRequested += ShowNowPlayingFullScreen;
         _miniPlayer.Closed += (_, _) =>
         {
             _miniPlayer = null;
-            if (!_window.IsVisible)
+            // The mini-player's X button calls Shutdown(), which closes us first.
+            // Don't try to re-show the main window if its native handle is already
+            // gone — Avalonia throws InvalidOperationException("Cannot re-show a
+            // closed window") and the unhandled exception crashes the process.
+            if (!_window.IsVisible && _window.PlatformImpl != null)
             {
                 _window.Show();
                 _window.Activate();
@@ -610,20 +653,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _window.Hide();
         }
-    }
-
-    [RelayCommand]
-    internal void ShowNowPlayingFullScreen()
-    {
-        if (_fullScreen != null)
-        {
-            _fullScreen.Activate();
-            return;
-        }
-
-        _fullScreen = new NowPlayingFullScreenWindow { DataContext = this };
-        _fullScreen.Closed += (_, _) => _fullScreen = null;
-        _fullScreen.Show();
     }
 
     internal static MiniPlayerMode LoadMiniPlayerMode()
@@ -984,6 +1013,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+        Podcasts = new PodcastsViewModel(this);
+
         // Initialize shuffle/repeat visual state from saved settings
         ShuffleOpacity = ShuffleMode == ShuffleMode.On ? 1.0 : 0.4;
         RepeatIcon = RepeatMode == RepeatMode.One ? "fa-solid fa-arrow-rotate-left" : "fa-solid fa-repeat";
@@ -1018,6 +1049,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioTap.Attach(_player);
         _audioOutput.LoadAndApplyPersistedSelections();
         UpdateMasterVolume();
+
+        // First-audio signal: libvlc fires Playing as soon as it thinks it has
+        // a Media to play -- often before any PCM has actually reached the tap.
+        // Hook the audio path itself so the loading-state indicator and the
+        // empty LCD time labels persist until sound is genuinely flowing.
+        _audioTap.AudioStarted += () => UI(() =>
+        {
+            IsPlaybackLoading = false;
+
+            if (_pendingDurationMs is { } d && d > 0)
+            {
+                CurrentTrackDuration = FormatHelper.FormatDurationCompact(d);
+                CurrentTrackDurationNumber = d;
+            }
+
+            _pendingDurationMs = null;
+        });
 
         _player.EndReached += (s, e) => UI(() =>
         {
@@ -1056,7 +1104,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player.Playing += (s, e) => UI(() =>
         {
-            IsStreamLoading = false;
+            // Don't clear IsPlaybackLoading here -- libvlc fires Playing the
+            // instant it has a Media, which can be well before actual audio
+            // reaches the tap. AudioTap.AudioStarted is the precise signal.
             ButtonPlayPauseIcon = ICON_PAUSE;
             ButtonPlayPausePadding = ICON_PAUSE_PADDING;
 
@@ -1073,7 +1123,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         long _lastMacNowPlayingPushMs = long.MinValue;
         _player.TimeChanged += (s, e) => UI(() =>
         {
-            CurrentTrackTime = TimeSpan.FromMilliseconds(e.Time).ToString("m\\:ss");
+            CurrentTrackTime = FormatHelper.FormatDurationCompact(e.Time);
             if (!isSeeking)
             {
                 CurrentTrackTimeNumber = e.Time;
@@ -1111,7 +1161,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player.Stopped += (s, e) => UI(() =>
         {
-            IsStreamLoading = false;
+            IsPlaybackLoading = false;
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
@@ -1154,9 +1204,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 if (e.Media != null && e.Media.Duration > 0)
                 {
-                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"m\:ss");
-                    CurrentTrackDurationNumber = e.Media.Duration;
+                    _pendingDurationMs = e.Media.Duration;
                 }
+                return;
+            }
+
+            // Podcast streams: keep the title/feed we set in PlayPodcastEpisodeStream
+            // and pick up the duration libvlc now has. Stop here so the music
+            // branch below doesn't overwrite the LCD with "Unknown Title".
+            if (_currentPodcastStream is { } ps)
+            {
+                IsSeekEnabled = true;
+
+                if (e.Media != null && e.Media.ParsedStatus != MediaParsedStatus.Done)
+                {
+                    _ = await e.Media.Parse();
+                }
+
+                // Cache duration -- prefer libvlc's measurement, fall back to
+                // the API's reported value for streams libvlc can't measure.
+                // AudioStarted writes it to the LCD when audio actually flows.
+                long? vlcDurMs = e.Media != null && e.Media.Duration > 0 ? e.Media.Duration : null;
+                long apiDurMs = (long)ps.Episode.DurationSec * 1000;
+                _pendingDurationMs = vlcDurMs ?? (apiDurMs > 0 ? apiDurMs : null);
+
+                CurrentTrackLine1 = ps.Episode.Title ?? string.Empty;
+                CurrentTrackLine2 = ps.Feed.Title ?? string.Empty;
                 return;
             }
 
@@ -1172,8 +1245,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     {
                         _ = await e.Media.Parse();
                     }
-                    CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString(@"m\:ss");
-                    CurrentTrackDurationNumber = e.Media.Duration;
+                    _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
                 }
 
                 var mountPath = CurrentPlayingItem.Source["device:".Length..];
@@ -1198,8 +1270,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _ = await e.Media.Parse();
             }
 
-            CurrentTrackDuration = TimeSpan.FromMilliseconds(e.Media.Duration).ToString("m\\:ss");
-            CurrentTrackDurationNumber = e.Media.Duration;
+            _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
 
             CurrentTrackLine1 = CurrentMusicItem?.Title ?? "Unknown Title";
             var artist = CurrentMusicItem?.Artist ?? "Unknown Artist";
@@ -1325,6 +1396,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (_player == null)
             {
+                return;
+            }
+
+            // Podcast streams skip the playback-context machinery, so they need
+            // a dedicated pause/resume branch -- the music / radio branches
+            // below depend on CurrentMusicItem / CurrentStation which are both
+            // null while a podcast is playing.
+            if (_currentPodcastStream != null)
+            {
+                if (_player.IsPlaying)
+                {
+                    Pause();
+                }
+                else
+                {
+                    Play();
+                }
                 return;
             }
 
@@ -1528,6 +1616,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Shared entry point for the Get Info dialog when the caller has an
+    /// arbitrary MediaItem that isn't part of the active <see cref="FilteredItems"/>
+    /// list (the podcast feed-detail view, for example, drives off its own
+    /// collection). Same dialog as Music / Radio "Get Info" so the action means
+    /// the same thing everywhere.
+    /// </summary>
+    internal async Task ShowMediaInfoForItemAsync(MediaItem item)
+    {
+        var dialog = new Views.MediaInfoDialog(item, [item]);
+        await dialog.ShowDialog<bool?>(_window);
+    }
+
     [RelayCommand]
     internal async Task ShowSettings()
     {
@@ -1686,7 +1787,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _currentMedia.AddOption(":file-caching=3000");
             _currentMedia.AddOption(":disc-caching=3000");
         }
-        IsStreamLoading = true;
+
+        BeginPlayback();
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -1765,10 +1867,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayMusicItem(MediaItem? file)
     {
-        if (_player == null || file == null || file.Kind != MediaKind.Music)
+        // Accepts Music files and downloaded Podcast files -- both are local
+        // paths libvlc opens via FromType.FromPath; the only difference is
+        // metadata routing handled downstream.
+        if (_player == null || file == null || (file.Kind != MediaKind.Music && file.Kind != MediaKind.Podcast))
         {
             return;
         }
+        _currentPodcastStream = null;
 
         // CD tracks use StreamUrl, regular music uses FilePath
         if (file.Source == "cdda")
@@ -1805,6 +1911,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
+        _currentPodcastStream = null;
 
         // Debounce rapid clicks: cancel any pending switch, schedule a fresh one.
         // 120 ms is short enough to feel responsive on deliberate clicks, long
@@ -1883,7 +1990,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
         ApplyVisualizerOption(_currentMedia);
 
-        IsStreamLoading = true;
+        BeginPlayback();
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -1943,6 +2050,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // Stream the body in chunks instead of trying to fully buffer the response
             // before playback starts. Required for live audio (no Content-Length).
             _currentMedia.AddOption(":http-continuous");
+            // Standard browser UA -- libvlc's default sometimes gets blocked
+            // by upstream CDNs / firewalls. Same UA we use for the cover-art
+            // and podcast image fetchers so server logs see consistent traffic.
+            _currentMedia.AddOption(":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
 
             // Capture THIS specific Media instance. When the user switches stations rapidly,
             // LibVLC can still deliver late MetaChanged events from the previous (disposed)
@@ -2017,7 +2128,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // is more crash-prone than the single transition Play(newMedia) performs
             // internally. The 120 ms debounce in PlayRadioStation + the lock here +
             // the deferred dispose under the same lock is the safe combination.
-            IsStreamLoading = true;
+            BeginPlayback();
             _ = _player.Play(thisMedia);
             DeferDispose(previousMedia, previousHandler);
         }
@@ -2039,6 +2150,148 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// is playing — consumers just read whenever they need to render.
     /// </summary>
     internal OrgZ.Services.AudioVisualization.IAudioVisualizationSource AudioVisualization => _audioTap;
+
+    /// <summary>
+    /// Streams a podcast episode directly from its <c>enclosureUrl</c> without
+    /// requiring a download or subscription. Records the play in
+    /// <see cref="Services.Podcast.PodcastCache"/> so all listens — streamed or
+    /// downloaded — show up in the history.
+    /// </summary>
+    /// <summary>
+    /// Plays a podcast episode. Pass <paramref name="localPath"/> when the
+    /// episode is downloaded; libvlc opens it as a local file. Without it,
+    /// the episode's <c>EnclosureUrl</c> is streamed. Either way the same LCD
+    /// metadata, OS now-playing payload, pause/resume logic, and listen
+    /// tracking apply -- this is the single playback path for podcasts.
+    /// </summary>
+    /// <summary>
+    /// Common pre-roll for every Play* path: clear LCD time labels, arm the
+    /// fast loading indicator, and reset the audio-start tracker so the next
+    /// PCM buffer libvlc delivers cleanly transitions out of the loading state.
+    /// Music / Radio / Podcast / CD all call this before handing libvlc new
+    /// Media, so the visual experience is identical across kinds.
+    /// </summary>
+    private void BeginPlayback()
+    {
+        CurrentTrackTime = "";
+        CurrentTrackDuration = "";
+        CurrentTrackTimeNumber = 0;
+        CurrentTrackDurationNumber = 0;
+        IsPlaybackLoading = true;
+        _audioTap?.ResetAudioStartTracking();
+    }
+
+    internal void PlayPodcastEpisode(Models.PodcastFeed feed, Models.PodcastEpisode episode, string? localPath = null)
+    {
+        if (_player == null)
+        {
+            _log.Warning("PlayPodcastEpisode: player not initialized");
+            return;
+        }
+
+        var source = localPath ?? episode.EnclosureUrl;
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            _log.Warning("PlayPodcastEpisode: episode {Id} has no playable source", episode.Id);
+            return;
+        }
+        bool isLocal = localPath != null && File.Exists(localPath);
+
+        _log.Information("Playing podcast episode {Id} '{Title}' [{Mode}] from {Source}",
+            episode.Id, episode.Title, isLocal ? "local" : "stream", source);
+
+        UI(() =>
+        {
+            _currentPodcastStream = (feed, episode);
+            _playbackContext?.Release();
+            _playbackContext = null;
+
+            CurrentAlbumArt = null;
+            CurrentTrackLine1 = episode.Title ?? string.Empty;
+            CurrentTrackLine2 = feed.Title ?? string.Empty;
+            UpdateMainStatus(isLocal ? $"Playing: {episode.Title}" : $"Streaming: {episode.Title}");
+
+            var artUrl = !string.IsNullOrWhiteSpace(episode.Image) ? episode.Image : feed.DisplayImage;
+            if (!string.IsNullOrWhiteSpace(artUrl))
+            {
+                _ = LoadPodcastArtAsync(artUrl, episode, feed);
+            }
+
+            // LCD time labels stay blank until the first PCM buffer reaches
+            // the audio tap -- BeginPlayback cleared them and the MediaChanged
+            // podcast branch will seed the API duration once playback is
+            // actually under way (with libvlc's measured value taking priority
+            // when it has one).
+
+            var item = new MediaItem
+            {
+                Id        = $"podcast:{episode.Id}",
+                Kind      = MediaKind.Podcast,
+                Source    = "podcast",
+                Title     = episode.Title,
+                Artist    = feed.Title,
+                StreamUrl = isLocal ? null : episode.EnclosureUrl,
+                FilePath  = isLocal ? localPath : null,
+            };
+            SelectedItem = item;
+
+#if WINDOWS
+            _smtcService?.UpdateMetadata(episode.Title, feed.Title, "Podcast", null);
+#endif
+            _mprisService?.SetMetadata(episode.Title, feed.Title, "Podcast", episode.Image ?? feed.DisplayImage);
+            _macNowPlaying?.SetMetadata(episode.Title, feed.Title, "Podcast", null);
+
+            try
+            {
+                lock (_playbackSwitchLock)
+                {
+                    var previousMedia = _currentMedia;
+                    var previousHandler = _currentMediaMetaHandler;
+                    _currentMediaMetaHandler = null;
+
+                    _currentMedia = isLocal
+                        ? new Media(_vlc, source, FromType.FromPath)
+                        : new Media(_vlc, source, FromType.FromLocation);
+
+                    if (!isLocal)
+                    {
+                        // Streamed only: podcasts have Content-Length so we omit
+                        // :http-continuous (a live-stream option). Network caching
+                        // and reconnect still help on flaky CDN edges.
+                        _currentMedia.AddOption(":network-caching=3000");
+                        _currentMedia.AddOption(":http-reconnect");
+                        // Force a standard browser UA -- libvlc's default
+                        // ("VLC/3.x LibVLC/3.x") gets blocked or fingerprinted
+                        // differently by some CDNs (Simplecast / Megaphone),
+                        // which can manifest as redirects libvlc won't follow.
+                        _currentMedia.AddOption(":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+                    }
+
+                    IsSeekEnabled = true;
+                    BeginPlayback();
+                    _ = _player.Play(_currentMedia);
+                    DeferDispose(previousMedia, previousHandler);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "PlayPodcastEpisode: libvlc Play failed for episode {Id}", episode.Id);
+            }
+
+            try
+            {
+                Services.Podcast.PodcastCache.RecordPlay(feed, episode);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "RecordPlay failed for episode {Id}", episode.Id);
+            }
+        });
+    }
+
+    // Back-compat alias: existing callers may still use the older name.
+    internal void PlayPodcastEpisodeStream(Models.PodcastFeed feed, Models.PodcastEpisode episode)
+        => PlayPodcastEpisode(feed, episode);
 
     /// <summary>
     /// Defers disposal of a LibVLC <see cref="Media"/> that's just been replaced
@@ -2110,8 +2363,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentAlbumArt = null;
         CurrentTrackLine1 = string.Empty;
         CurrentTrackLine2 = string.Empty;
-        CurrentTrackTime = "0:00";
-        CurrentTrackDuration = "0:00";
+        CurrentTrackTime = "";
+        CurrentTrackDuration = "";
         CurrentTrackTimeNumber = 0;
         CurrentTrackDurationNumber = 0;
 
@@ -3060,6 +3313,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdateTitle();
 
         MediaCache.EnsureCreated();
+        Services.Podcast.PodcastCache.EnsureCreated();
 
         // One-time cleanup: drop any leftover radio rows from the old runtime
         // sync sources. The new world keeps bundled stations in memory only;
@@ -3465,6 +3719,35 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         Timeout = TimeSpan.FromSeconds(5),
         DefaultRequestHeaders = { { "User-Agent", $"OrgZ/{App.Version}" } }
     };
+
+    private async Task LoadPodcastArtAsync(string url, Models.PodcastEpisode episode, Models.PodcastFeed feed)
+    {
+        try
+        {
+            var bytes = await _faviconHttp.GetByteArrayAsync(url);
+            var bitmap = BitmapFromBytes(bytes);
+            if (bitmap == null) return;
+            UI(() =>
+            {
+                // Only assign if this episode is still the one playing -- the
+                // user may have hopped to a different episode while we were
+                // downloading the artwork.
+                if (_currentPodcastStream is { } ps && ps.Episode.Id == episode.Id)
+                {
+                    CurrentAlbumArt = bitmap;
+#if WINDOWS
+                    _smtcService?.UpdateMetadata(episode.Title, feed.Title, "Podcast", bytes);
+#endif
+                    _macNowPlaying?.SetMetadata(episode.Title, feed.Title, "Podcast", null, bytes);
+                }
+            });
+        }
+        catch
+        {
+            // Best-effort -- if the image host is down or the URL is bad, the
+            // LCD just stays with the music-note placeholder.
+        }
+    }
 
     private async Task LoadFaviconAsync(string url)
     {

@@ -92,6 +92,13 @@ public sealed class MusicFolderWatcher : IDisposable
             return;
         }
 
+        // Skip dot-prefixed subdirectories (.podcasts/ etc.) — those belong to
+        // sibling subsystems (Podcasts) and would otherwise show up in Music.
+        if (IsInDotSubdirectory(path))
+        {
+            return;
+        }
+
         // For Created/Changed, only accept supported audio extensions.
         // For Deleted, accept all — the file is gone so we can't check,
         // and the consumer will only act if the path was tracked.
@@ -101,6 +108,21 @@ public sealed class MusicFolderWatcher : IDisposable
         }
 
         _channel?.Writer.TryWrite(new FsEvent(kind, path));
+    }
+
+    private static bool IsInDotSubdirectory(string path)
+    {
+        var dir = Path.GetDirectoryName(path);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            var name = Path.GetFileName(dir);
+            if (string.IsNullOrEmpty(name)) break;
+            if (name.StartsWith('.')) return true;
+            var parent = Path.GetDirectoryName(dir);
+            if (parent == dir) break;
+            dir = parent;
+        }
+        return false;
     }
 
     private async Task ConsumeLoop(CancellationToken ct)

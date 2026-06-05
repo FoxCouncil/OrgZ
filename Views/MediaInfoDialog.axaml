@@ -91,9 +91,14 @@
 				</ScrollViewer>
 			</TabItem>
 
-			<!-- ===== Info Tab ===== -->
+			<!-- ===== Info Tab =====
+			     Hosts a kind-specific inner panel: MusicInfoPanel for Music
+			     items, PodcastInfoPanel for Podcasts. Only one is visible at a
+			     time (LoadItem toggles). Radio uses its own "Station" tab so
+			     it doesn't share this slot. -->
 			<TabItem Header="Info">
 				<ScrollViewer Margin="8,12,0,12" Padding="0,0,12,0">
+					<Panel x:Name="InfoPanel">
 					<!-- Music Info Panel -->
 					<StackPanel x:Name="MusicInfoPanel" Spacing="8">
 						<TextBlock Text="Name" FontSize="11" Opacity="0.6" />
@@ -156,6 +161,41 @@
 							</StackPanel>
 						</Grid>
 					</StackPanel>
+
+					<!-- Podcast Info Panel: same Info tab, different fields when
+					     the item is a podcast episode. Show notes ride on the
+					     existing Comment field on MediaItem. -->
+					<StackPanel x:Name="PodcastInfoPanel" Spacing="8" IsVisible="False">
+						<TextBlock Text="Episode" FontSize="11" Opacity="0.6" />
+						<TextBox x:Name="PodcastInfoTitle" IsReadOnly="True" />
+
+						<Grid ColumnDefinitions="*,*" Margin="0,4,0,0">
+							<StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+								<TextBlock Text="Show" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="PodcastInfoShow" IsReadOnly="True" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="2">
+								<TextBlock Text="Duration" FontSize="11" Opacity="0.6" />
+								<TextBox x:Name="PodcastInfoDuration" IsReadOnly="True" />
+							</StackPanel>
+						</Grid>
+
+						<TextBlock Text="Published" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="PodcastInfoPublished" IsReadOnly="True" />
+
+						<TextBlock Text="Show Notes" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="PodcastInfoNotes" IsReadOnly="True"
+								 TextWrapping="Wrap" AcceptsReturn="True"
+								 MinHeight="160" MaxHeight="320"
+								 VerticalAlignment="Stretch" VerticalContentAlignment="Top" />
+
+						<TextBlock Text="Episode URL" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="PodcastInfoStreamUrl" IsReadOnly="True" />
+
+						<TextBlock Text="Show Homepage" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
+						<TextBox x:Name="PodcastInfoHomepage" IsReadOnly="True" />
+					</StackPanel>
+					</Panel>
 				</ScrollViewer>
 			</TabItem>
 

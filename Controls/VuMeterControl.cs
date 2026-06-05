@@ -33,6 +33,20 @@ public sealed class VuMeterControl : Control
     private readonly float[] _smoothedRight = new float[ColumnsPerChannel];
     private readonly float[] _peakLeft = new float[ColumnsPerChannel];
     private readonly float[] _peakRight = new float[ColumnsPerChannel];
+    private readonly float[] _peakVelLeft = new float[ColumnsPerChannel];
+    private readonly float[] _peakVelRight = new float[ColumnsPerChannel];
+
+    // Bar falls at a constant linear rate. The "tight" feel comes from pairing
+    // this with an INSTANT attack (no smoothing on the way up) -- new peaks
+    // appear next frame and the only delay is the linear ramp down.
+    private const float BarDecayPerSec = 1.5f;
+
+    // Peak gravity: starts slow, accelerates. Velocity grows continuously so
+    // the peak appears to float, then drop. Constant-rate peak fall (what we
+    // had before) looks detached because every peak takes the same long path
+    // down regardless of when it was set.
+    private const float PeakInitialVel = 0.012f;
+    private const float PeakAccelPerSec = 5.72f;
 
     /// <summary>
     /// Fill the available space (clamped by Min/Max constraints applied by the
@@ -48,16 +62,17 @@ public sealed class VuMeterControl : Control
     }
 
     /// <summary>
-    /// Pushes a new audio frame into the meter. <paramref name="decay"/> and
-    /// <paramref name="peakDecay"/> are per-frame deltas (rate × dtSec) so the
-    /// fall-off speed is identical across 30 / 60 / 120 Hz displays. Triggers a
-    /// single <see cref="InvalidateVisual"/> — the actual draw happens on the
-    /// next compositor tick.
+    /// Pushes a new audio frame into the meter. <paramref name="dt"/> is the
+    /// elapsed time since the previous Update call, in seconds (clamped by the
+    /// caller to ~100 ms so a one-off hitch doesn't slam everything to zero).
+    /// Triggers a single <see cref="InvalidateVisual"/> — the actual draw
+    /// happens on the next compositor tick. Falls and peaks are modeled in
+    /// continuous time so the look stays identical across 30 / 60 / 120 Hz.
     /// </summary>
-    public void Update(ReadOnlySpan<float> left, ReadOnlySpan<float> right, float decay, float peakDecay)
+    public void Update(ReadOnlySpan<float> left, ReadOnlySpan<float> right, float dt)
     {
-        FoldChannel(left, _smoothedLeft, _peakLeft, decay, peakDecay);
-        FoldChannel(right, _smoothedRight, _peakRight, decay, peakDecay);
+        FoldChannel(left, _smoothedLeft, _peakLeft, _peakVelLeft, dt);
+        FoldChannel(right, _smoothedRight, _peakRight, _peakVelRight, dt);
         InvalidateVisual();
     }
 
@@ -71,16 +86,23 @@ public sealed class VuMeterControl : Control
         Array.Clear(_smoothedRight);
         Array.Clear(_peakLeft);
         Array.Clear(_peakRight);
+        Array.Clear(_peakVelLeft);
+        Array.Clear(_peakVelRight);
         InvalidateVisual();
     }
 
-    private static void FoldChannel(ReadOnlySpan<float> source, float[] smoothed, float[] peaks, float decay, float peakDecay)
+    private static void FoldChannel(ReadOnlySpan<float> source, float[] smoothed, float[] peaks, float[] peakVel, float dt)
     {
         var srcLen = source.Length;
         if (srcLen == 0)
         {
             return;
         }
+
+        float barFall = BarDecayPerSec * dt;
+        // Continuous-time gravity: vel *= exp(accel * dt). Pre-computed so the
+        // inner loop is a single multiply per column.
+        float peakGravity = MathF.Exp(PeakAccelPerSec * dt);
 
         for (int c = 0; c < ColumnsPerChannel; c++)
         {
@@ -95,23 +117,28 @@ public sealed class VuMeterControl : Control
             }
             float target = Math.Clamp(sum / (end - start), 0f, 1f);
 
-            // Fast attack, slow linear decay toward the new target.
+            // Bar: instant snap-up, linear fall.
             if (target > smoothed[c])
             {
                 smoothed[c] = target;
             }
             else
             {
-                smoothed[c] = Math.Max(target, smoothed[c] - decay);
+                smoothed[c] = Math.Max(target, smoothed[c] - barFall);
             }
 
-            if (smoothed[c] > peaks[c])
+            // Peak: gravity model. New bar at-or-above peak resets position +
+            // velocity. Otherwise peak falls by velocity*dt and the velocity
+            // itself grows geometrically — slow float, then a drop.
+            if (smoothed[c] >= peaks[c])
             {
                 peaks[c] = smoothed[c];
+                peakVel[c] = PeakInitialVel;
             }
             else
             {
-                peaks[c] = Math.Max(smoothed[c], peaks[c] - peakDecay);
+                peaks[c] = Math.Max(smoothed[c], peaks[c] - peakVel[c] * dt);
+                peakVel[c] *= peakGravity;
             }
         }
     }
