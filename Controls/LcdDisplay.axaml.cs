@@ -32,11 +32,6 @@ public partial class LcdDisplay : UserControl
     private long _vuLastFrameTicks;
     private MainWindowViewModel? _watchedViewModel;
 
-    // Decay rates expressed per second so the fall-off looks identical on
-    // 30 / 60 / 120 Hz displays. Same values used for the main window's VU
-    // before the LCD extraction.
-    private const float MainVuDecayPerSecond = 1.25f;
-    private const float MainVuPeakDecayPerSecond = 0.30f;
 
     public LcdDisplay()
     {
@@ -68,6 +63,20 @@ public partial class LcdDisplay : UserControl
         {
             _vuActive = false;
             _marqueeCts?.Cancel();
+        };
+        // When the LCD is hosted in a window that opens later than DataContext
+        // assignment (e.g. the mini-player constructed with DataContext set in
+        // its initializer), DataContextChanged fires before this control is in
+        // a visual tree -- ScheduleNextVuFrame bails because TopLevel is null.
+        // Re-attempt the schedule once we're attached so the VU starts on the
+        // first switch to the mini-player instead of the second.
+        AttachedToVisualTree += (_, _) =>
+        {
+            if (_vuActive && !_vuRafScheduled)
+            {
+                _vuLastFrameTicks = Environment.TickCount64;
+                ScheduleNextVuFrame();
+            }
         };
     }
 
@@ -198,19 +207,18 @@ public partial class LcdDisplay : UserControl
             return;
         }
 
-        // Frame-time delta in seconds - used to scale decay so the visual
-        // fall-off rate is identical on 30 / 60 / 120 Hz displays. Clamped to
-        // 100 ms so a one-off hitch doesn't slam every bar to zero.
+        // Frame-time delta in seconds - clamped to 100 ms so a one-off hitch
+        // doesn't slam every bar to zero on resume. The Winamp-style bar fall
+        // and peak gravity are modeled in continuous time inside VuMeterControl,
+        // so the meter looks identical on 30 / 60 / 120 Hz displays.
         var now = Environment.TickCount64;
         var dtSec = Math.Min((now - _vuLastFrameTicks) / 1000f, 0.1f);
         _vuLastFrameTicks = now;
-        var decay = MainVuDecayPerSecond * dtSec;
-        var peakDecay = MainVuPeakDecayPerSecond * dtSec;
 
         Span<float> left = stackalloc float[source.BandCount];
         Span<float> right = stackalloc float[source.BandCount];
         source.CopyBandLevelsStereo(left, right);
 
-        VuControl.Update(left, right, decay, peakDecay);
+        VuControl.Update(left, right, dtSec);
     }
 }

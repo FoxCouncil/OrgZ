@@ -41,6 +41,15 @@ public class FileScanner
                         break;
                     }
 
+                    // Skip dot-prefixed folders -- .podcasts/ holds downloaded
+                    // episodes which belong to the Podcasts view, not Music.
+                    // Generalised so any future .* directory the user (or we)
+                    // create is treated as hidden the way unix conventions imply.
+                    if (IsInHiddenSubdirectory(filePath, directoryPath))
+                    {
+                        continue;
+                    }
+
                     var item = CreateMediaItemFromPath(filePath);
 
                     if (item != null)
@@ -93,5 +102,25 @@ public class FileScanner
         var extension = Path.GetExtension(filePath);
 
         return SupportedExtensions.Contains(extension);
+    }
+
+    /// <summary>
+    /// True when any directory segment between <paramref name="rootDirectory"/>
+    /// and <paramref name="filePath"/> starts with a dot. Used to skip podcast
+    /// downloads (.podcasts/) and any other hidden-by-convention scratch area
+    /// the user may stash inside their library.
+    /// </summary>
+    private static bool IsInHiddenSubdirectory(string filePath, string rootDirectory)
+    {
+        var relative = Path.GetRelativePath(rootDirectory, filePath);
+        var sep = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+        foreach (var segment in relative.Split(sep, StringSplitOptions.RemoveEmptyEntries))
+        {
+            // Last segment is the filename itself -- a leading dot on a file
+            // is fine, we only care about parent directory names being hidden.
+            if (segment == Path.GetFileName(filePath)) break;
+            if (segment.StartsWith('.')) return true;
+        }
+        return false;
     }
 }

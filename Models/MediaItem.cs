@@ -232,6 +232,29 @@ public partial class MediaItem : ObservableObject
 
     public string? CountryCode { get; init; }
 
+    /// <summary>
+    /// "XX - Country Name" pairing for the Radio Country column tooltip.
+    /// Returns just the code when no long form is known, just the name when
+    /// no code is known, or null when neither is set (so the tooltip vanishes).
+    /// </summary>
+    public string? CountryTooltip
+    {
+        get
+        {
+            var code = CountryCode?.Trim().ToUpperInvariant();
+            var name = Country?.Trim();
+            var hasCode = !string.IsNullOrEmpty(code);
+            var hasName = !string.IsNullOrEmpty(name);
+            return (hasCode, hasName) switch
+            {
+                (true, true)   => $"{code} — {name}",
+                (true, false)  => code,
+                (false, true)  => name,
+                _              => null,
+            };
+        }
+    }
+
     public string? Tags { get; init; }
 
     /// <summary>
