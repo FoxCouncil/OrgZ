@@ -18,18 +18,78 @@ public enum PodcastsView
 /// Drives the Podcasts panel: store landing, feed-detail view (single podcast +
 /// episodes), subscriptions view (your shows + downloaded queue), and search.
 /// </summary>
-internal partial class PodcastsViewModel : ObservableObject
+public partial class PodcastsViewModel : ObservableObject
 {
     private static readonly ILogger _log = Logging.For<PodcastsViewModel>();
 
-    private readonly MainWindowViewModel _main;
+    private readonly MainWindowViewModel? _main;
 
-    public PodcastsViewModel(MainWindowViewModel main)
+    internal PodcastsViewModel(MainWindowViewModel main)
     {
         _main = main;
         PodcastDownloadService.Instance.ProgressChanged += OnDownloadProgress;
         PodcastDownloadService.Instance.Completed       += OnDownloadCompleted;
         PodcastDownloadService.Instance.Failed          += OnDownloadFailed;
+    }
+
+    /// <summary>
+    /// Design-time only: parameterless constructor wired up by the XAML
+    /// designer so the Podcasts panel can be laid out with realistic-looking
+    /// sample data without spinning up the full app + a PodcastIndex round
+    /// trip. Populates Featured / Top / New &amp; Notable / Category rails so
+    /// the store page actually has something to render in the previewer.
+    /// </summary>
+    public PodcastsViewModel()
+    {
+        _main = null;
+
+        Featured.Add(SampleFeed(1, "The Daily", "The New York Times"));
+        Featured.Add(SampleFeed(2, "Reply All", "Gimlet"));
+        Featured.Add(SampleFeed(3, "Radiolab", "WNYC Studios"));
+
+        for (int i = 0; i < 10; i++)
+        {
+            TopPodcasts.Add(SampleFeed(100 + i, $"Top Show {i + 1}", $"Network {i + 1}"));
+        }
+
+        for (int i = 0; i < 8; i++)
+        {
+            NewAndNotable.Add(SampleFeed(200 + i, $"Notable {i + 1}", $"New Voices {i + 1}"));
+        }
+
+        foreach (var (name, count) in new[]
+        {
+            ("Society & Culture", 6),
+            ("News",              6),
+            ("Technology",        6),
+            ("Comedy",            6),
+        })
+        {
+            var rail = new PodcastCategoryRail
+            {
+                CategoryId   = 0,
+                CategoryName = name,
+                Feeds        = new ObservableCollection<PodcastFeed>(),
+            };
+
+            for (int i = 0; i < count; i++)
+            {
+                rail.Feeds.Add(SampleFeed(300 + i, $"{name} {i + 1}", "Host Name"));
+            }
+
+            CategoryRails.Add(rail);
+        }
+    }
+
+    private static PodcastFeed SampleFeed(long id, string title, string author)
+    {
+        return new PodcastFeed
+        {
+            Id          = id,
+            Title       = title,
+            Author      = author,
+            Description = "Sample show notes for designer preview.",
+        };
     }
 
     // -- Page state ------------------------------------------------------

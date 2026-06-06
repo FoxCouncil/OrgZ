@@ -323,40 +323,46 @@ public partial class MediaInfoDialog : Window
             : "-";
         PodcastInfoPublished.Text = FormatHelper.FormatDateWithRelative(item.DateAdded);
 
-        // Show notes ride on the Comment field -- it's the canonical "long
-        // description" slot on MediaItem so we don't add a podcast-only field
-        // just for this. PodcastIndex serves HTML, so we strip tags + unescape
-        // basic entities so the readout looks like text the user expects.
-        PodcastInfoNotes.Text = StripHtml(item.Comment ?? "");
+        // Show notes ride on the Comment field -- the canonical "long
+        // description" slot on MediaItem. PodcastIndex ships basic HTML;
+        // HtmlInlinesBuilder turns it into a flow of Runs + LineBreaks where
+        // anchor tags + bare URLs become hyperlink-styled runs that the
+        // PointerPressed handler below opens with the OS shell.
+        PodcastInfoNotes.Inlines?.Clear();
+
+        if (PodcastInfoNotes.Inlines is { } inlines)
+        {
+            foreach (var inline in HtmlInlinesBuilder.Build(item.Comment))
+            {
+                inlines.Add(inline);
+            }
+        }
 
         PodcastInfoStreamUrl.Text = item.StreamUrl ?? "";
         PodcastInfoHomepage.Text = item.HomepageUrl ?? "";
     }
 
-    private static string StripHtml(string html)
+    private void PodcastInfoNotes_PointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(html))
+        if (e.Source is not Avalonia.Controls.Documents.Run run)
         {
-            return "";
+            return;
         }
 
-        // Replace block tags with newlines so paragraphs survive the strip.
-        var withBreaks = System.Text.RegularExpressions.Regex.Replace(
-            html,
-            @"</?(p|br|li|div|h[1-6])[^>]*>",
-            "\n",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var url = HtmlInlinesBuilder.GetUrl(run);
 
-        // Drop the rest of the tags.
-        var stripped = System.Text.RegularExpressions.Regex.Replace(withBreaks, @"<[^>]+>", "");
+        if (string.IsNullOrEmpty(url))
+        {
+            return;
+        }
 
-        // Unescape standard entities the API ships verbatim.
-        stripped = System.Net.WebUtility.HtmlDecode(stripped);
+        if (!e.GetCurrentPoint(PodcastInfoNotes).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
 
-        // Collapse 3+ consecutive newlines down to 2 so spacing looks normal.
-        stripped = System.Text.RegularExpressions.Regex.Replace(stripped, @"\n{3,}", "\n\n");
-
-        return stripped.Trim();
+        HtmlInlinesBuilder.OpenUrl(url);
+        e.Handled = true;
     }
 
     #endregion

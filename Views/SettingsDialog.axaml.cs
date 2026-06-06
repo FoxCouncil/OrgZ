@@ -2,9 +2,7 @@
 
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Platform.Storage;
-using OrgZ.Services.AudioOutput;
 using OrgZ.ViewModels;
 
 namespace OrgZ.Views;
@@ -13,208 +11,23 @@ public partial class SettingsDialog : Window
 {
     private string _pendingFolderPath;
     private readonly List<MediaItem> _allItems;
-    private readonly AudioOutputManager? _audioOutput;
-    private readonly Dictionary<string, DeviceRow> _deviceRows = [];
 
     public bool FolderChanged { get; private set; }
     public bool SettingsReset { get; private set; }
 
-    public SettingsDialog() : this([], null) { }
+    public SettingsDialog() : this([]) { }
 
-    public SettingsDialog(List<MediaItem> allItems) : this(allItems, null) { }
-
-    public SettingsDialog(List<MediaItem> allItems, AudioOutputManager? audioOutput)
+    public SettingsDialog(List<MediaItem> allItems)
     {
         InitializeComponent();
 
         _pendingFolderPath = App.FolderPath;
         _allItems = allItems;
-        _audioOutput = audioOutput;
 
         WindowSizeTracker.Track(this, "Settings");
 
         LoadSettings();
         PopulateStats();
-        PopulateDeviceList();
-
-        if (_audioOutput != null)
-        {
-            _audioOutput.DevicesChanged += OnAudioDevicesChanged;
-            Closed += (_, _) => _audioOutput.DevicesChanged -= OnAudioDevicesChanged;
-        }
-    }
-
-    private void OnAudioDevicesChanged(object? sender, EventArgs e)
-    {
-        // Fires from the manager's background polling thread; marshal to UI.
-        Avalonia.Threading.Dispatcher.UIThread.Post(PopulateDeviceList);
-    }
-
-    private sealed class DeviceRow
-    {
-        public required AudioDeviceInfo Device { get; init; }
-        public required CheckBox Checkbox { get; init; }
-        public required Slider VolumeSlider { get; init; }
-        public required CheckBox MuteCheck { get; init; }
-    }
-
-    private void PopulateDeviceList()
-    {
-        if (_audioOutput == null)
-        {
-            DeviceDiscoveryHint.Text = "(audio output unavailable)";
-            return;
-        }
-
-        _deviceRows.Clear();
-        DeviceListPanel.Children.Clear();
-
-        var activeSinkIds = _audioOutput.Bus.Sinks.ToDictionary(s => s.Id, s => s);
-        var devices = _audioOutput.EnumerateAllDevices();
-        DeviceDiscoveryHint.Text = $"{devices.Count} device(s) found.  AirPlay devices may take a few seconds to appear.";
-
-        string? lastProvider = null;
-        foreach (var device in devices)
-        {
-            if (device.ProviderName != lastProvider)
-            {
-                lastProvider = device.ProviderName;
-                DeviceListPanel.Children.Add(new TextBlock
-                {
-                    Text = device.ProviderName,
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
-                    FontSize = 12,
-                    Margin = new Avalonia.Thickness(0, 8, 0, 4),
-                });
-            }
-
-            var active = activeSinkIds.TryGetValue(device.QualifiedId, out var sink);
-            var row = BuildDeviceRow(device, active, sink?.Volume ?? 1f, sink?.IsMuted ?? false);
-            _deviceRows[device.QualifiedId] = row;
-        }
-    }
-
-    private DeviceRow BuildDeviceRow(AudioDeviceInfo device, bool active, float volume, bool muted)
-    {
-        var grid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,140,Auto"),
-            Margin = new Avalonia.Thickness(0, 2, 0, 2),
-        };
-
-        var check = new CheckBox { IsChecked = active, VerticalAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(check, 0);
-        grid.Children.Add(check);
-
-        var label = new TextBlock
-        {
-            Text = device.DisplayName,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Avalonia.Thickness(8, 0, 8, 0),
-            TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
-        };
-        Grid.SetColumn(label, 1);
-        grid.Children.Add(label);
-
-        var slider = new Slider
-        {
-            Minimum = 0,
-            Maximum = 100,
-            Value = volume * 100,
-            VerticalAlignment = VerticalAlignment.Center,
-            Width = 120,
-            IsEnabled = active,
-        };
-        Grid.SetColumn(slider, 2);
-        grid.Children.Add(slider);
-
-        var mute = new CheckBox
-        {
-            Content = "Mute",
-            IsChecked = muted,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsEnabled = active,
-            Margin = new Avalonia.Thickness(8, 0, 0, 0),
-        };
-        Grid.SetColumn(mute, 3);
-        grid.Children.Add(mute);
-
-        check.IsCheckedChanged += (_, _) =>
-        {
-            slider.IsEnabled = check.IsChecked == true;
-            mute.IsEnabled = check.IsChecked == true;
-            ApplyRowLive(device);
-        };
-
-        // Live volume + mute updates — hook a sink that already exists and
-        // adjust in-place, so the user hears changes immediately instead of
-        // needing to close the dialog.  Checking/unchecking still requires
-        // ApplySelections (it adds / removes the sink from the bus).
-        slider.PropertyChanged += (_, ev) =>
-        {
-            if (ev.Property.Name == nameof(Slider.Value))
-            {
-                ApplyRowLive(device);
-            }
-        };
-        mute.IsCheckedChanged += (_, _) => ApplyRowLive(device);
-
-        DeviceListPanel.Children.Add(grid);
-
-        return new DeviceRow
-        {
-            Device = device,
-            Checkbox = check,
-            VolumeSlider = slider,
-            MuteCheck = mute,
-        };
-    }
-
-    private void ApplyRowLive(AudioDeviceInfo device)
-    {
-        if (_audioOutput == null || !_deviceRows.TryGetValue(device.QualifiedId, out var row))
-        {
-            return;
-        }
-
-        var existing = _audioOutput.Bus.Sinks.FirstOrDefault(s => s.Id == device.QualifiedId);
-        if (existing == null)
-        {
-            return;
-        }
-
-        existing.Volume = (float)(row.VolumeSlider.Value / 100.0);
-        existing.IsMuted = row.MuteCheck.IsChecked == true;
-    }
-
-    private void RefreshDevicesButton_Click(object? sender, RoutedEventArgs e)
-    {
-        PopulateDeviceList();
-    }
-
-    private void ApplyDeviceSelections()
-    {
-        if (_audioOutput == null)
-        {
-            return;
-        }
-
-        var selections = new List<AudioOutputManager.SinkSelection>();
-        foreach (var row in _deviceRows.Values)
-        {
-            if (row.Checkbox.IsChecked == true)
-            {
-                selections.Add(new AudioOutputManager.SinkSelection
-                {
-                    QualifiedId = row.Device.QualifiedId,
-                    Volume = (float)(row.VolumeSlider.Value / 100.0),
-                    IsMuted = row.MuteCheck.IsChecked == true,
-                });
-            }
-        }
-
-        _audioOutput.ApplySelections(selections);
-        _audioOutput.SavePersistedSelections();
     }
 
     private void LoadSettings()
@@ -249,27 +62,90 @@ public partial class SettingsDialog : Window
 
         AutoAdvanceCheck.IsChecked = Settings.Get("OrgZ.AutoAdvance", true);
 
-        // Playback → Mini-Player / Visualizer
+        // Playback → Mini-Player
         var miniMode = MainWindowViewModel.LoadMiniPlayerMode();
         MiniPlayerModeReplace.IsChecked = miniMode == MiniPlayerMode.Replace;
         MiniPlayerModeSideBySide.IsChecked = miniMode == MiniPlayerMode.SideBySide;
 
-        VisualizerEnabledCheck.IsChecked = Settings.Get("OrgZ.Visualizer.Enabled", false);
-        var visName = Settings.Get("OrgZ.Visualizer.Name", "spectrum");
-        VisualizerNameCombo.SelectedIndex = visName switch
-        {
-            "spectrum" => 0,
-            "spectrometer" => 1,
-            "scope" => 2,
-            "vumeter" => 3,
-            "goom" => 4,
-            _ => 0,
-        };
+        // Podcasts
+        LoadPodcastSettings();
 
         // Advanced
         var dbDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
         DatabasePathText.Text = Path.Combine(dbDir, "library.db");
         SettingsPathText.Text = Settings.GetSettingsFilePath();
+    }
+
+    private void LoadPodcastSettings()
+    {
+        var checkInterval = Settings.Get("OrgZ.Podcasts.CheckInterval", "day");
+        PodcastCheckIntervalCombo.SelectedIndex = checkInterval switch
+        {
+            "hour"   => 0,
+            "day"    => 1,
+            "week"   => 2,
+            "manual" => 3,
+            _        => 1,
+        };
+
+        var newAction = Settings.Get("OrgZ.Podcasts.NewEpisodeAction", "recent");
+        PodcastNewEpisodeActionCombo.SelectedIndex = newAction switch
+        {
+            "all"    => 0,
+            "recent" => 1,
+            "none"   => 2,
+            _        => 1,
+        };
+
+        var keep = Settings.Get("OrgZ.Podcasts.Keep", "all");
+        PodcastKeepCombo.SelectedIndex = keep switch
+        {
+            "all"      => 0,
+            "unplayed" => 1,
+            "last1"    => 2,
+            "last2"    => 3,
+            "last5"    => 4,
+            "last10"   => 5,
+            _          => 0,
+        };
+
+        UpdatePodcastNextCheckText();
+        PodcastCheckIntervalCombo.SelectionChanged += (_, _) => UpdatePodcastNextCheckText();
+    }
+
+    private void UpdatePodcastNextCheckText()
+    {
+        if (PodcastCheckIntervalCombo.SelectedItem is not ComboBoxItem item)
+        {
+            PodcastNextCheckText.Text = "";
+            return;
+        }
+
+        var tag = item.Tag as string ?? "";
+
+        if (tag == "manual")
+        {
+            PodcastNextCheckText.Text = "Episodes are only fetched when you click Refresh.";
+            return;
+        }
+
+        var lastCheckRaw = Settings.Get("OrgZ.Podcasts.LastCheck", "");
+        var lastCheck = DateTime.TryParse(
+            lastCheckRaw,
+            null,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var parsed) ? parsed : DateTime.MinValue;
+
+        var span = tag switch
+        {
+            "hour" => TimeSpan.FromHours(1),
+            "day"  => TimeSpan.FromDays(1),
+            "week" => TimeSpan.FromDays(7),
+            _      => TimeSpan.FromDays(1),
+        };
+
+        var next = lastCheck == DateTime.MinValue ? DateTime.Now : (lastCheck + span).ToLocalTime();
+        PodcastNextCheckText.Text = $"Next check: {next:dddd, MMMM d, h:mm tt}";
     }
 
     private void PopulateStats()
@@ -445,13 +321,19 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.ShuffleMode", ShuffleAlbumRadio.IsChecked == true ? "Album" : "Song");
         Settings.Set("OrgZ.AutoAdvance", AutoAdvanceCheck.IsChecked == true);
 
-        // Playback → Mini-Player / Visualizer
+        // Playback → Mini-Player
         var miniMode = MiniPlayerModeSideBySide.IsChecked == true ? MiniPlayerMode.SideBySide : MiniPlayerMode.Replace;
         MainWindowViewModel.SaveMiniPlayerMode(miniMode);
 
-        Settings.Set("OrgZ.Visualizer.Enabled", VisualizerEnabledCheck.IsChecked == true);
-        var visTag = (VisualizerNameCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "spectrum";
-        Settings.Set("OrgZ.Visualizer.Name", visTag);
+        // Podcasts
+        var checkTag = (PodcastCheckIntervalCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "day";
+        Settings.Set("OrgZ.Podcasts.CheckInterval", checkTag);
+
+        var newActionTag = (PodcastNewEpisodeActionCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "recent";
+        Settings.Set("OrgZ.Podcasts.NewEpisodeAction", newActionTag);
+
+        var keepTag = (PodcastKeepCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
+        Settings.Set("OrgZ.Podcasts.Keep", keepTag);
 
         Settings.Save();
     }
@@ -502,7 +384,6 @@ public partial class SettingsDialog : Window
         else
         {
             SaveSettings();
-            ApplyDeviceSelections();
         }
 
         Close(true);
