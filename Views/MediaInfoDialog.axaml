@@ -184,10 +184,15 @@
 						<TextBox x:Name="PodcastInfoPublished" IsReadOnly="True" />
 
 						<TextBlock Text="Show Notes" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
-						<TextBox x:Name="PodcastInfoNotes" IsReadOnly="True"
-								 TextWrapping="Wrap" AcceptsReturn="True"
-								 MinHeight="160" MaxHeight="320"
-								 VerticalAlignment="Stretch" VerticalContentAlignment="Top" />
+						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4"
+								Padding="8" MinHeight="160" MaxHeight="320">
+							<ScrollViewer HorizontalScrollBarVisibility="Disabled"
+										  VerticalScrollBarVisibility="Auto">
+								<SelectableTextBlock x:Name="PodcastInfoNotes"
+													 TextWrapping="Wrap"
+													 PointerPressed="PodcastInfoNotes_PointerPressed" />
+							</ScrollViewer>
+						</Border>
 
 						<TextBlock Text="Episode URL" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
 						<TextBox x:Name="PodcastInfoStreamUrl" IsReadOnly="True" />

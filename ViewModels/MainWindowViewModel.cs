@@ -110,6 +110,29 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     private long? _pendingDurationMs;
 
+    /// <summary>
+    /// Promotes <see cref="_pendingDurationMs"/> to the LCD if it's set AND
+    /// playback has actually started. Both MediaChanged and AudioStarted
+    /// funnel through here -- the race between the two doesn't matter
+    /// because whichever lands last (with both signals satisfied) wins.
+    /// </summary>
+    private void ApplyPendingDuration()
+    {
+        if (IsPlaybackLoading)
+        {
+            return;
+        }
+
+        if (_pendingDurationMs is not { } d || d <= 0)
+        {
+            return;
+        }
+
+        CurrentTrackDuration = FormatHelper.FormatDurationCompact(d);
+        CurrentTrackDurationNumber = d;
+        _pendingDurationMs = null;
+    }
+
     [ObservableProperty]
     private StatusBarViewModel _statusBar = new();
 
@@ -1057,14 +1080,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioTap.AudioStarted += () => UI(() =>
         {
             IsPlaybackLoading = false;
-
-            if (_pendingDurationMs is { } d && d > 0)
-            {
-                CurrentTrackDuration = FormatHelper.FormatDurationCompact(d);
-                CurrentTrackDurationNumber = d;
-            }
-
-            _pendingDurationMs = null;
+            ApplyPendingDuration();
         });
 
         _player.EndReached += (s, e) => UI(() =>
@@ -1205,6 +1221,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (e.Media != null && e.Media.Duration > 0)
                 {
                     _pendingDurationMs = e.Media.Duration;
+                    ApplyPendingDuration();
                 }
                 return;
             }
@@ -1227,6 +1244,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 long? vlcDurMs = e.Media != null && e.Media.Duration > 0 ? e.Media.Duration : null;
                 long apiDurMs = (long)ps.Episode.DurationSec * 1000;
                 _pendingDurationMs = vlcDurMs ?? (apiDurMs > 0 ? apiDurMs : null);
+                ApplyPendingDuration();
 
                 CurrentTrackLine1 = ps.Episode.Title ?? string.Empty;
                 CurrentTrackLine2 = ps.Feed.Title ?? string.Empty;
@@ -1246,6 +1264,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                         _ = await e.Media.Parse();
                     }
                     _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
+                    ApplyPendingDuration();
                 }
 
                 var mountPath = CurrentPlayingItem.Source["device:".Length..];
@@ -1271,6 +1290,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
+            ApplyPendingDuration();
 
             CurrentTrackLine1 = CurrentMusicItem?.Title ?? "Unknown Title";
             var artist = CurrentMusicItem?.Artist ?? "Unknown Artist";
@@ -1632,7 +1652,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     internal async Task ShowSettings()
     {
-        var dialog = new Views.SettingsDialog(_allItems, _audioOutput);
+        var dialog = new Views.SettingsDialog(_allItems);
         // The main window can be hidden when the mini-player is up - Avalonia 12 throws
         // "Cannot show window with non-visible owner" if we use it as the dialog parent.
         // Fall back to whichever visible top-level Avalonia knows about.
@@ -1890,8 +1910,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
-            // If the item is already in the current context, just jump to it
-            if (_playbackContext != null && _playbackContext.JumpTo(file))
+            // Reuse the existing context only when the current view's filter
+            // produces the SAME source list -- so a search that narrows the
+            // visible tracks rebuilds the queue against the filtered set
+            // (otherwise shuffle would pick from the wider pre-search list).
+            if (_playbackContext != null
+                && _playbackContext.MatchesSource(FilteredItems)
+                && _playbackContext.JumpTo(file))
             {
                 OnPropertyChanged(nameof(PlaybackContextUpcoming));
                 ExecutePlayMusic(file);
@@ -1936,7 +1961,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     return;
                 }
 
-                if (_playbackContext != null && _playbackContext.JumpTo(station))
+                if (_playbackContext != null
+                    && _playbackContext.MatchesSource(FilteredItems)
+                    && _playbackContext.JumpTo(station))
                 {
                     OnPropertyChanged(nameof(PlaybackContextUpcoming));
                     ExecutePlayRadio(station);
