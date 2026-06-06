@@ -98,38 +98,54 @@
 							</StackPanel>
 						</StackPanel>
 
-						<!-- Visualizer (LibVLC built-in) -->
-						<StackPanel Spacing="6">
-							<CheckBox x:Name="VisualizerEnabledCheck" Content="Show LibVLC audio visualizer while playing" />
-							<StackPanel Orientation="Horizontal" Spacing="8" Margin="22,0,0,0" IsEnabled="{Binding #VisualizerEnabledCheck.IsChecked}">
-								<TextBlock Text="Style:" VerticalAlignment="Center" />
-								<ComboBox x:Name="VisualizerNameCombo" Width="200">
-									<ComboBoxItem Content="Spectrum bars" Tag="spectrum" />
-									<ComboBoxItem Content="Spectrometer" Tag="spectrometer" />
-									<ComboBoxItem Content="Oscilloscope" Tag="scope" />
-									<ComboBoxItem Content="VU meter" Tag="vumeter" />
-									<ComboBoxItem Content="Goom" Tag="goom" />
-								</ComboBox>
-							</StackPanel>
-						</StackPanel>
 					</StackPanel>
 				</ScrollViewer>
 			</TabItem>
 
-			<!-- ===== Output Devices Tab ===== -->
-			<TabItem Header="Output Devices">
-				<DockPanel Margin="8,12">
-					<TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
-					           Text="Route audio to one or more devices.  Per-device volume and mute act independently."
-					           TextWrapping="Wrap" Opacity="0.7" FontSize="11" />
-					<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-						<Button x:Name="RefreshDevicesButton" Content="Refresh Devices" Click="RefreshDevicesButton_Click" />
-						<TextBlock x:Name="DeviceDiscoveryHint" Text="" Opacity="0.6" FontSize="11" VerticalAlignment="Center" />
+			<!-- ===== Podcasts Tab =====
+			     Three policy knobs mirroring classic iTunes Podcasts preferences:
+			     refresh cadence, what to do with new episodes, and how long to
+			     keep episodes around. iPod sync preferences land here later. -->
+			<TabItem Header="Podcasts">
+				<ScrollViewer Padding="0,0,12,0">
+					<StackPanel Margin="8,12" Spacing="16">
+						<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="8,4,0,0">
+							<TextBlock Grid.Row="0" Grid.Column="0" Text="Check for new episodes:"
+									   VerticalAlignment="Center" />
+							<ComboBox Grid.Row="0" Grid.Column="1" x:Name="PodcastCheckIntervalCombo"
+									  Width="220" HorizontalAlignment="Left">
+								<ComboBoxItem Content="Every hour" Tag="hour" />
+								<ComboBoxItem Content="Every day" Tag="day" />
+								<ComboBoxItem Content="Every week" Tag="week" />
+								<ComboBoxItem Content="Manually" Tag="manual" />
+							</ComboBox>
+
+							<TextBlock Grid.Row="1" Grid.Column="1" x:Name="PodcastNextCheckText"
+									   FontSize="11" Opacity="0.6" Margin="0,4,0,12" />
+
+							<TextBlock Grid.Row="2" Grid.Column="0" Text="When new episodes are available:"
+									   VerticalAlignment="Center" />
+							<ComboBox Grid.Row="2" Grid.Column="1" x:Name="PodcastNewEpisodeActionCombo"
+									  Width="220" HorizontalAlignment="Left">
+								<ComboBoxItem Content="Download all" Tag="all" />
+								<ComboBoxItem Content="Download the most recent one" Tag="recent" />
+								<ComboBoxItem Content="Do nothing" Tag="none" />
+							</ComboBox>
+
+							<TextBlock Grid.Row="3" Grid.Column="0" Text="Keep:"
+									   VerticalAlignment="Center" Margin="0,12,0,0" />
+							<ComboBox Grid.Row="3" Grid.Column="1" x:Name="PodcastKeepCombo"
+									  Width="220" HorizontalAlignment="Left" Margin="0,12,0,0">
+								<ComboBoxItem Content="All episodes" Tag="all" />
+								<ComboBoxItem Content="All unplayed episodes" Tag="unplayed" />
+								<ComboBoxItem Content="Most recent episode" Tag="last1" />
+								<ComboBoxItem Content="Most recent 2 episodes" Tag="last2" />
+								<ComboBoxItem Content="Most recent 5 episodes" Tag="last5" />
+								<ComboBoxItem Content="Most recent 10 episodes" Tag="last10" />
+							</ComboBox>
+						</Grid>
 					</StackPanel>
-					<ScrollViewer Padding="0,0,12,0">
-						<StackPanel x:Name="DeviceListPanel" Spacing="6" />
-					</ScrollViewer>
-				</DockPanel>
+				</ScrollViewer>
 			</TabItem>
 
 			<!-- ===== Stats Tab ===== -->

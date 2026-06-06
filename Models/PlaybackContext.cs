@@ -128,6 +128,31 @@ public partial class PlaybackContext : ObservableObject
         return _playOrder.Contains(item);
     }
 
+    /// <summary>
+    /// True when the source list this context was built from is the same
+    /// sequence the caller is now offering. Used to decide whether playing a
+    /// track from the current view can reuse the existing playback queue (and
+    /// keep its shuffle order intact) or has to rebuild because the view's
+    /// filter -- e.g. a search -- changed the candidate set.
+    /// </summary>
+    public bool MatchesSource(IReadOnlyList<MediaItem> source)
+    {
+        if (source.Count != _originalOrder.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            if (!ReferenceEquals(source[i], _originalOrder[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public bool JumpTo(MediaItem item)
     {
         var idx = _playOrder.IndexOf(item);

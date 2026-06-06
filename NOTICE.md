@@ -125,6 +125,21 @@ Their license terms are stated in the upstream repo.
 - Used via: `Optris.Icons.Avalonia.FontAwesome` NuGet for sidebar / button
   icons. Attribution: "Icons from Font Awesome Free, CC BY 4.0."
 
+### Country flag images (PNG)
+- Upstream: <https://flagcdn.com/> (image hosting)
+- Source set: <https://github.com/lipis/flag-icons> (MIT license, by Panayiotis Lipiridis)
+- Used via: 94 PNGs under `Assets/Flags/`, downloaded from `flagcdn.com/w80/`
+  at seed time and embedded as Avalonia resources for the Radio country column.
+- License: MIT for the upstream icon set. Attribution: "Flag icons from
+  lipis/flag-icons, MIT License."
+
+### Curated radio stations (`Assets/stations.json`)
+- Source: <https://www.radio-browser.info/> public station directory.
+- Used via: one-time seed (`tools/seed-stations.py`) that pulled the top-clicked
+  English-language streams per genre into a bundled JSON shipped with the app.
+- The radio-browser.info data is community-contributed and freely usable per
+  the project's terms of service.
+
 ---
 
 ## 5. External services consulted at runtime
@@ -138,8 +153,10 @@ network availability - no account or telemetry is required.
   by the MusicBrainz API usage policy.
 - **Cover Art Archive** (<https://coverartarchive.org/>): album-cover image
   fetch keyed off MusicBrainz release / release-group MBIDs.
-- **radio-browser.info** (<https://www.radio-browser.info/>): internet
-  radio station directory.
+- **PodcastIndex** (<https://podcastindex.org/>): podcast feed directory,
+  trending lists, category taxonomy, and episode metadata. PodcastIndex
+  content is freely usable per the project's terms; attribution to
+  PodcastIndex applies to all displayed feed metadata.
 
 ---
 
