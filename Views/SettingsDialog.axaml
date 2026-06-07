@@ -27,11 +27,11 @@
 				<ScrollViewer Padding="0,0,12,0">
 					<StackPanel Margin="8,12" Spacing="16">
 					<!-- Music Library Folder Location (mirrors iTunes Advanced tab) -->
-					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+					<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
 							<TextBlock Text="Music Library Folder Location" FontWeight="Bold" FontSize="13" />
 							<Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
-								<Border Grid.Row="0" Grid.Column="0" Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="2" Padding="8,6" Margin="0,0,8,0">
+								<Border Grid.Row="0" Grid.Column="0" Background="{StaticResource OrgZInputBackgroundBrush}" BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1" CornerRadius="2" Padding="8,6" Margin="0,0,8,0">
 									<TextBlock x:Name="FolderPathText" Text="" FontSize="11" TextWrapping="Wrap" MaxHeight="36" />
 								</Border>
 								<StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
@@ -47,7 +47,7 @@
 					<CheckBox x:Name="ShowIgnoredCheck" Content="Show Ignored section in sidebar" />
 
 					<!-- Bad Format quality criteria -->
-					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+					<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
 							<TextBlock Text="Bad Format Detection" FontWeight="Bold" FontSize="13" />
 							<TextBlock Text="Flag music tracks that match any of these criteria:" FontSize="11" Opacity="0.6" />
@@ -153,25 +153,25 @@
 				<ScrollViewer Margin="8,12" Padding="0,0,12,0">
 					<StackPanel Spacing="16">
 						<!-- Library Overview -->
-						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="8">
 								<TextBlock Text="Library Overview" FontWeight="Bold" FontSize="13" />
 								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto" Margin="8,4,0,0">
 									<TextBlock Grid.Row="0" Grid.Column="0" Text="Music Tracks:" Opacity="0.6" />
 									<Button Grid.Row="0" Grid.Column="1" Classes="link" Click="LinkMusicCount_Click">
-										<TextBlock x:Name="StatMusicCount" Text="0" Foreground="#4A9EFF" />
+										<TextBlock x:Name="StatMusicCount" Text="0" Foreground="{StaticResource OrgZAccentBlueBrush}" />
 									</Button>
 
 									<TextBlock Grid.Row="1" Grid.Column="0" Text="Radio Stations:" Opacity="0.6" />
 									<Button Grid.Row="1" Grid.Column="1" Classes="link" Click="LinkRadioCount_Click">
-										<TextBlock x:Name="StatRadioCount" Text="0" Foreground="#4A9EFF" />
+										<TextBlock x:Name="StatRadioCount" Text="0" Foreground="{StaticResource OrgZAccentBlueBrush}" />
 									</Button>
 								</Grid>
 							</StackPanel>
 						</Border>
 
 						<!-- Music Stats -->
-						<Border x:Name="MusicStatsSection" BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<Border x:Name="MusicStatsSection" BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="10">
 								<TextBlock Text="Music" FontWeight="Bold" FontSize="13" />
 								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" Margin="8,4,0,0">
@@ -201,7 +201,7 @@
 						</Border>
 
 						<!-- Radio Stats -->
-						<Border x:Name="RadioStatsSection" BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+						<Border x:Name="RadioStatsSection" BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="10">
 								<TextBlock Text="Radio" FontWeight="Bold" FontSize="13" />
 								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto" Margin="8,4,0,0">
@@ -234,29 +234,29 @@
 				<ScrollViewer Padding="0,0,12,0">
 					<StackPanel Margin="8,12" Spacing="16">
 					<!-- Database Location -->
-					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+					<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
 							<TextBlock Text="Database Location" FontWeight="Bold" FontSize="13" />
-							<Border Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="2" Padding="8,6">
+							<Border Background="{StaticResource OrgZInputBackgroundBrush}" BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1" CornerRadius="2" Padding="8,6">
 								<TextBlock x:Name="DatabasePathText" Text="" FontSize="11" TextWrapping="Wrap" Opacity="0.7" />
 							</Border>
 						</StackPanel>
 					</Border>
 
 					<!-- Settings File Location -->
-					<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="12">
+					<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
 							<TextBlock Text="Settings File Location" FontWeight="Bold" FontSize="13" />
-							<Border Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="2" Padding="8,6">
+							<Border Background="{StaticResource OrgZInputBackgroundBrush}" BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1" CornerRadius="2" Padding="8,6">
 								<TextBlock x:Name="SettingsPathText" Text="" FontSize="11" TextWrapping="Wrap" Opacity="0.7" />
 							</Border>
 						</StackPanel>
 					</Border>
 
 					<!-- Danger zone -->
-					<Border BorderBrush="#663333" BorderThickness="1" CornerRadius="4" Padding="12">
+					<Border BorderBrush="{StaticResource OrgZDangerBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 						<StackPanel Spacing="8">
-							<TextBlock Text="Maintenance" FontWeight="Bold" FontSize="13" Foreground="#FF8888" />
+							<TextBlock Text="Maintenance" FontWeight="Bold" FontSize="13" Foreground="{StaticResource OrgZDangerTextBrush}" />
 							<StackPanel Orientation="Horizontal" Spacing="8">
 								<Button x:Name="ResetWindowSizesButton" Content="Reset Window Sizes" Click="ResetWindowSizesButton_Click" />
 								<Button x:Name="ResetSettingsButton" Content="Reset All Settings" Click="ResetSettingsButton_Click" />

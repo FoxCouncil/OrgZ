@@ -68,7 +68,7 @@
              chrome itself holds still.  No pressed "dent", no hover tint. -->
         <Style Selector="Button.xportPlay">
             <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
-            <Setter Property="BorderBrush" Value="#5A5A5A" />
+            <Setter Property="BorderBrush" Value="{StaticResource OrgZMetalButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1.5" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
@@ -76,17 +76,17 @@
         </Style>
         <Style Selector="Button.xportPlay:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
-            <Setter Property="BorderBrush" Value="#5A5A5A" />
+            <Setter Property="BorderBrush" Value="{StaticResource OrgZMetalButtonBorderBrush}" />
         </Style>
         <Style Selector="Button.xportPlay:pressed /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}" />
-            <Setter Property="BorderBrush" Value="#5A5A5A" />
+            <Setter Property="BorderBrush" Value="{StaticResource OrgZMetalButtonBorderBrush}" />
         </Style>
 
         <Style Selector="Button.winChrome">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="BorderBrush" Value="#7B7B7B" />
+            <Setter Property="BorderBrush" Value="{StaticResource OrgZMetalButtonBorderActiveBrush}" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Foreground" Value="{StaticResource OrgZMetalTextBrush}" />
             <Setter Property="Cursor" Value="Hand" />
@@ -95,7 +95,7 @@
             <Setter Property="CornerRadius" Value="1" />
         </Style>
         <Style Selector="Button.winChrome:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#D8D8D8" />
+            <Setter Property="Background" Value="{StaticResource OrgZMetalButtonHoverBrush}" />
         </Style>
     </Window.Styles>
 
@@ -125,30 +125,33 @@
             <!-- macOS traffic lights -->
             <StackPanel x:Name="MacChrome" Grid.Column="0" Orientation="Vertical" Spacing="6"
                         HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False">
-                <Ellipse Width="12" Height="12" Cursor="Hand" Stroke="#9C2727" StrokeThickness="1"
+                <Ellipse Width="12" Height="12" Cursor="Hand"
+                         Stroke="{StaticResource OrgZStoplightCloseBorderBrush}" StrokeThickness="1"
                          PointerPressed="MacClose_PointerPressed" ToolTip.Tip="Close">
                     <Ellipse.Fill>
                         <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                            <GradientStop Offset="0" Color="#FF7B6C" />
-                            <GradientStop Offset="1" Color="#D6423A" />
+                            <GradientStop Offset="0" Color="{StaticResource OrgZStoplightCloseStart}" />
+                            <GradientStop Offset="1" Color="{StaticResource OrgZStoplightCloseEnd}" />
                         </LinearGradientBrush>
                     </Ellipse.Fill>
                 </Ellipse>
-                <Ellipse Width="12" Height="12" Cursor="Hand" Stroke="#A26A10" StrokeThickness="1"
+                <Ellipse Width="12" Height="12" Cursor="Hand"
+                         Stroke="{StaticResource OrgZStoplightMinBorderBrush}" StrokeThickness="1"
                          PointerPressed="MacMinimize_PointerPressed" ToolTip.Tip="Minimize">
                     <Ellipse.Fill>
                         <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                            <GradientStop Offset="0" Color="#FFD17A" />
-                            <GradientStop Offset="1" Color="#E2A522" />
+                            <GradientStop Offset="0" Color="{StaticResource OrgZStoplightMinStart}" />
+                            <GradientStop Offset="1" Color="{StaticResource OrgZStoplightMinEnd}" />
                         </LinearGradientBrush>
                     </Ellipse.Fill>
                 </Ellipse>
-                <Ellipse Width="12" Height="12" Cursor="Hand" Stroke="#1F8A26" StrokeThickness="1"
+                <Ellipse Width="12" Height="12" Cursor="Hand"
+                         Stroke="{StaticResource OrgZStoplightMaxBorderBrush}" StrokeThickness="1"
                          PointerPressed="MacExpand_PointerPressed" ToolTip.Tip="Switch to full player">
                     <Ellipse.Fill>
                         <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                            <GradientStop Offset="0" Color="#72E580" />
-                            <GradientStop Offset="1" Color="#32B247" />
+                            <GradientStop Offset="0" Color="{StaticResource OrgZStoplightMaxStart}" />
+                            <GradientStop Offset="1" Color="{StaticResource OrgZStoplightMaxEnd}" />
                         </LinearGradientBrush>
                     </Ellipse.Fill>
                 </Ellipse>
@@ -211,7 +214,7 @@
                     Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="4"
                     Width="62" Height="62" ClipToBounds="True">
                 <Panel>
-                    <Border Background="White"
+                    <Border Background="{StaticResource OrgZAlbumArtBackdropBrush}"
                             IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}">
                         <Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" />
                     </Border>

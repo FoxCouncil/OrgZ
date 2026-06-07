@@ -7,47 +7,97 @@
 		     no sort is active, truncating headers in narrow columns. -->
 		<x:Double x:Key="DataGridSortIconMinWidth">0</x:Double>
 
-		<!-- Colors -->
-		<Color x:Key="OrgZDialogBackground">#1A1A1A</Color>
-		<Color x:Key="OrgZTextForeground">#E0E0E0</Color>
+		<!-- Surfaces / chrome -->
+		<Color x:Key="OrgZSurfaceDark">#1A1A1A</Color>
 		<Color x:Key="OrgZInputBackground">#111111</Color>
 		<Color x:Key="OrgZReadonlyBackground">#222222</Color>
 		<Color x:Key="OrgZButtonBackground">#333333</Color>
 		<Color x:Key="OrgZBorderColor">#444444</Color>
-		<Color x:Key="OrgZAccentBlue">#4A9EFF</Color>
-		<Color x:Key="OrgZMutedText">#999999</Color>
-
-		<!-- Podcast sub-views: surface + tile chrome + hero overlay + subtitle -->
+		<Color x:Key="OrgZBorderColorStrong">#555555</Color>
+		<Color x:Key="OrgZFilterBarBackground">#1F0E0E</Color>
 		<Color x:Key="OrgZPodcastSurface">#1A0F2E</Color>
+
+		<!-- Text / accent -->
+		<Color x:Key="OrgZTextForeground">#E0E0E0</Color>
 		<Color x:Key="OrgZSubtitleText">#CCCCCC</Color>
+		<Color x:Key="OrgZMutedText">#999999</Color>
+		<Color x:Key="OrgZAccentBlue">#4A9EFF</Color>
+
+		<!-- Tiles (podcast store / subscriptions) -->
 		<Color x:Key="OrgZTileSurface">#222222</Color>
 		<Color x:Key="OrgZTileBorder">#3F3F3F</Color>
 		<Color x:Key="OrgZTileHoverOverlay">#22FFFFFF</Color>
 		<Color x:Key="OrgZHeroOverlay">#CC000000</Color>
+		<Color x:Key="OrgZAlbumArtBackdrop">#FFFFFF</Color>
 
-		<!-- Status: download row icons + store error banner -->
+		<!-- Status (success / warning / danger) -->
 		<Color x:Key="OrgZSuccess">#7CFF7C</Color>
 		<Color x:Key="OrgZWarning">#FFC07C</Color>
+		<Color x:Key="OrgZDangerBorder">#663333</Color>
+		<Color x:Key="OrgZDangerText">#FF8888</Color>
 		<Color x:Key="OrgZError">#FF4500</Color>
 
+		<!-- Disk-usage meter (DeviceInfoBar) -->
+		<Color x:Key="OrgZDiskMeterTrack">#2A2A2A</Color>
+		<Color x:Key="OrgZDiskMeterTrackBorder">#3A3A3A</Color>
+		<Color x:Key="OrgZDiskMeterDivider">#444444</Color>
+		<Color x:Key="OrgZDiskUsedStart">#6FB4FF</Color>
+		<Color x:Key="OrgZDiskUsedEnd">#2F7EE5</Color>
+		<Color x:Key="OrgZDiskFreeStart">#A0A0A0</Color>
+		<Color x:Key="OrgZDiskFreeEnd">#606060</Color>
+
+		<!-- Mini-player chrome: brushed-metal buttons + macOS stoplights -->
+		<Color x:Key="OrgZMetalButtonBorder">#5A5A5A</Color>
+		<Color x:Key="OrgZMetalButtonBorderActive">#7B7B7B</Color>
+		<Color x:Key="OrgZMetalButtonHover">#D8D8D8</Color>
+		<Color x:Key="OrgZStoplightCloseBorder">#9C2727</Color>
+		<Color x:Key="OrgZStoplightCloseStart">#FF7B6C</Color>
+		<Color x:Key="OrgZStoplightCloseEnd">#D6423A</Color>
+		<Color x:Key="OrgZStoplightMinBorder">#A26A10</Color>
+		<Color x:Key="OrgZStoplightMinStart">#FFD17A</Color>
+		<Color x:Key="OrgZStoplightMinEnd">#E2A522</Color>
+		<Color x:Key="OrgZStoplightMaxBorder">#1F8A26</Color>
+		<Color x:Key="OrgZStoplightMaxStart">#72E580</Color>
+		<Color x:Key="OrgZStoplightMaxEnd">#32B247</Color>
+
+		<!-- LCD toggle-button states -->
+		<Color x:Key="OrgZLcdButtonBackground">#B0B69E</Color>
+		<Color x:Key="OrgZLcdButtonBackgroundActive">#6B7160</Color>
+
 		<!-- Brushes -->
-		<SolidColorBrush x:Key="OrgZDialogBackgroundBrush" Color="{StaticResource OrgZDialogBackground}" />
-		<SolidColorBrush x:Key="OrgZTextForegroundBrush" Color="{StaticResource OrgZTextForeground}" />
+		<SolidColorBrush x:Key="OrgZSurfaceDarkBrush" Color="{StaticResource OrgZSurfaceDark}" />
 		<SolidColorBrush x:Key="OrgZInputBackgroundBrush" Color="{StaticResource OrgZInputBackground}" />
 		<SolidColorBrush x:Key="OrgZReadonlyBackgroundBrush" Color="{StaticResource OrgZReadonlyBackground}" />
 		<SolidColorBrush x:Key="OrgZButtonBackgroundBrush" Color="{StaticResource OrgZButtonBackground}" />
 		<SolidColorBrush x:Key="OrgZBorderColorBrush" Color="{StaticResource OrgZBorderColor}" />
-		<SolidColorBrush x:Key="OrgZAccentBlueBrush" Color="{StaticResource OrgZAccentBlue}" />
-		<SolidColorBrush x:Key="OrgZMutedTextBrush" Color="{StaticResource OrgZMutedText}" />
+		<SolidColorBrush x:Key="OrgZBorderColorStrongBrush" Color="{StaticResource OrgZBorderColorStrong}" />
+		<SolidColorBrush x:Key="OrgZFilterBarBackgroundBrush" Color="{StaticResource OrgZFilterBarBackground}" />
 		<SolidColorBrush x:Key="OrgZPodcastSurfaceBrush" Color="{StaticResource OrgZPodcastSurface}" />
+		<SolidColorBrush x:Key="OrgZTextForegroundBrush" Color="{StaticResource OrgZTextForeground}" />
 		<SolidColorBrush x:Key="OrgZSubtitleTextBrush" Color="{StaticResource OrgZSubtitleText}" />
+		<SolidColorBrush x:Key="OrgZMutedTextBrush" Color="{StaticResource OrgZMutedText}" />
+		<SolidColorBrush x:Key="OrgZAccentBlueBrush" Color="{StaticResource OrgZAccentBlue}" />
 		<SolidColorBrush x:Key="OrgZTileSurfaceBrush" Color="{StaticResource OrgZTileSurface}" />
 		<SolidColorBrush x:Key="OrgZTileBorderBrush" Color="{StaticResource OrgZTileBorder}" />
 		<SolidColorBrush x:Key="OrgZTileHoverOverlayBrush" Color="{StaticResource OrgZTileHoverOverlay}" />
 		<SolidColorBrush x:Key="OrgZHeroOverlayBrush" Color="{StaticResource OrgZHeroOverlay}" />
+		<SolidColorBrush x:Key="OrgZAlbumArtBackdropBrush" Color="{StaticResource OrgZAlbumArtBackdrop}" />
 		<SolidColorBrush x:Key="OrgZSuccessBrush" Color="{StaticResource OrgZSuccess}" />
 		<SolidColorBrush x:Key="OrgZWarningBrush" Color="{StaticResource OrgZWarning}" />
+		<SolidColorBrush x:Key="OrgZDangerBorderBrush" Color="{StaticResource OrgZDangerBorder}" />
+		<SolidColorBrush x:Key="OrgZDangerTextBrush" Color="{StaticResource OrgZDangerText}" />
 		<SolidColorBrush x:Key="OrgZErrorBrush" Color="{StaticResource OrgZError}" />
+		<SolidColorBrush x:Key="OrgZDiskMeterTrackBrush" Color="{StaticResource OrgZDiskMeterTrack}" />
+		<SolidColorBrush x:Key="OrgZDiskMeterTrackBorderBrush" Color="{StaticResource OrgZDiskMeterTrackBorder}" />
+		<SolidColorBrush x:Key="OrgZDiskMeterDividerBrush" Color="{StaticResource OrgZDiskMeterDivider}" />
+		<SolidColorBrush x:Key="OrgZMetalButtonBorderBrush" Color="{StaticResource OrgZMetalButtonBorder}" />
+		<SolidColorBrush x:Key="OrgZMetalButtonBorderActiveBrush" Color="{StaticResource OrgZMetalButtonBorderActive}" />
+		<SolidColorBrush x:Key="OrgZMetalButtonHoverBrush" Color="{StaticResource OrgZMetalButtonHover}" />
+		<SolidColorBrush x:Key="OrgZStoplightCloseBorderBrush" Color="{StaticResource OrgZStoplightCloseBorder}" />
+		<SolidColorBrush x:Key="OrgZStoplightMinBorderBrush" Color="{StaticResource OrgZStoplightMinBorder}" />
+		<SolidColorBrush x:Key="OrgZStoplightMaxBorderBrush" Color="{StaticResource OrgZStoplightMaxBorder}" />
+		<SolidColorBrush x:Key="OrgZLcdButtonBackgroundBrush" Color="{StaticResource OrgZLcdButtonBackground}" />
+		<SolidColorBrush x:Key="OrgZLcdButtonBackgroundActiveBrush" Color="{StaticResource OrgZLcdButtonBackgroundActive}" />
 
 		<!-- Font -->
 		<FontFamily x:Key="OrgZMonoFont">Consolas</FontFamily>
@@ -92,7 +142,7 @@
 
 	<!-- Dialog window background -->
 	<Style Selector="Window.orgzDialog">
-		<Setter Property="Background" Value="{StaticResource OrgZDialogBackgroundBrush}" />
+		<Setter Property="Background" Value="{StaticResource OrgZSurfaceDarkBrush}" />
 	</Style>
 
 	<!-- TextBlock -->

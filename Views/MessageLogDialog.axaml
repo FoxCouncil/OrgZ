@@ -20,7 +20,7 @@
 			<Setter Property="MinHeight" Value="0" />
 		</Style>
 		<Style Selector="ListBoxItem:nth-child(odd)">
-			<Setter Property="Background" Value="{StaticResource OrgZDialogBackgroundBrush}" />
+			<Setter Property="Background" Value="{StaticResource OrgZSurfaceDarkBrush}" />
 		</Style>
 	</Window.Styles>
 

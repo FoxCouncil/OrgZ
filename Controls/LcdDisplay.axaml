@@ -269,7 +269,7 @@
 			<Button x:Name="CyclePageButton" HorizontalAlignment="Left" VerticalAlignment="Center"
 			        Margin="6,0,0,0" Width="18" Height="18" CornerRadius="9"
 			        Padding="0" BorderThickness="0"
-			        Background="#B0B69E"
+			        Background="{StaticResource OrgZLcdButtonBackgroundBrush}"
 			        Command="{Binding CycleLcdPageCommand}"
 			        IsVisible="{Binding ShowLcdCycleButton}"
 			        Cursor="Hand"
@@ -277,13 +277,13 @@
 			        ToolTip.Tip="Switch LCD view">
 				<Button.Styles>
 					<Style Selector="Button">
-						<Setter Property="Background" Value="#B0B69E" />
+						<Setter Property="Background" Value="{StaticResource OrgZLcdButtonBackgroundBrush}" />
 					</Style>
 					<Style Selector="Button:pointerover /template/ ContentPresenter">
 						<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
 					</Style>
 					<Style Selector="Button:pressed /template/ ContentPresenter">
-						<Setter Property="Background" Value="#6B7160" />
+						<Setter Property="Background" Value="{StaticResource OrgZLcdButtonBackgroundActiveBrush}" />
 					</Style>
 				</Button.Styles>
 				<i:Icon Value="fa-solid fa-chevron-left" FontSize="9"
@@ -297,7 +297,7 @@
 			<Button x:Name="CancelRipButton" HorizontalAlignment="Right" VerticalAlignment="Center"
 			        Margin="0,0,6,0" Width="18" Height="18" CornerRadius="9"
 			        Padding="0" BorderThickness="0"
-			        Background="#B0B69E"
+			        Background="{StaticResource OrgZLcdButtonBackgroundBrush}"
 			        Command="{Binding CancelRipCommand}"
 			        IsVisible="{Binding IsRipping}"
 			        Cursor="Hand"
@@ -305,13 +305,13 @@
 			        ToolTip.Tip="Cancel rip">
 				<Button.Styles>
 					<Style Selector="Button">
-						<Setter Property="Background" Value="#B0B69E" />
+						<Setter Property="Background" Value="{StaticResource OrgZLcdButtonBackgroundBrush}" />
 					</Style>
 					<Style Selector="Button:pointerover /template/ ContentPresenter">
 						<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
 					</Style>
 					<Style Selector="Button:pressed /template/ ContentPresenter">
-						<Setter Property="Background" Value="#6B7160" />
+						<Setter Property="Background" Value="{StaticResource OrgZLcdButtonBackgroundActiveBrush}" />
 					</Style>
 				</Button.Styles>
 				<i:Icon Value="fa-solid fa-xmark" FontSize="9"

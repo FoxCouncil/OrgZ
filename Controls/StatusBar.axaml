@@ -21,7 +21,7 @@
             <Style Selector="Border">
                 <Setter Property="BorderBrush" Value="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="Background" Value="#1A1A1A" />
+                <Setter Property="Background" Value="{StaticResource OrgZSurfaceDarkBrush}" />
             </Style>
             <Style Selector="TextBlock.label">
                 <Setter Property="Foreground" Value="{DynamicResource SystemControlDisabledBaseMediumLowBrush}" />
@@ -79,8 +79,8 @@
                 <Border Grid.Column="5" IsVisible="{Binding !!ErrorCount}">
                     <Button Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />
-                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="OrangeRed" VerticalAlignment="Center" />
+                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="{StaticResource OrgZErrorBrush}" />
+                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="{StaticResource OrgZErrorBrush}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </Border>
@@ -115,8 +115,8 @@
                 <Border Grid.Column="2" IsVisible="{Binding !!ErrorCount}">
                     <Button Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />
-                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="OrangeRed" VerticalAlignment="Center" />
+                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="{StaticResource OrgZErrorBrush}" />
+                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="{StaticResource OrgZErrorBrush}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </Border>
@@ -157,8 +157,8 @@
                 <Border Grid.Column="3" IsVisible="{Binding !!ErrorCount}">
                     <Button Click="ErrorButton_Click" Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0">
                         <StackPanel Orientation="Horizontal" Spacing="4">
-                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="OrangeRed" />
-                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="OrangeRed" VerticalAlignment="Center" />
+                            <i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" Foreground="{StaticResource OrgZErrorBrush}" />
+                            <TextBlock Text="{Binding ErrorCount}" FontSize="11" Foreground="{StaticResource OrgZErrorBrush}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </Border>

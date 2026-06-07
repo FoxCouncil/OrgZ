@@ -157,7 +157,7 @@
 					     PNGs / radio favicons don't blend into the dark theme. -->
 					<Border Background="{DynamicResource SystemChromeGrayColor}" CornerRadius="6" Width="75" Height="75" ClipToBounds="True">
 						<Panel>
-							<Border Background="White" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}">
+							<Border Background="{StaticResource OrgZAlbumArtBackdropBrush}" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNotNull}}">
 								<Image Source="{Binding CurrentAlbumArt}" Stretch="UniformToFill" />
 							</Border>
 							<i:Icon Value="fa-solid fa-music" FontSize="28" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding CurrentAlbumArt, Converter={x:Static ObjectConverters.IsNull}}" Opacity="0.4" />
@@ -230,10 +230,10 @@
 										</Style>
 									</i:Icon.Styles>
 								</i:Icon>
-								<Border Background="OrangeRed" CornerRadius="6" MinWidth="12" Height="12"
+								<Border Background="{StaticResource OrgZErrorBrush}" CornerRadius="6" MinWidth="12" Height="12"
 								        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-6,0"
 								        IsVisible="{Binding HasActiveActivities}" Padding="2,0" ClipToBounds="False">
-									<TextBlock Text="{Binding ActivityBadgeCount}" FontSize="8" Foreground="White"
+									<TextBlock Text="{Binding ActivityBadgeCount}" FontSize="8" Foreground="{StaticResource OrgZTextForegroundBrush}"
 									           HorizontalAlignment="Center" VerticalAlignment="Center" />
 								</Border>
 							</Panel>
@@ -259,13 +259,8 @@
 				<Grid Grid.Column="2" ColumnDefinitions="*,Auto">
 					<Border Grid.Column="0" CornerRadius="8" ClipToBounds="True">
 						<DockPanel>
-							<controls:RadioFilterPanel x:Name="RadioFilterPanel"
-								DockPanel.Dock="Bottom"
-								DataContext="{Binding}"
-								IsVisible="False" />
-
-							<!-- CD audio action bar: same Bottom-docked convention as RadioFilterPanel.
-							     Shown only when the active sidebar entry is an Audio CD. -->
+							<!-- CD audio action bar: docks to the bottom of the content
+							     area, only when the active sidebar entry is an Audio CD. -->
 							<Border DockPanel.Dock="Bottom"
 									IsVisible="{Binding IsCdViewActive}"
 									Padding="8,6">
@@ -295,6 +290,14 @@
 									<i:Icon Value="fa-solid fa-xmark" FontSize="12" Opacity="0.5" />
 								</Button>
 							</Grid>
+
+							<!-- Radio country/genre filter header. Declared last among the
+							     Top-docked rows so it sits closest to the DataGrid -
+							     under the breadcrumb / device info if either is active. -->
+							<controls:RadioFilterPanel x:Name="RadioFilterPanel"
+								DockPanel.Dock="Top"
+								DataContext="{Binding}"
+								IsVisible="False" />
 
 							<DataGrid x:Name="DrillDownGrid"
 								DoubleTapped="DrillDownGrid_DoubleTapped"

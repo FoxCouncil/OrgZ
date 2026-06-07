@@ -43,8 +43,8 @@
 							           IsVisible="{Binding Detail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 							<ProgressBar Minimum="0" Maximum="1" Value="{Binding Progress}" Height="3" Margin="18,4,0,0"
 							             IsVisible="{Binding Progress, Converter={x:Static ObjectConverters.IsNotNull}}"
-							             Foreground="#4A9EFF" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-							<TextBlock Text="{Binding Error}" TextWrapping="Wrap" FontSize="10" Foreground="OrangeRed" Margin="18,2,0,0"
+							             Foreground="{StaticResource OrgZAccentBlueBrush}" Background="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+							<TextBlock Text="{Binding Error}" TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource OrgZErrorBrush}" Margin="18,2,0,0"
 							           IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 						</StackPanel>
 					</DataTemplate>

@@ -76,7 +76,7 @@
     </UserControl.Resources>
 
     <Border MinWidth="140" MaxWidth="350" CornerRadius="8" ClipToBounds="True"
-            Background="{StaticResource OrgZDialogBackgroundBrush}">
+            Background="{StaticResource OrgZSurfaceDarkBrush}">
 
         <DockPanel>
             <!-- LIBRARY header -->
