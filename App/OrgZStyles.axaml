@@ -17,6 +17,19 @@
 		<Color x:Key="OrgZAccentBlue">#4A9EFF</Color>
 		<Color x:Key="OrgZMutedText">#999999</Color>
 
+		<!-- Podcast sub-views: surface + tile chrome + hero overlay + subtitle -->
+		<Color x:Key="OrgZPodcastSurface">#1A0F2E</Color>
+		<Color x:Key="OrgZSubtitleText">#CCCCCC</Color>
+		<Color x:Key="OrgZTileSurface">#222222</Color>
+		<Color x:Key="OrgZTileBorder">#3F3F3F</Color>
+		<Color x:Key="OrgZTileHoverOverlay">#22FFFFFF</Color>
+		<Color x:Key="OrgZHeroOverlay">#CC000000</Color>
+
+		<!-- Status: download row icons + store error banner -->
+		<Color x:Key="OrgZSuccess">#7CFF7C</Color>
+		<Color x:Key="OrgZWarning">#FFC07C</Color>
+		<Color x:Key="OrgZError">#FF4500</Color>
+
 		<!-- Brushes -->
 		<SolidColorBrush x:Key="OrgZDialogBackgroundBrush" Color="{StaticResource OrgZDialogBackground}" />
 		<SolidColorBrush x:Key="OrgZTextForegroundBrush" Color="{StaticResource OrgZTextForeground}" />
@@ -26,6 +39,15 @@
 		<SolidColorBrush x:Key="OrgZBorderColorBrush" Color="{StaticResource OrgZBorderColor}" />
 		<SolidColorBrush x:Key="OrgZAccentBlueBrush" Color="{StaticResource OrgZAccentBlue}" />
 		<SolidColorBrush x:Key="OrgZMutedTextBrush" Color="{StaticResource OrgZMutedText}" />
+		<SolidColorBrush x:Key="OrgZPodcastSurfaceBrush" Color="{StaticResource OrgZPodcastSurface}" />
+		<SolidColorBrush x:Key="OrgZSubtitleTextBrush" Color="{StaticResource OrgZSubtitleText}" />
+		<SolidColorBrush x:Key="OrgZTileSurfaceBrush" Color="{StaticResource OrgZTileSurface}" />
+		<SolidColorBrush x:Key="OrgZTileBorderBrush" Color="{StaticResource OrgZTileBorder}" />
+		<SolidColorBrush x:Key="OrgZTileHoverOverlayBrush" Color="{StaticResource OrgZTileHoverOverlay}" />
+		<SolidColorBrush x:Key="OrgZHeroOverlayBrush" Color="{StaticResource OrgZHeroOverlay}" />
+		<SolidColorBrush x:Key="OrgZSuccessBrush" Color="{StaticResource OrgZSuccess}" />
+		<SolidColorBrush x:Key="OrgZWarningBrush" Color="{StaticResource OrgZWarning}" />
+		<SolidColorBrush x:Key="OrgZErrorBrush" Color="{StaticResource OrgZError}" />
 
 		<!-- Font -->
 		<FontFamily x:Key="OrgZMonoFont">Consolas</FontFamily>

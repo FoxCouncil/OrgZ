@@ -117,9 +117,9 @@ public sealed record PodcastSubscription
 }
 
 /// <summary>
-/// Persisted listen history entry. Distinct from <see cref="PodcastDownload"/> -
-/// every episode the user has ever played (downloaded or streamed) gets a row;
-/// downloads are a separate concept. Used to populate the "recently played" UI.
+/// Persisted listen history entry. Every episode the user has ever played
+/// (downloaded or streamed) gets a row, so listen records survive the deletion
+/// of any cached file on disk. Used to populate the "recently played" UI.
 /// </summary>
 public sealed record PodcastListenEntry
 {
@@ -138,22 +138,3 @@ public sealed record PodcastListenEntry
     public bool      Completed          { get; init; }
 }
 
-/// <summary>
-/// Local download record (SQLite-persisted). One row per downloaded or in-progress
-/// episode. <see cref="LocalPath"/> is set once the file is on disk.
-/// </summary>
-public sealed record PodcastDownload
-{
-    public long      EpisodeId      { get; init; }
-    public long      FeedId         { get; init; }
-    public string?   Title          { get; init; }
-    public string?   Description    { get; init; }
-    public string?   EnclosureUrl   { get; init; }
-    public long      EnclosureBytes { get; init; }
-    public int       DurationSec    { get; init; }
-    public long      DatePublishedEpoch { get; init; }
-    public string?   LocalPath      { get; init; }
-    public DateTime  AddedAt        { get; init; }
-    public DateTime? CompletedAt    { get; init; }
-    public long?     LastPositionMs { get; init; }
-}

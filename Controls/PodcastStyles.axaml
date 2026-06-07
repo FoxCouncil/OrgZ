@@ -1,0 +1,42 @@
+<Styles xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+	<!-- Shared styles for the split podcast sub-views (Store, Subscriptions,
+	     Downloads, FeedDetail). Each sub-view StyleIncludes this file so its
+	     designer preview renders with the same chrome the running app uses,
+	     and tweaking a tile in one place propagates everywhere. -->
+
+	<Style Selector="TextBlock.sectionHeader">
+		<Setter Property="FontSize" Value="18" />
+		<Setter Property="FontWeight" Value="SemiBold" />
+		<Setter Property="Margin" Value="0,4,0,8" />
+	</Style>
+
+	<Style Selector="TextBlock.subHeader">
+		<Setter Property="FontSize" Value="14" />
+		<Setter Property="FontWeight" Value="SemiBold" />
+		<Setter Property="Margin" Value="0,12,0,6" />
+		<Setter Property="Opacity" Value="0.85" />
+	</Style>
+
+	<Style Selector="Button.podcastTile">
+		<Setter Property="Background" Value="Transparent" />
+		<Setter Property="BorderThickness" Value="0" />
+		<Setter Property="Padding" Value="4" />
+		<Setter Property="Cursor" Value="Hand" />
+		<Setter Property="HorizontalAlignment" Value="Stretch" />
+	</Style>
+
+	<Style Selector="Button.podcastTile:pointerover /template/ ContentPresenter">
+		<Setter Property="Background" Value="{StaticResource OrgZTileHoverOverlayBrush}" />
+		<Setter Property="BorderBrush" Value="Transparent" />
+	</Style>
+
+	<Style Selector="Border.tileArt">
+		<Setter Property="CornerRadius" Value="6" />
+		<Setter Property="ClipToBounds" Value="True" />
+		<Setter Property="Background" Value="{StaticResource OrgZTileSurfaceBrush}" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZTileBorderBrush}" />
+		<Setter Property="BorderThickness" Value="1" />
+	</Style>
+</Styles>
