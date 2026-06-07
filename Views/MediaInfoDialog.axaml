@@ -29,7 +29,7 @@
 					<StackPanel Spacing="12">
 						<!-- Top section: art + basic info -->
 						<Grid ColumnDefinitions="100,*" Margin="0,0,0,8">
-							<Border Grid.Column="0" Background="#111" BorderBrush="#333" BorderThickness="1"
+							<Border Grid.Column="0" Background="{StaticResource OrgZInputBackgroundBrush}" BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1"
 									Width="90" Height="90" CornerRadius="4">
 								<Image x:Name="SummaryArt" Stretch="UniformToFill" />
 							</Border>
@@ -81,7 +81,7 @@
 						</Grid>
 
 						<!-- Where / Stream URL -->
-						<Border BorderBrush="#333" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,4,0,0">
+						<Border BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,4,0,0">
 							<StackPanel Spacing="2">
 								<TextBlock x:Name="SummaryWhereLabel" Text="Where:" FontWeight="Bold" FontSize="11" Opacity="0.6" />
 								<TextBlock x:Name="SummaryWherePath" FontSize="11" TextWrapping="Wrap" Opacity="0.5" />
@@ -184,7 +184,7 @@
 						<TextBox x:Name="PodcastInfoPublished" IsReadOnly="True" />
 
 						<TextBlock Text="Show Notes" FontSize="11" Opacity="0.6" Margin="0,4,0,0" />
-						<Border BorderBrush="#444" BorderThickness="1" CornerRadius="4"
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4"
 								Padding="8" MinHeight="160" MaxHeight="320">
 							<ScrollViewer HorizontalScrollBarVisibility="Disabled"
 										  VerticalScrollBarVisibility="Auto">
@@ -295,7 +295,7 @@
 						<Button Content="Add..." Width="80" IsEnabled="False" />
 						<Button Content="Delete" Width="80" IsEnabled="False" />
 					</StackPanel>
-					<Border Background="#111" BorderBrush="#333" BorderThickness="1" CornerRadius="4">
+					<Border Background="{StaticResource OrgZInputBackgroundBrush}" BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1" CornerRadius="4">
 						<Image x:Name="ArtworkImage" Stretch="Uniform" Margin="8" />
 					</Border>
 				</DockPanel>
