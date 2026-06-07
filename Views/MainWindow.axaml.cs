@@ -393,6 +393,11 @@ public partial class MainWindow : Window
         MainDataGrid.IsVisible = !isPodcasts && !isGrouped;
         GroupedDataGrid.IsVisible = !isPodcasts && isGrouped;
 
+        // Set RadioFilterPanel visibility before any early-return so a previous
+        // Radio view doesn't leave its country/genre dropdowns hanging in the
+        // Podcasts view.
+        RadioFilterPanel.IsVisible = config.ShowRadioFilterPanel;
+
         if (isPodcasts)
         {
             _ = _viewModel.Podcasts.LoadStoreAsync();
@@ -417,8 +422,6 @@ public partial class MainWindow : Window
             BuildColumns(config.Columns);
             BuildContextMenu(config.ContextMenuItems);
         }
-
-        RadioFilterPanel.IsVisible = config.ShowRadioFilterPanel;
 
         // Group expand/collapse for grouped views uses persisted per-view state. On
         // load, each group gets the state it had last time (or collapsed by default
