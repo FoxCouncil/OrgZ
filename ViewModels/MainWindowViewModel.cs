@@ -507,10 +507,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private DataGridCollectionView? _filteredItemsView;
 
     // -- Radio Filters --
+    //
+    // Both collections are seeded with "All" up front. RebuildRadioFilterOptions
+    // clears and re-adds it alongside the live entries; pre-seeding matters
+    // only at startup, before there's any radio data to rebuild from — without
+    // it the ComboBox.SelectedItem binding ("All") has nothing to resolve
+    // against and the dropdown renders blank.
 
-    internal ObservableCollection<string> Countries { get; } = [];
+    internal ObservableCollection<string> Countries { get; } = ["All"];
 
-    internal ObservableCollection<string> Genres { get; } = [];
+    internal ObservableCollection<string> Genres { get; } = ["All"];
 
     [ObservableProperty]
     private string _selectedCountry = Settings.Get("OrgZ.Radio.Country", "All");
@@ -798,8 +804,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ScrollToSelectedRequested?.Invoke();
     }
 
+    // Set true during RebuildRadioFilterOptions's bounce-assignment so the
+    // intermediate empty value doesn't trip ApplyFilter / Settings.Save.
+    private bool _suppressFilterSideEffects;
+
     partial void OnSelectedCountryChanged(string value)
     {
+        if (_suppressFilterSideEffects) return;
         ApplyFilter();
         Settings.Set("OrgZ.Radio.Country", value);
         Settings.Save();
@@ -807,6 +818,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedGenreChanged(string value)
     {
+        if (_suppressFilterSideEffects) return;
         ApplyFilter();
         Settings.Set("OrgZ.Radio.Genre", value);
         Settings.Save();
@@ -2518,8 +2530,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void RebuildRadioFilterOptions()
     {
-        var prevCountry = SelectedCountry;
-        var prevGenre = SelectedGenre;
+        // Capture intent from Settings, not from SelectedCountry/Genre. The
+        // ComboBox binds at startup while Countries/Genres still only contain
+        // "All"; Avalonia's ComboBox can't resolve the persisted "Canada"
+        // against an empty items list and silently leaves SelectedItem null.
+        // Settings is the durable source of truth here.
+        var prevCountry = Settings.Get("OrgZ.Radio.Country", "All");
+        var prevGenre   = Settings.Get("OrgZ.Radio.Genre",   "All");
 
         var radioItems = _allItems.Where(i => i.Kind == MediaKind.Radio);
 
@@ -2551,8 +2568,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        SelectedCountry = Countries.Contains(prevCountry) ? prevCountry : "All";
-        SelectedGenre = Genres.Contains(prevGenre) ? prevGenre : "All";
+        var resolvedCountry = Countries.Contains(prevCountry) ? prevCountry : "All";
+        var resolvedGenre   = Genres.Contains(prevGenre)     ? prevGenre   : "All";
+
+        // Bounce through "" before assigning the resolved value. The Avalonia
+        // ComboBox bound while Countries/Genres still only contained "All";
+        // it silently rendered blank because SelectedItem couldn't resolve
+        // against the small items list. Just calling OnPropertyChanged isn't
+        // enough — the binding reports the same value and Avalonia's ComboBox
+        // doesn't re-pick its SelectedItem. Forcing a real value change makes
+        // the ComboBox re-evaluate SelectedItem against the now-populated
+        // items collection. ApplyFilter / Settings.Save are suppressed during
+        // the bounce; we call ApplyFilter once at the end with the real value.
+        _suppressFilterSideEffects = true;
+        try
+        {
+            SelectedCountry = string.Empty;
+            SelectedCountry = resolvedCountry;
+            SelectedGenre   = string.Empty;
+            SelectedGenre   = resolvedGenre;
+        }
+        finally
+        {
+            _suppressFilterSideEffects = false;
+        }
+
+        ApplyFilter();
     }
 
     #endregion
