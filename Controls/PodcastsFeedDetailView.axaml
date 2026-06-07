@@ -1,0 +1,134 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:img="clr-namespace:OrgZ.Converters"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.PodcastsFeedDetailView"
+             Background="{StaticResource OrgZPodcastSurfaceBrush}"
+             x:CompileBindings="False">
+	<Design.DataContext>
+		<vm:PodcastsViewModel />
+	</Design.DataContext>
+	<UserControl.Styles>
+		<StyleInclude Source="avares://OrgZ/Controls/PodcastStyles.axaml" />
+	</UserControl.Styles>
+
+	<Grid RowDefinitions="Auto,*">
+		<Border Grid.Row="0" Background="{StaticResource OrgZPodcastSurfaceBrush}" Padding="16">
+			<Grid ColumnDefinitions="Auto,*,Auto">
+				<Border Grid.Column="0" Classes="tileArt" Width="140" Height="140" Margin="0,0,16,0">
+					<Image img:RemoteImage.Url="{Binding SelectedFeed.DisplayImage}" Stretch="UniformToFill" />
+				</Border>
+				<StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+					<TextBlock Text="{Binding SelectedFeed.Title}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" />
+					<TextBlock Text="{Binding SelectedFeed.Author}" FontSize="13" Opacity="0.7" />
+					<SelectableTextBlock x:Name="FeedDescriptionBlock"
+					                     FontSize="12" Opacity="0.85" TextWrapping="Wrap"
+					                     MaxLines="4" TextTrimming="CharacterEllipsis"
+					                     PointerPressed="FeedDescriptionBlock_PointerPressed" />
+				</StackPanel>
+				<StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="8">
+					<Button Command="{Binding ToggleSubscribeCommand}" Padding="14,6" Cursor="Hand">
+						<StackPanel Orientation="Horizontal" Spacing="6">
+							<i:Icon Value="fa-solid fa-bookmark" FontSize="12" />
+							<TextBlock Text="Subscribe" IsVisible="{Binding !SelectedFeedIsSubscribed}" />
+							<TextBlock Text="Unsubscribe" IsVisible="{Binding SelectedFeedIsSubscribed}" />
+						</StackPanel>
+					</Button>
+				</StackPanel>
+			</Grid>
+		</Border>
+
+		<DataGrid Grid.Row="1" x:Name="EpisodesGrid"
+		          ItemsSource="{Binding SelectedFeedEpisodes}"
+		          DoubleTapped="EpisodesGrid_DoubleTapped"
+		          GridLinesVisibility="All"
+		          IsReadOnly="True"
+		          AutoGenerateColumns="False"
+		          CanUserSortColumns="True"
+		          SelectionMode="Single"
+		          Background="{DynamicResource SystemAltHighColor}"
+		          HorizontalScrollBarVisibility="Auto"
+		          VerticalScrollBarVisibility="Auto">
+			<DataGrid.ContextMenu>
+				<ContextMenu>
+					<MenuItem Header="Play" Click="ContextPlay_Click" />
+					<MenuItem Header="Download" Click="ContextDownload_Click" />
+					<Separator />
+					<MenuItem Header="Get Info" Click="ContextGetInfo_Click" />
+				</ContextMenu>
+			</DataGrid.ContextMenu>
+			<DataGrid.Styles>
+				<Style Selector="DataGridRow">
+					<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+				</Style>
+				<Style Selector="DataGridRow:nth-child(odd)">
+					<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+				</Style>
+				<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
+					<Setter Property="IsVisible" Value="False" />
+				</Style>
+				<Style Selector="DataGridCell TextBlock">
+					<Setter Property="VerticalAlignment" Value="Center" />
+				</Style>
+			</DataGrid.Styles>
+			<DataGrid.Columns>
+				<DataGridTextColumn Header="Episode" Binding="{Binding Title}" Width="*" />
+				<DataGridTextColumn Header="Published" Binding="{Binding DatePublishedPretty}" Width="160" />
+				<DataGridTextColumn Header="Duration" Binding="{Binding DurationLabel}" Width="100" />
+				<DataGridTemplateColumn Header="" Width="84" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
+					<DataGridTemplateColumn.CellTemplate>
+						<DataTemplate DataType="vm:PodcastEpisodeRow">
+							<StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+								<Button Click="StreamEpisode_Click" Tag="{Binding}"
+								        Padding="6,3" Cursor="Hand" ToolTip.Tip="Play (prefers local file when downloaded)">
+									<i:Icon Value="fa-solid fa-play" FontSize="11" />
+								</Button>
+								<!-- One physical button, four overlaid icons. Visibility is driven
+								     by the row's DownloadState so the icon swaps the moment the
+								     state observes a change - service raises Completed/Failed and
+								     PodcastsViewModel pokes the row, no rebind / no redraw of the
+								     whole grid. Tooltip is generic; the icon carries the meaning. -->
+								<Button Click="DownloadEpisode_Click" Tag="{Binding}"
+								        Padding="6,3" Cursor="Hand" ToolTip.Tip="Download (click to (re)fetch)">
+									<Panel>
+										<i:Icon Value="fa-solid fa-download" FontSize="11"
+										        IsVisible="{Binding IsNotDownloaded}" />
+										<i:Icon Value="fa-solid fa-circle-notch" FontSize="11"
+										        IsVisible="{Binding IsDownloading}" />
+										<i:Icon Value="fa-solid fa-check" FontSize="11"
+										        Foreground="{StaticResource OrgZSuccessBrush}"
+										        IsVisible="{Binding IsDownloaded}" />
+										<i:Icon Value="fa-solid fa-triangle-exclamation" FontSize="11"
+										        Foreground="{StaticResource OrgZWarningBrush}"
+										        IsVisible="{Binding IsIncomplete}" />
+									</Panel>
+								</Button>
+							</StackPanel>
+						</DataTemplate>
+					</DataGridTemplateColumn.CellTemplate>
+				</DataGridTemplateColumn>
+			</DataGrid.Columns>
+		</DataGrid>
+
+		<!-- Overlay status messages on top of the DataGrid area. -->
+		<TextBlock Grid.Row="1" Text="Loading episodes…"
+		           IsVisible="{Binding IsLoadingFeed}"
+		           HorizontalAlignment="Center" VerticalAlignment="Center"
+		           Opacity="0.6" FontSize="14" IsHitTestVisible="False" />
+		<TextBlock Grid.Row="1" Text="No episodes available for this podcast."
+		           HorizontalAlignment="Center" VerticalAlignment="Center"
+		           Opacity="0.6" FontSize="14" IsHitTestVisible="False">
+			<TextBlock.IsVisible>
+				<MultiBinding Converter="{x:Static BoolConverters.And}">
+					<Binding Path="!IsLoadingFeed" />
+					<Binding Path="SelectedFeedEpisodes.Count" Converter="{x:Static ObjectConverters.Equal}" ConverterParameter="0" />
+				</MultiBinding>
+			</TextBlock.IsVisible>
+		</TextBlock>
+	</Grid>
+</UserControl>

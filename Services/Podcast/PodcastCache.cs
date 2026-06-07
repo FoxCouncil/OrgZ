@@ -6,8 +6,10 @@ using OrgZ.Models;
 namespace OrgZ.Services.Podcast;
 
 /// <summary>
-/// SQLite-backed cache for user podcast state: subscriptions and downloads.
+/// SQLite-backed cache for user podcast state: subscriptions and listen history.
 /// Lives in the same library.db as <see cref="MediaCache"/>, on its own tables.
+/// Download presence is no longer tracked here - it's a function of whether the
+/// downloaded file exists on disk; see <see cref="PodcastDownloadService.GetState"/>.
 /// </summary>
 public static class PodcastCache
 {
@@ -37,29 +39,13 @@ public static class PodcastCache
                     LastCheckedAt   TEXT
                 );
 
-                CREATE TABLE IF NOT EXISTS PodcastDownload (
-                    EpisodeId           INTEGER PRIMARY KEY,
-                    FeedId              INTEGER NOT NULL,
-                    Title               TEXT,
-                    Description         TEXT,
-                    EnclosureUrl        TEXT,
-                    EnclosureBytes      INTEGER NOT NULL DEFAULT 0,
-                    DurationSec         INTEGER NOT NULL DEFAULT 0,
-                    DatePublishedEpoch  INTEGER NOT NULL DEFAULT 0,
-                    LocalPath           TEXT,
-                    AddedAt             TEXT NOT NULL,
-                    CompletedAt         TEXT,
-                    LastPositionMs      INTEGER
-                );
-
-                CREATE INDEX IF NOT EXISTS IX_PodcastDownload_FeedId ON PodcastDownload(FeedId);
+                -- Legacy table — kept as a DROP for upgrades from older installs.
+                -- Download tracking now lives on disk (PodcastDownloadService.GetState).
+                DROP TABLE IF EXISTS PodcastDownload;
 
                 -- Listen history: one row per episode the user has ever played,
                 -- whether they downloaded it or just streamed. Upserted on play
-                -- and updated with progress as they listen. Distinct from
-                -- PodcastDownload so listen records survive deletion of the
-                -- local file and so we can record streams that never touched
-                -- the disk.
+                -- and updated with progress as they listen.
                 CREATE TABLE IF NOT EXISTS PodcastListen (
                     EpisodeId           INTEGER PRIMARY KEY,
                     FeedId              INTEGER NOT NULL,
@@ -237,95 +223,6 @@ public static class PodcastCache
         cmd.Parameters.AddWithValue("@id", feedId);
         cmd.ExecuteNonQuery();
     }
-
-    // -- Downloads -------------------------------------------------------
-
-    public static List<PodcastDownload> GetDownloads()
-    {
-        var list = new List<PodcastDownload>();
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT EpisodeId, FeedId, Title, Description, EnclosureUrl, EnclosureBytes, DurationSec, DatePublishedEpoch, LocalPath, AddedAt, CompletedAt, LastPositionMs FROM PodcastDownload ORDER BY DatePublishedEpoch DESC";
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
-        {
-            list.Add(ReadDownload(r));
-        }
-        return list;
-    }
-
-    public static PodcastDownload? GetDownload(long episodeId)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT EpisodeId, FeedId, Title, Description, EnclosureUrl, EnclosureBytes, DurationSec, DatePublishedEpoch, LocalPath, AddedAt, CompletedAt, LastPositionMs FROM PodcastDownload WHERE EpisodeId = @id";
-        cmd.Parameters.AddWithValue("@id", episodeId);
-        using var r = cmd.ExecuteReader();
-        return r.Read() ? ReadDownload(r) : null;
-    }
-
-    public static void UpsertDownload(PodcastDownload d)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO PodcastDownload (EpisodeId, FeedId, Title, Description, EnclosureUrl, EnclosureBytes, DurationSec, DatePublishedEpoch, LocalPath, AddedAt, CompletedAt, LastPositionMs)
-            VALUES (@EpisodeId, @FeedId, @Title, @Description, @EnclosureUrl, @EnclosureBytes, @DurationSec, @DatePublishedEpoch, @LocalPath, @AddedAt, @CompletedAt, @LastPositionMs)
-            ON CONFLICT(EpisodeId) DO UPDATE SET
-                FeedId             = excluded.FeedId,
-                Title              = excluded.Title,
-                Description        = excluded.Description,
-                EnclosureUrl       = excluded.EnclosureUrl,
-                EnclosureBytes     = excluded.EnclosureBytes,
-                DurationSec        = excluded.DurationSec,
-                DatePublishedEpoch = excluded.DatePublishedEpoch,
-                LocalPath          = excluded.LocalPath,
-                CompletedAt        = excluded.CompletedAt,
-                LastPositionMs     = excluded.LastPositionMs
-            """;
-        cmd.Parameters.AddWithValue("@EpisodeId",          d.EpisodeId);
-        cmd.Parameters.AddWithValue("@FeedId",             d.FeedId);
-        cmd.Parameters.AddWithValue("@Title",              (object?)d.Title        ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@Description",        (object?)d.Description  ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@EnclosureUrl",       (object?)d.EnclosureUrl ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@EnclosureBytes",     d.EnclosureBytes);
-        cmd.Parameters.AddWithValue("@DurationSec",        d.DurationSec);
-        cmd.Parameters.AddWithValue("@DatePublishedEpoch", d.DatePublishedEpoch);
-        cmd.Parameters.AddWithValue("@LocalPath",          (object?)d.LocalPath ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@AddedAt",            d.AddedAt.ToString("O"));
-        cmd.Parameters.AddWithValue("@CompletedAt",        d.CompletedAt?.ToString("O") ?? (object)DBNull.Value);
-        cmd.Parameters.AddWithValue("@LastPositionMs",     (object?)d.LastPositionMs ?? DBNull.Value);
-        cmd.ExecuteNonQuery();
-    }
-
-    public static void RemoveDownload(long episodeId)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM PodcastDownload WHERE EpisodeId = @id";
-        cmd.Parameters.AddWithValue("@id", episodeId);
-        cmd.ExecuteNonQuery();
-    }
-
-    private static PodcastDownload ReadDownload(SqliteDataReader r) => new()
-    {
-        EpisodeId          = r.GetInt64(0),
-        FeedId             = r.GetInt64(1),
-        Title              = GetString(r, 2),
-        Description        = GetString(r, 3),
-        EnclosureUrl       = GetString(r, 4),
-        EnclosureBytes     = r.GetInt64(5),
-        DurationSec        = r.GetInt32(6),
-        DatePublishedEpoch = r.GetInt64(7),
-        LocalPath          = GetString(r, 8),
-        AddedAt            = ParseDate(r.GetString(9)) ?? DateTime.UtcNow,
-        CompletedAt        = GetString(r, 10) is { } s ? ParseDate(s) : null,
-        LastPositionMs     = r.IsDBNull(11) ? null : r.GetInt64(11),
-    };
 
     private static string? GetString(SqliteDataReader r, int ord) => r.IsDBNull(ord) ? null : r.GetString(ord);
     private static DateTime? ParseDate(string s) => DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) ? d : null;

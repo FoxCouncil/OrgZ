@@ -8,11 +8,31 @@ using Serilog;
 namespace OrgZ.Services.Podcast;
 
 /// <summary>
+/// Whether an episode is on disk and usable. "Downloaded" requires both the
+/// final file to exist AND its size to match (or be close to) the upstream
+/// EnclosureLength. "Incomplete" covers the broken-rename window and any case
+/// where bytes were written but the file is the wrong size - both manifest as
+/// a file you don't want to feed to libvlc.
+/// </summary>
+public enum PodcastDownloadState
+{
+    NotDownloaded,
+    InProgress,
+    Downloaded,
+    Incomplete,
+}
+
+/// <summary>
 /// Pulls podcast episode enclosures to disk under
-/// <c>{libraryRoot}/.podcasts/{feedId}/{episodeId}.mp3</c>. Each download is a
+/// <c>{libraryRoot}/.podcasts/{feedId}/{episodeId}.{ext}</c>. Each download is a
 /// background task; callers can subscribe to <see cref="ProgressChanged"/> for
-/// UI updates and to <see cref="Completed"/> to be notified when the file is on
-/// disk and registered in <see cref="PodcastCache"/>.
+/// UI updates and to <see cref="Completed"/> / <see cref="Failed"/> for the
+/// finished-or-broken transition.
+///
+/// "Is this episode downloaded?" is answered by <see cref="GetState"/> against
+/// the filesystem - no SQLite tracking table, since the file on disk is the
+/// only authoritative source and a stale DB row that disagrees with the file
+/// is worse than no row at all.
 /// </summary>
 public sealed class PodcastDownloadService
 {
@@ -32,10 +52,84 @@ public sealed class PodcastDownloadService
     public static PodcastDownloadService Instance { get; } = new();
 
     public event Action<DownloadProgress>? ProgressChanged;
-    public event Action<PodcastDownload>?  Completed;
-    public event Action<long, Exception>?  Failed;
+    public event Action<PodcastFeed, PodcastEpisode>? Completed;
+    public event Action<long, Exception>? Failed;
 
     public bool IsDownloading(long episodeId) => _jobs.ContainsKey(episodeId);
+
+    /// <summary>
+    /// Predictable on-disk path for an episode. Mirrors the path the download
+    /// job writes to (same {libraryRoot}/.podcasts/{feedId}/{episodeId}{ext}
+    /// convention), so callers can probe presence without running a download.
+    /// </summary>
+    public static string? GetLocalPath(PodcastFeed feed, PodcastEpisode episode, string? libraryRoot)
+    {
+        if (string.IsNullOrWhiteSpace(libraryRoot))
+        {
+            return null;
+        }
+        var dir = Path.Combine(libraryRoot, ".podcasts", feed.Id.ToString());
+        var ext = GuessExtension(episode);
+        return Path.Combine(dir, $"{episode.Id}{ext}");
+    }
+
+    /// <summary>
+    /// Inspects disk + in-flight jobs to report the current state of an
+    /// episode's download. Order matters: an in-flight job always wins, then
+    /// a leftover .partial is "Incomplete" (resumed downloads aren't supported
+    /// yet - clicking the button re-fetches from scratch), then a final file
+    /// is "Downloaded" only if its size matches the upstream EnclosureLength.
+    /// A size mismatch is reported as "Incomplete" so the UI can flag the
+    /// half-downloaded / interrupted case the user explicitly asked about.
+    /// </summary>
+    public static PodcastDownloadState GetState(PodcastFeed feed, PodcastEpisode episode, string? libraryRoot)
+    {
+        if (Instance._jobs.ContainsKey(episode.Id))
+        {
+            return PodcastDownloadState.InProgress;
+        }
+        var path = GetLocalPath(feed, episode, libraryRoot);
+        if (path == null)
+        {
+            return PodcastDownloadState.NotDownloaded;
+        }
+        if (File.Exists(path + ".partial"))
+        {
+            return PodcastDownloadState.Incomplete;
+        }
+        if (!File.Exists(path))
+        {
+            return PodcastDownloadState.NotDownloaded;
+        }
+
+        // Size sanity-check. Some feeds publish enclosureLength=0 (no
+        // Content-Length on the upstream HEAD) - in that case we have no way
+        // to verify so we trust the file. When we DO have a length, we tolerate
+        // a 1% delta because some hosts report container length and write
+        // re-muxed bytes (a couple of dozen bytes off is normal).
+        try
+        {
+            var actual = new FileInfo(path).Length;
+            var expected = episode.EnclosureLength;
+            if (expected <= 0 || WithinTolerance(actual, expected))
+            {
+                return PodcastDownloadState.Downloaded;
+            }
+            _log.Warning("Episode {Id} on disk size {Actual} mismatches expected {Expected}", episode.Id, actual, expected);
+            return PodcastDownloadState.Incomplete;
+        }
+        catch
+        {
+            return PodcastDownloadState.Incomplete;
+        }
+    }
+
+    private static bool WithinTolerance(long actual, long expected)
+    {
+        if (actual == expected) return true;
+        var diff = Math.Abs(actual - expected);
+        return diff <= Math.Max(64, expected / 100);
+    }
 
     public Task EnqueueAsync(PodcastFeed feed, PodcastEpisode episode, string libraryRoot, CancellationToken ct = default)
     {
@@ -72,20 +166,14 @@ public sealed class PodcastDownloadService
             var targetPath = Path.Combine(dir, $"{ep.Id}{ext}");
             var partialPath = targetPath + ".partial";
 
-            var record = new PodcastDownload
+            // Pre-emptively clear a stale target file. The atomic rename below
+            // would replace it anyway, but a leftover from a previous broken
+            // download could make GetState briefly report Downloaded mid-job;
+            // wiping it up front keeps state honest.
+            if (File.Exists(targetPath))
             {
-                EpisodeId          = ep.Id,
-                FeedId             = job.Feed.Id,
-                Title              = ep.Title,
-                Description        = ep.Description,
-                EnclosureUrl       = ep.EnclosureUrl,
-                EnclosureBytes     = ep.EnclosureLength,
-                DurationSec        = ep.DurationSec,
-                DatePublishedEpoch = ep.DatePublishedEpoch,
-                LocalPath          = null,
-                AddedAt            = DateTime.UtcNow,
-            };
-            PodcastCache.UpsertDownload(record);
+                File.Delete(targetPath);
+            }
 
             using (var resp = await _http.GetAsync(ep.EnclosureUrl!, HttpCompletionOption.ResponseHeadersRead, job.Token))
             {
@@ -108,21 +196,15 @@ public sealed class PodcastDownloadService
             }
 
             // Atomic rename: only replace target when fully written.
-            if (File.Exists(targetPath)) File.Delete(targetPath);
             File.Move(partialPath, targetPath);
 
-            var completed = record with
-            {
-                LocalPath    = targetPath,
-                CompletedAt  = DateTime.UtcNow,
-            };
-            PodcastCache.UpsertDownload(completed);
-            Completed?.Invoke(completed);
+            Completed?.Invoke(job.Feed, ep);
             _log.Information("Downloaded {Title} ({Bytes} bytes) -> {Path}", ep.Title, new FileInfo(targetPath).Length, targetPath);
         }
         catch (OperationCanceledException)
         {
             _log.Information("Download cancelled for episode {Id}", ep.Id);
+            Failed?.Invoke(ep.Id, new OperationCanceledException());
         }
         catch (Exception ex)
         {

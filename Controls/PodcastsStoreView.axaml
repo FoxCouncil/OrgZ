@@ -1,0 +1,132 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:img="clr-namespace:OrgZ.Converters"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.PodcastsStoreView"
+             Background="{StaticResource OrgZPodcastSurfaceBrush}"
+             x:CompileBindings="False">
+	<Design.DataContext>
+		<vm:PodcastsViewModel />
+	</Design.DataContext>
+	<UserControl.Styles>
+		<StyleInclude Source="avares://OrgZ/Controls/PodcastStyles.axaml" />
+	</UserControl.Styles>
+
+	<StackPanel Margin="16" Spacing="2">
+		<!-- Featured hero strip -->
+		<TextBlock Classes="sectionHeader" Text="Featured" />
+		<ItemsControl ItemsSource="{Binding Featured}">
+			<ItemsControl.ItemsPanel>
+				<ItemsPanelTemplate>
+					<UniformGrid Columns="3" />
+				</ItemsPanelTemplate>
+			</ItemsControl.ItemsPanel>
+			<ItemsControl.ItemTemplate>
+				<DataTemplate DataType="models:PodcastFeed">
+					<Button Classes="podcastTile" Click="FeedTile_Click" Tag="{Binding}" Margin="6">
+						<Border Classes="tileArt" Height="160">
+							<Grid>
+								<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
+								<Border VerticalAlignment="Bottom" Background="{StaticResource OrgZHeroOverlayBrush}" Padding="10,6">
+									<StackPanel>
+										<TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" Foreground="{StaticResource OrgZTextForegroundBrush}" TextTrimming="CharacterEllipsis" />
+										<TextBlock Text="{Binding Author}" FontSize="11" Foreground="{StaticResource OrgZSubtitleTextBrush}" TextTrimming="CharacterEllipsis" />
+									</StackPanel>
+								</Border>
+							</Grid>
+						</Border>
+					</Button>
+				</DataTemplate>
+			</ItemsControl.ItemTemplate>
+		</ItemsControl>
+
+		<!-- Top Podcasts rail -->
+		<TextBlock Classes="subHeader" Text="Top Podcasts" />
+		<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+			<ItemsControl ItemsSource="{Binding TopPodcasts}">
+				<ItemsControl.ItemsPanel>
+					<ItemsPanelTemplate>
+						<StackPanel Orientation="Horizontal" Spacing="8" />
+					</ItemsPanelTemplate>
+				</ItemsControl.ItemsPanel>
+				<ItemsControl.ItemTemplate>
+					<DataTemplate DataType="models:PodcastFeed">
+						<Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
+							<StackPanel Spacing="4">
+								<Border Classes="tileArt" Width="120" Height="120">
+									<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
+								</Border>
+								<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
+							</StackPanel>
+						</Button>
+					</DataTemplate>
+				</ItemsControl.ItemTemplate>
+			</ItemsControl>
+		</ScrollViewer>
+
+		<!-- New & Notable rail -->
+		<TextBlock Classes="subHeader" Text="New &amp; Notable" />
+		<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+			<ItemsControl ItemsSource="{Binding NewAndNotable}">
+				<ItemsControl.ItemsPanel>
+					<ItemsPanelTemplate>
+						<StackPanel Orientation="Horizontal" Spacing="8" />
+					</ItemsPanelTemplate>
+				</ItemsControl.ItemsPanel>
+				<ItemsControl.ItemTemplate>
+					<DataTemplate DataType="models:PodcastFeed">
+						<Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
+							<StackPanel Spacing="4">
+								<Border Classes="tileArt" Width="120" Height="120">
+									<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
+								</Border>
+								<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
+							</StackPanel>
+						</Button>
+					</DataTemplate>
+				</ItemsControl.ItemTemplate>
+			</ItemsControl>
+		</ScrollViewer>
+
+		<!-- Category rails -->
+		<ItemsControl ItemsSource="{Binding CategoryRails}">
+			<ItemsControl.ItemTemplate>
+				<DataTemplate DataType="vm:PodcastCategoryRail">
+					<StackPanel Spacing="2">
+						<TextBlock Classes="subHeader" Text="{Binding CategoryName, StringFormat='Top in {0}'}" />
+						<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+							<ItemsControl ItemsSource="{Binding Feeds}">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<StackPanel Orientation="Horizontal" Spacing="8" />
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate DataType="models:PodcastFeed">
+										<Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
+											<StackPanel Spacing="4">
+												<Border Classes="tileArt" Width="120" Height="120">
+													<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
+												</Border>
+												<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
+											</StackPanel>
+										</Button>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</ScrollViewer>
+					</StackPanel>
+				</DataTemplate>
+			</ItemsControl.ItemTemplate>
+		</ItemsControl>
+
+		<!-- Loading / error state -->
+		<TextBlock Text="Loading podcasts…" IsVisible="{Binding IsLoadingStore}" HorizontalAlignment="Center" Opacity="0.6" Margin="0,24" />
+		<TextBlock Text="{Binding StoreError}" IsVisible="{Binding StoreError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" HorizontalAlignment="Center" Foreground="{StaticResource OrgZErrorBrush}" Margin="0,12" />
+	</StackPanel>
+</UserControl>
