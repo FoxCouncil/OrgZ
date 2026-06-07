@@ -11,7 +11,6 @@ public enum PodcastsView
     Store,
     FeedDetail,
     Subscriptions,
-    Downloads,
 }
 
 /// <summary>
@@ -34,10 +33,11 @@ public partial class PodcastsViewModel : ObservableObject
 
     /// <summary>
     /// Design-time only: parameterless constructor wired up by the XAML
-    /// designer so the Podcasts panel can be laid out with realistic-looking
-    /// sample data without spinning up the full app + a PodcastIndex round
-    /// trip. Populates Featured / Top / New &amp; Notable / Category rails so
-    /// the store page actually has something to render in the previewer.
+    /// designer so each split sub-view (Store, Subscriptions, FeedDetail) can
+    /// be laid out with realistic-looking sample data without spinning up the
+    /// full app + a PodcastIndex round trip. Populates every collection any
+    /// sub-view reads from, so the same instance can be used as the design
+    /// data context for all of them.
     /// </summary>
     public PodcastsViewModel()
     {
@@ -79,6 +79,54 @@ public partial class PodcastsViewModel : ObservableObject
 
             CategoryRails.Add(rail);
         }
+
+        // Subscriptions sample data — mirrors the shape PodcastCache returns
+        // for real subscriptions, so the SubscriptionsView previewer renders
+        // the same tile grid the running app would.
+        for (int i = 0; i < 5; i++)
+        {
+            Subscriptions.Add(new PodcastSubscription
+            {
+                FeedId       = 400 + i,
+                Title        = $"Subscribed Show {i + 1}",
+                Author       = $"Producer {i + 1}",
+                Description  = "Sample subscription description for designer preview.",
+                SubscribedAt = DateTime.UtcNow,
+            });
+        }
+
+        // FeedDetail sample data — one selected feed plus a handful of
+        // episodes in mixed download states so the row icons get exercised.
+        SelectedFeed = new PodcastFeed
+        {
+            Id          = 999,
+            Title       = "The Sample Show",
+            Author      = "Sample Producer",
+            Description = "A long-form interview podcast about sample data. "
+                        + "Each week the host sits down with another fake guest to talk about realistic-looking content for designer previews.",
+        };
+        var sampleStates = new[]
+        {
+            PodcastDownloadState.NotDownloaded,
+            PodcastDownloadState.Downloaded,
+            PodcastDownloadState.InProgress,
+            PodcastDownloadState.Incomplete,
+            PodcastDownloadState.NotDownloaded,
+            PodcastDownloadState.Downloaded,
+        };
+        for (int i = 0; i < sampleStates.Length; i++)
+        {
+            var ep = new PodcastEpisode
+            {
+                Id                  = 9000 + i,
+                Title               = $"Episode {sampleStates.Length - i}: A representative title that wraps onto a second line",
+                DurationSec         = 1800 + i * 327,
+                DatePublishedPretty = $"Jan {sampleStates.Length - i}, 2026",
+            };
+            var row = new PodcastEpisodeRow(SelectedFeed, ep, libraryRoot: null);
+            row.DownloadState = sampleStates[i];
+            SelectedFeedEpisodes.Add(row);
+        }
     }
 
     private static PodcastFeed SampleFeed(long id, string title, string author)
@@ -95,13 +143,12 @@ public partial class PodcastsViewModel : ObservableObject
     // -- Page state ------------------------------------------------------
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsFeedDetail), nameof(IsSubscriptions), nameof(IsDownloads))]
+    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsFeedDetail), nameof(IsSubscriptions))]
     private PodcastsView _currentView = PodcastsView.Store;
 
     public bool IsStore         => CurrentView == PodcastsView.Store;
     public bool IsFeedDetail    => CurrentView == PodcastsView.FeedDetail;
     public bool IsSubscriptions => CurrentView == PodcastsView.Subscriptions;
-    public bool IsDownloads     => CurrentView == PodcastsView.Downloads;
 
     // -- Store rails -----------------------------------------------------
 
@@ -126,15 +173,14 @@ public partial class PodcastsViewModel : ObservableObject
     public bool SelectedFeedIsSubscribed =>
         SelectedFeed is not null && PodcastCache.IsSubscribed(SelectedFeed.Id);
 
-    public ObservableCollection<PodcastEpisode> SelectedFeedEpisodes { get; } = [];
+    public ObservableCollection<PodcastEpisodeRow> SelectedFeedEpisodes { get; } = [];
 
     [ObservableProperty]
     private bool _isLoadingFeed;
 
-    // -- Subscriptions / downloads --------------------------------------
+    // -- Subscriptions ---------------------------------------------------
 
     public ObservableCollection<PodcastSubscription> Subscriptions { get; } = [];
-    public ObservableCollection<PodcastDownload>     Downloads     { get; } = [];
 
     // -- Search ----------------------------------------------------------
 
@@ -162,13 +208,6 @@ public partial class PodcastsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    internal void ShowDownloads()
-    {
-        ReloadDownloads();
-        CurrentView = PodcastsView.Downloads;
-    }
-
-    [RelayCommand]
     internal async Task OpenFeedAsync(PodcastFeed? feed)
     {
         if (feed == null) return;
@@ -183,9 +222,10 @@ public partial class PodcastsViewModel : ObservableObject
             var eps = await PodcastIndexClient.GetEpisodesByFeedIdAsync(feed.Id, max: 200);
             _log.Information("OpenFeedAsync: feed {Id} returned {Count} episodes (first duration={Dur})",
                 feed.Id, eps.Count, eps.Count > 0 ? eps[0].DurationSec : -1);
+            var libraryRoot = App.FolderPath;
             foreach (var e in eps)
             {
-                SelectedFeedEpisodes.Add(e);
+                SelectedFeedEpisodes.Add(new PodcastEpisodeRow(feed, e, libraryRoot));
             }
         }
         finally
@@ -252,6 +292,26 @@ public partial class PodcastsViewModel : ObservableObject
     internal void StreamEpisode(PodcastEpisode? episode)
     {
         if (episode == null || SelectedFeed == null) return;
+
+        // "Stream" is now a misnomer kept for backward compatibility with the
+        // existing button — if we have a fully downloaded copy on disk, play
+        // that instead so the user gets gapless start, no-buffering, and works
+        // offline. Falls through to the network stream when the file isn't on
+        // disk (or is partial / corrupted).
+        var libraryRoot = App.FolderPath;
+        if (!string.IsNullOrWhiteSpace(libraryRoot))
+        {
+            var state = PodcastDownloadService.GetState(SelectedFeed, episode, libraryRoot);
+            if (state == PodcastDownloadState.Downloaded)
+            {
+                var localPath = PodcastDownloadService.GetLocalPath(SelectedFeed, episode, libraryRoot);
+                if (!string.IsNullOrWhiteSpace(localPath))
+                {
+                    _main.PlayPodcastEpisode(SelectedFeed, episode, localPath: localPath);
+                    return;
+                }
+            }
+        }
         _main.PlayPodcastEpisodeStream(SelectedFeed, episode);
     }
 
@@ -266,28 +326,9 @@ public partial class PodcastsViewModel : ObservableObject
             return;
         }
         _ = PodcastDownloadService.Instance.EnqueueAsync(SelectedFeed, episode, libraryRoot);
-    }
-
-    [RelayCommand]
-    internal void PlayDownload(PodcastDownload? download)
-    {
-        if (download?.LocalPath == null || !File.Exists(download.LocalPath)) return;
-
-        // Reconstruct enough of the feed + episode shape to feed the unified
-        // PlayPodcastEpisode entry point. Downloaded plays go through the
-        // exact same code path as streamed plays from here -- same LCD
-        // metadata, OS now-playing, pause/resume, and listen tracking.
-        var feed = new PodcastFeed { Id = download.FeedId, Title = SelectedFeed?.Title };
-        var episode = new PodcastEpisode
-        {
-            Id                 = download.EpisodeId,
-            Title              = download.Title,
-            Description        = download.Description,
-            EnclosureUrl       = download.EnclosureUrl,
-            DurationSec        = download.DurationSec,
-            DatePublishedEpoch = download.DatePublishedEpoch,
-        };
-        _main.PlayPodcastEpisode(feed, episode, localPath: download.LocalPath);
+        // Bump the row to InProgress immediately — the service signals Completed
+        // / Failed when it's done, but the user expects the icon to flip now.
+        RefreshEpisodeRowState(episode.Id);
     }
 
     [RelayCommand]
@@ -402,31 +443,71 @@ public partial class PodcastsViewModel : ObservableObject
         }
     }
 
-    internal void ReloadDownloads()
-    {
-        Downloads.Clear();
-        foreach (var d in PodcastCache.GetDownloads())
-        {
-            Downloads.Add(d);
-        }
-    }
-
     private void OnDownloadProgress(DownloadProgress p) { /* hook UI progress here if needed */ }
 
-    private void OnDownloadCompleted(PodcastDownload d)
+    private void OnDownloadCompleted(PodcastFeed feed, PodcastEpisode ep)
     {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (CurrentView == PodcastsView.Downloads)
-            {
-                ReloadDownloads();
-            }
-        });
+        Dispatcher.UIThread.Post(() => RefreshEpisodeRowState(ep.Id));
     }
 
     private void OnDownloadFailed(long episodeId, Exception ex)
     {
         _log.Warning(ex, "Download failed for episode {Id}", episodeId);
+        Dispatcher.UIThread.Post(() => RefreshEpisodeRowState(episodeId));
+    }
+
+    private void RefreshEpisodeRowState(long episodeId)
+    {
+        foreach (var row in SelectedFeedEpisodes)
+        {
+            if (row.Episode.Id == episodeId)
+            {
+                row.RefreshDownloadState();
+            }
+        }
+    }
+}
+
+/// <summary>
+/// DataGrid row wrapper for a podcast episode in the feed-detail view. Wraps a
+/// raw <see cref="PodcastEpisode"/> record so the row can carry observable
+/// state (the download button's icon changes as the file lands on disk, gets
+/// orphaned as a .partial, or comes up size-mismatched). The pass-through
+/// properties keep existing column bindings (Title, DatePublishedPretty,
+/// DurationLabel) working unchanged.
+/// </summary>
+public partial class PodcastEpisodeRow : ObservableObject
+{
+    public PodcastFeed Feed { get; }
+    public PodcastEpisode Episode { get; }
+    private readonly string? _libraryRoot;
+
+    public PodcastEpisodeRow(PodcastFeed feed, PodcastEpisode episode, string? libraryRoot)
+    {
+        Feed = feed;
+        Episode = episode;
+        _libraryRoot = libraryRoot;
+        _downloadState = PodcastDownloadService.GetState(feed, episode, libraryRoot);
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDownloaded), nameof(IsDownloading), nameof(IsIncomplete), nameof(IsNotDownloaded))]
+    private PodcastDownloadState _downloadState;
+
+    public bool IsDownloaded    => DownloadState == PodcastDownloadState.Downloaded;
+    public bool IsDownloading   => DownloadState == PodcastDownloadState.InProgress;
+    public bool IsIncomplete    => DownloadState == PodcastDownloadState.Incomplete;
+    public bool IsNotDownloaded => DownloadState == PodcastDownloadState.NotDownloaded;
+
+    // Pass-throughs so the DataGrid columns can keep binding to the same names
+    // they used when the source was a raw PodcastEpisode.
+    public string? Title               => Episode.Title;
+    public string? DatePublishedPretty => Episode.DatePublishedPretty;
+    public string  DurationLabel       => Episode.DurationLabel;
+
+    public void RefreshDownloadState()
+    {
+        DownloadState = PodcastDownloadService.GetState(Feed, Episode, _libraryRoot);
     }
 }
 

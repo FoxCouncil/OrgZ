@@ -402,7 +402,6 @@ public partial class MainWindow : Window
         {
             _ = _viewModel.Podcasts.LoadStoreAsync();
             _viewModel.Podcasts.ReloadSubscriptions();
-            _viewModel.Podcasts.ReloadDownloads();
             return;
         }
 

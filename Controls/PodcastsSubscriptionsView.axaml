@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:img="clr-namespace:OrgZ.Converters"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.PodcastsSubscriptionsView"
+             Background="{StaticResource OrgZPodcastSurfaceBrush}"
+             x:CompileBindings="False">
+	<Design.DataContext>
+		<vm:PodcastsViewModel />
+	</Design.DataContext>
+	<UserControl.Styles>
+		<StyleInclude Source="avares://OrgZ/Controls/PodcastStyles.axaml" />
+	</UserControl.Styles>
+
+	<StackPanel Margin="16" Spacing="8">
+		<TextBlock Classes="sectionHeader" Text="Your Subscriptions" />
+		<ItemsControl ItemsSource="{Binding Subscriptions}">
+			<ItemsControl.ItemsPanel>
+				<ItemsPanelTemplate>
+					<WrapPanel Orientation="Horizontal" />
+				</ItemsPanelTemplate>
+			</ItemsControl.ItemsPanel>
+			<ItemsControl.ItemTemplate>
+				<DataTemplate DataType="models:PodcastSubscription">
+					<Button Classes="podcastTile" Width="160" Margin="4"
+					        Click="SubscriptionTile_Click" Tag="{Binding}">
+						<StackPanel Spacing="4">
+							<Border Classes="tileArt" Width="150" Height="150">
+								<Image img:RemoteImage.Url="{Binding ImageUrl}" Stretch="UniformToFill" />
+							</Border>
+							<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="150" />
+							<TextBlock Text="{Binding Author}" FontSize="11" Opacity="0.6" TextTrimming="CharacterEllipsis" Width="150" />
+						</StackPanel>
+					</Button>
+				</DataTemplate>
+			</ItemsControl.ItemTemplate>
+		</ItemsControl>
+		<TextBlock Text="You haven't subscribed to anything yet. Use the Store to find shows."
+		           IsVisible="{Binding Subscriptions.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}"
+		           Opacity="0.6" HorizontalAlignment="Center" Margin="0,40" />
+	</StackPanel>
+</UserControl>

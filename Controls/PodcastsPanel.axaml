@@ -1,331 +1,35 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:i="https://github.com/projektanker/icons.avalonia"
              xmlns:vm="using:OrgZ.ViewModels"
-             xmlns:models="using:OrgZ.Models"
-             xmlns:img="clr-namespace:OrgZ.Converters"
+             xmlns:controls="using:OrgZ.Controls"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              x:Class="OrgZ.Controls.PodcastsPanel"
-             Background="#1A0F2E"
+             Background="{StaticResource OrgZPodcastSurfaceBrush}"
              x:CompileBindings="False">
-    <Design.DataContext>
-        <vm:PodcastsViewModel />
-    </Design.DataContext>
-    <UserControl.Styles>
-        <Style Selector="TextBlock.sectionHeader">
-            <Setter Property="FontSize" Value="18" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,4,0,8" />
-        </Style>
-        <Style Selector="TextBlock.subHeader">
-            <Setter Property="FontSize" Value="14" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Margin" Value="0,12,0,6" />
-            <Setter Property="Opacity" Value="0.85" />
-        </Style>
-        <Style Selector="Button.podcastTile">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="4" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="HorizontalAlignment" Value="Stretch" />
-        </Style>
-        <Style Selector="Button.podcastTile:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#22FFFFFF" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-        </Style>
-        <Style Selector="Border.tileArt">
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="ClipToBounds" Value="True" />
-            <Setter Property="Background" Value="#222" />
-            <Setter Property="BorderBrush" Value="#3F3F3F" />
-            <Setter Property="BorderThickness" Value="1" />
-        </Style>
-    </UserControl.Styles>
+	<Design.DataContext>
+		<vm:PodcastsViewModel />
+	</Design.DataContext>
 
-    <Grid RowDefinitions="Auto,*">
-        <!-- ============ Content area ============
-             Two layers stacked at Row 1: a ScrollViewer that owns Store /
-             Subscriptions / Downloads (rail-style content that needs vertical
-             scrolling) and a sibling Grid that owns the Feed Detail view
-             (DataGrid scrolls itself; nesting it inside the outer ScrollViewer
-             makes both layers fight for scroll ownership on row selection,
-             which manifests as the view jumping around on click). -->
-        <Grid Grid.Row="1" IsVisible="{Binding IsFeedDetail}" RowDefinitions="Auto,*">
-            <Border Grid.Row="0" Background="#1A0F2E" Padding="16">
-                <Grid ColumnDefinitions="Auto,*,Auto">
-                    <Border Grid.Column="0" Classes="tileArt" Width="140" Height="140" Margin="0,0,16,0">
-                        <Image img:RemoteImage.Url="{Binding SelectedFeed.DisplayImage}" Stretch="UniformToFill" />
-                    </Border>
-                    <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding SelectedFeed.Title}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding SelectedFeed.Author}" FontSize="13" Opacity="0.7" />
-                        <SelectableTextBlock x:Name="FeedDescriptionBlock"
-                                             FontSize="12" Opacity="0.85" TextWrapping="Wrap"
-                                             MaxLines="4" TextTrimming="CharacterEllipsis"
-                                             PointerPressed="FeedDescriptionBlock_PointerPressed" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="8">
-                        <Button Command="{Binding ToggleSubscribeCommand}" Padding="14,6" Cursor="Hand">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <i:Icon Value="fa-solid fa-bookmark" FontSize="12" />
-                                <TextBlock Text="Subscribe" IsVisible="{Binding !SelectedFeedIsSubscribed}" />
-                                <TextBlock Text="Unsubscribe" IsVisible="{Binding SelectedFeedIsSubscribed}" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                </Grid>
-            </Border>
+	<!-- ==================== Layered content ====================
+	     FeedDetail owns its own scrolling (the DataGrid scrolls internally),
+	     so it's a sibling of the ScrollViewer, not a child. Store and
+	     Subscriptions are rail-style content that needs the outer
+	     ScrollViewer to handle vertical overflow; both share that scroll
+	     context and swap via IsVisible bindings. The two layers are stacked
+	     at the same Grid row and each toggles its own visibility — only one
+	     is hit-testable at a time. -->
+	<Grid>
+		<controls:PodcastsFeedDetailView IsVisible="{Binding IsFeedDetail}" />
 
-            <DataGrid Grid.Row="1" x:Name="EpisodesGrid"
-                      ItemsSource="{Binding SelectedFeedEpisodes}"
-                      DoubleTapped="EpisodesGrid_DoubleTapped"
-                      GridLinesVisibility="All"
-                      IsReadOnly="True"
-                      AutoGenerateColumns="False"
-                      CanUserSortColumns="True"
-                      SelectionMode="Single"
-                      Background="{DynamicResource SystemAltHighColor}"
-                      HorizontalScrollBarVisibility="Auto"
-                      VerticalScrollBarVisibility="Auto">
-                <DataGrid.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="Play" Click="ContextPlay_Click" />
-                        <MenuItem Header="Download" Click="ContextDownload_Click" />
-                        <Separator />
-                        <MenuItem Header="Get Info" Click="ContextGetInfo_Click" />
-                    </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.Styles>
-                    <Style Selector="DataGridRow">
-                        <Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-                    </Style>
-                    <Style Selector="DataGridRow:nth-child(odd)">
-                        <Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-                    </Style>
-                    <Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
-                        <Setter Property="IsVisible" Value="False" />
-                    </Style>
-                    <Style Selector="DataGridCell TextBlock">
-                        <Setter Property="VerticalAlignment" Value="Center" />
-                    </Style>
-                </DataGrid.Styles>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Episode" Binding="{Binding Title}" Width="*" />
-                    <DataGridTextColumn Header="Published" Binding="{Binding DatePublishedPretty}" Width="160" />
-                    <DataGridTextColumn Header="Duration"
-                                        Binding="{Binding DurationLabel}"
-                                        Width="100" />
-                    <DataGridTemplateColumn Header="" Width="84" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate DataType="models:PodcastEpisode">
-                                <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                    <Button Click="StreamEpisode_Click" Tag="{Binding}"
-                                            Padding="6,3" Cursor="Hand" ToolTip.Tip="Play (stream)">
-                                        <i:Icon Value="fa-solid fa-play" FontSize="11" />
-                                    </Button>
-                                    <Button Click="DownloadEpisode_Click" Tag="{Binding}"
-                                            Padding="6,3" Cursor="Hand" ToolTip.Tip="Download for offline">
-                                        <i:Icon Value="fa-solid fa-download" FontSize="11" />
-                                    </Button>
-                                </StackPanel>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                </DataGrid.Columns>
-            </DataGrid>
-
-            <!-- Overlay status messages on top of the DataGrid area. -->
-            <TextBlock Grid.Row="1" Text="Loading episodes…"
-                       IsVisible="{Binding IsLoadingFeed}"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Opacity="0.6" FontSize="14" IsHitTestVisible="False" />
-            <TextBlock Grid.Row="1" Text="No episodes available for this podcast."
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       Opacity="0.6" FontSize="14" IsHitTestVisible="False">
-                <TextBlock.IsVisible>
-                    <MultiBinding Converter="{x:Static BoolConverters.And}">
-                        <Binding Path="!IsLoadingFeed" />
-                        <Binding Path="SelectedFeedEpisodes.Count" Converter="{x:Static ObjectConverters.Equal}" ConverterParameter="0" />
-                    </MultiBinding>
-                </TextBlock.IsVisible>
-            </TextBlock>
-        </Grid>
-
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
-                      IsVisible="{Binding !IsFeedDetail}">
-            <Grid>
-                <!-- ============ STORE VIEW ============ -->
-                <StackPanel Margin="16" Spacing="2" IsVisible="{Binding IsStore}">
-                    <!-- Featured hero strip -->
-                    <TextBlock Classes="sectionHeader" Text="Featured" />
-                    <ItemsControl ItemsSource="{Binding Featured}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="3" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="models:PodcastFeed">
-                                <Button Classes="podcastTile" Click="FeedTile_Click" Tag="{Binding}" Margin="6">
-                                    <Border Classes="tileArt" Height="160">
-                                        <Grid>
-                                            <Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-                                            <Border VerticalAlignment="Bottom" Background="#CC000000" Padding="10,6">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" Foreground="White" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding Author}" FontSize="11" Foreground="#CCCCCC" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                            </Border>
-                                        </Grid>
-                                    </Border>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <!-- Top Podcasts rail -->
-                    <TextBlock Classes="subHeader" Text="Top Podcasts" />
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding TopPodcasts}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="8" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="models:PodcastFeed">
-                                    <Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
-                                        <StackPanel Spacing="4">
-                                            <Border Classes="tileArt" Width="120" Height="120">
-                                                <Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-                                            </Border>
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
-                                        </StackPanel>
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-
-                    <!-- New & Notable rail -->
-                    <TextBlock Classes="subHeader" Text="New &amp; Notable" />
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding NewAndNotable}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="8" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="models:PodcastFeed">
-                                    <Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
-                                        <StackPanel Spacing="4">
-                                            <Border Classes="tileArt" Width="120" Height="120">
-                                                <Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-                                            </Border>
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
-                                        </StackPanel>
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-
-                    <!-- Category rails -->
-                    <ItemsControl ItemsSource="{Binding CategoryRails}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:PodcastCategoryRail">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Classes="subHeader" Text="{Binding CategoryName, StringFormat='Top in {0}'}" />
-                                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                                        <ItemsControl ItemsSource="{Binding Feeds}">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <StackPanel Orientation="Horizontal" Spacing="8" />
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate DataType="models:PodcastFeed">
-                                                    <Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
-                                                        <StackPanel Spacing="4">
-                                                            <Border Classes="tileArt" Width="120" Height="120">
-                                                                <Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-                                                            </Border>
-                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <!-- Loading / error state -->
-                    <TextBlock Text="Loading podcasts…" IsVisible="{Binding IsLoadingStore}" HorizontalAlignment="Center" Opacity="0.6" Margin="0,24" />
-                    <TextBlock Text="{Binding StoreError}" IsVisible="{Binding StoreError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" HorizontalAlignment="Center" Foreground="OrangeRed" Margin="0,12" />
-                </StackPanel>
-
-                <!-- ============ SUBSCRIPTIONS VIEW ============ -->
-                <StackPanel Margin="16" Spacing="8" IsVisible="{Binding IsSubscriptions}">
-                    <TextBlock Classes="sectionHeader" Text="Your Subscriptions" />
-                    <ItemsControl ItemsSource="{Binding Subscriptions}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel Orientation="Horizontal" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="models:PodcastSubscription">
-                                <Button Classes="podcastTile" Width="160" Margin="4"
-                                        Click="SubscriptionTile_Click" Tag="{Binding}">
-                                    <StackPanel Spacing="4">
-                                        <Border Classes="tileArt" Width="150" Height="150">
-                                            <Image img:RemoteImage.Url="{Binding ImageUrl}" Stretch="UniformToFill" />
-                                        </Border>
-                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="150" />
-                                        <TextBlock Text="{Binding Author}" FontSize="11" Opacity="0.6" TextTrimming="CharacterEllipsis" Width="150" />
-                                    </StackPanel>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <TextBlock Text="You haven't subscribed to anything yet. Use the Store to find shows."
-                               IsVisible="{Binding Subscriptions.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}"
-                               Opacity="0.6" HorizontalAlignment="Center" Margin="0,40" />
-                </StackPanel>
-
-                <!-- ============ DOWNLOADS VIEW ============ -->
-                <StackPanel Margin="16" Spacing="8" IsVisible="{Binding IsDownloads}">
-                    <TextBlock Classes="sectionHeader" Text="Downloads" />
-                    <ItemsControl ItemsSource="{Binding Downloads}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="models:PodcastDownload">
-                                <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,6">
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding LocalPath}" FontSize="10" Opacity="0.5" TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                    <TextBlock Grid.Column="1" Text="{Binding DurationSec, Converter={StaticResource SecondsToMinutesConverter}}"
-                                               VerticalAlignment="Center" FontSize="11" Opacity="0.65" Margin="12,0,12,0" />
-                                    <Button Grid.Column="2" Click="PlayDownload_Click" Tag="{Binding}"
-                                            Padding="8,4" Cursor="Hand" ToolTip.Tip="Play">
-                                        <i:Icon Value="fa-solid fa-play" FontSize="12" />
-                                    </Button>
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <TextBlock Text="No downloaded episodes yet."
-                               IsVisible="{Binding Downloads.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}"
-                               Opacity="0.6" HorizontalAlignment="Center" Margin="0,40" />
-                </StackPanel>
-            </Grid>
-        </ScrollViewer>
-    </Grid>
+		<ScrollViewer HorizontalScrollBarVisibility="Disabled"
+		              VerticalScrollBarVisibility="Auto"
+		              IsVisible="{Binding !IsFeedDetail}">
+			<Grid>
+				<controls:PodcastsStoreView IsVisible="{Binding IsStore}" />
+				<controls:PodcastsSubscriptionsView IsVisible="{Binding IsSubscriptions}" />
+			</Grid>
+		</ScrollViewer>
+	</Grid>
 </UserControl>
