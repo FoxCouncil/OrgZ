@@ -4,12 +4,19 @@
 		xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
 		xmlns:i="https://github.com/projektanker/icons.avalonia"
 		xmlns:controls="using:OrgZ.Controls"
+		xmlns:converters="clr-namespace:OrgZ.Converters"
 		mc:Ignorable="d" d:DesignWidth="1024" d:DesignHeight="450"
 		x:Class="OrgZ.Views.MainWindow"
 		Title="OrgZ"
 		Width="1100" Height="700"
 		MinWidth="1080" MinHeight="500"
 		x:CompileBindings="False">
+
+	<Window.Resources>
+		<!-- View-mode discriminator for the footer summary text: only one of
+		     the per-mode TextBlocks shows at a time. -->
+		<converters:MediaKindMatchConverter x:Key="MediaKindMatch" />
+	</Window.Resources>
 
 	<NativeMenu.Menu>
 		<NativeMenu>
@@ -186,69 +193,35 @@
 							<Button.Flyout>
 								<Flyout Placement="BottomEdgeAlignedRight">
 									<DockPanel MinWidth="320" MaxWidth="420" LastChildFill="True">
-										<TextBlock DockPanel.Dock="Top" Text="Output Devices" FontWeight="Bold" FontSize="12" Margin="6,4,6,6" />
-										<TextBlock DockPanel.Dock="Top" x:Name="AudioOutputFlyoutHint" Text="" Opacity="0.6" FontSize="10" Margin="6,0,6,6" />
-										<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="6,6,6,6" Spacing="6">
-											<Button Content="Refresh" Click="AudioOutputRefresh_Click" FontSize="11" Padding="8,4" />
-											<Button Content="Open Settings…" Click="AudioOutputOpenSettings_Click" FontSize="11" Padding="8,4" />
-										</StackPanel>
-										<ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-											<StackPanel x:Name="AudioOutputDeviceList" Spacing="4" Margin="6,0,6,0" />
+										<Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="6,4,6,6">
+											<TextBlock Grid.Column="0" Text="Output Devices" FontWeight="Bold" FontSize="12" VerticalAlignment="Center" />
+											<Button Grid.Column="1" Click="AudioOutputRefresh_Click"
+											        Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
+											        ToolTip.Tip="Refresh device list">
+												<i:Icon Value="fa-solid fa-arrows-rotate" FontSize="12" />
+											</Button>
+										</Grid>
+										<ScrollViewer MaxHeight="480" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+											<!-- Right padding leaves room for the vertical scrollbar so
+											     device rows don't get clipped behind it once the list
+											     overflows. -->
+											<StackPanel x:Name="AudioOutputDeviceList" Spacing="4" Margin="6,0,18,0" />
 										</ScrollViewer>
 									</DockPanel>
 								</Flyout>
 							</Button.Flyout>
 						</Button>
-						<Button Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Browse by Artist">
-							<i:Icon Value="fa-solid fa-folder-tree" FontSize="16" />
-						</Button>
-						<Button Command="{Binding ToggleQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,2,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Up Next">
+						<Button Command="{Binding ToggleQueueCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,5,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Up Next">
 							<i:Icon Value="fa-solid fa-list" FontSize="16" />
 						</Button>
-						<Button Command="{Binding ToggleActivityPanelCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,5,10" VerticalAlignment="Center" Cursor="Hand" ToolTip.Tip="Activity" ClipToBounds="False">
-							<Panel ClipToBounds="False">
-								<!-- Static icon when idle; spinning gear while a rip / burn / sync
-								     is in flight so the user gets visible feedback even with the
-								     activity panel closed. -->
-								<i:Icon Value="fa-solid fa-bars-progress" FontSize="16"
-								        IsVisible="{Binding !HasActiveActivities}" />
-								<i:Icon Value="fa-solid fa-gear" FontSize="16"
-								        IsVisible="{Binding HasActiveActivities}"
-								        RenderTransformOrigin="50%,50%">
-									<i:Icon.Styles>
-										<Style Selector="i|Icon">
-											<Style.Animations>
-												<Animation Duration="0:0:2.5" IterationCount="INFINITE">
-													<KeyFrame Cue="0%">
-														<Setter Property="RotateTransform.Angle" Value="0" />
-													</KeyFrame>
-													<KeyFrame Cue="100%">
-														<Setter Property="RotateTransform.Angle" Value="360" />
-													</KeyFrame>
-												</Animation>
-											</Style.Animations>
-										</Style>
-									</i:Icon.Styles>
-								</i:Icon>
-								<Border Background="{StaticResource OrgZErrorBrush}" CornerRadius="6" MinWidth="12" Height="12"
-								        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-6,0"
-								        IsVisible="{Binding HasActiveActivities}" Padding="2,0" ClipToBounds="False">
-									<TextBlock Text="{Binding ActivityBadgeCount}" FontSize="8" Foreground="{StaticResource OrgZTextForegroundBrush}"
-									           HorizontalAlignment="Center" VerticalAlignment="Center" />
-								</Border>
-							</Panel>
-						</Button>
 						<i:Icon Value="fa-solid fa-search" Margin="5,10,5,10" />
-						<TextBox x:Name="SearchBox" Width="200" Watermark="Search..." Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
+						<TextBox x:Name="SearchBox" Width="200" Watermark="{Binding SearchPlaceholder}" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
 						<Button Command="{Binding ClearSearchCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,10,10" VerticalAlignment="Center" Cursor="Hand" IsVisible="{Binding SearchText.Length}">
 							<i:Icon Value="fa-solid fa-xmark" FontSize="14" />
 						</Button>
 					</StackPanel>
 				</Border>
 			</Grid>
-
-			<!-- Status bar at bottom -->
-			<controls:StatusBar DockPanel.Dock="Bottom" x:Name="MainStatusBar" DataContext="{Binding StatusBar}" Margin="4,0,4,0" />
 
 			<!-- Sidebar + Content area with resizable splitter -->
 			<Grid ColumnDefinitions="200,4,*" Margin="4">
@@ -259,20 +232,58 @@
 				<Grid Grid.Column="2" ColumnDefinitions="*,Auto">
 					<Border Grid.Column="0" CornerRadius="8" ClipToBounds="True">
 						<DockPanel>
-							<!-- CD audio action bar: docks to the bottom of the content
-							     area, only when the active sidebar entry is an Audio CD. -->
-							<Border DockPanel.Dock="Bottom"
-									IsVisible="{Binding IsCdViewActive}"
-									Padding="8,6">
-								<StackPanel Orientation="Horizontal" Spacing="8">
-									<Button Command="{Binding RipCurrentCdCommand}" Padding="10,4" Cursor="Hand" ToolTip.Tip="Rip the disc to disk">
-										<StackPanel Orientation="Horizontal" Spacing="6">
-											<i:Icon Value="fa-solid fa-compact-disc" FontSize="13" />
-											<TextBlock Text="Rip CD…" VerticalAlignment="Center" />
-										</StackPanel>
-									</Button>
-								</StackPanel>
-							</Border>
+							<!-- View footer: a centered per-view summary line drawn directly
+							     ("23,300 songs, 129.3 hours, 123.4 GB" on Music, "12 tracks"
+							     on a CD, etc). When the active view is an Audio CD, the
+							     Rip button slots in at the left edge so the footer reads
+							     [Rip CD…]            12 tracks, 0:01:13:42. Inlined here
+							     instead of a separate StatusBar UserControl — the data
+							     still lives on StatusBarViewModel via the inner Border's
+							     DataContext binding. -->
+							<Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0" MinHeight="24">
+								<Button Grid.Column="0"
+								        Command="{Binding RipCurrentCdCommand}"
+								        IsVisible="{Binding IsCdViewActive}"
+								        Padding="10,4" Cursor="Hand"
+								        Margin="0,0,8,0"
+								        ToolTip.Tip="Rip the disc to disk">
+									<StackPanel Orientation="Horizontal" Spacing="6">
+										<i:Icon Value="fa-solid fa-compact-disc" FontSize="13" />
+										<TextBlock Text="Rip CD…" VerticalAlignment="Center" LineHeight="14" />
+									</StackPanel>
+								</Button>
+
+								<!-- Per-view summary text. Black on the metal-textured page. -->
+								<TextBlock Grid.Column="1"
+								           DataContext="{Binding StatusBar}"
+								           HorizontalAlignment="Center" VerticalAlignment="Center"
+								           Foreground="Black"
+								           Text="{Binding MusicSummary}"
+								           IsVisible="{Binding ActiveKind, Converter={StaticResource MediaKindMatch}, ConverterParameter=Music}" />
+								<TextBlock Grid.Column="1"
+								           DataContext="{Binding StatusBar}"
+								           HorizontalAlignment="Center" VerticalAlignment="Center"
+								           Foreground="Black"
+								           Text="{Binding RadioSummary}"
+								           IsVisible="{Binding ActiveKind, Converter={StaticResource MediaKindMatch}, ConverterParameter=Radio}" />
+								<TextBlock Grid.Column="1"
+								           DataContext="{Binding StatusBar}"
+								           HorizontalAlignment="Center" VerticalAlignment="Center"
+								           Foreground="Black"
+								           Text="{Binding GenericSummary}"
+								           IsVisible="{Binding HasGenericStats}" />
+
+								<Button Grid.Column="2"
+								        DataContext="{Binding StatusBar}"
+								        Click="StatusBarErrorButton_Click"
+								        Background="Transparent" Padding="4,0" Cursor="Hand" BorderThickness="0"
+								        IsVisible="{Binding !!ErrorCount}">
+									<StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+										<i:Icon Value="fa-solid fa-circle-exclamation" FontSize="12" />
+										<TextBlock Text="{Binding ErrorCount}" FontSize="11" VerticalAlignment="Center" />
+									</StackPanel>
+								</Button>
+							</Grid>
 
 							<ContentControl DockPanel.Dock="Top"
 								Content="{Binding SelectedDevice}"
@@ -284,41 +295,13 @@
 								</ContentControl.ContentTemplate>
 							</ContentControl>
 
-							<Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" IsVisible="{Binding IsDrillDownActive}">
-								<controls:BreadcrumbBar x:Name="BreadcrumbBar" Grid.Column="0" />
-								<Button Grid.Column="1" Command="{Binding ToggleDrillDownCommand}" Background="Transparent" BorderThickness="0" Padding="4" HorizontalAlignment="Right" Cursor="Hand" ToolTip.Tip="Exit Browse">
-									<i:Icon Value="fa-solid fa-xmark" FontSize="12" Opacity="0.5" />
-								</Button>
-							</Grid>
-
 							<!-- Radio country/genre filter header. Declared last among the
 							     Top-docked rows so it sits closest to the DataGrid —
-							     under the breadcrumb / device info if either is active. -->
+							     under the device info if it's active. -->
 							<controls:RadioFilterPanel x:Name="RadioFilterPanel"
 								DockPanel.Dock="Top"
 								DataContext="{Binding}"
 								IsVisible="False" />
-
-							<DataGrid x:Name="DrillDownGrid"
-								DoubleTapped="DrillDownGrid_DoubleTapped"
-								ItemsSource="{Binding DrillDownEntries}"
-								GridLinesVisibility="All"
-								IsReadOnly="True"
-								AutoGenerateColumns="False"
-								CanUserSortColumns="True"
-								SelectionMode="Single"
-								Background="{DynamicResource SystemAltHighColor}"
-								IsVisible="False">
-								<DataGrid.Styles>
-									<Style Selector="DataGridRow">
-										<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-									</Style>
-									<Style Selector="DataGridRow:nth-child(odd)">
-										<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-									</Style>
-								</DataGrid.Styles>
-								<DataGrid.Columns />
-							</DataGrid>
 
 							<!-- Regular DataGrid for non-grouped views (Music, Favorites, Playlists, Ignored) -->
 							<DataGrid x:Name="MainDataGrid"
@@ -399,7 +382,6 @@
 					</Border>
 
 					<controls:QueuePanel Grid.Column="1" Width="250" Margin="4,0,0,0" DataContext="{Binding}" IsVisible="{Binding IsQueueVisible}" />
-					<controls:ActivityPanel Grid.Column="1" Width="280" Margin="4,0,0,0" DataContext="{Binding}" IsVisible="{Binding IsActivityPanelVisible}" />
 				</Grid>
 			</Grid>
 		</DockPanel>

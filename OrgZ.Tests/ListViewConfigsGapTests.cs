@@ -268,28 +268,6 @@ public class ListViewConfigsGapTests
         Assert.True(trackIdx < albumIdx,  "Track # must come before Album");
     }
 
-    // ===== Drill-down column factories =====
-
-    [Fact]
-    public void BuildArtistsColumns_returns_two_grouped_columns()
-    {
-        var cols = ListViewConfigs.BuildArtistsColumns();
-        Assert.Equal(2, cols.Count);
-        Assert.Equal("Artist", cols[0].Header);
-        Assert.Equal("Info", cols[1].Header);
-        Assert.Equal("GroupKey", cols[0].BindingPath);
-        Assert.Equal("SecondaryInfo", cols[1].BindingPath);
-    }
-
-    [Fact]
-    public void BuildAlbumsColumns_returns_two_grouped_columns()
-    {
-        var cols = ListViewConfigs.BuildAlbumsColumns();
-        Assert.Equal(2, cols.Count);
-        Assert.Equal("Album", cols[0].Header);
-        Assert.Equal("Info", cols[1].Header);
-    }
-
     // ===== Search filters (additional uncovered branches) =====
 
     [Fact]

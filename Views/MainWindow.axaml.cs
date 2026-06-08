@@ -172,13 +172,6 @@ public partial class MainWindow : Window
             ApplyViewConfig(initialConfig);
         }
 
-        var breadcrumb = this.FindControl<Controls.BreadcrumbBar>("BreadcrumbBar")!;
-        breadcrumb.RootClicked += () => _viewModel.DrillUpToRoot();
-        breadcrumb.ArtistClicked += () => _viewModel.DrillUpToArtist();
-
-        var statusBar = this.FindControl<Controls.StatusBar>("MainStatusBar")!;
-        statusBar.ErrorButtonClicked += async () => await _viewModel.ShowMessageLog();
-
         Loaded += async (s, e) =>
         {
             // Screenshot harness seeds state directly; don't scan the real library
@@ -210,12 +203,6 @@ public partial class MainWindow : Window
 
     private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.IsDrillDownActive) || e.PropertyName == nameof(MainWindowViewModel.DrillDownEntries))
-        {
-            UpdateDrillDownView();
-            return;
-        }
-
         if (e.PropertyName != nameof(MainWindowViewModel.SelectedSidebarItem))
         {
             return;
@@ -311,6 +298,15 @@ public partial class MainWindow : Window
         }
     }
 
+    // Click handler for the error badge in the inlined view footer (the
+    // chunk of XAML that used to live in the StatusBar UserControl). Opens
+    // the message log dialog — same behavior as the old
+    // StatusBar.ErrorButtonClicked event, just wired directly now.
+    private async void StatusBarErrorButton_Click(object? sender, RoutedEventArgs e)
+    {
+        await _viewModel.ShowMessageLog();
+    }
+
     // -- Audio output flyout (mirrors MiniPlayerWindow's) --------------------
 
     private void AudioOutputButton_Click(object? sender, RoutedEventArgs e)
@@ -323,15 +319,9 @@ public partial class MainWindow : Window
         PopulateAudioOutputFlyout();
     }
 
-    private async void AudioOutputOpenSettings_Click(object? sender, RoutedEventArgs e)
-    {
-        AudioOutputButton.Flyout?.Hide();
-        await _viewModel.ShowSettings();
-    }
-
     private void PopulateAudioOutputFlyout()
     {
-        OrgZ.Services.AudioOutput.AudioOutputFlyoutHelper.Populate(_viewModel._audioOutput, AudioOutputDeviceList, AudioOutputFlyoutHint);
+        OrgZ.Services.AudioOutput.AudioOutputFlyoutHelper.Populate(_viewModel._audioOutput, AudioOutputDeviceList);
     }
 
     /// <summary>
@@ -442,12 +432,6 @@ public partial class MainWindow : Window
             _currentGroupedViewKey = null;
             _appliedExpansionKeys.Clear();
         }
-
-        // Reset drill-down when switching views
-        if (_viewModel.DrillDownState != null)
-        {
-            _viewModel.DrillUpToRoot();
-        }
     }
 
     /// <summary>
@@ -547,52 +531,6 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(_currentGroupedViewKey))
         {
             GroupExpansionState.Save(_currentGroupedViewKey!, _groupExpansion);
-        }
-    }
-
-    private void UpdateDrillDownView()
-    {
-        var state = _viewModel.DrillDownState;
-        var breadcrumb = this.FindControl<Controls.BreadcrumbBar>("BreadcrumbBar");
-        var drillGrid = this.FindControl<DataGrid>("DrillDownGrid");
-
-        if (state == null || drillGrid == null)
-        {
-            // Not in drill-down mode — show main grid, hide drill grid
-            if (drillGrid != null)
-            {
-                drillGrid.IsVisible = false;
-            }
-
-            MainDataGrid.IsVisible = true;
-            return;
-        }
-
-        breadcrumb?.Update(state);
-
-        if (state.Level == DrillDownLevel.Songs)
-        {
-            // Songs level uses the main DataGrid with FilteredItems
-            drillGrid.IsVisible = false;
-            MainDataGrid.IsVisible = true;
-            return;
-        }
-
-        // Artists or Albums level — use the drill-down grid
-        MainDataGrid.IsVisible = false;
-        drillGrid.IsVisible = true;
-
-        drillGrid.Columns.Clear();
-        var columns = state.Level == DrillDownLevel.Artists ? ListViewConfigs.BuildArtistsColumns() : ListViewConfigs.BuildAlbumsColumns();
-        BuildColumnsOn(drillGrid, columns);
-    }
-
-    private void DrillDownGrid_DoubleTapped(object? sender, Avalonia.Input.TappedEventArgs e)
-    {
-        var drillGrid = this.FindControl<DataGrid>("DrillDownGrid");
-        if (drillGrid?.SelectedItem is DrillDownEntry entry)
-        {
-            _viewModel.DrillInto(entry);
         }
     }
 

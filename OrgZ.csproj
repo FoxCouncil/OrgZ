@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>0.7.0</Version>
+		<Version>0.7.5</Version>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -63,9 +63,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Compile Update="Controls\StatusBar.axaml.cs">
-	    <DependentUpon>StatusBar.axaml</DependentUpon>
-	  </Compile>
 	  <Compile Update="Controls\RadioFilterPanel.axaml.cs">
 	    <DependentUpon>RadioFilterPanel.axaml</DependentUpon>
 	  </Compile>

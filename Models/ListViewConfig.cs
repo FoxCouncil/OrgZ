@@ -14,7 +14,6 @@ public record ListViewConfig
     public bool ShowRadioFilterPanel { get; init; }
     public string? DefaultSortColumn { get; init; }
     public bool DefaultSortDescending { get; init; }
-    public bool SupportsDrillDown { get; init; }
     public Func<IEnumerable<MediaItem>, IEnumerable<MediaItem>>? Sorter { get; init; }
     public int? PlaylistId { get; init; }
 
@@ -94,7 +93,7 @@ public static class ListViewConfigs
                 new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new() { Header = "Genre", BindingPath = "Genre", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100 },
                 new() { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
                 new() { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
                 new() { Header = "Plays", BindingPath = "PlayCount", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.RightAligned },
             }
@@ -105,7 +104,7 @@ public static class ListViewConfigs
                 new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new() { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
                 new() { Header = "Extension", BindingPath = "Extension", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
             };
 
@@ -148,7 +147,7 @@ public static class ListViewConfigs
                 new() { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
                 new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
             ],
             BaseFilter = item => idSet.Contains(item.Id),
             SearchFilter = (item, search) =>
@@ -252,7 +251,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Track #", BindingPath = "TrackDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 65, Type = ColumnType.RightAligned, FontSize = 11, LetterSpacing = -0.5 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "mm\\:ss" },
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
                 new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
                 // Default-hidden columns — toggle via the column-header right-click menu
                 new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
@@ -275,26 +274,7 @@ public static class ListViewConfigs
                 (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Year?.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildMusicContextMenu(),
-            SupportsDrillDown = true,
         };
-    }
-
-    public static List<ColumnDef> BuildArtistsColumns()
-    {
-        return
-        [
-            new ColumnDef { Header = "Artist", BindingPath = "GroupKey", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-            new ColumnDef { Header = "Info", BindingPath = "SecondaryInfo", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-        ];
-    }
-
-    public static List<ColumnDef> BuildAlbumsColumns()
-    {
-        return
-        [
-            new ColumnDef { Header = "Album", BindingPath = "GroupKey", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-            new ColumnDef { Header = "Info", BindingPath = "SecondaryInfo", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-        ];
     }
 
     private static ListViewConfig BuildRadioConfig()
@@ -394,9 +374,9 @@ public static class ListViewConfigs
             Columns =
             [
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new ColumnDef { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40 },
+                new ColumnDef { Header = "#", BindingPath = "Track", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60 },
                 new ColumnDef { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, StringFormat = "mm\\:ss" },
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, StringFormat = "m\\:ss" },
             ],
             BaseFilter = item => item.Source == "cdda",
             SearchFilter = (item, search) =>

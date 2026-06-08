@@ -245,17 +245,18 @@
                 <Button.Flyout>
                     <Flyout Placement="BottomEdgeAlignedRight">
                         <DockPanel MinWidth="320" MaxWidth="420" LastChildFill="True">
-                            <TextBlock DockPanel.Dock="Top" Text="Output Devices" FontWeight="Bold" FontSize="12"
-                                       Margin="6,4,6,6" Foreground="{StaticResource OrgZTextForegroundBrush}" />
-                            <TextBlock DockPanel.Dock="Top" x:Name="AudioOutputFlyoutHint"
-                                       Text="" Opacity="0.6" FontSize="10" Margin="6,0,6,6"
-                                       Foreground="{StaticResource OrgZMutedTextBrush}" />
-                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="6,6,6,6" Spacing="6">
-                                <Button Content="Refresh" Click="AudioOutputRefresh_Click" FontSize="11" Padding="8,4" />
-                                <Button Content="Open Settings…" Click="AudioOutputOpenSettings_Click" FontSize="11" Padding="8,4" />
-                            </StackPanel>
-                            <ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                                <StackPanel x:Name="AudioOutputDeviceList" Spacing="4" Margin="6,0,6,0" />
+                            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="6,4,6,6">
+                                <TextBlock Grid.Column="0" Text="Output Devices" FontWeight="Bold" FontSize="12"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource OrgZTextForegroundBrush}" />
+                                <Button Grid.Column="1" Click="AudioOutputRefresh_Click"
+                                        Background="Transparent" BorderThickness="0" Padding="6,2" Cursor="Hand"
+                                        ToolTip.Tip="Refresh device list">
+                                    <i:Icon Value="fa-solid fa-arrows-rotate" FontSize="12" />
+                                </Button>
+                            </Grid>
+                            <ScrollViewer MaxHeight="480" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="AudioOutputDeviceList" Spacing="4" Margin="6,0,18,0" />
                             </ScrollViewer>
                         </DockPanel>
                     </Flyout>
