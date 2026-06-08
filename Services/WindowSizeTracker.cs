@@ -79,6 +79,32 @@ public static class WindowSizeTracker
     }
 
     /// <summary>
+    /// Drops any persisted size for <paramref name="windowKey"/> so the next
+    /// open falls back to the XAML default / <see cref="SizeToContent"/>
+    /// behavior. Use this when a window is migrated away from size tracking
+    /// (e.g. the content shrank and SizeToContent should rule from now on);
+    /// the leftover entry would otherwise force the old dimensions back.
+    /// </summary>
+    public static void Remove(string windowKey)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(windowKey);
+
+        bool changed;
+        string json;
+        lock (_cacheLock)
+        {
+            changed = _cache.Remove(windowKey);
+            json = JsonSerializer.Serialize(_cache);
+        }
+
+        if (changed)
+        {
+            Settings.Set(SettingsKey, json);
+            Settings.Save();
+        }
+    }
+
+    /// <summary>
     /// Clears all persisted window sizes.  Next time each window opens, it
     /// falls back to its XAML-declared default size or <see cref="SizeToContent"/>
     /// behavior, as if this user had never resized anything.
