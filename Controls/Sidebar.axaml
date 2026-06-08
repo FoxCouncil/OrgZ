@@ -39,17 +39,11 @@
             </StackPanel>
         </DataTemplate>
         <TreeDataTemplate x:Key="DeviceTreeTemplate" x:DataType="models:SidebarItem" ItemsSource="{Binding Children}">
-            <!-- Leaf rows (no Children) get a negative left margin to cancel out the
-                 chevron slot the TreeViewItem reserves for parent rows. Without this an
-                 audio CD looks indented relative to a connected iPod (which itself uses
-                 the slot for its real chevron). -->
-            <StackPanel Orientation="Horizontal" Spacing="10"
-                        Classes.leaf="{Binding !HasChildren}">
-                <StackPanel.Styles>
-                    <Style Selector="StackPanel.leaf">
-                        <Setter Property="Margin" Value="-18,0,0,0" />
-                    </Style>
-                </StackPanel.Styles>
+            <!-- ChevronContainer is collapsed out of layout by the container
+                 theme above; we then push the row by the ListBoxItem's
+                 16px-left padding so the icon sits in the same column as the
+                 LIBRARY rows. -->
+            <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,0,0">
                 <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
                     <Panel>
                         <Image Source="{Binding IconBitmap}"
@@ -72,6 +66,13 @@
         <ControlTheme x:Key="DeviceTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
             <Setter Property="IsExpanded" Value="True" />
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+            <!-- Kill the entire chevron column. Hiding only the inner
+                 ToggleButton leaves the container's 12,0,12,0 margin in
+                 layout - that 24px reservation is what nudged the device
+                 icon out of alignment with the LIBRARY ListBox above. -->
+            <Style Selector="^ /template/ Panel#PART_ExpandCollapseChevronContainer">
+                <Setter Property="IsVisible" Value="False" />
+            </Style>
         </ControlTheme>
     </UserControl.Resources>
 
