@@ -3,11 +3,16 @@
 using Avalonia.Controls;
 using Avalonia.Input;
 using OrgZ.Models;
+using OrgZ.Services;
+using Serilog;
 
 namespace OrgZ.Controls;
 
 public partial class DeviceInfoBar : UserControl
 {
+    private static readonly ILogger _log = Logging.For<DeviceInfoBar>();
+    private bool _firmwareReadInFlight;
+
     public DeviceInfoBar()
     {
         InitializeComponent();
@@ -24,6 +29,53 @@ public partial class DeviceInfoBar : UserControl
         {
             device.ShowHardwareModel = !device.ShowHardwareModel;
             e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// "Read iPod OS version…" affordance on the Software Version row. Only
+    /// active when the device is stock iPod and AppleFirmwareVersion is empty
+    /// (see <see cref="ConnectedDevice.IsAppleFirmwareReadable"/>). Spawns the
+    /// elevated CD helper to read the firmware partition; on success, updates
+    /// the live device and writes the result to <c>/.orgz/device</c> so future
+    /// non-admin scans pick it up via the merge-on-read path.
+    /// </summary>
+    private async void FirmwareValue_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not ConnectedDevice device || !device.IsAppleFirmwareReadable || _firmwareReadInFlight)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _firmwareReadInFlight = true;
+        try
+        {
+            var result = await IPodFirmwareElevation.ReadAsync(device.MountPath, device.IpodGeneration);
+
+            if (!string.IsNullOrWhiteSpace(result.Version))
+            {
+                device.AppleFirmwareVersion = result.Version;
+                DeviceFingerprint.PersistDeviceRecord(device);
+                _log.Information("Persisted Apple firmware version {Version} for device at {MountPath}", result.Version, device.MountPath);
+            }
+            else if (result.UserDeclined)
+            {
+                _log.Information("User declined UAC for iPod firmware read on {MountPath}", device.MountPath);
+            }
+            else
+            {
+                _log.Warning("iPod firmware read returned no version for {MountPath}: {Diagnostic}", device.MountPath, result.Diagnostic);
+            }
+        }
+        finally
+        {
+            _firmwareReadInFlight = false;
         }
     }
 }
