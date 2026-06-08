@@ -23,15 +23,16 @@
 				<Border Grid.Column="0" Classes="tileArt" Width="140" Height="140" Margin="0,0,16,0">
 					<Image img:RemoteImage.Url="{Binding SelectedFeed.DisplayImage}" Stretch="UniformToFill" />
 				</Border>
-				<StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
+				<StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Top">
 					<TextBlock Text="{Binding SelectedFeed.Title}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" />
 					<TextBlock Text="{Binding SelectedFeed.Author}" FontSize="13" Opacity="0.7" />
 					<SelectableTextBlock x:Name="FeedDescriptionBlock"
 					                     FontSize="12" Opacity="0.85" TextWrapping="Wrap"
 					                     MaxLines="4" TextTrimming="CharacterEllipsis"
-					                     PointerPressed="FeedDescriptionBlock_PointerPressed" />
+					                     PointerPressed="FeedDescriptionBlock_PointerPressed"
+					                     PointerMoved="FeedDescriptionBlock_PointerMoved" />
 				</StackPanel>
-				<StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="8">
+				<StackPanel Grid.Column="2" VerticalAlignment="Top" Spacing="8">
 					<Button Command="{Binding ToggleSubscribeCommand}" Padding="14,6" Cursor="Hand">
 						<StackPanel Orientation="Horizontal" Spacing="6">
 							<i:Icon Value="fa-solid fa-bookmark" FontSize="12" />
@@ -80,35 +81,31 @@
 				<DataGridTextColumn Header="Episode" Binding="{Binding Title}" Width="*" />
 				<DataGridTextColumn Header="Published" Binding="{Binding DatePublishedPretty}" Width="160" />
 				<DataGridTextColumn Header="Duration" Binding="{Binding DurationLabel}" Width="100" />
-				<DataGridTemplateColumn Header="" Width="84" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
+				<DataGridTemplateColumn Header="" Width="48" CanUserSort="False" CanUserResize="False" CanUserReorder="False">
 					<DataGridTemplateColumn.CellTemplate>
 						<DataTemplate DataType="vm:PodcastEpisodeRow">
-							<StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
-								<Button Click="StreamEpisode_Click" Tag="{Binding}"
-								        Padding="6,3" Cursor="Hand" ToolTip.Tip="Play (prefers local file when downloaded)">
-									<i:Icon Value="fa-solid fa-play" FontSize="11" />
-								</Button>
-								<!-- One physical button, four overlaid icons. Visibility is driven
-								     by the row's DownloadState so the icon swaps the moment the
-								     state observes a change — service raises Completed/Failed and
-								     PodcastsViewModel pokes the row, no rebind / no redraw of the
-								     whole grid. Tooltip is generic; the icon carries the meaning. -->
-								<Button Click="DownloadEpisode_Click" Tag="{Binding}"
-								        Padding="6,3" Cursor="Hand" ToolTip.Tip="Download (click to (re)fetch)">
-									<Panel>
-										<i:Icon Value="fa-solid fa-download" FontSize="11"
-										        IsVisible="{Binding IsNotDownloaded}" />
-										<i:Icon Value="fa-solid fa-circle-notch" FontSize="11"
-										        IsVisible="{Binding IsDownloading}" />
-										<i:Icon Value="fa-solid fa-check" FontSize="11"
-										        Foreground="{StaticResource OrgZSuccessBrush}"
-										        IsVisible="{Binding IsDownloaded}" />
-										<i:Icon Value="fa-solid fa-triangle-exclamation" FontSize="11"
-										        Foreground="{StaticResource OrgZWarningBrush}"
-										        IsVisible="{Binding IsIncomplete}" />
-									</Panel>
-								</Button>
-							</StackPanel>
+							<!-- Single download button per row. Play is reachable via row
+							     double-click and the context menu, so the dedicated play
+							     button was duplicating affordances. Four overlaid icons
+							     swap on DownloadState; tooltip is generic and the icon
+							     carries the meaning. -->
+							<Button Click="DownloadEpisode_Click" Tag="{Binding}"
+							        HorizontalAlignment="Center" VerticalAlignment="Center"
+							        Padding="6,3" Cursor="Hand"
+							        ToolTip.Tip="Download (click to (re)fetch)">
+								<Panel>
+									<i:Icon Value="fa-solid fa-download" FontSize="11"
+									        IsVisible="{Binding IsNotDownloaded}" />
+									<i:Icon Value="fa-solid fa-circle-notch" FontSize="11"
+									        IsVisible="{Binding IsDownloading}" />
+									<i:Icon Value="fa-solid fa-check" FontSize="11"
+									        Foreground="{StaticResource OrgZSuccessBrush}"
+									        IsVisible="{Binding IsDownloaded}" />
+									<i:Icon Value="fa-solid fa-triangle-exclamation" FontSize="11"
+									        Foreground="{StaticResource OrgZWarningBrush}"
+									        IsVisible="{Binding IsIncomplete}" />
+								</Panel>
+							</Button>
 						</DataTemplate>
 					</DataGridTemplateColumn.CellTemplate>
 				</DataGridTemplateColumn>

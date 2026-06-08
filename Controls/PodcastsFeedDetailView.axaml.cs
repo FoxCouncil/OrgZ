@@ -72,25 +72,77 @@ public partial class PodcastsFeedDetailView : UserControl
 
     private void FeedDescriptionBlock_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source is not Run run)
-        {
-            return;
-        }
-
-        var url = HtmlInlinesBuilder.GetUrl(run);
-
-        if (string.IsNullOrEmpty(url))
-        {
-            return;
-        }
-
         if (!e.GetCurrentPoint(FeedDescriptionBlock).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var url = HitTestForLinkUrl(e.GetPosition(FeedDescriptionBlock));
+        if (string.IsNullOrEmpty(url))
         {
             return;
         }
 
         HtmlInlinesBuilder.OpenUrl(url);
         e.Handled = true;
+    }
+
+    private void FeedDescriptionBlock_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        // Hand cursor whenever the pointer is over a hyperlink Run, default
+        // otherwise. SelectableTextBlock paints its own I-beam everywhere by
+        // default; this overrides per-position based on what's actually under
+        // the cursor in the inline flow.
+        var url = HitTestForLinkUrl(e.GetPosition(FeedDescriptionBlock));
+        FeedDescriptionBlock.Cursor = string.IsNullOrEmpty(url)
+            ? new Cursor(StandardCursorType.Ibeam)
+            : new Cursor(StandardCursorType.Hand);
+    }
+
+    /// <summary>
+    /// Resolves the pixel point under the cursor to the URL of the inline Run
+    /// the layout hit (or null if it landed in plain text / outside the layout).
+    /// Avalonia's SelectableTextBlock doesn't dispatch pointer events per inline
+    /// — the whole control is the hit target — so we hit-test its TextLayout
+    /// to a character index and walk the Inlines counting characters to find
+    /// which Run owns that index.
+    /// </summary>
+    private string? HitTestForLinkUrl(Avalonia.Point point)
+    {
+        var layout = FeedDescriptionBlock.TextLayout;
+        if (layout is null)
+        {
+            return null;
+        }
+
+        var hit = layout.HitTestPoint(point);
+        if (!hit.IsInside)
+        {
+            return null;
+        }
+
+        var inlines = FeedDescriptionBlock.Inlines;
+        if (inlines is null)
+        {
+            return null;
+        }
+
+        int offset = 0;
+        foreach (var inline in inlines)
+        {
+            int len = inline switch
+            {
+                Run r => r.Text?.Length ?? 0,
+                LineBreak => 1,
+                _ => 0,
+            };
+            if (hit.TextPosition >= offset && hit.TextPosition < offset + len)
+            {
+                return inline is Run run ? HtmlInlinesBuilder.GetUrl(run) : null;
+            }
+            offset += len;
+        }
+        return null;
     }
 
     private void DownloadEpisode_Click(object? sender, RoutedEventArgs e)

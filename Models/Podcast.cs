@@ -30,6 +30,25 @@ public sealed record PodcastFeed
 
     public string DisplayImage => !string.IsNullOrWhiteSpace(Artwork) ? Artwork! : (Image ?? "");
     public long DisplayNewest => NewestItemEpoch != 0 ? NewestItemEpoch : NewestItemEpoch2;
+
+    /// <summary>
+    /// Short one-line label for a feed's secondary text (carousel tile subtitle,
+    /// "by …" header line, etc). PodcastIndex frequently leaves both Author and
+    /// OwnerName empty for trending feeds, so the chain falls through to episode
+    /// count, then the leading category name, then a generic "Podcast" so the
+    /// subtitle line is never empty on real data.
+    /// </summary>
+    public string DisplaySubtitle
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Author))    return Author!;
+            if (!string.IsNullOrWhiteSpace(OwnerName)) return OwnerName!;
+            if (EpisodeCount > 0)                      return $"{EpisodeCount} episode{(EpisodeCount == 1 ? "" : "s")}";
+            if (Categories is { Count: > 0 } cats)     return cats.Values.First();
+            return "Podcast";
+        }
+    }
 }
 
 /// <summary>

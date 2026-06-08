@@ -47,9 +47,32 @@ public partial class PodcastsViewModel : ObservableObject
         Featured.Add(SampleFeed(2, "Reply All", "Gimlet"));
         Featured.Add(SampleFeed(3, "Radiolab", "WNYC Studios"));
 
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 20; i++)
         {
-            TopPodcasts.Add(SampleFeed(100 + i, $"Top Show {i + 1}", $"Network {i + 1}"));
+            var feed = SampleFeed(100 + i, $"Top Show {i + 1}", $"Network {i + 1}");
+            TopPodcasts.Add(feed);
+            NumberedTopPodcasts.Add(new NumberedFeed(i + 1, feed));
+        }
+
+        // Category carousel sample data so the stacked carousels render in
+        // the designer with representative content instead of empty cards.
+        for (int i = 0; i < 8; i++)
+        {
+            NonProfitFeeds.Add(SampleFeed(500 + i, $"Non-Profit Show {i + 1}", "Foundation"));
+            NewsFeeds.Add(SampleFeed(550 + i, $"News Show {i + 1}", "Network"));
+            MusicFeeds.Add(SampleFeed(600 + i, $"Music Show {i + 1}", "Label"));
+        }
+
+        // A handful of categories so the left card has something to scroll.
+        foreach (var name in new[]
+        {
+            "Arts", "Business", "Comedy", "Education", "Fiction", "Health & Fitness",
+            "History", "Kids & Family", "Leisure", "Music", "News",
+            "Religion & Spirituality", "Science", "Society & Culture",
+            "Sports", "Technology", "True Crime", "TV & Film",
+        })
+        {
+            Categories.Add(new PodcastCategory { Id = 0, Name = name });
         }
 
         for (int i = 0; i < 8; i++)
@@ -154,7 +177,11 @@ public partial class PodcastsViewModel : ObservableObject
 
     public ObservableCollection<PodcastFeed> Featured     { get; } = [];
     public ObservableCollection<PodcastFeed> TopPodcasts  { get; } = [];
+    public ObservableCollection<NumberedFeed> NumberedTopPodcasts { get; } = [];
     public ObservableCollection<PodcastFeed> NewAndNotable { get; } = [];
+    public ObservableCollection<PodcastFeed> NonProfitFeeds { get; } = [];
+    public ObservableCollection<PodcastFeed> NewsFeeds { get; } = [];
+    public ObservableCollection<PodcastFeed> MusicFeeds { get; } = [];
     public ObservableCollection<PodcastCategory> Categories { get; } = [];
     public ObservableCollection<PodcastCategoryRail> CategoryRails { get; } = [];
 
@@ -368,7 +395,7 @@ public partial class PodcastsViewModel : ObservableObject
         StoreError = null;
         try
         {
-            var trendingTask  = PodcastIndexClient.GetTrendingAsync(max: 24);
+            var trendingTask  = PodcastIndexClient.GetTrendingAsync(max: 30);
             var recentTask    = PodcastIndexClient.GetRecentFeedsAsync(max: 16);
             var categoryTask  = PodcastIndexClient.GetCategoriesAsync();
 
@@ -383,45 +410,55 @@ public partial class PodcastsViewModel : ObservableObject
             {
                 Featured.Add(f);
             }
-            // Top Podcasts: next 10 trending
-            foreach (var f in trending.Skip(3).Take(10))
+            // Top Podcasts: next 20 trending. Mirrored into NumberedTopPodcasts
+            // so the right-column list can show a 1-indexed rank without the
+            // template needing to know its position.
+            int rank = 1;
+            foreach (var f in trending.Skip(3).Take(20))
             {
                 TopPodcasts.Add(f);
+                NumberedTopPodcasts.Add(new NumberedFeed(rank++, f));
             }
             // New & Notable: recent feeds
             foreach (var f in recent.Where(r => !string.IsNullOrEmpty(r.DisplayImage)).Take(8))
             {
                 NewAndNotable.Add(f);
             }
-            // Categories list
-            foreach (var c in cats)
+            // Categories list — popularity-ranked, top 40 only. Popularity is
+            // derived from how often each category shows up in the trending +
+            // recent feed sample we already fetched: categories that mark a
+            // lot of popular feeds bubble to the top. Ties break alphabetically.
+            // Not a perfect signal (small sample, weighted by what's hot right
+            // now), but PodcastIndex doesn't expose a per-category popularity
+            // metric of its own, and this beats either "alphabetical" or
+            // "whatever order the API returned them in".
+            var categoryFreq = new Dictionary<int, int>();
+            foreach (var f in trending.Concat(recent))
+            {
+                if (f.Categories is null) continue;
+                foreach (var key in f.Categories.Keys)
+                {
+                    if (int.TryParse(key, out var id))
+                    {
+                        categoryFreq[id] = categoryFreq.GetValueOrDefault(id) + 1;
+                    }
+                }
+            }
+            foreach (var c in cats
+                .OrderByDescending(c => categoryFreq.GetValueOrDefault(c.Id))
+                .ThenBy(c => c.Name)
+                .Take(40))
             {
                 Categories.Add(c);
             }
 
-            // Per-category rails — pick a handful of high-traffic categories.
-            var railCategories = new (int Id, string Label)[]
-            {
-                (   9, "Society & Culture" ),
-                (  55, "News" ),
-                (  77, "Technology" ),
-                (  16, "Comedy" ),
-                (  17, "Business" ),
-                (  53, "Music" ),
-            };
-            foreach (var (id, label) in railCategories)
-            {
-                var feeds = await PodcastIndexClient.GetTrendingAsync(max: 6, categoryId: id);
-                if (feeds.Count > 0)
-                {
-                    CategoryRails.Add(new PodcastCategoryRail
-                    {
-                        CategoryId   = id,
-                        CategoryName = label,
-                        Feeds        = new ObservableCollection<PodcastFeed>(feeds),
-                    });
-                }
-            }
+            // Category-driven carousels stacked under the three-column row.
+            // Resolve each category's ID by name from the loaded list so we
+            // don't hard-code numerics that PodcastIndex could renumber.
+            await LoadCategoryFeedsAsync(cats, "Non-Profit", NonProfitFeeds);
+            await LoadCategoryFeedsAsync(cats, "News",       NewsFeeds);
+            await LoadCategoryFeedsAsync(cats, "Music",      MusicFeeds);
+
         }
         catch (Exception ex)
         {
@@ -431,6 +468,29 @@ public partial class PodcastsViewModel : ObservableObject
         finally
         {
             IsLoadingStore = false;
+        }
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="categoryName"/> against the loaded category
+    /// list (case-insensitive, name match) and fills <paramref name="target"/>
+    /// with that category's trending feeds. Skips silently if the API didn't
+    /// return a matching category — keeps the carousel slot empty rather than
+    /// taking the page down for a single missing rail.
+    /// </summary>
+    private static async Task LoadCategoryFeedsAsync(List<PodcastCategory> categories, string categoryName, ObservableCollection<PodcastFeed> target)
+    {
+        var match = categories.FirstOrDefault(c =>
+            !string.IsNullOrEmpty(c.Name) &&
+            string.Equals(c.Name, categoryName, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            return;
+        }
+        var feeds = await PodcastIndexClient.GetTrendingAsync(max: 16, categoryId: match.Id);
+        foreach (var f in feeds.Where(t => !string.IsNullOrEmpty(t.DisplayImage)))
+        {
+            target.Add(f);
         }
     }
 
@@ -517,3 +577,11 @@ public sealed class PodcastCategoryRail
     public required string CategoryName { get; init; }
     public required ObservableCollection<PodcastFeed> Feeds { get; init; }
 }
+
+/// <summary>
+/// Pairs a <see cref="PodcastFeed"/> with a 1-indexed rank for the right-column
+/// "Top Podcasts" list. The DataTemplate binds to <c>Number</c> for the leading
+/// numeral and reaches through <c>Feed</c> for the title + subtitle, so the
+/// row template doesn't need to know its position in the ItemsControl.
+/// </summary>
+public sealed record NumberedFeed(int Number, PodcastFeed Feed);

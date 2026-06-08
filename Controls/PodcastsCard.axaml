@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             mc:Ignorable="d" d:DesignWidth="200" d:DesignHeight="180"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.PodcastsCard"
+             x:Name="Root"
+             ClipToBounds="False"
+             x:CompileBindings="False">
+
+	<!-- Card chrome: matches PodcastsCarousel exactly so all three columns
+	     of the podcast store header section read as a unified strip. Empty
+	     body for now; populated later. -->
+	<Border Background="{StaticResource OrgZCarouselSurfaceBrush}"
+	        CornerRadius="10"
+	        ClipToBounds="True"
+	        BoxShadow="0 2 6 -1 #66000000 inset, 0 -1 2 -1 #20FFFFFF inset">
+		<DockPanel LastChildFill="True">
+			<!-- Header strip: title only — no dots, no See All, no arrows. -->
+			<Border DockPanel.Dock="Top"
+			        Background="{StaticResource OrgZCarouselHeaderShineBrush}"
+			        BorderBrush="{StaticResource OrgZCarouselDividerBrush}"
+			        BorderThickness="0,0,0,1"
+			        Height="32">
+				<Grid Margin="14,0">
+					<TextBlock Text="{Binding #Root.Title}"
+					           VerticalAlignment="Center"
+					           FontWeight="Bold"
+					           Foreground="{StaticResource OrgZCarouselTextBrush}"
+					           HorizontalAlignment="Left" />
+				</Grid>
+			</Border>
+
+			<!-- Body slot. Empty for now; left intentionally blank so the
+			     three-column strip reads as a consistent shape before the
+			     left / right lists get wired up. -->
+			<ContentControl Content="{Binding #Root.BodyContent}" />
+		</DockPanel>
+	</Border>
+</UserControl>

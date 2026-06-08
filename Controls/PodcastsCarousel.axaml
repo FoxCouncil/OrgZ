@@ -1,0 +1,183 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:img="clr-namespace:OrgZ.Converters"
+             xmlns:controls="using:OrgZ.Controls"
+             mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="180"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.PodcastsCarousel"
+             x:Name="Root"
+             ClipToBounds="False"
+             x:CompileBindings="False">
+	<Design.DataContext>
+		<vm:PodcastsViewModel />
+	</Design.DataContext>
+
+	<UserControl.Styles>
+		<!-- Floating arrow buttons. Foreground propagates to the inner FA icon
+		     so a single :disabled rule greys both background + glyph. Opacity
+		     is locked to 1 so Avalonia's default disabled-dimming doesn't
+		     half-fade us instead of swapping color. -->
+		<Style Selector="Button.carouselArrow">
+			<Setter Property="Foreground" Value="{StaticResource OrgZCarouselTextBrush}" />
+		</Style>
+		<Style Selector="Button.carouselArrow:disabled">
+			<Setter Property="Background" Value="{StaticResource OrgZSurfaceDarkBrush}" />
+			<Setter Property="Foreground" Value="{StaticResource OrgZCarouselSubtextBrush}" />
+			<Setter Property="Opacity" Value="1" />
+		</Style>
+		<Style Selector="Button.carouselArrow:disabled /template/ ContentPresenter">
+			<Setter Property="Background" Value="{StaticResource OrgZSurfaceDarkBrush}" />
+		</Style>
+	</UserControl.Styles>
+
+	<!-- Outer Grid hosts the card and the floating arrows as siblings: the
+	     card clips its content (rounded corners), the arrows live outside the
+	     clip so they can overhang the left / right edges and read as "pinned
+	     to the border". The arrow overlay Grid is offset top by the header
+	     height so the arrows center on the body, not the whole card. -->
+	<Grid x:Name="OuterGrid" ClipToBounds="False">
+		<!-- The card itself. No outer cartouche — recessed feel comes from the
+		     inset shadow on this border plus the contrast against the dark
+		     purple podcast page surface around it. -->
+		<Border Background="{StaticResource OrgZCarouselSurfaceBrush}"
+		        CornerRadius="10"
+		        ClipToBounds="True"
+		        BoxShadow="0 2 6 -1 #66000000 inset, 0 -1 2 -1 #20FFFFFF inset">
+			<DockPanel LastChildFill="True">
+				<!-- Header strip: title left, page dots center, See All right. -->
+				<Border DockPanel.Dock="Top"
+				        Background="{StaticResource OrgZCarouselHeaderShineBrush}"
+				        BorderBrush="{StaticResource OrgZCarouselDividerBrush}"
+				        BorderThickness="0,0,0,1"
+				        Height="32">
+					<Grid Margin="14,0">
+						<TextBlock Text="{Binding #Root.Title}"
+						           VerticalAlignment="Center"
+						           FontWeight="Bold"
+						           Foreground="{StaticResource OrgZCarouselTextBrush}"
+						           HorizontalAlignment="Left" />
+
+						<ItemsControl x:Name="PageDots"
+						              HorizontalAlignment="Center"
+						              VerticalAlignment="Center">
+							<ItemsControl.ItemsPanel>
+								<ItemsPanelTemplate>
+									<StackPanel Orientation="Horizontal" Spacing="6" />
+								</ItemsPanelTemplate>
+							</ItemsControl.ItemsPanel>
+							<ItemsControl.ItemTemplate>
+								<DataTemplate>
+									<Ellipse Width="7" Height="7" Fill="{Binding}" />
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+
+						<Button x:Name="SeeAllButton" Click="SeeAll_Click"
+						        Background="Transparent" BorderThickness="0" Padding="0"
+						        Cursor="Hand"
+						        HorizontalAlignment="Right" VerticalAlignment="Center">
+							<TextBlock Text="See All"
+							           FontSize="12"
+							           Foreground="{StaticResource OrgZCarouselTextBrush}" />
+						</Button>
+					</Grid>
+				</Border>
+
+				<!-- Body: 4 items in a UniformGrid. Side padding (20px) leaves
+				     room for the floating arrows that hang from the card edges.
+				     Top / bottom margins are tight so the carousel doesn't
+				     burn vertical space on whitespace. -->
+				<ItemsControl x:Name="PageItemsHost" Margin="20,8,20,10">
+					<ItemsControl.ItemsPanel>
+						<ItemsPanelTemplate>
+							<UniformGrid Columns="4" />
+						</ItemsPanelTemplate>
+					</ItemsControl.ItemsPanel>
+					<ItemsControl.ItemTemplate>
+						<DataTemplate DataType="models:PodcastFeed">
+							<!-- Padding gives the hover/pressed highlight breathing
+							     room around the artwork + text stack so the
+							     selection box doesn't hug the content edges. -->
+							<Button Click="Item_Click" Tag="{Binding}"
+							        Background="Transparent" BorderThickness="0"
+							        Padding="6,8" Cursor="Hand"
+							        HorizontalAlignment="Stretch"
+							        VerticalAlignment="Top">
+								<StackPanel Spacing="4">
+									<!-- Conservative art size: 80px square. Recognizable
+									     without dominating the row, and keeps the carousel
+									     height tight even when the host column is wide. -->
+									<Border Width="80" Height="80"
+									        CornerRadius="6"
+									        HorizontalAlignment="Center"
+									        ClipToBounds="True"
+									        Background="{StaticResource OrgZTileSurfaceBrush}">
+										<Image img:RemoteImage.Url="{Binding DisplayImage}"
+										       Stretch="UniformToFill" />
+									</Border>
+									<TextBlock Text="{Binding Title}"
+									           FontWeight="Bold"
+									           FontSize="12"
+									           Foreground="{StaticResource OrgZCarouselTextBrush}"
+									           HorizontalAlignment="Center"
+									           TextWrapping="NoWrap"
+									           TextTrimming="CharacterEllipsis" />
+									<!-- DisplaySubtitle = Author → OwnerName → "" so the
+									     subtitle line is rarely missing on real PodcastIndex
+									     data. MinHeight reserves the line height even when
+									     empty so the tiles stay vertically aligned across
+									     a page where some feeds have a subtitle and others
+									     don't. -->
+									<TextBlock Text="{Binding DisplaySubtitle}"
+									           FontSize="11"
+									           MinHeight="14"
+									           Foreground="{StaticResource OrgZCarouselSubtextBrush}"
+									           HorizontalAlignment="Center"
+									           TextWrapping="NoWrap"
+									           TextTrimming="CharacterEllipsis" />
+								</StackPanel>
+							</Button>
+						</DataTemplate>
+					</ItemsControl.ItemTemplate>
+				</ItemsControl>
+			</DockPanel>
+		</Border>
+
+		<!-- Floating arrows. Margin top = header height so the arrows are
+		     vertically centered on the body area instead of the whole card.
+		     Horizontal margin = -14 puts the 28px button's center on the
+		     card's left / right edge — visible half hangs over the page bg,
+		     visible half sits inside the card body. -->
+		<Grid Margin="0,32,0,0" ClipToBounds="False" IsHitTestVisible="True">
+			<Button x:Name="PrevButton" Click="Prev_Click"
+			        Classes="carouselArrow"
+			        Width="28" Height="28" Padding="0"
+			        Background="{StaticResource OrgZCarouselButtonBrush}"
+			        CornerRadius="14"
+			        HorizontalAlignment="Left" VerticalAlignment="Center"
+			        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+			        Margin="-14,0,0,0"
+			        BorderThickness="0" Cursor="Hand">
+				<i:Icon Value="fa-solid fa-chevron-left" FontSize="12"
+				        HorizontalAlignment="Center" VerticalAlignment="Center" />
+			</Button>
+
+			<Button x:Name="NextButton" Click="Next_Click"
+			        Classes="carouselArrow"
+			        Width="28" Height="28" Padding="0"
+			        Background="{StaticResource OrgZCarouselButtonBrush}"
+			        CornerRadius="14"
+			        HorizontalAlignment="Right" VerticalAlignment="Center"
+			        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+			        Margin="0,0,-14,0"
+			        BorderThickness="0" Cursor="Hand">
+				<i:Icon Value="fa-solid fa-chevron-right" FontSize="12"
+				        HorizontalAlignment="Center" VerticalAlignment="Center" />
+			</Button>
+		</Grid>
+	</Grid>
+</UserControl>
