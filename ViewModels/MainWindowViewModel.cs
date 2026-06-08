@@ -137,7 +137,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults))]
     private SidebarItem? _selectedSidebarItem;
 
     /// <summary>
@@ -484,7 +484,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(ShowNoSearchResults))]
     private List<MediaItem> _filteredItems = [];
 
-    public bool ShowNoSearchResults => FilteredItems.Count == 0 && !string.IsNullOrWhiteSpace(SearchText);
+    // The Podcasts view replaces the data grid with its own panel, which renders
+    // its own results + empty-state. Its library item count is always 0, so
+    // without this guard the grid's "No search results" overlay would light up
+    // (and, as a DockPanel sibling, shove the panel sideways) on every podcast
+    // search. Gate it to the grid-backed views only.
+    public bool ShowNoSearchResults =>
+        FilteredItems.Count == 0
+        && !string.IsNullOrWhiteSpace(SearchText)
+        && SelectedSidebarItem?.ViewConfigKey != "Podcasts";
 
     public string NoSearchResultsMessage => $"No search results for \"{SearchText}\".";
 
@@ -576,6 +584,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (!_suppressSearchPersist)
         {
             PerViewSearchState.Save(_searchTextByView, SelectedSidebarItem?.ViewConfigKey, value);
+        }
+
+        // The Podcasts panel replaces the data grid with its own surface, so the
+        // header search box can't filter a grid there. Route it to a debounced
+        // PodcastIndex search that renders into the panel's shared feed-list view.
+        if (SelectedSidebarItem?.ViewConfigKey == "Podcasts" && Podcasts is not null)
+        {
+            Podcasts.ApplyHeaderSearch(value);
         }
     }
 

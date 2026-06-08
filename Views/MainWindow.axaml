@@ -273,6 +273,16 @@
 								           Text="{Binding GenericSummary}"
 								           IsVisible="{Binding HasGenericStats}" />
 
+								<!-- Podcast feed-list result count (genre browse / search). Bound to
+								     the Podcasts panel VM rather than StatusBar since the count lives
+								     with the feed list, not the library stats. -->
+								<TextBlock Grid.Column="1"
+								           DataContext="{Binding Podcasts}"
+								           HorizontalAlignment="Center" VerticalAlignment="Center"
+								           Foreground="Black"
+								           Text="{Binding FeedListSummary}"
+								           IsVisible="{Binding IsFeedList}" />
+
 								<Button Grid.Column="2"
 								        DataContext="{Binding StatusBar}"
 								        Click="StatusBarErrorButton_Click"
@@ -303,6 +313,14 @@
 								DataContext="{Binding}"
 								IsVisible="False" />
 
+							<!-- Fill child of the DockPanel: the mutually-exclusive content
+							     surfaces (Music/Playlist grid, grouped Radio grid, Podcasts panel)
+							     plus the search empty-state overlay, all stacked and gated by
+							     IsVisible. Wrapping them in a Grid (rather than leaving them as bare
+							     DockPanel children) guarantees the visible one stretches to the full
+							     area - as Dock=Left children they only got their desired width, which
+							     collapsed the near-empty podcast feed list into a narrow strip. -->
+							<Grid>
 							<!-- Regular DataGrid for non-grouped views (Music, Favorites, Playlists, Ignored) -->
 							<DataGrid x:Name="MainDataGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
@@ -378,6 +396,7 @@
 								</DataGrid.Styles>
 								<DataGrid.Columns />
 							</DataGrid>
+							</Grid>
 						</DockPanel>
 					</Border>
 

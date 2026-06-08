@@ -11,6 +11,7 @@ public enum PodcastsView
     Store,
     FeedDetail,
     Subscriptions,
+    FeedList,
 }
 
 /// <summary>
@@ -78,6 +79,14 @@ public partial class PodcastsViewModel : ObservableObject
         for (int i = 0; i < 8; i++)
         {
             NewAndNotable.Add(SampleFeed(200 + i, $"Notable {i + 1}", $"New Voices {i + 1}"));
+        }
+
+        // FeedList sample data - the shared browse/search grid. Title + a dozen
+        // feeds so the designer renders a representative wrapping grid.
+        FeedListTitle = "Technology";
+        for (int i = 0; i < 12; i++)
+        {
+            FeedListItems.Add(SampleFeed(700 + i, $"Tech Show {i + 1}", $"Studio {i + 1}"));
         }
 
         foreach (var (name, count) in new[]
@@ -166,12 +175,13 @@ public partial class PodcastsViewModel : ObservableObject
     // -- Page state ------------------------------------------------------
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsFeedDetail), nameof(IsSubscriptions))]
+    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsFeedDetail), nameof(IsSubscriptions), nameof(IsFeedList))]
     private PodcastsView _currentView = PodcastsView.Store;
 
     public bool IsStore         => CurrentView == PodcastsView.Store;
     public bool IsFeedDetail    => CurrentView == PodcastsView.FeedDetail;
     public bool IsSubscriptions => CurrentView == PodcastsView.Subscriptions;
+    public bool IsFeedList      => CurrentView == PodcastsView.FeedList;
 
     // -- Store rails -----------------------------------------------------
 
@@ -184,6 +194,11 @@ public partial class PodcastsViewModel : ObservableObject
     public ObservableCollection<PodcastFeed> MusicFeeds { get; } = [];
     public ObservableCollection<PodcastCategory> Categories { get; } = [];
     public ObservableCollection<PodcastCategoryRail> CategoryRails { get; } = [];
+
+    // Full category list from the last store load (not just the popularity-ranked
+    // top-40 shown in the left column). Lets a carousel's "See All" resolve its
+    // title back to a category and browse it identically to a left-column click.
+    private List<PodcastCategory> _allCategories = [];
 
     [ObservableProperty]
     private bool _isLoadingStore;
@@ -209,27 +224,133 @@ public partial class PodcastsViewModel : ObservableObject
 
     public ObservableCollection<PodcastSubscription> Subscriptions { get; } = [];
 
-    // -- Search ----------------------------------------------------------
+    // -- Feed list (shared surface for genre browse + store search) ------
+    //
+    // Both the left-column Categories list and the global header search box
+    // render their results into this one view: a flat grid of feeds with a
+    // title strip. Keeping a single collection + title means genre browse and
+    // search stay visually identical and there's one navigation path to test.
+
+    public ObservableCollection<PodcastFeed> FeedListItems { get; } = [];
 
     [ObservableProperty]
-    private string _searchText = "";
-
-    public ObservableCollection<PodcastFeed> SearchResults { get; } = [];
+    private string _feedListTitle = "";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSearchActive))]
-    private bool _isSearchInFlight;
+    private bool _isLoadingFeedList;
 
-    public bool IsSearchActive => !string.IsNullOrWhiteSpace(SearchText);
+    /// <summary>
+    /// Footer summary for the feed-list view (shown in the main window's per-view
+    /// status strip): the total number of feeds currently listed. Raised manually
+    /// from <see cref="LoadFeedListAsync"/> since it derives from a collection count.
+    /// </summary>
+    public string FeedListSummary =>
+        FeedListItems.Count == 1 ? "1 podcast" : $"{FeedListItems.Count} podcasts";
+
+    // True when the feed-list view is currently showing search results (vs a
+    // genre browse). Lets a header-search refine replace the list in place
+    // instead of pushing a new back-stack entry per keystroke, and lets clearing
+    // the box step back out of the results rather than jump straight home.
+    private bool _feedListIsSearch;
+
+    // -- Navigation back-stack -------------------------------------------
+    //
+    // The store is "home". Each forward navigation (open a feed, browse a genre,
+    // run a search) pushes a snapshot of the view it's leaving; Back pops and
+    // restores it - list contents and selected feed included - so it returns to
+    // where you actually came from without a network re-fetch. Empty stack == home.
+    private readonly Stack<NavEntry> _navStack = new();
 
     // -- Commands --------------------------------------------------------
 
+    /// <summary>
+    /// Resets all the way to the store (home) and empties the back-stack.
+    /// </summary>
     [RelayCommand]
-    internal void ShowStore() => CurrentView = PodcastsView.Store;
+    internal void ShowStore()
+    {
+        _navStack.Clear();
+        CurrentView = PodcastsView.Store;
+        // Home clears a search that was driving the header box, so the store
+        // isn't shown with a stale query still typed in.
+        if (_main is { } main && !string.IsNullOrEmpty(main.SearchText))
+        {
+            main.SearchText = "";
+        }
+    }
+
+    /// <summary>
+    /// Steps back one level through the navigation stack (store = home). Restores
+    /// the previous view's content from its snapshot, so Back from a feed returns
+    /// to the genre / search list it was opened from - not all the way to the store.
+    /// </summary>
+    [RelayCommand]
+    internal void GoBack()
+    {
+        if (_navStack.Count > 0)
+        {
+            RestoreEntry(_navStack.Pop());
+        }
+        else
+        {
+            CurrentView = PodcastsView.Store;
+        }
+
+        // Landing back on the store clears the header search so it isn't left
+        // showing a query for results that are no longer on screen.
+        if (CurrentView == PodcastsView.Store && _main is { } main && !string.IsNullOrEmpty(main.SearchText))
+        {
+            main.SearchText = "";
+        }
+    }
+
+    private NavEntry SnapshotCurrent() => new()
+    {
+        View             = CurrentView,
+        FeedListTitle    = FeedListTitle,
+        FeedListIsSearch = _feedListIsSearch,
+        FeedListItems    = FeedListItems.ToList(),
+        SelectedFeed     = SelectedFeed,
+        Episodes         = SelectedFeedEpisodes.ToList(),
+    };
+
+    private void RestoreEntry(NavEntry e)
+    {
+        _feedListIsSearch = false;
+        switch (e.View)
+        {
+            case PodcastsView.FeedList:
+            {
+                FeedListTitle     = e.FeedListTitle;
+                _feedListIsSearch = e.FeedListIsSearch;
+                FeedListItems.Clear();
+                foreach (var f in e.FeedListItems)
+                {
+                    FeedListItems.Add(f);
+                }
+                OnPropertyChanged(nameof(FeedListSummary));
+            }
+            break;
+
+            case PodcastsView.FeedDetail:
+            {
+                SelectedFeed = e.SelectedFeed;
+                SelectedFeedEpisodes.Clear();
+                foreach (var r in e.Episodes)
+                {
+                    SelectedFeedEpisodes.Add(r);
+                }
+            }
+            break;
+        }
+
+        CurrentView = e.View;
+    }
 
     [RelayCommand]
     internal void ShowSubscriptions()
     {
+        _navStack.Push(SnapshotCurrent());
         ReloadSubscriptions();
         CurrentView = PodcastsView.Subscriptions;
     }
@@ -238,6 +359,7 @@ public partial class PodcastsViewModel : ObservableObject
     internal async Task OpenFeedAsync(PodcastFeed? feed)
     {
         if (feed == null) return;
+        _navStack.Push(SnapshotCurrent());
         SelectedFeed = feed;
         SelectedFeedEpisodes.Clear();
         CurrentView = PodcastsView.FeedDetail;
@@ -358,32 +480,155 @@ public partial class PodcastsViewModel : ObservableObject
         RefreshEpisodeRowState(episode.Id);
     }
 
-    [RelayCommand]
-    internal async Task SearchAsync()
+    // -- Genre browse + search (both render into the shared FeedList view) -
+
+    // Cancels the in-flight / pending feed-list fetch when a newer one
+    // supersedes it (a fresh keystroke debounce, or a genre tap interrupting
+    // a search). Genre taps and searches share this token so they can't race
+    // each other's results into the same collection.
+    private CancellationTokenSource? _feedListCts;
+
+    /// <summary>
+    /// Opens the shared feed-list view for a category and fills it with that
+    /// genre's trending feeds. Wired from the store's left-column Categories list.
+    /// </summary>
+    internal async Task ShowCategoryAsync(PodcastCategory? category)
     {
-        var q = SearchText.Trim();
-        SearchResults.Clear();
-        if (string.IsNullOrEmpty(q)) return;
-        IsSearchInFlight = true;
+        if (category is null) return;
+        _feedListCts?.Cancel();
+        _navStack.Push(SnapshotCurrent());
+        var cts = new CancellationTokenSource();
+        _feedListCts = cts;
+        await LoadFeedListAsync(category.Name,
+            ct => PodcastIndexClient.GetTrendingAsync(max: 60, categoryId: category.Id, ct: ct),
+            cts.Token,
+            isSearch: false);
+    }
+
+    /// <summary>
+    /// Wired from a carousel's "See All". If the rail maps to a real category
+    /// (Non-Profit / News / Music), browse it through the exact same path as the
+    /// left-column category click - a fresh category fetch - so "See All" and the
+    /// Categories list are consistent. Rails with no category backing (e.g. "New"
+    /// = recent feeds) just show their already-loaded set, no network fetch.
+    /// </summary>
+    internal async Task ShowFeedList(string title, IEnumerable<PodcastFeed> feeds)
+    {
+        var match = _allCategories.FirstOrDefault(c =>
+            !string.IsNullOrEmpty(c.Name) &&
+            string.Equals(c.Name, title, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            await ShowCategoryAsync(match);
+            return;
+        }
+
+        _feedListCts?.Cancel();
+        _navStack.Push(SnapshotCurrent());
+        FeedListTitle = title;
+        _feedListIsSearch = false;
+        FeedListItems.Clear();
+        foreach (var f in feeds)
+        {
+            FeedListItems.Add(f);
+        }
+        OnPropertyChanged(nameof(FeedListSummary));
+        IsLoadingFeedList = false;
+        CurrentView = PodcastsView.FeedList;
+    }
+
+    /// <summary>
+    /// Driven by the global header search box (see <c>MainWindowViewModel</c>).
+    /// Debounced so we don't fire a PodcastIndex round-trip on every keystroke.
+    /// A non-empty query routes the panel to the shared feed-list view; clearing
+    /// the box while that view is showing returns to the store.
+    /// </summary>
+    internal void ApplyHeaderSearch(string? text)
+    {
+        var q = text?.Trim() ?? "";
+
+        // Supersede any in-flight / pending search.
+        _feedListCts?.Cancel();
+
+        if (q.Length == 0)
+        {
+            // Clearing the box steps back out of the search results (to whatever
+            // we were on before searching) rather than jumping straight home -
+            // but only when the search is what put us on the feed-list view.
+            if (CurrentView == PodcastsView.FeedList && _feedListIsSearch)
+            {
+                GoBack();
+            }
+            return;
+        }
+
+        // Push the source view the first time we open search results; subsequent
+        // keystrokes refine the same results in place (no new back-stack entry).
+        bool entering = !(CurrentView == PodcastsView.FeedList && _feedListIsSearch);
+        var cts = new CancellationTokenSource();
+        _feedListCts = cts;
+        _ = DebouncedSearchAsync(q, cts.Token, entering);
+    }
+
+    private async Task DebouncedSearchAsync(string query, CancellationToken ct, bool pushSource)
+    {
         try
         {
-            var results = await PodcastIndexClient.SearchByTermAsync(q, max: 50);
-            foreach (var r in results)
+            await Task.Delay(400, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (ct.IsCancellationRequested) return;
+        if (pushSource)
+        {
+            _navStack.Push(SnapshotCurrent());
+        }
+        await LoadFeedListAsync($"Search: “{query}”",
+            c => PodcastIndexClient.SearchByTermAsync(query, max: 50, ct: c),
+            ct,
+            isSearch: true);
+    }
+
+    /// <summary>
+    /// Shared loader for the feed-list view: flips to the view, shows a spinner,
+    /// runs <paramref name="fetch"/>, and replaces the visible feeds. Genre browse
+    /// and search both funnel through here so the surface stays identical.
+    /// </summary>
+    private async Task LoadFeedListAsync(string title, Func<CancellationToken, Task<List<PodcastFeed>>> fetch, CancellationToken ct, bool isSearch)
+    {
+        FeedListTitle = title;
+        _feedListIsSearch = isSearch;
+        FeedListItems.Clear();
+        OnPropertyChanged(nameof(FeedListSummary));
+        CurrentView = PodcastsView.FeedList;
+        IsLoadingFeedList = true;
+        try
+        {
+            var feeds = await fetch(ct);
+            if (ct.IsCancellationRequested) return;
+            foreach (var f in feeds.Where(f => !string.IsNullOrEmpty(f.DisplayImage)))
             {
-                SearchResults.Add(r);
+                FeedListItems.Add(f);
             }
+            OnPropertyChanged(nameof(FeedListSummary));
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded - leave the newer request to own the view.
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Feed list load failed for '{Title}'", title);
         }
         finally
         {
-            IsSearchInFlight = false;
+            if (!ct.IsCancellationRequested)
+            {
+                IsLoadingFeedList = false;
+            }
         }
-    }
-
-    [RelayCommand]
-    internal void ClearSearch()
-    {
-        SearchText = "";
-        SearchResults.Clear();
     }
 
     // -- Loading ---------------------------------------------------------
@@ -404,6 +649,7 @@ public partial class PodcastsViewModel : ObservableObject
             var trending = trendingTask.Result;
             var recent   = recentTask.Result;
             var cats     = categoryTask.Result;
+            _allCategories = cats;
 
             // Featured: first 3 trending with artwork
             foreach (var f in trending.Where(t => !string.IsNullOrEmpty(t.DisplayImage)).Take(3))
@@ -569,6 +815,21 @@ public partial class PodcastEpisodeRow : ObservableObject
     {
         DownloadState = PodcastDownloadService.GetState(Feed, Episode, _libraryRoot);
     }
+}
+
+/// <summary>
+/// A snapshot of a podcasts-panel view for the navigation back-stack - enough to
+/// restore the view and its content (feed list or selected feed + episodes)
+/// without re-fetching from the network.
+/// </summary>
+internal sealed class NavEntry
+{
+    public required PodcastsView View { get; init; }
+    public string FeedListTitle { get; init; } = "";
+    public bool FeedListIsSearch { get; init; }
+    public IReadOnlyList<PodcastFeed> FeedListItems { get; init; } = [];
+    public PodcastFeed? SelectedFeed { get; init; }
+    public IReadOnlyList<PodcastEpisodeRow> Episodes { get; init; } = [];
 }
 
 public sealed class PodcastCategoryRail

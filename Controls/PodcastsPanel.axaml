@@ -25,7 +25,7 @@
 		        BorderThickness="0,0,0,1"
 		        IsVisible="{Binding !IsStore}"
 		        Height="40">
-			<Button Command="{Binding ShowStoreCommand}"
+			<Button Command="{Binding GoBackCommand}"
 			        HorizontalAlignment="Left"
 			        VerticalAlignment="Center"
 			        Margin="10,0"
@@ -50,6 +50,7 @@
 			              IsVisible="{Binding !IsFeedDetail}">
 				<Grid>
 					<controls:PodcastsStoreView IsVisible="{Binding IsStore}" />
+					<controls:PodcastsFeedListView IsVisible="{Binding IsFeedList}" />
 					<controls:PodcastsSubscriptionsView IsVisible="{Binding IsSubscriptions}" />
 				</Grid>
 			</ScrollViewer>
