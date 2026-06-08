@@ -44,6 +44,10 @@ public partial class PodcastsCarousel : UserControl
     private int _currentPage;
     private INotifyCollectionChanged? _watchedItems;
 
+    // The slice of feeds currently bound to PageItemsHost. Used to suppress
+    // redundant ItemsSource swaps (see RenderPage).
+    private List<PodcastFeed>? _lastSlice;
+
     public PodcastsCarousel()
     {
         InitializeComponent();
@@ -98,7 +102,18 @@ public partial class PodcastsCarousel : UserControl
             _currentPage = totalPages - 1;
         }
 
-        PageItemsHost.ItemsSource = all.Skip(_currentPage * ItemsPerPage).Take(ItemsPerPage).ToList();
+        // Only swap the ItemsSource when the visible window actually changes.
+        // During the initial store load the bound collection grows item-by-item,
+        // firing CollectionChanged on every Add; without this guard each Add tore
+        // down and rebuilt all four tile containers - blanking and re-fetching
+        // their artwork - which read as flicker. Reserving the body height (XAML
+        // MinHeight) stops the column reflow; this stops the tile flicker.
+        var slice = all.Skip(_currentPage * ItemsPerPage).Take(ItemsPerPage).ToList();
+        if (_lastSlice is null || !slice.SequenceEqual(_lastSlice))
+        {
+            PageItemsHost.ItemsSource = slice;
+            _lastSlice = slice;
+        }
 
         var activeBrush = Application.Current?.FindResource("OrgZCarouselDotActiveBrush") as IBrush ?? Brushes.DarkGray;
         var inactiveBrush = Application.Current?.FindResource("OrgZCarouselDotInactiveBrush") as IBrush ?? Brushes.LightGray;
