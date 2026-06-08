@@ -33,6 +33,14 @@ public sealed class DeviceDetectionService : IDisposable
 
     private readonly List<FileSystemWatcher> _linuxMountWatchers = [];
 
+    // CD media-arrival fallback poll. Win32_VolumeChangeEvent doesn't fire
+    // reliably for audio-CD insertion on every USB CD drive - the optical
+    // bridge swallows the event and we'd never know media is loaded. A 3s
+    // tick that just signals CdDriveEvent lets ScanForCdAsync re-check via
+    // IOCTL_STORAGE_CHECK_VERIFY (instant). The handler is idempotent and
+    // skips when nothing changed, so this is cheap.
+    private Avalonia.Threading.DispatcherTimer? _cdPollTimer;
+
     // Debounce: a flaky USB port can re-mount the same path multiple times per second.
     // Track the latest debounce generation per mount path - when the timer fires we only
     // act if the generation matches what we captured at scheduling time.
@@ -48,6 +56,17 @@ public sealed class DeviceDetectionService : IDisposable
     {
         // Pick up devices that were already mounted at startup
         EnumerateExistingDrives();
+
+        // Always-on CD fallback poll, cross-platform. Even when the WMI /
+        // /Volumes / udisks2 watcher fires fine, the poll is a cheap safety
+        // net; when it doesn't (USB CD bridges that drop the event) this is
+        // the only thing that surfaces a freshly inserted disc.
+        _cdPollTimer = new Avalonia.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(3),
+        };
+        _cdPollTimer.Tick += (_, _) => CdDriveEvent?.Invoke();
+        _cdPollTimer.Start();
 
 #if WINDOWS
         try
@@ -378,6 +397,16 @@ public sealed class DeviceDetectionService : IDisposable
 
     public void Dispose()
     {
+        try
+        {
+            _cdPollTimer?.Stop();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Error stopping CD poll timer");
+        }
+        _cdPollTimer = null;
+
 #if WINDOWS
         try
         {
