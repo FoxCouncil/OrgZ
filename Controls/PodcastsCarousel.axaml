@@ -90,8 +90,14 @@
 				<!-- Body: 4 items in a UniformGrid. Side padding (20px) leaves
 				     room for the floating arrows that hang from the card edges.
 				     Top / bottom margins are tight so the carousel doesn't
-				     burn vertical space on whitespace. -->
-				<ItemsControl x:Name="PageItemsHost" Margin="20,8,20,10">
+				     burn vertical space on whitespace.
+				     MinHeight reserves a full tile row (80px art + two text
+				     lines + padding) so an empty carousel occupies the same
+				     vertical space as a populated one. Without it, every
+				     carousel collapses to header-height on first paint and then
+				     jumps to full height as the store feeds stream in, shoving
+				     the whole center column down repeatedly — the load "jank". -->
+				<ItemsControl x:Name="PageItemsHost" Margin="20,8,20,10" MinHeight="134">
 					<ItemsControl.ItemsPanel>
 						<ItemsPanelTemplate>
 							<UniformGrid Columns="4" />
