@@ -83,8 +83,19 @@ public partial class ConnectedDevice : ObservableObject
     /// on iPods running Rockbox alongside their original Apple firmware.
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(FirmwareVersionDisplay))]
+    [NotifyPropertyChangedFor(nameof(FirmwareVersionDisplay), nameof(IsAppleFirmwareReadable))]
     private string? _appleFirmwareVersion;
+
+    /// <summary>
+    /// True when we both lack <see cref="AppleFirmwareVersion"/> AND know the
+    /// device is on stock iPod OS (so reading the firmware partition would
+    /// actually find a build ID we could decode). Drives the click affordance
+    /// on the "Software Version" row in the info bar - Rockbox-booted iPods
+    /// never light up because Apple's osos isn't reachable from there.
+    /// </summary>
+    public bool IsAppleFirmwareReadable =>
+        DeviceType == DeviceType.StockIPod
+        && string.IsNullOrWhiteSpace(AppleFirmwareVersion);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FormatDisplay))]

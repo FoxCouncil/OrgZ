@@ -72,6 +72,7 @@ internal static class CdHelperMode
             {
                 "rip" => RunRip(spec, progressWriter, log),
                 "burn" => RunBurn(spec, progressWriter, log),
+                "ipod-firmware-read" => RunIPodFirmwareRead(spec, progressWriter, log),
                 _ => FailWith(progressWriter, $"Unknown operation '{spec.Operation}'"),
             };
         }
@@ -199,6 +200,34 @@ internal static class CdHelperMode
         return 0;
     }
 
+    /// <summary>
+    /// Elevated path for <see cref="IPodFirmwarePartition.TryReadOsosVersion"/>.
+    /// Re-uses the same UAC-spawned process used by burn/rip - reads the iPod's
+    /// firmware partition via <c>\\.\PhysicalDriveN</c> SCSI pass-through and
+    /// streams the decoded OS version back as an <c>ipod-firmware-result</c>
+    /// event. Returns non-zero exit when no version was decoded so the caller
+    /// can distinguish "ran but found nothing" from "couldn't read at all".
+    /// </summary>
+    private static int RunIPodFirmwareRead(CdHelperSpec spec, ProgressWriter progress, ILogger log)
+    {
+        if (string.IsNullOrWhiteSpace(spec.DrivePath))
+        {
+            return FailWith(progress, "DrivePath required for ipod-firmware-read");
+        }
+
+        var version = IPodFirmwarePartition.TryReadOsosVersion(spec.DrivePath, spec.IpodGeneration, out var diagnostic);
+
+        progress.WriteEvent(new CdHelperEvent
+        {
+            Type = "ipod-firmware-result",
+            OsosVersion = version,
+            Message = diagnostic,
+        });
+
+        log.Information("cd-helper: iPod firmware read done — version={Version}", version ?? "(unknown)");
+        return version != null ? 0 : 3;
+    }
+
     private static int FailWith(ProgressWriter progress, string message)
     {
         progress.WriteEvent(new CdHelperEvent { Type = "error", Message = message });
@@ -255,6 +284,14 @@ internal sealed class CdHelperSpec
     public string? DiscPerformer { get; set; }
     public bool TestWrite { get; set; }
     public List<CdHelperTrack>? Tracks { get; set; }
+
+    /// <summary>
+    /// iPod generation key for <c>ipod-firmware-read</c> operations. Used by
+    /// <see cref="IPodFirmwarePartition.TryReadOsosVersion"/> to translate the
+    /// raw build ID into a human version string via the per-generation lookup
+    /// table. Ignored for rip/burn.
+    /// </summary>
+    public string? IpodGeneration { get; set; }
 }
 
 internal sealed class CdHelperTrack
@@ -285,6 +322,9 @@ internal sealed class CdHelperEvent
     public long TotalSectorsWritten { get; set; }
 
     public List<CdHelperOutcome>? Outcomes { get; set; }
+
+    /// <summary>Decoded iPod OS version string from <c>ipod-firmware-read</c>.</summary>
+    public string? OsosVersion { get; set; }
 }
 
 internal sealed class CdHelperOutcome

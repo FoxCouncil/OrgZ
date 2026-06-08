@@ -95,7 +95,25 @@
                     <TextBlock Grid.Row="0" Grid.Column="4" Text="{Binding TotalSpaceLabel}" Classes="value" />
 
                     <TextBlock Grid.Row="1" Grid.Column="3" Text="Software Version:" Classes="label" />
-                    <TextBlock Grid.Row="1" Grid.Column="4" Text="{Binding FirmwareVersionDisplay}" Classes="value" />
+                    <!-- When IsAppleFirmwareReadable (stock iPod + version unknown), the
+                         value cell becomes clickable: tapping it triggers the elevated
+                         firmware-partition read. Tooltip explains the UAC prompt. -->
+                    <Panel Grid.Row="1" Grid.Column="4"
+                           Classes.firmwareReadable="{Binding IsAppleFirmwareReadable}"
+                           PointerPressed="FirmwareValue_PointerPressed">
+                        <Panel.Styles>
+                            <Style Selector="Panel.firmwareReadable">
+                                <Setter Property="Cursor" Value="Hand" />
+                            </Style>
+                        </Panel.Styles>
+                        <TextBlock Text="{Binding FirmwareVersionDisplay}" Classes="value"
+                                   IsVisible="{Binding !IsAppleFirmwareReadable}" />
+                        <TextBlock Text="Read iPod OS version…"
+                                   Classes="value"
+                                   Opacity="0.7"
+                                   ToolTip.Tip="Reads the iPod's firmware partition (requires admin)."
+                                   IsVisible="{Binding IsAppleFirmwareReadable}" />
+                    </Panel>
 
                     <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
                     <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
