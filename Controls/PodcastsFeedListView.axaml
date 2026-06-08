@@ -1,0 +1,84 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:img="clr-namespace:OrgZ.Converters"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.PodcastsFeedListView"
+             x:Name="Root"
+             Background="{StaticResource OrgZPodcastSurfaceBrush}"
+             x:CompileBindings="False">
+	<Design.DataContext>
+		<vm:PodcastsViewModel />
+	</Design.DataContext>
+	<UserControl.Styles>
+		<StyleInclude Source="avares://OrgZ/Controls/PodcastStyles.axaml" />
+	</UserControl.Styles>
+
+	<!-- Shared browse surface for genre taps and store search. The hosting
+	     PodcastsPanel supplies the back-to-store nav header and the outer
+	     ScrollViewer, so this view is just a titled, wrapping grid of feeds. -->
+	<StackPanel Margin="16" Spacing="12">
+		<TextBlock Text="{Binding FeedListTitle}" Classes="sectionHeader" />
+
+		<!-- UniformGrid fills the available width: every column is an equal
+		     fraction of the panel width, so there's no dead space on the right
+		     (a plain WrapPanel left-packs fixed-width tiles and leaves the
+		     remainder unused). Columns is computed in code-behind from the
+		     current width / target tile width, so the grid reflows as the window
+		     resizes. Tiles stretch to their cell; the square art stays fixed and
+		     centered. -->
+		<ItemsControl ItemsSource="{Binding FeedListItems}">
+			<ItemsControl.ItemsPanel>
+				<ItemsPanelTemplate>
+					<UniformGrid Columns="{Binding #Root.ColumnCount}" />
+				</ItemsPanelTemplate>
+			</ItemsControl.ItemsPanel>
+			<ItemsControl.ItemTemplate>
+				<DataTemplate DataType="models:PodcastFeed">
+					<Button Classes="podcastTile" Click="FeedTile_Click" Tag="{Binding}" Margin="6">
+						<StackPanel Spacing="6" VerticalAlignment="Top">
+							<!-- Fixed square art box, centered in the (stretched) cell.
+							     Height is reserved before the remote image lands so the
+							     grid never reflows as artwork streams in. -->
+							<Border Classes="tileArt" Width="138" Height="138" HorizontalAlignment="Center">
+								<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
+							</Border>
+							<TextBlock Text="{Binding Title}"
+							           FontWeight="Bold"
+							           FontSize="12"
+							           Foreground="{StaticResource OrgZCarouselTextBrush}"
+							           HorizontalAlignment="Center"
+							           TextAlignment="Center"
+							           MaxLines="2"
+							           TextWrapping="Wrap"
+							           TextTrimming="CharacterEllipsis" />
+							<TextBlock Text="{Binding DisplaySubtitle}"
+							           FontSize="11"
+							           MinHeight="14"
+							           Foreground="{StaticResource OrgZCarouselSubtextBrush}"
+							           HorizontalAlignment="Center"
+							           TextAlignment="Center"
+							           TextWrapping="NoWrap"
+							           TextTrimming="CharacterEllipsis" />
+						</StackPanel>
+					</Button>
+				</DataTemplate>
+			</ItemsControl.ItemTemplate>
+		</ItemsControl>
+
+		<!-- Loading / empty states -->
+		<TextBlock Text="Loading…" IsVisible="{Binding IsLoadingFeedList}"
+		           HorizontalAlignment="Center" Opacity="0.6" Margin="0,24" />
+		<TextBlock Text="No podcasts found." HorizontalAlignment="Center" Opacity="0.6" Margin="0,24">
+			<TextBlock.IsVisible>
+				<MultiBinding Converter="{x:Static BoolConverters.And}">
+					<Binding Path="!IsLoadingFeedList" />
+					<Binding Path="FeedListItems.Count" Converter="{x:Static ObjectConverters.Equal}" ConverterParameter="0" />
+				</MultiBinding>
+			</TextBlock.IsVisible>
+		</TextBlock>
+	</StackPanel>
+</UserControl>

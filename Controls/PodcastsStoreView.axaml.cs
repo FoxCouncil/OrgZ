@@ -39,16 +39,14 @@ public partial class PodcastsStoreView : UserControl
     }
 
     /// <summary>
-    /// A row in the left-column Categories list. Surfaces the click but
-    /// doesn't navigate anywhere yet - there's no "feeds in category"
-    /// view to hand off to, so we leave the action unwired and let Fox
-    /// direct what tapping a category should do.
+    /// A row in the left-column Categories list. Opens the shared feed-list
+    /// view filled with that genre's trending feeds.
     /// </summary>
-    private void CategoryItem_Click(object? sender, RoutedEventArgs e)
+    private async void CategoryItem_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: PodcastCategory })
+        if (sender is Button { Tag: PodcastCategory cat } && ViewModel is { } vm)
         {
-            // TODO: navigate to a category browse view.
+            await vm.ShowCategoryAsync(cat);
         }
     }
 }
