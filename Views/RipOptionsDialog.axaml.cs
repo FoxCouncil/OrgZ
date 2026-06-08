@@ -12,7 +12,12 @@ public partial class RipOptionsDialog : Window
     public RipOptionsDialog()
     {
         InitializeComponent();
-        WindowSizeTracker.Track(this, "RipOptions");
+        // No WindowSizeTracker: this dialog uses SizeToContent="WidthAndHeight"
+        // so it should always size to the current contents. The tracker would
+        // restore a persisted Width/Height from a previous session and defeat
+        // SizeToContent - visible whenever the content shrinks between runs.
+        // Clean up any stale entry from when we *did* track this window.
+        WindowSizeTracker.Remove("RipOptions");
         _result = CdRipOptions.Default;
         LoadFromOptions(_result);
         ApplyFormatVisibility(_result.Format);
