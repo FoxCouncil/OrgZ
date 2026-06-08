@@ -170,15 +170,6 @@ public partial class MiniPlayerWindow : Window
         PopulateAudioOutputFlyout();
     }
 
-    private async void AudioOutputOpenSettings_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is OrgZ.ViewModels.MainWindowViewModel vm)
-        {
-            AudioOutputButton.Flyout?.Hide();
-            await vm.ShowSettings();
-        }
-    }
-
     private void PopulateAudioOutputFlyout()
     {
         if (DataContext is not OrgZ.ViewModels.MainWindowViewModel vm)
@@ -186,6 +177,6 @@ public partial class MiniPlayerWindow : Window
             return;
         }
 
-        AudioOutputFlyoutHelper.Populate(vm._audioOutput, AudioOutputDeviceList, AudioOutputFlyoutHint);
+        AudioOutputFlyoutHelper.Populate(vm._audioOutput, AudioOutputDeviceList);
     }
 }

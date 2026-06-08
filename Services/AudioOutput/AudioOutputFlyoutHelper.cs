@@ -15,13 +15,12 @@ namespace OrgZ.Services.AudioOutput;
 /// </summary>
 internal static class AudioOutputFlyoutHelper
 {
-    public static void Populate(AudioOutputManager manager, StackPanel deviceList, TextBlock hint)
+    public static void Populate(AudioOutputManager manager, StackPanel deviceList)
     {
         deviceList.Children.Clear();
 
         var devices = manager.EnumerateAllDevices();
         var activeSinks = manager.Bus.Sinks.ToDictionary(s => s.Id, s => s);
-        hint.Text = $"{devices.Count} device(s). Tick to route audio.";
 
         string? lastProvider = null;
         foreach (var device in devices)
