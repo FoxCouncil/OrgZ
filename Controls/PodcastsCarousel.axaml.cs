@@ -154,11 +154,13 @@ public partial class PodcastsCarousel : UserControl
         }
     }
 
-    private void SeeAll_Click(object? sender, RoutedEventArgs e)
+    private async void SeeAll_Click(object? sender, RoutedEventArgs e)
     {
-        // No dedicated "all" view yet — placeholder for the iTunes-style
-        // navigation to a full list. Leaving the button visible because the
-        // carousel chrome looks lopsided without it.
+        if (FindViewModel() is { } vm)
+        {
+            var feeds = Items?.OfType<PodcastFeed>().ToList() ?? new List<PodcastFeed>();
+            await vm.ShowFeedList(Title, feeds);
+        }
     }
 
     private PodcastsViewModel? FindViewModel()
