@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
              xmlns:vm="using:OrgZ.ViewModels"
              xmlns:controls="using:OrgZ.Controls"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
@@ -13,23 +14,45 @@
 	</Design.DataContext>
 
 	<!-- ==================== Layered content ====================
-	     FeedDetail owns its own scrolling (the DataGrid scrolls internally),
-	     so it's a sibling of the ScrollViewer, not a child. Store and
-	     Subscriptions are rail-style content that needs the outer
-	     ScrollViewer to handle vertical overflow; both share that scroll
-	     context and swap via IsVisible bindings. The two layers are stacked
-	     at the same Grid row and each toggles its own visibility - only one
-	     is hit-testable at a time. -->
-	<Grid>
-		<controls:PodcastsFeedDetailView IsVisible="{Binding IsFeedDetail}" />
+	     A Top-docked nav header surfaces a < Back button when the panel
+	     isn't on the Store view. FeedDetail owns its own scrolling (the
+	     DataGrid scrolls internally), so it sits as a sibling of the
+	     ScrollViewer that hosts Store + Subscriptions. -->
+	<DockPanel LastChildFill="True">
+		<Border DockPanel.Dock="Top"
+		        Background="{StaticResource OrgZSurfaceDarkBrush}"
+		        BorderBrush="{StaticResource OrgZBorderColorBrush}"
+		        BorderThickness="0,0,0,1"
+		        IsVisible="{Binding !IsStore}"
+		        Height="40">
+			<Button Command="{Binding ShowStoreCommand}"
+			        HorizontalAlignment="Left"
+			        VerticalAlignment="Center"
+			        Margin="10,0"
+			        Padding="12,5"
+			        Cursor="Hand">
+				<StackPanel Orientation="Horizontal" Spacing="6">
+					<i:Icon Value="fa-solid fa-chevron-left" FontSize="12"
+					        VerticalAlignment="Center" />
+					<!-- LineHeight 10 collapses the text's line box just enough
+					     to align its visual baseline with the FA glyph. -->
+					<TextBlock Text="Back" FontSize="12" LineHeight="10"
+					           VerticalAlignment="Center" />
+				</StackPanel>
+			</Button>
+		</Border>
 
-		<ScrollViewer HorizontalScrollBarVisibility="Disabled"
-		              VerticalScrollBarVisibility="Auto"
-		              IsVisible="{Binding !IsFeedDetail}">
-			<Grid>
-				<controls:PodcastsStoreView IsVisible="{Binding IsStore}" />
-				<controls:PodcastsSubscriptionsView IsVisible="{Binding IsSubscriptions}" />
-			</Grid>
-		</ScrollViewer>
-	</Grid>
+		<Grid>
+			<controls:PodcastsFeedDetailView IsVisible="{Binding IsFeedDetail}" />
+
+			<ScrollViewer HorizontalScrollBarVisibility="Disabled"
+			              VerticalScrollBarVisibility="Auto"
+			              IsVisible="{Binding !IsFeedDetail}">
+				<Grid>
+					<controls:PodcastsStoreView IsVisible="{Binding IsStore}" />
+					<controls:PodcastsSubscriptionsView IsVisible="{Binding IsSubscriptions}" />
+				</Grid>
+			</ScrollViewer>
+		</Grid>
+	</DockPanel>
 </UserControl>
