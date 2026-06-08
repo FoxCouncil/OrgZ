@@ -4,6 +4,7 @@
              xmlns:vm="using:OrgZ.ViewModels"
              xmlns:models="using:OrgZ.Models"
              xmlns:img="clr-namespace:OrgZ.Converters"
+             xmlns:controls="using:OrgZ.Controls"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="700"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -19,7 +20,6 @@
 
 	<StackPanel Margin="16" Spacing="2">
 		<!-- Featured hero strip -->
-		<TextBlock Classes="sectionHeader" Text="Featured" />
 		<ItemsControl ItemsSource="{Binding Featured}">
 			<ItemsControl.ItemsPanel>
 				<ItemsPanelTemplate>
@@ -45,88 +45,105 @@
 			</ItemsControl.ItemTemplate>
 		</ItemsControl>
 
-		<!-- Top Podcasts rail -->
-		<TextBlock Classes="subHeader" Text="Top Podcasts" />
-		<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-			<ItemsControl ItemsSource="{Binding TopPodcasts}">
-				<ItemsControl.ItemsPanel>
-					<ItemsPanelTemplate>
-						<StackPanel Orientation="Horizontal" Spacing="8" />
-					</ItemsPanelTemplate>
-				</ItemsControl.ItemsPanel>
-				<ItemsControl.ItemTemplate>
-					<DataTemplate DataType="models:PodcastFeed">
-						<Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
-							<StackPanel Spacing="4">
-								<Border Classes="tileArt" Width="120" Height="120">
-									<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-								</Border>
-								<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
-							</StackPanel>
-						</Button>
-					</DataTemplate>
-				</ItemsControl.ItemTemplate>
-			</ItemsControl>
-		</ScrollViewer>
+		<!-- Main Three Column View: Categories list on the left, stacked
+		     category carousels (New / Non-Profit / placeholder grid / News /
+		     Music) in the middle, numbered Top Podcasts list on the right. -->
+		<Grid ColumnDefinitions="250,*,250" ColumnSpacing="30" Margin="0,8,0,8">
+			<controls:PodcastsCard Grid.Column="0" Title="Categories">
+				<controls:PodcastsCard.BodyContent>
+					<ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+						<ItemsControl ItemsSource="{Binding Categories}" Padding="0,4,0,4">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate DataType="models:PodcastCategory">
+									<Button Click="CategoryItem_Click" Tag="{Binding}"
+									        Background="Transparent" BorderThickness="0"
+									        Padding="14,4" Cursor="Hand"
+									        HorizontalAlignment="Stretch"
+									        HorizontalContentAlignment="Left">
+										<TextBlock Text="{Binding Name}"
+										           FontSize="12"
+										           Foreground="{StaticResource OrgZCarouselTextBrush}" />
+									</Button>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+					</ScrollViewer>
+				</controls:PodcastsCard.BodyContent>
+			</controls:PodcastsCard>
 
-		<!-- New & Notable rail -->
-		<TextBlock Classes="subHeader" Text="New &amp; Notable" />
-		<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-			<ItemsControl ItemsSource="{Binding NewAndNotable}">
-				<ItemsControl.ItemsPanel>
-					<ItemsPanelTemplate>
-						<StackPanel Orientation="Horizontal" Spacing="8" />
-					</ItemsPanelTemplate>
-				</ItemsControl.ItemsPanel>
-				<ItemsControl.ItemTemplate>
-					<DataTemplate DataType="models:PodcastFeed">
-						<Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
-							<StackPanel Spacing="4">
-								<Border Classes="tileArt" Width="120" Height="120">
-									<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-								</Border>
-								<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
-							</StackPanel>
-						</Button>
-					</DataTemplate>
-				</ItemsControl.ItemTemplate>
-			</ItemsControl>
-		</ScrollViewer>
+			<StackPanel Grid.Column="1" Spacing="16">
+				<controls:PodcastsCarousel Title="New" Items="{Binding NewAndNotable}" />
+				<controls:PodcastsCarousel Title="Non-Profit" Items="{Binding NonProfitFeeds}" />
 
-		<!-- Category rails -->
-		<ItemsControl ItemsSource="{Binding CategoryRails}">
-			<ItemsControl.ItemTemplate>
-				<DataTemplate DataType="vm:PodcastCategoryRail">
-					<StackPanel Spacing="2">
-						<TextBlock Classes="subHeader" Text="{Binding CategoryName, StringFormat='Top in {0}'}" />
-						<ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-							<ItemsControl ItemsSource="{Binding Feeds}">
-								<ItemsControl.ItemsPanel>
-									<ItemsPanelTemplate>
-										<StackPanel Orientation="Horizontal" Spacing="8" />
-									</ItemsPanelTemplate>
-								</ItemsControl.ItemsPanel>
-								<ItemsControl.ItemTemplate>
-									<DataTemplate DataType="models:PodcastFeed">
-										<Button Classes="podcastTile" Width="130" Click="FeedTile_Click" Tag="{Binding}">
-											<StackPanel Spacing="4">
-												<Border Classes="tileArt" Width="120" Height="120">
-													<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
-												</Border>
-												<TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Width="120" />
+				<!-- Placeholder 2x3 grid of colored borders. Aspect / chrome
+				     finalized later; for now just six tinted cells so the
+				     vertical rhythm of the column is visible. -->
+				<UniformGrid Rows="2" Columns="3" Height="160">
+					<Border Background="{StaticResource OrgZAccentBlueBrush}"           CornerRadius="6" Margin="0,0,8,8" />
+					<Border Background="{StaticResource OrgZCarouselButtonBrush}"       CornerRadius="6" Margin="4,0,4,8" />
+					<Border Background="{StaticResource OrgZSuccessBrush}"              CornerRadius="6" Margin="8,0,0,8" />
+					<Border Background="{StaticResource OrgZWarningBrush}"              CornerRadius="6" Margin="0,8,8,0" />
+					<Border Background="{StaticResource OrgZErrorBrush}"                CornerRadius="6" Margin="4,8,4,0" />
+					<Border Background="{StaticResource OrgZCarouselDotInactiveBrush}"  CornerRadius="6" Margin="8,8,0,0" />
+				</UniformGrid>
+
+				<controls:PodcastsCarousel Title="News"  Items="{Binding NewsFeeds}" />
+				<controls:PodcastsCarousel Title="Music" Items="{Binding MusicFeeds}" />
+			</StackPanel>
+
+			<controls:PodcastsCard Grid.Column="2" Title="Top Podcasts">
+				<controls:PodcastsCard.BodyContent>
+					<ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+						<ItemsControl ItemsSource="{Binding NumberedTopPodcasts}" Padding="0,4,0,4">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate DataType="vm:NumberedFeed">
+									<Button Click="NumberedFeedItem_Click" Tag="{Binding}"
+									        Background="Transparent" BorderThickness="0"
+									        Padding="14,5" Cursor="Hand"
+									        HorizontalAlignment="Stretch"
+									        HorizontalContentAlignment="Stretch">
+										<Grid ColumnDefinitions="28,*">
+											<TextBlock Grid.Column="0"
+											           Text="{Binding Number, StringFormat='{}{0}.'}"
+											           FontWeight="Bold"
+											           FontSize="12"
+											           Foreground="{StaticResource OrgZCarouselTextBrush}"
+											           VerticalAlignment="Top" />
+											<StackPanel Grid.Column="1">
+												<TextBlock Text="{Binding Feed.Title}"
+												           FontWeight="Bold"
+												           FontSize="12"
+												           Foreground="{StaticResource OrgZCarouselTextBrush}"
+												           TextWrapping="NoWrap"
+												           TextTrimming="CharacterEllipsis" />
+												<TextBlock Text="{Binding Feed.DisplaySubtitle}"
+												           FontSize="11"
+												           Foreground="{StaticResource OrgZCarouselSubtextBrush}"
+												           TextWrapping="NoWrap"
+												           TextTrimming="CharacterEllipsis" />
 											</StackPanel>
-										</Button>
-									</DataTemplate>
-								</ItemsControl.ItemTemplate>
-							</ItemsControl>
-						</ScrollViewer>
-					</StackPanel>
-				</DataTemplate>
-			</ItemsControl.ItemTemplate>
-		</ItemsControl>
+										</Grid>
+									</Button>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+					</ScrollViewer>
+				</controls:PodcastsCard.BodyContent>
+			</controls:PodcastsCard>
+		</Grid>
 
 		<!-- Loading / error state -->
 		<TextBlock Text="Loading podcasts…" IsVisible="{Binding IsLoadingStore}" HorizontalAlignment="Center" Opacity="0.6" Margin="0,24" />
 		<TextBlock Text="{Binding StoreError}" IsVisible="{Binding StoreError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" HorizontalAlignment="Center" Foreground="{StaticResource OrgZErrorBrush}" Margin="0,12" />
+
+		<!-- Footer: horizontal rule + centered attribution. The rule is the
+		     existing carousel divider color so it ties into the rest of the
+		     section chrome. -->
+		<Border Height="1" Background="{StaticResource OrgZCarouselDividerBrush}" Margin="0,24,0,12" />
+		<TextBlock Text="Podcast directory powered by Podcastindex.org"
+		           HorizontalAlignment="Center"
+		           FontSize="11"
+		           Foreground="{StaticResource OrgZCarouselSubtextBrush}"
+		           Margin="0,0,0,16" />
 	</StackPanel>
 </UserControl>

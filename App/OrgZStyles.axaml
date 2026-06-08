@@ -64,6 +64,21 @@
 		<Color x:Key="OrgZLcdButtonBackground">#B0B69E</Color>
 		<Color x:Key="OrgZLcdButtonBackgroundActive">#6B7160</Color>
 
+		<!-- iTunes-style carousel widget (PodcastsCarousel): deep purple chrome
+		     around a dark inner card with a slightly lighter header strip.
+		     Tuned for the OrgZ dark theme - the original iTunes cartouche was
+		     white-on-light; this is its dark-mode cousin. -->
+		<Color x:Key="OrgZCarouselOuter">#3D1F66</Color>
+		<Color x:Key="OrgZCarouselButton">#7A3FD6</Color>
+		<Color x:Key="OrgZCarouselSurface">#000000</Color>
+		<Color x:Key="OrgZCarouselHeader">#2A1845</Color>
+		<Color x:Key="OrgZCarouselHeaderHighlight">#463572</Color>
+		<Color x:Key="OrgZCarouselDivider">#3D2F5C</Color>
+		<Color x:Key="OrgZCarouselText">#E0E0E0</Color>
+		<Color x:Key="OrgZCarouselSubtext">#999999</Color>
+		<Color x:Key="OrgZCarouselDotActive">#C7B8E0</Color>
+		<Color x:Key="OrgZCarouselDotInactive">#5B4880</Color>
+
 		<!-- Brushes -->
 		<SolidColorBrush x:Key="OrgZSurfaceDarkBrush" Color="{StaticResource OrgZSurfaceDark}" />
 		<SolidColorBrush x:Key="OrgZInputBackgroundBrush" Color="{StaticResource OrgZInputBackground}" />
@@ -98,6 +113,23 @@
 		<SolidColorBrush x:Key="OrgZStoplightMaxBorderBrush" Color="{StaticResource OrgZStoplightMaxBorder}" />
 		<SolidColorBrush x:Key="OrgZLcdButtonBackgroundBrush" Color="{StaticResource OrgZLcdButtonBackground}" />
 		<SolidColorBrush x:Key="OrgZLcdButtonBackgroundActiveBrush" Color="{StaticResource OrgZLcdButtonBackgroundActive}" />
+		<SolidColorBrush x:Key="OrgZCarouselOuterBrush" Color="{StaticResource OrgZCarouselOuter}" />
+		<SolidColorBrush x:Key="OrgZCarouselButtonBrush" Color="{StaticResource OrgZCarouselButton}" />
+		<SolidColorBrush x:Key="OrgZCarouselSurfaceBrush" Color="{StaticResource OrgZCarouselSurface}" />
+		<SolidColorBrush x:Key="OrgZCarouselHeaderBrush" Color="{StaticResource OrgZCarouselHeader}" />
+		<!-- Glossy header strip: a quick fade from the highlight color at the
+		     very top to the base header color below gives the iTunes-style
+		     "light glancing off the top edge" shine. Used by PodcastsCarousel
+		     and PodcastsCard so the strip is consistent across the section. -->
+		<LinearGradientBrush x:Key="OrgZCarouselHeaderShineBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+			<GradientStop Offset="0" Color="{StaticResource OrgZCarouselHeaderHighlight}" />
+			<GradientStop Offset="1" Color="{StaticResource OrgZCarouselHeader}" />
+		</LinearGradientBrush>
+		<SolidColorBrush x:Key="OrgZCarouselDividerBrush" Color="{StaticResource OrgZCarouselDivider}" />
+		<SolidColorBrush x:Key="OrgZCarouselTextBrush" Color="{StaticResource OrgZCarouselText}" />
+		<SolidColorBrush x:Key="OrgZCarouselSubtextBrush" Color="{StaticResource OrgZCarouselSubtext}" />
+		<SolidColorBrush x:Key="OrgZCarouselDotActiveBrush" Color="{StaticResource OrgZCarouselDotActive}" />
+		<SolidColorBrush x:Key="OrgZCarouselDotInactiveBrush" Color="{StaticResource OrgZCarouselDotInactive}" />
 
 		<!-- Font -->
 		<FontFamily x:Key="OrgZMonoFont">Consolas</FontFamily>
