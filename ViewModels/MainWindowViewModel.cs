@@ -137,8 +137,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder))]
     private SidebarItem? _selectedSidebarItem;
+
+    /// <summary>
+    /// Watermark text for the search box. Mirrors whatever the active
+    /// sidebar entry calls itself - "Search Music...", "Search Radio...",
+    /// "Search Best of 2024..." for a playlist named "Best of 2024", etc.
+    /// Falls back to "Search..." when no sidebar item is selected.
+    /// </summary>
+    public string SearchPlaceholder =>
+        SelectedSidebarItem?.Name is { Length: > 0 } name
+            ? $"Search {name}…"
+            : "Search…";
 
     [ObservableProperty]
     private ConnectedDevice? _selectedDevice;
@@ -339,27 +350,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private double _repeatOpacity = 0.4;
 
-    // -- Drill-Down --
-
-    [ObservableProperty]
-    private DrillDownState? _drillDownState;
-
-    [ObservableProperty]
-    private List<DrillDownEntry> _drillDownEntries = [];
-
-    public bool IsDrillDownActive => DrillDownState != null;
-
     // -- Queue --
 
     [ObservableProperty]
     private bool _isQueueVisible;
 
     public ObservableCollection<MediaItem>? PlaybackContextUpcoming => _playbackContext?.UpcomingItems;
-
-    // -- Activity --
-
-    [ObservableProperty]
-    private bool _isActivityPanelVisible;
 
     // Rip-in-progress LCD state. iTunes-style: while a rip is running the
     // now-playing LCD swaps to show "Importing 'Track'", a progress bar, and
@@ -471,12 +467,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         OnPropertyChanged(nameof(ActivityBadgeCount));
         OnPropertyChanged(nameof(HasActiveActivities));
-    }
-
-    [RelayCommand]
-    private void ToggleActivityPanel()
-    {
-        IsActivityPanelVisible = !IsActivityPanelVisible;
     }
 
     // -- Unified Data --
@@ -892,7 +882,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (value?.Kind == MediaKind.Radio)
         {
-            StatusBar.StationCount = FilteredItems.Count.ToString();
+            StatusBar.StationCount = FilteredItems.Count;
         }
     }
 
@@ -978,7 +968,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // Update radio station count in status bar
             if (_activeViewConfig.ShowRadioFilterPanel)
             {
-                UI(() => StatusBar.StationCount = FilteredItems.Count.ToString());
+                UI(() => StatusBar.StationCount = FilteredItems.Count);
             }
 
             // Update generic status bar for non-Music/Radio views
@@ -1791,9 +1781,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentTrackLine2 = !string.IsNullOrWhiteSpace(track.Artist)
             ? (string.IsNullOrWhiteSpace(track.Album) ? track.Artist : $"{track.Artist} \u2014 {track.Album}")
             : track.Album ?? "";
-        CurrentTrackDuration = track.Duration?.ToString(@"m\:ss") ?? "--:--";
-        CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
-
         CurrentAlbumArt = _cdCoverArt;
 
 #if WINDOWS
@@ -1821,6 +1808,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         BeginPlayback();
+        // CD track duration comes from the TOC, not libvlc - restore it
+        // AFTER BeginPlayback clears the LCD time labels so the total time
+        // shows up immediately instead of waiting on MediaChanged.
+        CurrentTrackDuration = track.Duration?.ToString(@"m\:ss") ?? "--:--";
+        CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -2598,139 +2590,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #endregion
 
-    #region Drill-Down Navigation
-
-    [RelayCommand]
-    internal void ToggleDrillDown()
-    {
-        if (DrillDownState != null)
-        {
-            ExitDrillDown();
-        }
-        else if (_activeViewConfig?.SupportsDrillDown == true)
-        {
-            DrillDownState = new DrillDownState { Level = DrillDownLevel.Artists };
-            BuildDrillDownEntries();
-            OnPropertyChanged(nameof(IsDrillDownActive));
-        }
-    }
-
-    internal void DrillInto(DrillDownEntry entry)
-    {
-        if (DrillDownState == null)
-        {
-            return;
-        }
-
-        switch (DrillDownState.Level)
-        {
-            case DrillDownLevel.Artists:
-            {
-                DrillDownState.SelectedArtist = entry.GroupKey;
-                DrillDownState.Level = DrillDownLevel.Albums;
-                BuildDrillDownEntries();
-                break;
-            }
-
-            case DrillDownLevel.Albums:
-            {
-                DrillDownState.SelectedAlbum = entry.GroupKey;
-                DrillDownState.Level = DrillDownLevel.Songs;
-                // At songs level, filter the normal list and exit drill-down grid mode
-                ApplyDrillDownSongsFilter();
-                break;
-            }
-        }
-    }
-
-    internal void DrillUpToRoot()
-    {
-        ExitDrillDown();
-    }
-
-    internal void DrillUpToArtist()
-    {
-        if (DrillDownState == null)
-        {
-            return;
-        }
-
-        DrillDownState.SelectedAlbum = null;
-        DrillDownState.Level = DrillDownLevel.Albums;
-        BuildDrillDownEntries();
-    }
-
-    private void ExitDrillDown()
-    {
-        DrillDownState = null;
-        DrillDownEntries = [];
-        OnPropertyChanged(nameof(IsDrillDownActive));
-        ApplyFilter();
-    }
-
-    private void BuildDrillDownEntries()
-    {
-        var musicItems = _allItems.Where(i => i.Kind == MediaKind.Music);
-
-        if (DrillDownState!.Level == DrillDownLevel.Artists)
-        {
-            DrillDownEntries = musicItems
-                .Where(i => !string.IsNullOrEmpty(i.Artist))
-                .GroupBy(i => i.Artist!)
-                .Select(g => new DrillDownEntry
-                {
-                    GroupKey = g.Key,
-                    ItemCount = g.Count(),
-                    TotalDuration = TimeSpan.FromTicks(g.Sum(x => x.Duration?.Ticks ?? 0)),
-                    SecondaryInfo = $"{g.Select(x => x.Album).Where(a => !string.IsNullOrEmpty(a)).Distinct().Count()} albums, {g.Count()} songs",
-                })
-                .OrderBy(e => e.GroupKey)
-                .ToList();
-        }
-        else if (DrillDownState.Level == DrillDownLevel.Albums)
-        {
-            DrillDownEntries = musicItems
-                .Where(i => string.Equals(i.Artist, DrillDownState.SelectedArtist, StringComparison.OrdinalIgnoreCase))
-                .Where(i => !string.IsNullOrEmpty(i.Album))
-                .GroupBy(i => i.Album!)
-                .Select(g => new DrillDownEntry
-                {
-                    GroupKey = g.Key,
-                    ItemCount = g.Count(),
-                    TotalDuration = TimeSpan.FromTicks(g.Sum(x => x.Duration?.Ticks ?? 0)),
-                    SecondaryInfo = $"{g.FirstOrDefault()?.Year?.ToString() ?? "?"} \u2014 {g.Count()} songs",
-                })
-                .OrderBy(e => e.GroupKey)
-                .ToList();
-        }
-    }
-
-    private void ApplyDrillDownSongsFilter()
-    {
-        if (DrillDownState == null)
-        {
-            return;
-        }
-
-        var artist = DrillDownState.SelectedArtist;
-        var album = DrillDownState.SelectedAlbum;
-
-        var tracksInAlbum = _allItems
-            .Where(i => i.Kind == MediaKind.Music)
-            .Where(i => string.Equals(i.Artist, artist, StringComparison.OrdinalIgnoreCase))
-            .Where(i => string.Equals(i.Album, album, StringComparison.OrdinalIgnoreCase));
-        FilteredItems = AlbumTrackSort.Order(tracksInAlbum).ToList();
-
-        // Search within this scope
-        var searchText = SearchText?.Trim() ?? string.Empty;
-        if (!string.IsNullOrEmpty(searchText) && _activeViewConfig != null)
-        {
-            FilteredItems = FilteredItems.Where(i => _activeViewConfig.SearchFilter(i, searchText)).ToList();
-        }
-    }
-
-    #endregion
-
     #region Playlist Management
 
     private void LoadPlaylistSidebarItems()
@@ -2871,7 +2730,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (doCopy)
             {
                 var activity = AddActivity($"Copying {unmatched.Count} track(s) to library");
-                IsActivityPanelVisible = true;
                 int copied = 0;
 
                 foreach (var sourcePath in unmatched)
@@ -3687,19 +3545,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void UpdateData()
     {
-        int totalArtists = MusicItems.Where(f => !string.IsNullOrEmpty(f.Artist)).Select(f => f.Artist).Distinct().Count();
-        int totalAlbums = MusicItems.Where(f => !string.IsNullOrEmpty(f.Album)).Select(f => f.Album).Distinct().Count();
-
         int totalSongs = MusicItems.Count();
-
         TimeSpan totalDuration = TimeSpan.FromTicks(MusicItems.Sum(x => x.Duration?.Ticks ?? 0));
+        long totalFileSize = MusicItems.Sum(x => x.FileSize ?? 0L);
 
         UI(() =>
         {
-            StatusBar.TotalArtists = totalArtists.ToString();
-            StatusBar.TotalAlbums = totalAlbums.ToString();
-            StatusBar.TotalSongs = totalSongs.ToString();
-            StatusBar.TotalDuration = totalDuration.ToString(@"dd\:hh\:mm\:ss");
+            StatusBar.TotalSongs = totalSongs;
+            StatusBar.TotalDuration = totalDuration;
+            StatusBar.TotalFileSize = totalFileSize;
         });
     }
 
@@ -3763,18 +3617,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             "Favorites" => "favorites",
             "Ignored" => "ignored",
             "BadFormat" => "issues",
+            "CdAudio" => "tracks",
             _ when viewKey.StartsWith("Playlist:") => "tracks",
+            _ when viewKey.StartsWith("Device:") => "tracks",
             _ => "items"
         };
 
         var duration = TimeSpan.FromTicks(FilteredItems.Where(i => i.Duration.HasValue).Sum(i => i.Duration!.Value.Ticks));
-        var durationStr = duration.TotalSeconds > 0 ? duration.ToString(@"d\:hh\:mm\:ss") : "";
 
         UI(() =>
         {
-            StatusBar.ItemCount = count.ToString();
+            StatusBar.ItemCount = count;
             StatusBar.ItemLabel = label;
-            StatusBar.ItemDuration = durationStr;
+            StatusBar.ItemDuration = duration;
         });
     }
 
@@ -4014,7 +3869,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _cdTracks.AddRange(discInfo.Tracks);
                 _allItems.AddRange(discInfo.Tracks);
 
-                var label = discInfo.Tracks[0].Album ?? $"Audio CD ({driveId})";
+                var album = discInfo.Tracks[0].Album;
+                var label = string.IsNullOrWhiteSpace(album)
+                    ? $"Audio CD ({driveId})"
+                    : $"{album} ({driveId})";
 
                 DeviceItems.Add(new SidebarItem
                 {
@@ -4426,8 +4284,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ListViewConfigs.Register(playlistsKey, ListViewConfigs.BuildDevicePlaylistsConfig(device.MountPath));
 
         // The device row itself IS the music view (its ViewConfigKey = "Device:{mount}").
-        // Children under it are secondary views - currently just Playlists, expandable to
-        // future sub-views (Browse, Settings, Sync).
+        // Children under it are secondary views - Playlists is wired, Podcasts and
+        // Audiobooks are placeholders for future device-scoped views and stay
+        // disabled until those views land.
         var playlistsChild = new SidebarItem
         {
             Name = "Playlists",
@@ -4435,6 +4294,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Category = "DEVICE",
             IsEnabled = true,
             ViewConfigKey = playlistsKey,
+        };
+
+        var podcastsChild = new SidebarItem
+        {
+            Name = "Podcasts",
+            Icon = "fa-solid fa-podcast",
+            Category = "DEVICE",
+            IsEnabled = false,
+        };
+
+        var audiobooksChild = new SidebarItem
+        {
+            Name = "Audiobooks",
+            Icon = "fa-solid fa-headphones",
+            Category = "DEVICE",
+            IsEnabled = false,
         };
 
         var sidebarItem = new SidebarItem
@@ -4445,7 +4320,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Category = "DEVICES",
             IsEnabled = true,
             ViewConfigKey = viewKey,
-            Children = { playlistsChild },
+            Children = { playlistsChild, podcastsChild, audiobooksChild },
         };
         DeviceItems.Add(sidebarItem);
 
