@@ -9,6 +9,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using LibVLCSharp.Shared;
+using System.Net.Http;
 using Serilog;
 
 namespace OrgZ.ViewModels;
@@ -1209,6 +1210,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             UpdateMainStatus("Stopped");
         });
 
+        // libvlc reports open/decode failures asynchronously on this event rather
+        // than throwing from Play(), so without a handler a bad source (a dead
+        // CDN, an unsupported codec, a redirect chain VLC won't follow) failed
+        // silently - the UI just sat there. Surface it.
+        _player.EncounteredError += (s, e) => UI(() =>
+        {
+            IsPlaybackLoading = false;
+            _log.Warning("LibVLC EncounteredError — media source could not be opened");
+            UpdateMainStatus("Couldn't play this — the media source couldn't be opened.");
+        });
+
         _player.MediaChanged += (s, e) => UI(async () =>
         {
             if (e.Media == null)
@@ -2228,6 +2240,49 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioTap?.ResetAudioStartTracking();
     }
 
+    // Follows redirects ourselves so VLC gets the final URL. Podcast hosts stack
+    // tracking/prefix redirects (pdst.fm -> pscrb.fm -> mgln.ai -> CDN); libvlc
+    // caps redirects low and aborts with "too many redirections" - silently, in
+    // native code - so those episodes never played. HttpClient walks the chain
+    // (up to 20 hops) and we hand VLC the resolved URL, which it opens directly.
+    private static readonly HttpClient _podcastRedirectResolver = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 20,
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(10),
+    };
+
+    private static async Task<string> ResolvePodcastUrlAsync(string url)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            // Same browser UA the playback path uses - some CDNs vary their
+            // redirect target by User-Agent.
+            req.Headers.TryAddWithoutValidation("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+            // ResponseHeadersRead so we don't download the audio body - we only
+            // need the final RequestUri after the handler followed the chain.
+            using var resp = await _podcastRedirectResolver.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            var final = resp.RequestMessage?.RequestUri?.ToString();
+            if (!string.IsNullOrWhiteSpace(final) && !string.Equals(final, url, StringComparison.Ordinal))
+            {
+                _log.Information("Resolved podcast redirects: {Original} -> {Final}", url, final);
+                return final;
+            }
+            return url;
+        }
+        catch (Exception ex)
+        {
+            // Resolution is best-effort - fall back to the original URL and let
+            // VLC try directly (it may still work for short chains).
+            _log.Warning(ex, "Podcast URL redirect resolve failed; using original {Url}", url);
+            return url;
+        }
+    }
+
     internal void PlayPodcastEpisode(Models.PodcastFeed feed, Models.PodcastEpisode episode, string? localPath = null)
     {
         if (_player == null)
@@ -2236,14 +2291,33 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var source = localPath ?? episode.EnclosureUrl;
-        if (string.IsNullOrWhiteSpace(source))
+        var rawSource = localPath ?? episode.EnclosureUrl;
+        if (string.IsNullOrWhiteSpace(rawSource))
         {
             _log.Warning("PlayPodcastEpisode: episode {Id} has no playable source", episode.Id);
             return;
         }
         bool isLocal = localPath != null && File.Exists(localPath);
 
+        if (isLocal)
+        {
+            StartPodcastPlayback(feed, episode, rawSource, isLocal: true);
+            return;
+        }
+
+        // Streamed: resolve the redirect chain off the UI thread, then play the
+        // final URL. UI shows the streaming state once resolved (sub-second).
+        _ = ResolveAndStreamPodcastAsync(feed, episode, rawSource);
+    }
+
+    private async Task ResolveAndStreamPodcastAsync(Models.PodcastFeed feed, Models.PodcastEpisode episode, string url)
+    {
+        var resolved = await ResolvePodcastUrlAsync(url);
+        StartPodcastPlayback(feed, episode, resolved, isLocal: false);
+    }
+
+    private void StartPodcastPlayback(Models.PodcastFeed feed, Models.PodcastEpisode episode, string source, bool isLocal)
+    {
         _log.Information("Playing podcast episode {Id} '{Title}' [{Mode}] from {Source}",
             episode.Id, episode.Title, isLocal ? "local" : "stream", source);
 
@@ -2278,7 +2352,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 Title     = episode.Title,
                 Artist    = feed.Title,
                 StreamUrl = isLocal ? null : episode.EnclosureUrl,
-                FilePath  = isLocal ? localPath : null,
+                FilePath  = isLocal ? source : null,
             };
             SelectedItem = item;
 
