@@ -227,32 +227,59 @@ public static class IPodTrackImporter
         {
             var artDir = Path.Combine(mountPath, "iPod_Control", "Artwork");
             Directory.CreateDirectory(artDir);
+            var dbPath = Path.Combine(artDir, "ArtworkDB");
+
+            // Read existing entries so we APPEND this track's art rather than clobber
+            // every other track's (the from-scratch Build would otherwise drop them).
+            var existing = new List<ArtImage>();
+            if (File.Exists(dbPath))
+            {
+                try
+                {
+                    existing = ArtworkDbWriter.ReadImages(ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath)));
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Existing ArtworkDB unreadable; rebuilding from this track only");
+                    existing = [];
+                }
+            }
+            int imageId = ArtworkDbWriter.NextImageId(existing);
 
             var thumbs = new List<ArtThumb>();
             int totalSize = 0;
             foreach (var (formatId, w, h) in coverFormats)
             {
+                int expected = w * h * 2;
                 var ithmb = Path.Combine(artDir, $"F{formatId}_1.ithmb");
-                if (!await ExtractRgb565Async(ffmpegPath, sourceFile, w, h, ithmb, ct))
+                var staged = ithmb + ".new";
+                if (!await ExtractRgb565Async(ffmpegPath, sourceFile, w, h, staged, ct))
                 {
                     return (false, 0);   // no cover stream / ffmpeg failed
                 }
-                int expected = w * h * 2;
-                if (new FileInfo(ithmb).Length != expected)
+                var raw = await File.ReadAllBytesAsync(staged, ct);
+                File.Delete(staged);
+                if (raw.Length != expected)
                 {
-                    _log.Warning("Thumbnail {File} is {Actual}B, expected {Expected}B", ithmb, new FileInfo(ithmb).Length, expected);
+                    _log.Warning("Thumbnail F{Fmt} is {Actual}B, expected {Expected}B", formatId, raw.Length, expected);
                     return (false, 0);
                 }
-                thumbs.Add(new ArtThumb(formatId, w, h, IthmbOffset: 0, ImageSize: expected));
+                // Append after any existing thumbnails already packed in this format's file.
+                long offset = File.Exists(ithmb) ? new FileInfo(ithmb).Length : 0;
+                await using (var fs = new FileStream(ithmb, FileMode.Append, FileAccess.Write))
+                {
+                    await fs.WriteAsync(raw, ct);
+                }
+                thumbs.Add(new ArtThumb(formatId, w, h, (int)offset, expected));
                 totalSize += expected;
             }
 
-            var doc = ArtworkDbWriter.Build(dbid, imageId: 100, thumbs, origImgSize: totalSize);
+            var allImages = new List<ArtImage>(existing) { new(dbid, imageId, thumbs, totalSize) };
+            var doc = ArtworkDbWriter.BuildFromImages(allImages);
             ITunesDbChunkTree.Normalize(doc.Root);
             var bytes = ITunesDbChunkTree.Serialize(doc);
             ITunesDbChunkTree.Parse(bytes);   // sanity: must re-parse
 
-            var dbPath = Path.Combine(artDir, "ArtworkDB");
             if (File.Exists(dbPath) && !File.Exists(dbPath + ".orgzbak"))
             {
                 File.Copy(dbPath, dbPath + ".orgzbak");
@@ -261,7 +288,7 @@ public static class IPodTrackImporter
             File.WriteAllBytes(tmp, bytes);
             File.Move(tmp, dbPath, overwrite: true);
 
-            _log.Information("Wrote ArtworkDB + {Count} thumbnails ({Bytes}B)", thumbs.Count, totalSize);
+            _log.Information("Wrote ArtworkDB image {ImageId} (+{Count} thumbnails, {Bytes}B); {Total} image(s) total", imageId, thumbs.Count, totalSize, allImages.Count);
             return (true, totalSize);
         }
         catch (Exception ex)
