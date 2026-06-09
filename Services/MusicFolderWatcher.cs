@@ -8,7 +8,7 @@ public sealed class MusicFolderWatcher : IDisposable
 {
     private static readonly HashSet<string> TempSuffixes = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".tmp", ".part", ".crdownload", ".partial"
+        ".tmp", ".part", ".crdownload", ".partial", ".partial-rip"
     };
 
     private FileSystemWatcher? _watcher;
@@ -145,16 +145,18 @@ public sealed class MusicFolderWatcher : IDisposable
                 break;
             }
 
-            // Debounce: drain everything that arrives within a sliding 500ms window,
-            // up to a 5-second ceiling from the first event.
-            var ceiling = DateTime.UtcNow.AddSeconds(5);
+            // Debounce: drain everything that arrives within a sliding 250ms window,
+            // up to a 2-second ceiling from the first event. Kept short so the library
+            // tracks the filesystem snappily — ApplyFilter is only a few ms even at 30k
+            // items — while still coalescing the rapid bursts of a bulk copy/delete.
+            var ceiling = DateTime.UtcNow.AddSeconds(2);
 
             while (DateTime.UtcNow < ceiling)
             {
                 try
                 {
                     using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    delayCts.CancelAfter(500);
+                    delayCts.CancelAfter(250);
 
                     var next = await reader.ReadAsync(delayCts.Token);
                     Coalesce(pending, next);
