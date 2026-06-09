@@ -405,7 +405,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1 && !IsLcdIdle;
+    // Show the cycle arrows whenever there's more than one page to flip between.
+    // Idle playback (nothing playing) normally hides them - but an in-progress
+    // activity like a rip is itself a cyclable screen, so keep the arrows then.
+    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1 && (!IsLcdIdle || IsRipping);
 
     [RelayCommand]
     private void CycleLcdPage()
@@ -992,6 +995,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (StatusBar.HasGenericStats)
             {
                 UpdateGenericStatusBar();
+            }
+
+            // Music view: the footer summary must reflect the current search/filter,
+            // not the whole-library totals (UpdateData). When no search is active the
+            // filtered set is the full library, so the count is unchanged.
+            if (StatusBar.ActiveKind == MediaKind.Music)
+            {
+                var songs = FilteredItems.Count;
+                var duration = TimeSpan.FromTicks(FilteredItems.Sum(i => i.Duration?.Ticks ?? 0));
+                var size = FilteredItems.Sum(i => i.FileSize ?? 0L);
+                UI(() =>
+                {
+                    StatusBar.TotalSongs = songs;
+                    StatusBar.TotalDuration = duration;
+                    StatusBar.TotalFileSize = size;
+                });
             }
 
             UpdateNavigationButtons();
@@ -1841,6 +1860,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // shows up immediately instead of waiting on MediaChanged.
         CurrentTrackDuration = track.Duration?.ToString(@"m\:ss") ?? "--:--";
         CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
+        // When the total is known up front, seed the elapsed tile at 0:00 too so both
+        // LCD labels populate immediately instead of the elapsed staying blank until
+        // the first position tick.
+        if (track.Duration.HasValue)
+        {
+            CurrentTrackTime = FormatHelper.FormatDurationCompact(0);
+            CurrentTrackTimeNumber = 0;
+        }
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -3466,6 +3493,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdateData();
     }
 
+    private static string NormalizePath(string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch
+        {
+            return path;
+        }
+    }
+
+    /// <summary>True if a music item with this file path is already tracked in the library.</summary>
+    private bool LibraryContainsPath(string path)
+    {
+        var full = NormalizePath(path);
+        return _allItems.Any(i => i.Kind == MediaKind.Music && i.FilePath != null && NormalizePath(i.FilePath) == full);
+    }
+
     private void StartFolderWatcher()
     {
         _folderWatcher?.Stop();
@@ -3495,6 +3541,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _folderWatcher.Start(App.FolderPath);
+        _log.Information("Folder watcher watching {Path}", App.FolderPath);
     }
 
     private async Task ProcessFileChangesAsync(WatcherChangeSet changes)
@@ -3504,10 +3551,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Handle deleted files
         if (changes.Deleted.Count > 0)
         {
-            var deletedPaths = new HashSet<string>(changes.Deleted, StringComparer.OrdinalIgnoreCase);
+            // Normalize both sides - the scanner (Directory.GetFiles) and the watcher
+            // (FileSystemWatcher.FullPath) should agree, but GetFullPath collapses any
+            // separator/relative-segment drift so the match doesn't silently miss.
+            var deletedPaths = new HashSet<string>(changes.Deleted.Select(NormalizePath), StringComparer.OrdinalIgnoreCase);
             var deletedItems = _allItems
-                .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && deletedPaths.Contains(i.FilePath))
+                .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && deletedPaths.Contains(NormalizePath(i.FilePath)))
                 .ToList();
+
+            _log.Information("Watcher: {Deleted} deleted path(s) -> matched {Matched} tracked item(s)", changes.Deleted.Count, deletedItems.Count);
+            if (deletedItems.Count == 0)
+            {
+                _log.Debug("Watcher delete matched nothing. Reported: {Paths}", string.Join(" | ", changes.Deleted));
+            }
 
             foreach (var item in deletedItems)
             {
@@ -3527,7 +3583,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 var item = FileScanner.CreateMediaItemFromPath(path);
 
-                if (item != null)
+                // Dedup: a rip (or any path) may have already added this file directly.
+                if (item != null && !LibraryContainsPath(path))
                 {
                     _allItems.Add(item);
                     filesToAnalyze.Add(item);
@@ -4235,6 +4292,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             verificationLines.Add(line);
             RipDetail = line;
             activity.Detail = string.Join("  •  ", verificationLines.TakeLast(3));
+
+            // Surface the finished track in the library now. Relying on the folder
+            // watcher races with flac/lame holding the file open for the whole encode,
+            // which lagged the view a track behind and dropped the final one. The rip
+            // knows its own output path, so add it directly (deduped vs the watcher).
+            if (!string.IsNullOrEmpty(o.OutputPath) && File.Exists(o.OutputPath) && !LibraryContainsPath(o.OutputPath))
+            {
+                var ripped = FileScanner.CreateMediaItemFromPath(o.OutputPath);
+                if (ripped != null)
+                {
+                    _allItems.Add(ripped);
+                    ApplyFilter();
+                    _ = AnalyzeAllFilesAsync([ripped]);
+                }
+            }
         });
 
         _ripCts = new CancellationTokenSource();
