@@ -324,15 +324,11 @@ public static class CdAudioService
             trackInfos = System.Text.Json.JsonSerializer.Deserialize<List<TrackInfo>>(cached.TracksJson);
         }
 
-        var albumLabel = cached.Album;
-        if (cached.Year.HasValue)
-        {
-            albumLabel += $" ({cached.Year})";
-        }
-
         foreach (var track in info.Tracks)
         {
-            track.Album = albumLabel;
+            // Album is the clean title only - the year lives in track.Year (and the
+            // grid's Year column), not appended to the album name/tag/folder.
+            track.Album = cached.Album;
             track.Artist = cached.Artist;
             track.Genre = cached.Genre;
             if (cached.Year.HasValue)
@@ -356,15 +352,10 @@ public static class CdAudioService
     {
         info.CoverArtBytes = coverArt;
 
-        var albumLabel = result.Title;
-        if (result.Year.HasValue)
-        {
-            albumLabel += $" ({result.Year})";
-        }
-
         foreach (var track in info.Tracks)
         {
-            track.Album = albumLabel;
+            // Album is the clean title only - the year lives in track.Year, not the name.
+            track.Album = result.Title;
             track.Artist = result.Artist;
             track.Genre = result.Genre;
             if (result.Year.HasValue)
