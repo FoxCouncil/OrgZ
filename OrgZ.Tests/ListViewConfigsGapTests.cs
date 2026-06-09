@@ -214,7 +214,7 @@ public class ListViewConfigsGapTests
         var dur = cfg.Columns.Single(c => c.Header == "Duration");
         Assert.Equal("Duration", dur.BindingPath);
         Assert.True(dur.IsDefaultVisible);
-        Assert.Equal(@"mm\:ss", dur.StringFormat);
+        Assert.Equal(@"m\:ss", dur.StringFormat);
     }
 
     [Fact]
