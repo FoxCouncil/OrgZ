@@ -148,7 +148,7 @@ internal static class CdHelperMode
             Outcomes = [ToHelper(o)],
         }));
 
-        var outcomes = CdRipService.RipTracksAsync(spec.DrivePath!, mediaItems, spec.OutputDirectory!, options, ripProgress, trackCompleted, spec.CoverArt).GetAwaiter().GetResult();
+        var outcomes = CdRipService.RipTracksAsync(spec.DrivePath!, mediaItems, spec.OutputDirectory!, options, ripProgress, trackCompleted, spec.CoverArt, spec.DiscId).GetAwaiter().GetResult();
 
         progress.WriteEvent(new CdHelperEvent
         {
@@ -280,6 +280,8 @@ internal sealed class CdHelperSpec
     public int ReReadAttempts { get; set; } = 40;
     /// <summary>Front-cover image bytes, JSON-serialized as base64.</summary>
     public byte[]? CoverArt { get; set; }
+    /// <summary>MusicBrainz DiscID stamped into ripped files as MUSICBRAINZ_DISCID.</summary>
+    public string? DiscId { get; set; }
     public string? DiscTitle { get; set; }
     public string? DiscPerformer { get; set; }
     public bool TestWrite { get; set; }
