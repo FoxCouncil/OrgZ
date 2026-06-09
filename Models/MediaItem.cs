@@ -2,6 +2,15 @@
 
 namespace OrgZ.Models;
 
+/// <summary>Per-track CD-rip status shown in the CD view's play column.</summary>
+public enum RipState
+{
+    None,
+    Pending,   // queued — grey static spinner
+    Ripping,   // in progress — black spinning spinner
+    Ripped,    // done — green check
+}
+
 public partial class MediaItem : ObservableObject
 {
     // -- Identity --
@@ -25,10 +34,23 @@ public partial class MediaItem : ObservableObject
     private TimeSpan? _duration;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowRipPending), nameof(ShowRipping), nameof(ShowRipDone))]
     private bool _isPlaying;
 
     [ObservableProperty]
     private bool _isFavorite;
+
+    /// <summary>
+    /// CD-rip status surfaced in the play column. The play indicator takes priority,
+    /// so the rip glyphs hide while a row is actively playing.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowRipPending), nameof(ShowRipping), nameof(ShowRipDone))]
+    private RipState _ripStatus;
+
+    public bool ShowRipPending => RipStatus == RipState.Pending && !IsPlaying;
+    public bool ShowRipping => RipStatus == RipState.Ripping && !IsPlaying;
+    public bool ShowRipDone => RipStatus == RipState.Ripped && !IsPlaying;
 
     [ObservableProperty]
     private bool _isIgnored;
@@ -107,6 +129,14 @@ public partial class MediaItem : ObservableObject
 
     [ObservableProperty]
     private uint? _totalDiscs;
+
+    /// <summary>
+    /// MusicBrainz DiscID of the CD this track was ripped from, read from the file's
+    /// MUSICBRAINZ_DISCID tag. Lets the CD view show a green check when that disc is
+    /// re-inserted (the file is the source of truth — no side database).
+    /// </summary>
+    [ObservableProperty]
+    private string? _discId;
 
     [ObservableProperty]
     private bool? _hasAlbumArt;

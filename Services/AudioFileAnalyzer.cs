@@ -31,6 +31,8 @@ public class AudioFileAnalyzer
             item.Composer = file.Tag.JoinedComposers;
             item.Comment = file.Tag.Comment;
             item.Bpm = file.Tag.BeatsPerMinute;
+            // Source CD's DiscID (MUSICBRAINZ_DISCID) for "already ripped" recognition.
+            item.DiscId = string.IsNullOrWhiteSpace(file.Tag.MusicBrainzDiscId) ? null : file.Tag.MusicBrainzDiscId;
 
             item.AudioBitrate = file.Properties.AudioBitrate;
             item.SampleRate = file.Properties.AudioSampleRate;
