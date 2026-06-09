@@ -12,6 +12,16 @@ public sealed record RipTrackMetadata
     public string? Album { get; init; }
     public string? Genre { get; init; }
     public int? TrackNumber { get; init; }
+
+    /// <summary>Total tracks on the disc - written as FLAC TRACKTOTAL / MP3 TRCK "n/total".</summary>
+    public int? TotalTracks { get; init; }
+
+    /// <summary>Disc number (1 for a standalone CD) - FLAC DISCNUMBER / MP3 TPOS.</summary>
+    public int? DiscNumber { get; init; }
+
+    /// <summary>Total discs in the set (1 for a standalone CD) - FLAC DISCTOTAL / MP3 TPOS "d/total".</summary>
+    public int? TotalDiscs { get; init; }
+
     public uint? Year { get; init; }
 
     /// <summary>
@@ -39,6 +49,14 @@ public sealed record RipTrackMetadata
 public interface IRipEncoder : IAsyncDisposable
 {
     Task WriteAsync(ReadOnlyMemory<byte> pcm, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finalizes a SUCCESSFUL encode: flushes/closes the encoder and atomically
+    /// renames the <c>.partial-rip</c> working file to its real extension. Call only
+    /// after all PCM has been written. If the encoder is disposed without it (cancel
+    /// or error), the partial file is discarded instead of being published.
+    /// </summary>
+    Task CompleteAsync(CancellationToken cancellationToken);
 }
 
 public static class RipEncoder
@@ -83,11 +101,17 @@ public static class RipEncoder
             WriteWavSidecarCover(outputPath, metadata.CoverArt);
         }
 
+        // Encode into a ".partial-rip" working file, then atomically rename to the
+        // real extension once the encode succeeds (see CompleteAsync). The library
+        // watcher ignores .partial-rip, so half-written tracks never register as
+        // music and each finished file appears complete, in one shot.
+        var encodePath = Path.ChangeExtension(outputPath, ".partial-rip");
+
         return options.Format switch
         {
-            RipFormat.Wav => new WavEncoder(outputPath, pcmByteCount),
-            RipFormat.Flac => new SubprocessEncoder("flac", BuildFlacArgs(outputPath, metadata, options, coverArtTempFile), outputPath, _log, coverArtTempFile),
-            RipFormat.Mp3 => new SubprocessEncoder("lame", BuildLameArgs(outputPath, metadata, options, coverArtTempFile), outputPath, _log, coverArtTempFile),
+            RipFormat.Wav => new WavEncoder(encodePath, outputPath, pcmByteCount),
+            RipFormat.Flac => new SubprocessEncoder("flac", BuildFlacArgs(encodePath, metadata, options, coverArtTempFile), encodePath, outputPath, _log, coverArtTempFile),
+            RipFormat.Mp3 => new SubprocessEncoder("lame", BuildLameArgs(encodePath, metadata, options, coverArtTempFile), encodePath, outputPath, _log, coverArtTempFile),
             _ => throw new ArgumentOutOfRangeException(nameof(options), "Unknown rip format"),
         };
     }
@@ -170,6 +194,21 @@ public static class RipEncoder
             AppendFlacTag(args, "TRACKNUMBER", n.ToString());
         }
 
+        if (metadata.TotalTracks is int tt && tt > 0)
+        {
+            AppendFlacTag(args, "TRACKTOTAL", tt.ToString());
+        }
+
+        if (metadata.DiscNumber is int dn && dn > 0)
+        {
+            AppendFlacTag(args, "DISCNUMBER", dn.ToString());
+        }
+
+        if (metadata.TotalDiscs is int dtot && dtot > 0)
+        {
+            AppendFlacTag(args, "DISCTOTAL", dtot.ToString());
+        }
+
         if (metadata.Year is uint y && y > 0)
         {
             AppendFlacTag(args, "DATE", y.ToString());
@@ -238,8 +277,16 @@ public static class RipEncoder
 
         if (metadata.TrackNumber is int n && n > 0)
         {
+            // ID3v2 TRCK accepts "num/total".
             args.Add("--tn");
-            args.Add(n.ToString());
+            args.Add(metadata.TotalTracks is int tt && tt > 0 ? $"{n}/{tt}" : n.ToString());
+        }
+
+        if (metadata.DiscNumber is int dn && dn > 0)
+        {
+            // ID3v2 TPOS = disc position, "disc/total" when the total is known.
+            args.Add("--tv");
+            args.Add(metadata.TotalDiscs is int dtot && dtot > 0 ? $"TPOS={dn}/{dtot}" : $"TPOS={dn}");
         }
 
         if (metadata.Year is uint y && y > 0)
@@ -286,15 +333,36 @@ public static class RipEncoder
         args.Add($"--tag={key}={value}");
     }
 
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Failed to delete working file {Path}", path);
+        }
+    }
+
     // -- Encoder implementations --------------------------------------------
 
     private sealed class WavEncoder : IRipEncoder
     {
         private readonly FileStream _fs;
+        private readonly string _encodePath;
+        private readonly string _finalPath;
+        private bool _completed;
+        private bool _disposed;
 
-        public WavEncoder(string outputPath, long pcmByteCount)
+        public WavEncoder(string encodePath, string finalPath, long pcmByteCount)
         {
-            _fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            _encodePath = encodePath;
+            _finalPath = finalPath;
+            _fs = new FileStream(encodePath, FileMode.Create, FileAccess.Write, FileShare.None);
             CdRipService.WriteWavHeader(_fs, pcmByteCount);
         }
 
@@ -303,10 +371,28 @@ public static class RipEncoder
             return _fs.WriteAsync(pcm, cancellationToken).AsTask();
         }
 
+        public async Task CompleteAsync(CancellationToken cancellationToken)
+        {
+            await _fs.FlushAsync(cancellationToken);
+            await _fs.DisposeAsync();
+            File.Move(_encodePath, _finalPath, overwrite: true);
+            _completed = true;
+        }
+
         public async ValueTask DisposeAsync()
         {
-            await _fs.FlushAsync();
-            _fs.Dispose();
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+
+            if (!_completed)
+            {
+                // Cancelled / errored before CompleteAsync - drop the partial file.
+                await _fs.DisposeAsync();
+                TryDelete(_encodePath);
+            }
         }
     }
 
@@ -314,14 +400,19 @@ public static class RipEncoder
     {
         private readonly Process _proc;
         private readonly Stream _stdin;
-        private readonly string _outputPath;
+        private readonly string _encodePath;
+        private readonly string _finalPath;
+        private readonly string _exeName;
         private readonly ILogger _log;
         private readonly string? _coverArtTempFile;
+        private bool _completed;
         private bool _disposed;
 
-        public SubprocessEncoder(string exeName, List<string> args, string outputPath, ILogger log, string? coverArtTempFile = null)
+        public SubprocessEncoder(string exeName, List<string> args, string encodePath, string finalPath, ILogger log, string? coverArtTempFile = null)
         {
-            _outputPath = outputPath;
+            _encodePath = encodePath;
+            _finalPath = finalPath;
+            _exeName = exeName;
             _log = log;
             _coverArtTempFile = coverArtTempFile;
 
@@ -373,6 +464,22 @@ public static class RipEncoder
             await _stdin.WriteAsync(pcm, cancellationToken);
         }
 
+        public async Task CompleteAsync(CancellationToken cancellationToken)
+        {
+            // Closing stdin signals EOF, so flac/lame flush + finalize the file and exit.
+            await _stdin.FlushAsync(cancellationToken);
+            _stdin.Close();
+            await _proc.WaitForExitAsync(cancellationToken);
+
+            if (_proc.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"Encoder '{_exeName}' exited with code {_proc.ExitCode} while producing {_finalPath}.");
+            }
+
+            File.Move(_encodePath, _finalPath, overwrite: true);
+            _completed = true;
+        }
+
         public async ValueTask DisposeAsync()
         {
             if (_disposed)
@@ -384,13 +491,21 @@ public static class RipEncoder
 
             try
             {
-                await _stdin.FlushAsync();
-                _stdin.Close();
-                await _proc.WaitForExitAsync();
-
-                if (_proc.ExitCode != 0)
+                if (!_completed)
                 {
-                    throw new InvalidOperationException($"Encoder exited with code {_proc.ExitCode} while producing {_outputPath}.");
+                    // Cancelled or errored before CompleteAsync - stop the child and
+                    // discard the partial so no truncated track is ever published.
+                    try
+                    {
+                        if (!_proc.HasExited)
+                        {
+                            _stdin.Close();
+                            _proc.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch { /* already gone */ }
+                    try { await _proc.WaitForExitAsync(); } catch { /* already gone */ }
+                    TryDelete(_encodePath);
                 }
             }
             finally
@@ -398,8 +513,7 @@ public static class RipEncoder
                 _proc.Dispose();
                 if (_coverArtTempFile != null)
                 {
-                    try { File.Delete(_coverArtTempFile); }
-                    catch (Exception ex) { _log.Debug(ex, "Failed to clean up cover art temp file {Path}", _coverArtTempFile); }
+                    TryDelete(_coverArtTempFile);
                 }
             }
         }
