@@ -74,6 +74,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private PlaybackContext? _playbackContext;
 
     private readonly List<MediaItem> _cdTracks = [];
+    // Drive key (from DrivePathFromCdTrackId) -> MusicBrainz DiscID of the loaded disc,
+    // so a rip can record what it ripped and a re-insert can restore green checks.
+    private readonly Dictionary<string, string> _cdDiscIdByDrive = [];
     private bool _cdScanning;
     private Bitmap? _cdCoverArt;
     private byte[]? _cdCoverArtBytes;
@@ -1822,6 +1825,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ExecutePlayCd(MediaItem track)
     {
+        // The optical drive is held exclusively by the elevated rip helper during a
+        // rip - don't try to play off it, and let the rip status own the play column.
+        if (IsRipping)
+        {
+            UpdateMainStatus("Can't play the CD while it's being imported.");
+            return;
+        }
+
         SelectedItem = track;
 
         CurrentTrackLine1 = track.Title ?? "Unknown Track";
@@ -3512,6 +3523,67 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return _allItems.Any(i => i.Kind == MediaKind.Music && i.FilePath != null && NormalizePath(i.FilePath) == full);
     }
 
+    /// <summary>
+    /// Re-evaluates the CD view's green checks against the CURRENT library: a loaded CD
+    /// track is Ripped only while a library file with that disc's MUSICBRAINZ_DISCID and
+    /// track number still exists. Deleting the ripped folder therefore drops the checks;
+    /// re-adding the files restores them. Tracks mid-rip (Pending/Ripping) are left alone
+    /// so an active rip's spinner isn't disturbed.
+    /// </summary>
+    private void RefreshCdRipRecognition()
+    {
+        if (_cdTracks.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var byDrive in _cdTracks
+                     .Where(t => DrivePathFromCdTrackId(t.Id) is not null)
+                     .GroupBy(t => DrivePathFromCdTrackId(t.Id)!))
+        {
+            if (!_cdDiscIdByDrive.TryGetValue(byDrive.Key, out var discId))
+            {
+                continue;
+            }
+
+            var rippedTracks = _allItems
+                .Where(i => i.Kind == MediaKind.Music && i.DiscId == discId && i.Track is not null)
+                .Select(i => (int)i.Track!.Value)
+                .ToHashSet();
+
+            foreach (var t in byDrive)
+            {
+                if (t.RipStatus is RipState.Pending or RipState.Ripping)
+                {
+                    continue;   // a rip is in flight for this track - don't touch it
+                }
+                t.RipStatus = t.Track is { } n && rippedTracks.Contains((int)n) ? RipState.Ripped : RipState.None;
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="filePath"/> equals one of the deleted paths or lives
+    /// under a deleted directory - so a single folder-delete event clears every track it
+    /// contained. The trailing separator stops "Album" from matching "Album 2".
+    /// </summary>
+    private static bool IsUnderAnyDeletedPath(string filePath, List<string> deletedPaths)
+    {
+        foreach (var d in deletedPaths)
+        {
+            if (string.Equals(filePath, d, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            var asDir = d.EndsWith(Path.DirectorySeparatorChar) ? d : d + Path.DirectorySeparatorChar;
+            if (filePath.StartsWith(asDir, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void StartFolderWatcher()
     {
         _folderWatcher?.Stop();
@@ -3551,12 +3623,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Handle deleted files
         if (changes.Deleted.Count > 0)
         {
-            // Normalize both sides - the scanner (Directory.GetFiles) and the watcher
-            // (FileSystemWatcher.FullPath) should agree, but GetFullPath collapses any
-            // separator/relative-segment drift so the match doesn't silently miss.
-            var deletedPaths = new HashSet<string>(changes.Deleted.Select(NormalizePath), StringComparer.OrdinalIgnoreCase);
+            // A deleted path may be a FILE or a DIRECTORY: deleting a folder in Explorer
+            // fires a single Deleted for the folder, not one per file. So remove tracked
+            // files that equal a deleted path OR live anywhere under a deleted directory.
+            // Paths are normalized (GetFullPath) so separator/case drift can't miss.
+            var deletedPaths = changes.Deleted.Select(NormalizePath).ToList();
             var deletedItems = _allItems
-                .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && deletedPaths.Contains(NormalizePath(i.FilePath)))
+                .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && IsUnderAnyDeletedPath(NormalizePath(i.FilePath), deletedPaths))
                 .ToList();
 
             _log.Information("Watcher: {Deleted} deleted path(s) -> matched {Matched} tracked item(s)", changes.Deleted.Count, deletedItems.Count);
@@ -3630,6 +3703,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         else if (changes.Deleted.Count > 0)
         {
             UpdateData();
+        }
+
+        // The library changed - re-evaluate the CD view's green checks. Deleting the
+        // ripped folder must clear them; newly-analyzed files restore them.
+        if (changes.Deleted.Count > 0 || filesToAnalyze.Count > 0)
+        {
+            RefreshCdRipRecognition();
         }
     }
 
@@ -4016,6 +4096,28 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _cdTracks.AddRange(discInfo.Tracks);
                 _allItems.AddRange(discInfo.Tracks);
 
+                // Remember the disc's DiscID, and restore green checks for any tracks
+                // we've ripped from this exact disc before (this or a past session).
+                if (discInfo.DiscId is { Length: > 0 } discId &&
+                    DrivePathFromCdTrackId(discInfo.Tracks[0].Id) is { } discKey)
+                {
+                    _cdDiscIdByDrive[discKey] = discId;
+
+                    // Recognize tracks we've ripped from this exact disc before by the
+                    // MUSICBRAINZ_DISCID stamped in the library files' tags - no side DB.
+                    var already = _allItems
+                        .Where(i => i.Kind == MediaKind.Music && i.DiscId == discId && i.Track is not null)
+                        .Select(i => (int)i.Track!.Value)
+                        .ToHashSet();
+                    foreach (var t in discInfo.Tracks)
+                    {
+                        if (t.Track is { } n && already.Contains((int)n))
+                        {
+                            t.RipStatus = RipState.Ripped;
+                        }
+                    }
+                }
+
                 var album = discInfo.Tracks[0].Album;
                 var label = string.IsNullOrWhiteSpace(album)
                     ? $"Audio CD ({driveId})"
@@ -4199,6 +4301,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // DiscID of the loaded disc - used to remember what we ripped (Part B).
+        var ripDiscId = _cdDiscIdByDrive.GetValueOrDefault(drivePath);
+
         // FoxRedbook on macOS wants a bare BSD name (disk4) / dev path, not the
         // mount point. Same translation we do for TOC reads in CdAudioService.
         var openPath = OperatingSystem.IsMacOS()
@@ -4226,8 +4331,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         RipDetail = string.Empty;
         RipPercent = 0;
 
+        // Queue indicator: every track about to be ripped shows the grey spinner.
+        foreach (var t in tracks)
+        {
+            t.RipStatus = RipState.Pending;
+        }
+
         var progress = new Progress<RipTrackProgress>(p =>
         {
+            // Mark the in-flight track with the spinning (black) indicator.
+            var ripping = tracks.FirstOrDefault(t => t.Track == (uint)p.TrackNumber);
+            if (ripping is not null && ripping.RipStatus != RipState.Ripped)
+            {
+                ripping.RipStatus = RipState.Ripping;
+            }
+
             activity.Detail = $"Track {p.TrackNumber} of {p.TrackCount}: {p.TrackTitle} ({p.TrackPercent:P0})";
             activity.Progress = p.TrackPercent;
 
@@ -4276,6 +4394,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var verificationLines = new List<string>(tracks.Count);
         var trackCompleted = new Progress<RipOutcome>(o =>
         {
+            // Green check the moment a track is verified. Persistence comes from the
+            // MUSICBRAINZ_DISCID tag the encoder writes into the file, not a side ledger.
+            var done = tracks.FirstOrDefault(t => t.Track == (uint)o.TrackNumber);
+            if (done is not null)
+            {
+                done.RipStatus = RipState.Ripped;
+                done.DiscId ??= ripDiscId;
+            }
+
             string line;
             if (o.Verified)
             {
@@ -4321,7 +4448,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // via the SynchronizationContext captured at construction.
             var ct = _ripCts.Token;
             var outcomes = await Task.Run(() =>
-                CdRipService.RipTracksWithElevationAsync(openPath, tracks, outputDir, options, progress, trackCompleted, _cdCoverArtBytes, ct), ct);
+                CdRipService.RipTracksWithElevationAsync(openPath, tracks, outputDir, options, progress, trackCompleted, _cdCoverArtBytes, ripDiscId, ct), ct);
 
             var unverified = outcomes.Where(o => !o.Verified).ToList();
             if (unverified.Count == 0)
@@ -4360,6 +4487,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             RipTitle = string.Empty;
             RipDetail = string.Empty;
             RipPercent = 0;
+
+            // Clear the queued/spinning state for anything not actually ripped (e.g.
+            // a cancelled rip), leaving completed tracks' green checks in place.
+            foreach (var t in tracks)
+            {
+                if (t.RipStatus != RipState.Ripped)
+                {
+                    t.RipStatus = RipState.None;
+                }
+            }
         }
     }
 
