@@ -7,6 +7,9 @@ namespace OrgZ.Services;
 /// <summary>One on-disk thumbnail: which .ithmb format, its pixel size, and where in that file it lives.</summary>
 public sealed record ArtThumb(int FormatId, int Width, int Height, int IthmbOffset, int ImageSize);
 
+/// <summary>One artwork entry: a track's dbid, its image id, and the thumbnails (one per format).</summary>
+public sealed record ArtImage(ulong Dbid, int ImageId, IReadOnlyList<ArtThumb> Thumbs, int OrigImgSize);
+
 /// <summary>
 /// Builds an iPod ArtworkDB (iPod_Control/Artwork/ArtworkDB) from scratch for a
 /// single image, reusing the <see cref="ITunesDbChunkTree"/> chunk model (the
@@ -46,49 +49,55 @@ public static class ArtworkDbWriter
     private const int MhodTypeThumbnail = 2;   // container holding an mhni
     private const int MhodTypeFileName  = 3;   // string holding the .ithmb filename
 
+    /// <summary>Builds an ArtworkDB for a single image (the from-scratch case).</summary>
     public static ITunesDbDocument Build(ulong dbid, int imageId, IReadOnlyList<ArtThumb> thumbs, int origImgSize)
-    {
-        var mhfd = NewChunk("mhfd", MhfdLen);
-        mhfd.WriteHeaderInt32(0x10, 2);             // unknown2 / version marker
-        mhfd.WriteHeaderInt32(0x1C, imageId + 1);   // next_id
-        mhfd.WriteHeaderInt32(0x30, 2);             // unknown_flag1
+        => BuildFromImages([new ArtImage(dbid, imageId, thumbs, origImgSize)]);
 
-        // --- image list (index 1): one mhii, one mhod->mhni per thumbnail ---
+    /// <summary>
+    /// Builds a complete ArtworkDB from a list of image entries - one mhii per
+    /// image, one mhif per distinct .ithmb format across all of them. Used to
+    /// rebuild the DB after appending a new image to the existing set (multi-track
+    /// sync), so previously-written art is preserved rather than clobbered.
+    /// </summary>
+    public static ITunesDbDocument BuildFromImages(IReadOnlyList<ArtImage> images)
+    {
+        int nextId = (images.Count > 0 ? images.Max(i => i.ImageId) : 99) + 1;
+
+        var mhfd = NewChunk("mhfd", MhfdLen);
+        mhfd.WriteHeaderInt32(0x10, 2);          // unknown2 / version marker
+        mhfd.WriteHeaderInt32(0x1C, nextId);     // next_id
+        mhfd.WriteHeaderInt32(0x30, 2);          // unknown_flag1
+
+        // --- image list (index 1): one mhii per image ---
         var imgList = NewMhsd(1);
         imgList.Children.Add(NewChunk("mhli", MhliLen));
-
-        var mhii = NewChunk("mhii", MhiiLen);
-        mhii.WriteHeaderInt32(0x10, imageId);
-        WriteUInt64(mhii.Header, 0x14, dbid);       // song_id == track dbid
-        mhii.WriteHeaderInt32(0x30, origImgSize);   // src/orig image size
-        foreach (var t in thumbs)
+        foreach (var img in images)
         {
-            var mhni = NewChunk("mhni", MhniLen);
-            mhni.WriteHeaderInt32(0x10, t.FormatId);
-            mhni.WriteHeaderInt32(0x14, t.IthmbOffset);
-            mhni.WriteHeaderInt32(0x18, t.ImageSize);
-            WriteUInt16(mhni.Header, 0x20, (ushort)t.Height);
-            WriteUInt16(mhni.Header, 0x22, (ushort)t.Width);
-            mhni.WriteHeaderInt32(0x28, t.ImageSize);   // image_size is stored twice
-            // The filename child is mandatory for the firmware to render the image.
-            mhni.Children.Add(BuildFileNameMhod($":F{t.FormatId}_1.ithmb"));
-
-            var container = NewChunk("mhod", MhodLen);
-            WriteUInt16(container.Header, 0x0C, MhodTypeThumbnail);
-            container.Children.Add(mhni);
-            mhii.Children.Add(container);
+            var mhii = NewChunk("mhii", MhiiLen);
+            mhii.WriteHeaderInt32(0x10, img.ImageId);
+            WriteUInt64(mhii.Header, 0x14, img.Dbid);       // song_id == track dbid
+            mhii.WriteHeaderInt32(0x30, img.OrigImgSize);   // src/orig image size
+            foreach (var t in img.Thumbs)
+            {
+                mhii.Children.Add(BuildThumbContainer(t));
+            }
+            imgList.Children.Add(mhii);
         }
-        imgList.Children.Add(mhii);
 
         // --- album list (index 2): present but empty ---
         var albumList = NewMhsd(2);
         albumList.Children.Add(NewChunk("mhla", MhlaLen));
 
-        // --- file list (index 3): one mhif per .ithmb file ---
+        // --- file list (index 3): one mhif per distinct .ithmb format ---
         var fileList = NewMhsd(3);
         fileList.Children.Add(NewChunk("mhlf", MhlfLen));
-        foreach (var t in thumbs)
+        var seenFormats = new HashSet<int>();
+        foreach (var t in images.SelectMany(i => i.Thumbs))
         {
+            if (!seenFormats.Add(t.FormatId))
+            {
+                continue;
+            }
             var mhif = NewChunk("mhif", MhifLen);
             mhif.WriteHeaderInt32(0x10, t.FormatId);
             mhif.WriteHeaderInt32(0x14, t.ImageSize);
@@ -100,6 +109,70 @@ public static class ArtworkDbWriter
         mhfd.Children.Add(fileList);
 
         return new ITunesDbDocument { Root = mhfd };
+    }
+
+    /// <summary>
+    /// Reads the image entries out of an already-parsed ArtworkDB so new art can be
+    /// appended without losing the existing entries. Tolerates the iPod's own
+    /// rewritten layout (mhii are siblings of mhli under the image-list mhsd).
+    /// </summary>
+    public static List<ArtImage> ReadImages(ITunesDbDocument doc)
+    {
+        var images = new List<ArtImage>();
+        var imgList = doc.Root.Children.FirstOrDefault(c =>
+                          c.Magic == "mhsd" && (ReadInt32(c.Header, 0x0C) & 0xFFFF) == 1)
+                      ?? doc.Root.Children.FirstOrDefault(c => c.Children.Any(x => x.Magic == "mhii"));
+        if (imgList is null)
+        {
+            return images;
+        }
+
+        foreach (var mhii in imgList.Children.Where(c => c.Magic == "mhii"))
+        {
+            int imageId = ReadInt32(mhii.Header, 0x10);
+            ulong dbid = ReadUInt64(mhii.Header, 0x14);
+            int origSize = ReadInt32(mhii.Header, 0x30);
+
+            var thumbs = new List<ArtThumb>();
+            foreach (var container in mhii.Children.Where(c => c.Magic == "mhod"))
+            {
+                var mhni = container.Children.FirstOrDefault(c => c.Magic == "mhni");
+                if (mhni is null)
+                {
+                    continue;
+                }
+                thumbs.Add(new ArtThumb(
+                    FormatId:    ReadInt32(mhni.Header, 0x10),
+                    Width:       ReadUInt16(mhni.Header, 0x22),
+                    Height:      ReadUInt16(mhni.Header, 0x20),
+                    IthmbOffset: ReadInt32(mhni.Header, 0x14),
+                    ImageSize:   ReadInt32(mhni.Header, 0x18)));
+            }
+            images.Add(new ArtImage(dbid, imageId, thumbs, origSize));
+        }
+        return images;
+    }
+
+    /// <summary>Next free image id given the current entries (iTunes starts at 100).</summary>
+    public static int NextImageId(IReadOnlyList<ArtImage> images)
+        => (images.Count > 0 ? images.Max(i => i.ImageId) : 99) + 1;
+
+    private static ITunesDbChunk BuildThumbContainer(ArtThumb t)
+    {
+        var mhni = NewChunk("mhni", MhniLen);
+        mhni.WriteHeaderInt32(0x10, t.FormatId);
+        mhni.WriteHeaderInt32(0x14, t.IthmbOffset);
+        mhni.WriteHeaderInt32(0x18, t.ImageSize);
+        WriteUInt16(mhni.Header, 0x20, (ushort)t.Height);
+        WriteUInt16(mhni.Header, 0x22, (ushort)t.Width);
+        mhni.WriteHeaderInt32(0x28, t.ImageSize);   // image_size is stored twice
+        // The filename child is mandatory for the firmware to render the image.
+        mhni.Children.Add(BuildFileNameMhod($":F{t.FormatId}_1.ithmb"));
+
+        var container = NewChunk("mhod", MhodLen);
+        WriteUInt16(container.Header, 0x0C, MhodTypeThumbnail);
+        container.Children.Add(mhni);
+        return container;
     }
 
     /// <summary>
@@ -152,5 +225,19 @@ public static class ArtworkDbWriter
         {
             b[o + i] = (byte)((v >> (8 * i)) & 0xFF);
         }
+    }
+
+    private static int ReadInt32(byte[] b, int o) => b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24);
+
+    private static int ReadUInt16(byte[] b, int o) => b[o] | (b[o + 1] << 8);
+
+    private static ulong ReadUInt64(byte[] b, int o)
+    {
+        ulong v = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            v |= (ulong)b[o + i] << (8 * i);
+        }
+        return v;
     }
 }
