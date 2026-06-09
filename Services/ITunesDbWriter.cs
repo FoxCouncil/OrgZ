@@ -49,6 +49,37 @@ public static class ITunesDbWriter
 
     private static readonly DateTime MacEpoch = new(1904, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>
+    /// Builds a minimal, valid empty iTunesDB: an MHBD with a track dataset
+    /// (MHSD type 1 → empty MHLT) and a playlists-v2 dataset (MHSD type 3 → MHLP
+    /// with a single hidden master playlist). <see cref="AddTrack"/> can append to
+    /// it directly. Callers <see cref="ITunesDbChunkTree.Normalize"/> +
+    /// <see cref="ITunesDbChunkTree.Serialize"/> before writing.
+    /// </summary>
+    public static ITunesDbDocument CreateEmpty()
+    {
+        var mhbd = NewChunk("mhbd", 0x68);
+        mhbd.WriteHeaderInt32(0x10, 0x19);   // db version (iPod Video / iTunes 7 era)
+
+        var tracks = NewChunk("mhsd", 0x60);
+        tracks.WriteHeaderInt32(0x0C, 1);    // dataset type 1 = tracks
+        tracks.Children.Add(NewChunk("mhlt", 0x5C));
+
+        var playlists = NewChunk("mhsd", 0x60);
+        playlists.WriteHeaderInt32(0x0C, 3); // dataset type 3 = playlists (v2)
+        playlists.Children.Add(NewChunk("mhlp", 0x5C));
+
+        var master = NewChunk("mhyp", 0x6C);
+        master.Header[0x14] = 1;             // master/library flag
+        master.WriteHeaderInt32(0x1C, 1);    // playlist id
+        master.Children.Add(BuildStringMhod(1, "OrgZ"));   // playlist name
+        playlists.Children.Add(master);
+
+        mhbd.Children.Add(tracks);
+        mhbd.Children.Add(playlists);
+        return new ITunesDbDocument { Root = mhbd };
+    }
+
     /// <summary>Next free track id = max existing MHIT id + 1 (1 on an empty library).</summary>
     public static uint NextTrackId(ITunesDbDocument doc)
     {
@@ -183,8 +214,27 @@ public static class ITunesDbWriter
         return mhip;
     }
 
+    private static ITunesDbChunk NewChunk(string magic, int headerSize)
+    {
+        var c = new ITunesDbChunk { Magic = magic, Header = new byte[headerSize] };
+        WriteAscii(c.Header, 0, magic);
+        c.WriteHeaderInt32(0x04, headerSize);
+        // total size (0x08) and count fields are filled by ITunesDbChunkTree.Normalize.
+        return c;
+    }
+
     private static int MacSeconds(DateTime utc)
-        => (int)(utc.ToUniversalTime() - MacEpoch).TotalSeconds;
+    {
+        // iTunesDB timestamps are uint32 seconds since 1904. A 2026 date is ~3.85e9
+        // seconds - past int.MaxValue - so cast through uint to keep the bit pattern
+        // the firmware (and ITunesDbReader, which reads it back as uint) expects.
+        double seconds = (utc.ToUniversalTime() - MacEpoch).TotalSeconds;
+        if (seconds <= 0 || seconds > uint.MaxValue)
+        {
+            return 0;
+        }
+        return unchecked((int)(uint)seconds);
+    }
 
     private static void WriteAscii(byte[] dest, int offset, string magic)
     {
