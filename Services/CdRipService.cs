@@ -217,6 +217,9 @@ public static class CdRipService
         _log.Information("Opened {DrivePath} for rip: {Vendor} {Product} (fw {Rev}) format={Format}", drivePath, drive.Inquiry.Vendor, drive.Inquiry.Product, drive.Inquiry.Revision, options.ShortLabel);
 
         var toc = await drive.ReadTocAsync(cancellationToken);
+        // Total tracks for tagging = audio tracks on the disc (data tracks on an
+        // enhanced CD don't count toward the album's track total).
+        int audioTrackCount = toc.Tracks.Count(t => t.Type == FoxRedbook.TrackType.Audio);
         var redbookOptions = new FoxRedbook.RipOptions { MaxReReads = options.ReReadAttempts };
         using var session = RipSession.CreateAutoCorrected(drive, redbookOptions);
         _log.Information("Rip options: ReReadAttempts={ReReadAttempts}", options.ReReadAttempts);
@@ -254,6 +257,9 @@ public static class CdRipService
                 Album = requested.Album,
                 Genre = requested.Genre,
                 TrackNumber = trackNumber,
+                TotalTracks = requested.TotalTracks is { } rtt && rtt > 0 ? (int)rtt : audioTrackCount,
+                DiscNumber = requested.Disc is { } rd && rd > 0 ? (int)rd : 1,
+                TotalDiscs = requested.TotalDiscs is { } rtd && rtd > 0 ? (int)rtd : 1,
                 Year = requested.Year,
                 EncodedBy = $"OrgZ {App.Version}",
                 CoverArt = coverArt,
@@ -316,6 +322,11 @@ public static class CdRipService
                         });
                     }
                 }
+
+                // All sectors written - finalize + atomically rename .partial-rip to
+                // the real extension. Skipped if the foreach threw (cancel/error), so
+                // an aborted track leaves no published file.
+                await encoder.CompleteAsync(cancellationToken);
             }
 
             var outcome = new RipOutcome
