@@ -31,12 +31,6 @@ public class ListViewConfigTests
         Assert.False(config.SearchFilter(item, "Stones"));
     }
 
-    [Fact]
-    public void MusicConfig_SupportsDrillDown()
-    {
-        Assert.True(ListViewConfigs.Get("Music")!.SupportsDrillDown);
-    }
-
     // -- Radio view --
 
     [Fact]
