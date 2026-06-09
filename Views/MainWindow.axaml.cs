@@ -14,6 +14,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using OrgZ.Controls;
 using OrgZ.ViewModels;
 using Optris.Icons.Avalonia;
 
@@ -597,19 +598,8 @@ public partial class MainWindow : Window
                 ColumnType.PlayIndicator => new DataGridTemplateColumn
                 {
                     Header = def.Header,
-                    CellTemplate = new FuncDataTemplate<MediaItem>((item, _) =>
-                    {
-                        var icon = new Icon
-                        {
-                            Value = "fa-solid fa-play",
-                            FontSize = 14,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment = VerticalAlignment.Center,
-                            Foreground = new SolidColorBrush(Color.Parse("#0096FF")),
-                        };
-                        icon.Bind(IsVisibleProperty, new Binding("IsPlaying"));
-                        return icon;
-                    }),
+                    // Shows play (priority) / rip status (pending · ripping · done).
+                    CellTemplate = new FuncDataTemplate<MediaItem>((_, _) => new RipStatusIndicator()),
                 },
                 ColumnType.FavoriteTitle => new DataGridTemplateColumn
                 {

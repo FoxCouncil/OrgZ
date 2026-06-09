@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:icons="using:Optris.Icons.Avalonia"
+             xmlns:models="using:OrgZ.Models"
+             x:Class="OrgZ.Controls.RipStatusIndicator"
+             x:DataType="models:MediaItem"
+             Width="16" Height="16">
+    <UserControl.Styles>
+        <!-- Continuous clockwise spin for the "ripping" glyph. Animating
+             RotateTransform.Angle auto-applies a RotateTransform; origin is centered
+             so it rotates in place. The animation only matters while the icon is
+             visible (ShowRipping), which is at most one row per disc. -->
+        <Style Selector="icons|Icon.ripSpin">
+            <Style.Animations>
+                <Animation Duration="0:0:0.9" IterationCount="INFINITE" Easing="LinearEasing">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="RotateTransform.Angle" Value="0" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="RotateTransform.Angle" Value="360" />
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+    </UserControl.Styles>
+
+    <Panel>
+        <!-- Pending: grey, static -->
+        <icons:Icon Value="fa-solid fa-spinner" FontSize="12" Foreground="#999999"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    IsVisible="{Binding ShowRipPending}" />
+        <!-- Ripping: black, spinning -->
+        <icons:Icon Value="fa-solid fa-spinner" FontSize="12" Foreground="White" Classes="ripSpin"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    RenderTransformOrigin="50%,50%"
+                    IsVisible="{Binding ShowRipping}" />
+        <!-- Ripped: green check -->
+        <icons:Icon Value="fa-solid fa-check" FontSize="12" Foreground="#28A745"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    IsVisible="{Binding ShowRipDone}" />
+        <!-- Playing takes priority over everything above -->
+        <icons:Icon Value="fa-solid fa-play" FontSize="14" Foreground="#0096FF"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    IsVisible="{Binding IsPlaying}" />
+    </Panel>
+</UserControl>

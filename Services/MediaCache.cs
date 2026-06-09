@@ -247,6 +247,7 @@ public static class MediaCache
             "UseStartTime INTEGER NOT NULL DEFAULT 0",
             "UseStopTime INTEGER NOT NULL DEFAULT 0",
             "IsIgnored INTEGER NOT NULL DEFAULT 0",
+            "DiscId TEXT",
         };
 
         foreach (var col in columns)
@@ -488,7 +489,7 @@ public static class MediaCache
             INSERT INTO Media
                 (Id, Kind, Title, Artist, Album, Duration, IsFavorite, LastPlayed, DateAdded,
                  FilePath, FileName, Extension, FileSize, LastModified,
-                 Year, Track, TotalTracks, Disc, TotalDiscs,
+                 Year, Track, TotalTracks, Disc, TotalDiscs, DiscId,
                  HasAlbumArt, FileNameMatchesHeaders, MimeType,
                  Genre, Composer, Comment, BPM, AudioBitrate, SampleRate, AudioChannels,
                  EncoderSettings, CodecDescription,
@@ -501,7 +502,7 @@ public static class MediaCache
             VALUES
                 (@Id, @Kind, @Title, @Artist, @Album, @Duration, @IsFavorite, @LastPlayed, @DateAdded,
                  @FilePath, @FileName, @Extension, @FileSize, @LastModified,
-                 @Year, @Track, @TotalTracks, @Disc, @TotalDiscs,
+                 @Year, @Track, @TotalTracks, @Disc, @TotalDiscs, @DiscId,
                  @HasAlbumArt, @FileNameMatchesHeaders, @MimeType,
                  @Genre, @Composer, @Comment, @BPM, @AudioBitrate, @SampleRate, @AudioChannels,
                  @EncoderSettings, @CodecDescription,
@@ -526,6 +527,7 @@ public static class MediaCache
                 TotalTracks = excluded.TotalTracks,
                 Disc = excluded.Disc,
                 TotalDiscs = excluded.TotalDiscs,
+                DiscId = excluded.DiscId,
                 HasAlbumArt = excluded.HasAlbumArt,
                 FileNameMatchesHeaders = excluded.FileNameMatchesHeaders,
                 MimeType = excluded.MimeType,
@@ -583,6 +585,7 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@TotalTracks", item.TotalTracks.HasValue ? (object)(long)item.TotalTracks.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@Disc", item.Disc.HasValue ? (object)(long)item.Disc.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@TotalDiscs", item.TotalDiscs.HasValue ? (object)(long)item.TotalDiscs.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@DiscId", (object?)item.DiscId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@HasAlbumArt", item.HasAlbumArt.HasValue ? (object)(item.HasAlbumArt.Value ? 1 : 0) : DBNull.Value);
         cmd.Parameters.AddWithValue("@FileNameMatchesHeaders", item.FileNameMatchesHeaders.HasValue ? (object)(item.FileNameMatchesHeaders.Value ? 1 : 0) : DBNull.Value);
         cmd.Parameters.AddWithValue("@MimeType", (object?)item.MimeType ?? DBNull.Value);
@@ -673,6 +676,7 @@ public static class MediaCache
         item.TotalTracks = GetNullableUint(reader, "TotalTracks");
         item.Disc = GetNullableUint(reader, "Disc");
         item.TotalDiscs = GetNullableUint(reader, "TotalDiscs");
+        item.DiscId = GetNullableString(reader, "DiscId");
         item.HasAlbumArt = GetNullableBool(reader, "HasAlbumArt");
         item.FileNameMatchesHeaders = GetNullableBool(reader, "FileNameMatchesHeaders");
         item.MimeType = GetNullableString(reader, "MimeType");
