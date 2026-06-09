@@ -85,11 +85,12 @@ public static class CdRipService
         IProgress<RipTrackProgress>? progress = null,
         IProgress<RipOutcome>? trackCompleted = null,
         byte[]? coverArt = null,
+        string? discId = null,
         CancellationToken cancellationToken = default)
     {
         if (!CdElevation.RequiresElevation)
         {
-            return await RipTracksAsync(drivePath, tracks, outputDirectory, options, progress, trackCompleted, coverArt, cancellationToken);
+            return await RipTracksAsync(drivePath, tracks, outputDirectory, options, progress, trackCompleted, coverArt, discId, cancellationToken);
         }
 
         var spec = new CdHelperSpec
@@ -97,6 +98,7 @@ public static class CdRipService
             Operation = "rip",
             DrivePath = drivePath,
             OutputDirectory = outputDirectory,
+            DiscId = discId,
             Format = (int)options.Format,
             FlacCompression = options.FlacCompression,
             Mp3Mode = (int)options.Mp3Mode,
@@ -197,6 +199,7 @@ public static class CdRipService
         IProgress<RipTrackProgress>? progress = null,
         IProgress<RipOutcome>? trackCompleted = null,
         byte[]? coverArt = null,
+        string? discId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(drivePath);
@@ -260,6 +263,7 @@ public static class CdRipService
                 TotalTracks = requested.TotalTracks is { } rtt && rtt > 0 ? (int)rtt : audioTrackCount,
                 DiscNumber = requested.Disc is { } rd && rd > 0 ? (int)rd : 1,
                 TotalDiscs = requested.TotalDiscs is { } rtd && rtd > 0 ? (int)rtd : 1,
+                DiscId = discId,
                 Year = requested.Year,
                 EncodedBy = $"OrgZ {App.Version}",
                 CoverArt = coverArt,

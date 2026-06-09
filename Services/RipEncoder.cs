@@ -22,6 +22,12 @@ public sealed record RipTrackMetadata
     /// <summary>Total discs in the set (1 for a standalone CD) - FLAC DISCTOTAL / MP3 TPOS "d/total".</summary>
     public int? TotalDiscs { get; init; }
 
+    /// <summary>
+    /// MusicBrainz DiscID of the source CD, written as MUSICBRAINZ_DISCID so a
+    /// re-inserted disc can be recognized as already ripped (the file is the record).
+    /// </summary>
+    public string? DiscId { get; init; }
+
     public uint? Year { get; init; }
 
     /// <summary>
@@ -209,6 +215,8 @@ public static class RipEncoder
             AppendFlacTag(args, "DISCTOTAL", dtot.ToString());
         }
 
+        AppendFlacTag(args, "MUSICBRAINZ_DISCID", metadata.DiscId);
+
         if (metadata.Year is uint y && y > 0)
         {
             AppendFlacTag(args, "DATE", y.ToString());
@@ -287,6 +295,14 @@ public static class RipEncoder
             // ID3v2 TPOS = disc position, "disc/total" when the total is known.
             args.Add("--tv");
             args.Add(metadata.TotalDiscs is int dtot && dtot > 0 ? $"TPOS={dn}/{dtot}" : $"TPOS={dn}");
+        }
+
+        if (!string.IsNullOrEmpty(metadata.DiscId))
+        {
+            // ID3v2 TXXX with the Picard-standard description, so TagLib reads it back
+            // as Tag.MusicBrainzDiscId (matching the FLAC MUSICBRAINZ_DISCID comment).
+            args.Add("--tv");
+            args.Add($"MusicBrainz Disc Id={metadata.DiscId}");
         }
 
         if (metadata.Year is uint y && y > 0)
