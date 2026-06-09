@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>0.7.8</Version>
+		<Version>0.7.9</Version>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -142,5 +142,25 @@
 		<Exec Command="chmod +x &quot;$(OutDir)tools&quot;/*"
 		      Condition="'@(LinuxEncoderBinary)' != ''"
 		      IgnoreExitCode="true" />
+	</Target>
+
+	<!-- Windows counterpart: bundle flac.exe / lame.exe so ripping works without a
+	     separate install. RipEncoder.ResolveExecutable falls back to
+	     {BaseDirectory}/tools/{name}.exe, which the *elevated* rip helper resolves
+	     too (it's the same OrgZ.exe), so this is the only place the UAC'd encoder
+	     can reliably find the binaries. Populate tools\win-x64\ via
+	     scripts/fetch-encoders.ps1. Empty dir = silent no-op (dev falls back to PATH). -->
+	<ItemGroup>
+		<WindowsEncoderBinary Include="tools\win-x64\*"
+		                      Exclude="tools\win-x64\*.md;tools\win-x64\.gitkeep;tools\win-x64\.gitignore" />
+	</ItemGroup>
+	<Target Name="BundleWindowsEncoders"
+	        AfterTargets="Build"
+	        Condition="$([MSBuild]::IsOSPlatform('Windows')) Or $(RuntimeIdentifier.StartsWith('win'))"
+	        Inputs="@(WindowsEncoderBinary)"
+	        Outputs="@(WindowsEncoderBinary->'$(OutDir)tools\%(Filename)%(Extension)')">
+		<Copy SourceFiles="@(WindowsEncoderBinary)"
+		      DestinationFolder="$(OutDir)tools"
+		      SkipUnchangedFiles="true" />
 	</Target>
 </Project>

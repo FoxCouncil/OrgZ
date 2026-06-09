@@ -1,0 +1,5 @@
+# Prebuilt flac.exe / lame.exe are bundled at build/pack time but not
+# redistributed via this repo - see README.md. Allow only the README and this file.
+*
+!.gitignore
+!README.md
