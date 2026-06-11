@@ -71,37 +71,24 @@ public class ListViewConfigsGapTests
         Assert.False(cfg.SearchFilter(track, "Floyd"));
     }
 
-    // ===== BuildDeviceConfig — stock iPod vs Rockbox column shapes =====
+    // ===== BuildDeviceConfig — device track grid mirrors the Music view columns =====
 
     [Fact]
-    public void BuildDeviceConfig_StockIPod_columns_include_play_count_and_rating()
+    public void BuildDeviceConfig_columns_match_the_music_view()
     {
-        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\", DeviceType.StockIPod);
+        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\");
         var headers = cfg.Columns.Select(c => c.Header).ToList();
 
-        Assert.Contains("Plays", headers);
-        Assert.Contains("Rating", headers);
-        Assert.Contains("Genre", headers);
-    }
-
-    [Fact]
-    public void BuildDeviceConfig_RockboxOther_uses_simpler_column_set()
-    {
-        var cfg = ListViewConfigs.BuildDeviceConfig(@"E:\", DeviceType.RockboxOther);
-        var headers = cfg.Columns.Select(c => c.Header).ToList();
-
-        // Rockbox doesn't expose play counts / ratings, so its column set is leaner
-        Assert.DoesNotContain("Plays", headers);
-        Assert.DoesNotContain("Rating", headers);
-        Assert.Contains("Title", headers);
-        Assert.Contains("Artist", headers);
-        Assert.Contains("Extension", headers);
+        // The iPod/device track grid uses the same columns as the local Music view.
+        Assert.Equal(
+            new[] { "", "Title", "Artist", "Track #", "Album", "Duration", "Year", "Plays", "Extension", "Has Album Art", "Rating" },
+            headers);
     }
 
     [Fact]
     public void BuildDeviceConfig_BaseFilter_filters_by_device_source_string()
     {
-        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\", DeviceType.StockIPod);
+        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\");
 
         var ours = Music("track-1", source: @"device:L:\");
         var theirs = Music("track-2", source: @"device:E:\");
@@ -113,7 +100,7 @@ public class ListViewConfigsGapTests
     [Fact]
     public void BuildDeviceConfig_SearchFilter_matches_title_artist_album_filename()
     {
-        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\", DeviceType.StockIPod);
+        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\");
         var track = Music("t1", title: "Tom Sawyer", artist: "Rush", album: "Moving Pictures", fileName: "01-tom-sawyer.mp3");
 
         Assert.True(cfg.SearchFilter(track, "Sawyer"));
@@ -126,7 +113,7 @@ public class ListViewConfigsGapTests
     [Fact]
     public void BuildDeviceConfig_Key_includes_mount_path()
     {
-        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\", DeviceType.StockIPod);
+        var cfg = ListViewConfigs.BuildDeviceConfig(@"L:\");
         Assert.Equal(@"Device:L:\", cfg.Key);
     }
 

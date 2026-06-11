@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:i="https://github.com/projektanker/icons.avalonia"
              xmlns:models="using:OrgZ.Models"
+             xmlns:vm="using:OrgZ.ViewModels"
              xmlns:converters="clr-namespace:OrgZ.Converters"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="120"
              x:Class="OrgZ.Controls.DeviceInfoBar"
@@ -36,8 +37,8 @@
 
         <DockPanel>
 
-            <!-- TOP: icon + iTunes-style identity grid -->
-            <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,10">
+            <!-- TOP: icon + iTunes-style identity grid + eject -->
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
 
                 <!-- Large device image: per-generation product photo when available,
                      otherwise the generic FontAwesome icon. -->
@@ -118,6 +119,21 @@
                     <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
                     <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
                 </Grid>
+
+                <!-- Eject the device shown in this view. Disabled while any long iPod/disc
+                     operation (import, scan, burn) is running. Command + busy state live on
+                     the VM, reached through the hosting window. -->
+                <Button Grid.Column="2"
+                        VerticalAlignment="Top" HorizontalAlignment="Right"
+                        Padding="10,6" Cursor="Hand"
+                        ToolTip.Tip="Eject this iPod"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).EjectSelectedDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsRipping, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-eject" FontSize="13" />
+                        <TextBlock Text="Eject" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </Grid>
 
             <!-- BOTTOM: full-width capacity bar with inline legend -->

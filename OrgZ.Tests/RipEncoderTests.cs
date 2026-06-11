@@ -156,6 +156,9 @@ public class RipEncoderTests
             await using (encoder)
             {
                 await encoder.WriteAsync(payload, default);
+                // The encoder writes to a ".partial-rip" file and only renames it to the
+                // final path on CompleteAsync — disposing without it discards the partial.
+                await encoder.CompleteAsync(default);
             }
 
             var disk = await File.ReadAllBytesAsync(tmp);
