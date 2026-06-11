@@ -78,35 +78,14 @@ public static class ListViewConfigs
         _configs.Remove(key);
     }
 
-    public static ListViewConfig BuildDeviceConfig(string mountPath, DeviceType deviceType)
+    public static ListViewConfig BuildDeviceConfig(string mountPath)
     {
         var source = $"device:{mountPath}";
         var key = $"Device:{mountPath}";
 
-        var columns = deviceType == DeviceType.StockIPod
-            ? new List<ColumnDef>
-            {
-                new() { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new() { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40, Type = ColumnType.Centered },
-                new() { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
-                new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new() { Header = "Genre", BindingPath = "Genre", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100 },
-                new() { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
-                new() { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
-                new() { Header = "Plays", BindingPath = "PlayCount", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.RightAligned },
-            }
-            : new List<ColumnDef>
-            {
-                new() { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new() { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
-                new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new() { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
-                new() { Header = "Extension", BindingPath = "Extension", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
-            };
+        // The device (iPod/Rockbox) track grid uses the same columns as the local Music
+        // view so the two read identically.
+        var columns = MusicColumns();
 
         return new ListViewConfig
         {
@@ -235,30 +214,33 @@ public static class ListViewConfigs
         };
     }
 
+    /// <summary>
+    /// The standard music-track columns, shared by the local-library "Music" view and the
+    /// device (iPod) track view so they read identically. Returns fresh ColumnDef instances
+    /// each call - per-view column visibility/width prefs mutate these and must not be shared.
+    /// </summary>
+    private static List<ColumnDef> MusicColumns() =>
+    [
+        new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+        new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+        new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+        new ColumnDef { Header = "Track #", BindingPath = "TrackDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 65, Type = ColumnType.RightAligned, FontSize = 11, LetterSpacing = -0.5 },
+        new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+        new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
+        new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
+        // Default-hidden columns - toggle via the column-header right-click menu.
+        new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
+        new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
+        new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
+        new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
+    ];
+
     private static ListViewConfig BuildMusicConfig()
     {
         return new ListViewConfig
         {
             Key = "Music",
-            Columns =
-            [
-                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                // Title / Artist / Track lead the media-style layout; Album,
-                // Year follow. Rating sits at the far right so it doesn't break
-                // up the metadata flow. Users can reorder via header drag and
-                // their preference persists.
-                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Track #", BindingPath = "TrackDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 65, Type = ColumnType.RightAligned, FontSize = 11, LetterSpacing = -0.5 },
-                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80, StringFormat = "m\\:ss" },
-                new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                // Default-hidden columns - toggle via the column-header right-click menu
-                new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
-                new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
-                new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
-            ],
+            Columns = MusicColumns(),
             // Local library view - must NOT include CD-audio tracks (Source="cdda")
             // or connected-device tracks (Source="device:{mountPath}").  Those have
             // their own sidebar entries and their own views.  Without this, typing

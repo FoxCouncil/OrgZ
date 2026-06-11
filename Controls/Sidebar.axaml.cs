@@ -23,6 +23,41 @@ public partial class Sidebar : UserControl
         PlaylistListBox.AddHandler(DragDrop.DropEvent, PlaylistListBox_Drop);
         PlaylistListBox.ContextRequested += PlaylistListBox_ContextRequested;
         DeviceTreeView.ContextRequested += DeviceTreeView_ContextRequested;
+
+        DragDrop.SetAllowDrop(DeviceTreeView, true);
+        DeviceTreeView.AddHandler(DragDrop.DragOverEvent, DeviceTreeView_DragOver);
+        DeviceTreeView.AddHandler(DragDrop.DropEvent, DeviceTreeView_Drop);
+    }
+
+    // -- Drag a library track onto a device node (iPod import; Music only, for now) --
+
+    private void DeviceTreeView_DragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = DragDropEffects.None;
+        if (e.DataTransfer.Contains(MediaItemDragFormat)
+            && (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>()?.DataContext is SidebarItem sb
+            && DataContext is MainWindowViewModel vm
+            && vm.CanAcceptMediaDrop(sb, MainWindow.DraggedMediaItem))
+        {
+            e.DragEffects = DragDropEffects.Copy;
+        }
+        e.Handled = true;
+    }
+
+    private async void DeviceTreeView_Drop(object? sender, DragEventArgs e)
+    {
+        if (!e.DataTransfer.Contains(MediaItemDragFormat))
+        {
+            return;
+        }
+        var media = MainWindow.DraggedMediaItem;
+        if ((e.Source as Visual)?.FindAncestorOfType<TreeViewItem>()?.DataContext is SidebarItem sb
+            && DataContext is MainWindowViewModel vm
+            && media is not null)
+        {
+            e.Handled = true;
+            await vm.ImportMediaToDeviceAsync(sb, media);
+        }
     }
 
     private void DeviceTreeView_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
