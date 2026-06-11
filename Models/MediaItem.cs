@@ -138,6 +138,12 @@ public partial class MediaItem : ObservableObject
     [ObservableProperty]
     private string? _discId;
 
+    /// <summary>
+    /// For device (iPod) tracks: the iTunesDB 64-bit persistent id (dbid) used to look
+    /// up the track's artwork in the iPod's ArtworkDB. 0/null for library tracks.
+    /// </summary>
+    public ulong? Dbid { get; init; }
+
     [ObservableProperty]
     private bool? _hasAlbumArt;
 

@@ -6,7 +6,7 @@ using Serilog;
 namespace OrgZ.Services;
 
 /// <summary>Result of importing one track onto a device.</summary>
-public sealed record IPodImportResult(uint TrackId, string IpodPath, string DestFile, string? Title);
+public sealed record IPodImportResult(uint TrackId, string IpodPath, string DestFile, string? Title, ulong Dbid);
 
 /// <summary>
 /// Copies a library track onto a stock iPod and registers it in the iTunesDB.
@@ -196,7 +196,7 @@ public static class IPodTrackImporter
             File.Move(tmp, dbPath, overwrite: true);
 
             _log.Information("Imported '{Title}' as track {Id} -> {IpodPath} ({Bytes} byte DB)", title, trackId, ipodPath, outBytes.Length);
-            return new IPodImportResult(trackId, ipodPath, destFile, title);
+            return new IPodImportResult(trackId, ipodPath, destFile, title, dbid);
         }
         finally
         {
