@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:models="using:OrgZ.Models"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="120"
+             x:Class="OrgZ.Controls.CdInfoBar"
+             x:DataType="models:CdInfo">
+
+    <Border Background="{StaticResource OrgZSurfaceDarkBrush}"
+            BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="16,10">
+
+        <Border.Styles>
+            <Style Selector="TextBlock.label">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="Opacity" Value="0.55" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="0,0,6,0" />
+            </Style>
+            <Style Selector="TextBlock.value">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+        </Border.Styles>
+
+        <Grid ColumnDefinitions="Auto,*">
+
+            <!-- Cover art: the CD's front cover when MusicBrainz/embedded art is available,
+                 otherwise a generic disc glyph. -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SystemChromeGrayColor}"
+                    CornerRadius="6"
+                    Width="84" Height="84"
+                    VerticalAlignment="Center"
+                    ClipToBounds="True">
+                <Panel>
+                    <Image Source="{Binding CoverArt}"
+                           Stretch="Uniform"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding HasCoverArt}" />
+                    <i:Icon Value="fa-solid fa-compact-disc" FontSize="40"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsVisible="{Binding !HasCoverArt}" />
+                </Panel>
+            </Border>
+
+            <!-- Identity grid: album/artist headline + the details we can surface. -->
+            <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="6" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="{Binding AlbumDisplay}"
+                           FontSize="16" FontWeight="Bold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Row="1" Text="{Binding ArtistDisplay}"
+                           FontSize="12" Opacity="0.8"
+                           TextTrimming="CharacterEllipsis" />
+
+                <!-- Detail row: a horizontal run of label/value pairs. -->
+                <Grid Grid.Row="3">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="50" />
+                        <ColumnDefinition Width="180" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="60" />
+                        <ColumnDefinition Width="100" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="80" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Year:" Classes="label" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding YearDisplay}" Classes="value" />
+
+                    <TextBlock Grid.Row="0" Grid.Column="3" Text="Genre:" Classes="label" />
+                    <TextBlock Grid.Row="0" Grid.Column="4" Text="{Binding GenreDisplay}" Classes="value" />
+
+                    <TextBlock Grid.Row="0" Grid.Column="6" Text="Tracks:" Classes="label" />
+                    <TextBlock Grid.Row="0" Grid.Column="7" Text="{Binding TrackCountDisplay}" Classes="value" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Time:" Classes="label" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TotalTimeDisplay}" Classes="value" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="3" Text="DiscID:" Classes="label" />
+                    <TextBlock Grid.Row="1" Grid.Column="4" Grid.ColumnSpan="4"
+                               Text="{Binding DiscIdDisplay}" Classes="value"
+                               FontFamily="Cascadia Mono,Consolas,monospace"
+                               ToolTip.Tip="{Binding ReleaseMbidDisplay}" />
+                </Grid>
+            </Grid>
+        </Grid>
+    </Border>
+
+</UserControl>
