@@ -305,7 +305,18 @@
 								</ContentControl.ContentTemplate>
 							</ContentControl>
 
-							<!-- Radio country/genre filter header. Declared last among the
+							<!-- CD info bar: album art + disc details, shown in the CD view. -->
+								<ContentControl DockPanel.Dock="Top"
+									Content="{Binding CurrentCdInfo}"
+									IsVisible="{Binding ShowCdInfoBar}">
+									<ContentControl.ContentTemplate>
+										<DataTemplate>
+											<controls:CdInfoBar />
+										</DataTemplate>
+									</ContentControl.ContentTemplate>
+								</ContentControl>
+
+								<!-- Radio country/genre filter header. Declared last among the
 							     Top-docked rows so it sits closest to the DataGrid -
 							     under the device info if it's active. -->
 							<controls:RadioFilterPanel x:Name="RadioFilterPanel"

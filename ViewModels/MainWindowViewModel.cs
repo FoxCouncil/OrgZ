@@ -81,6 +81,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private Bitmap? _cdCoverArt;
     private byte[]? _cdCoverArtBytes;
 
+    /// <summary>Metadata of the inserted audio CD, shown in the CD view's info bar.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowCdInfoBar))]
+    private CdInfo? _currentCdInfo;
+
+    /// <summary>The CD info bar shows only while the CD view is active and a disc is loaded.</summary>
+    public bool ShowCdInfoBar => SelectedSidebarItem?.ViewConfigKey == "CdAudio" && CurrentCdInfo is not null;
+
     private DeviceDetectionService? _deviceDetection;
     private readonly Dictionary<string, ConnectedDevice> _connectedDevices = new(StringComparer.OrdinalIgnoreCase);
 
@@ -104,6 +112,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// PlaybackContext system, so this is the source of truth.
     /// </summary>
     private (Models.PodcastFeed Feed, Models.PodcastEpisode Episode)? _currentPodcastStream;
+
+    // One-shot guard: when we Stop() the player to switch tracks (so the old audio cuts
+    // immediately), the resulting Stopped event must NOT tear down the loading state - the
+    // barber pole should run continuously until the new track's audio starts. Set right
+    // before such a Stop(); the Stopped handler consumes it and bails.
+    private bool _suppressStoppedLoadingClear;
+
+    // Monotonic playback "epoch". Bumped at the start of every playback (and on stop) so
+    // in-flight async work for a superseded playback - chiefly a streamed podcast's redirect
+    // resolve - can detect it's stale and bail instead of yanking the user off whatever they
+    // started in the meantime. Read/written on the UI thread only.
+    private int _playbackEpoch;
+
+    private int NewPlaybackEpoch() => ++_playbackEpoch;
 
     /// <summary>
     /// Duration captured during MediaChanged (or seeded by API for podcasts)
@@ -363,8 +385,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     // Rip-in-progress LCD state. iTunes-style: while a rip is running the
     // now-playing LCD swaps to show "Importing 'Track'", a progress bar, and
-    // a "Time remaining: 0:15 (8.5×)" readout. Cleared on rip completion or
-    // failure. The activity panel still tracks the same data for history.
+    // a "Time remaining: 0:15 (8.5×)" readout. Cleared on completion. Long device
+    // operations (import, scan, burn) reuse this same page via BeginLcdBusy/EndLcdBusy.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowLcdCycleButton))]
     private bool _isRipping;
@@ -435,45 +457,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             CurrentLcdPage = LcdPage.Playback;
         }
-    }
-
-    internal ObservableCollection<ActivityItem> Activities { get; } = [];
-
-    public int ActivityBadgeCount => Activities.Count(a => a.Status is ActivityStatus.Pending or ActivityStatus.Running);
-
-    public bool HasActiveActivities => ActivityBadgeCount > 0;
-
-    internal ActivityItem AddActivity(string title)
-    {
-        var item = new ActivityItem { Title = title, Status = ActivityStatus.Running };
-        UI(() =>
-        {
-            Activities.Add(item);
-            OnPropertyChanged(nameof(ActivityBadgeCount));
-            OnPropertyChanged(nameof(HasActiveActivities));
-        });
-        return item;
-    }
-
-    internal void UpdateActivityBadge()
-    {
-        UI(() =>
-        {
-            OnPropertyChanged(nameof(ActivityBadgeCount));
-            OnPropertyChanged(nameof(HasActiveActivities));
-        });
-    }
-
-    [RelayCommand]
-    private void ClearCompletedActivities()
-    {
-        var toRemove = Activities.Where(a => a.Status is ActivityStatus.Completed or ActivityStatus.Failed).ToList();
-        foreach (var item in toRemove)
-        {
-            Activities.Remove(item);
-        }
-        OnPropertyChanged(nameof(ActivityBadgeCount));
-        OnPropertyChanged(nameof(HasActiveActivities));
     }
 
     // -- Unified Data --
@@ -596,7 +579,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // The Podcasts panel replaces the data grid with its own surface, so the
         // header search box can't filter a grid there. Route it to a debounced
         // PodcastIndex search that renders into the panel's shared feed-list view.
-        if (SelectedSidebarItem?.ViewConfigKey == "Podcasts" && Podcasts is not null)
+        //
+        // Skip while restoring a per-view saved search on a view switch
+        // (_suppressSearchPersist): re-running the podcast search would navigate the panel
+        // back to the results and push a duplicate nav-stack entry. On a real switch back
+        // the panel keeps whatever view the user left it on.
+        if (!_suppressSearchPersist && SelectedSidebarItem?.ViewConfigKey == "Podcasts" && Podcasts is not null)
         {
             Podcasts.ApplyHeaderSearch(value);
         }
@@ -881,6 +869,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             SelectedDevice = null;
         }
 
+        OnPropertyChanged(nameof(ShowCdInfoBar));
+
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
 
         if (!string.IsNullOrEmpty(value?.ViewConfigKey))
@@ -1037,7 +1027,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // -- Headless seeding seam --
     // Generic hooks the docs-screenshot runner uses to drive views. No
     // screenshot-specific data or orchestration lives in the app: UpdateData,
-    // AddActivity, DeviceItems/LibraryItems/PlaylistItems, and the playback/LCD
+    // DeviceItems/LibraryItems/PlaylistItems, and the playback/LCD
     // properties are already internal/public, so the runner composes scenes from
     // those plus the four primitives below.
 
@@ -1218,6 +1208,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player.Stopped += (s, e) => UI(() =>
         {
+            // A Stop() we issued to switch tracks - keep the loading/barber-pole state and
+            // the now-playing UI we just set for the incoming track.
+            if (_suppressStoppedLoadingClear)
+            {
+                _suppressStoppedLoadingClear = false;
+                return;
+            }
+
             IsPlaybackLoading = false;
             ButtonPlayPauseIcon = ICON_PLAY;
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
@@ -1865,6 +1863,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _currentMedia.AddOption(":disc-caching=3000");
         }
 
+        NewPlaybackEpoch();
         BeginPlayback();
         // CD track duration comes from the TOC, not libvlc - restore it
         // AFTER BeginPlayback clears the LCD time labels so the total time
@@ -2072,7 +2071,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
         // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
-        var artBytes = ExtractAlbumArtBytes(file.FilePath!);
+        // Device (iPod) tracks keep art in the iPod's ArtworkDB keyed by dbid - read it
+        // natively there first, then fall back to any embedded picture in the file.
+        byte[]? artBytes = null;
+        if (file.Source?.StartsWith("device:") == true && file.Dbid is { } dbid && dbid != 0)
+        {
+            artBytes = IPodArtworkReader.LoadThumbnail(file.Source["device:".Length..], dbid);
+        }
+        artBytes ??= ExtractAlbumArtBytes(file.FilePath!);
         CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
 
 #if WINDOWS
@@ -2087,7 +2093,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
         ApplyVisualizerOption(_currentMedia);
 
-        BeginPlayback();
+        // Local file - opens instantly, so skip the barber pole.
+        NewPlaybackEpoch();
+        BeginPlayback(showLoading: false);
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 
@@ -2225,6 +2233,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // is more crash-prone than the single transition Play(newMedia) performs
             // internally. The 120 ms debounce in PlayRadioStation + the lock here +
             // the deferred dispose under the same lock is the safe combination.
+            NewPlaybackEpoch();
             BeginPlayback();
             _ = _player.Play(thisMedia);
             DeferDispose(previousMedia, previousHandler);
@@ -2268,13 +2277,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// Music / Radio / Podcast / CD all call this before handing libvlc new
     /// Media, so the visual experience is identical across kinds.
     /// </summary>
-    private void BeginPlayback()
+    private void BeginPlayback(bool showLoading = true)
     {
-        CurrentTrackTime = "";
-        CurrentTrackDuration = "";
+        // Seed the time tiles at 0:00 rather than blanking them - the known total (music,
+        // CD) or measured one (radio/podcast via MediaChanged) overwrites the total a beat
+        // later, but the tiles never flash empty in between.
+        CurrentTrackTime = FormatHelper.FormatDurationCompact(0);
+        CurrentTrackDuration = FormatHelper.FormatDurationCompact(0);
         CurrentTrackTimeNumber = 0;
         CurrentTrackDurationNumber = 0;
-        IsPlaybackLoading = true;
+        // The barber pole is only worth showing for high-latency sources - remote streams
+        // (radio, streamed podcasts) and CD spin-up. Local files (library music, iPod tracks
+        // over USB, downloaded podcasts) open effectively instantly, so the pole would just
+        // flicker; those callers pass showLoading: false.
+        IsPlaybackLoading = showLoading;
         _audioTap?.ResetAudioStartTracking();
     }
 
@@ -2307,6 +2323,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var final = resp.RequestMessage?.RequestUri?.ToString();
             if (!string.IsNullOrWhiteSpace(final) && !string.Equals(final, url, StringComparison.Ordinal))
             {
+                // If the chain ends in a per-request *signed* CDN URL (CloudFront/Akamai/
+                // Triton token), DON'T hand VLC the one we just fetched - those are often
+                // single-use or request-bound, so our resolve GET "spends" it and VLC's
+                // open of the same URL is rejected (this is exactly how BBC's
+                // open.live.bbc.co.uk -> tritondigital chain behaves). Instead give VLC the
+                // original short-redirect URL and let it mint its own fresh signed URL - it
+                // follows redirects fine for short chains and uses the same browser UA we
+                // set on the media. Long tracking-prefix chains end in plain, reusable CDN
+                // URLs that VLC can't walk itself, so those we still hand over resolved.
+                if (LooksSigned(final))
+                {
+                    _log.Information("Podcast resolves to a signed CDN URL; letting VLC follow {Original} itself", url);
+                    return url;
+                }
                 _log.Information("Resolved podcast redirects: {Original} -> {Final}", url, final);
                 return final;
             }
@@ -2320,6 +2350,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return url;
         }
     }
+
+    /// <summary>
+    /// True when a URL carries a per-request signature/token (CloudFront, Akamai, Triton) -
+    /// re-opening the same URL after we've already fetched it is likely to be rejected.
+    /// </summary>
+    private static bool LooksSigned(string url) =>
+        url.Contains("Signature=", StringComparison.OrdinalIgnoreCase)
+        || url.Contains("Key-Pair-Id=", StringComparison.OrdinalIgnoreCase)
+        || url.Contains("X-Amz-Signature", StringComparison.OrdinalIgnoreCase)
+        || url.Contains("hdnea=", StringComparison.OrdinalIgnoreCase)
+        || url.Contains("hdnts=", StringComparison.OrdinalIgnoreCase)
+        || url.Contains("__token__", StringComparison.OrdinalIgnoreCase);
 
     internal void PlayPodcastEpisode(Models.PodcastFeed feed, Models.PodcastEpisode episode, string? localPath = null)
     {
@@ -2337,30 +2379,48 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         bool isLocal = localPath != null && File.Exists(localPath);
 
+        // Bump the playback epoch up front and capture it: if the user starts something else
+        // while a streamed episode is still resolving, the resolve sees a newer epoch and
+        // bails instead of hijacking whatever's now playing.
+        int epoch = NewPlaybackEpoch();
+
+        // Switch the UI to this episode immediately so a double-click registers - even a
+        // streamed episode whose redirect chain is still resolving shows its title, feed,
+        // art and a loading state right away.
+        ShowPodcastSwitching(feed, episode, rawSource, isLocal);
+
         if (isLocal)
         {
-            StartPodcastPlayback(feed, episode, rawSource, isLocal: true);
+            StartPodcastPlayback(feed, episode, rawSource, isLocal: true, epoch);
             return;
         }
 
-        // Streamed: resolve the redirect chain off the UI thread, then play the
-        // final URL. UI shows the streaming state once resolved (sub-second).
-        _ = ResolveAndStreamPodcastAsync(feed, episode, rawSource);
+        // Streamed: resolve the redirect chain off the UI thread, then start VLC.
+        _ = ResolveAndStreamPodcastAsync(feed, episode, rawSource, epoch);
     }
 
-    private async Task ResolveAndStreamPodcastAsync(Models.PodcastFeed feed, Models.PodcastEpisode episode, string url)
+    /// <summary>
+    /// Immediate visual switch to a podcast episode - title, feed, art, now-playing
+    /// metadata and a loading state - so a double-click registers before a streamed
+    /// episode's redirect chain has resolved. <see cref="StartPodcastPlayback"/> then
+    /// hands the (resolved) source to libvlc.
+    /// </summary>
+    private void ShowPodcastSwitching(Models.PodcastFeed feed, Models.PodcastEpisode episode, string source, bool isLocal)
     {
-        var resolved = await ResolvePodcastUrlAsync(url);
-        StartPodcastPlayback(feed, episode, resolved, isLocal: false);
-    }
-
-    private void StartPodcastPlayback(Models.PodcastFeed feed, Models.PodcastEpisode episode, string source, bool isLocal)
-    {
-        _log.Information("Playing podcast episode {Id} '{Title}' [{Mode}] from {Source}",
-            episode.Id, episode.Title, isLocal ? "local" : "stream", source);
-
         UI(() =>
         {
+            // Switch like any other media: stop whatever's playing right now and reset the
+            // transport (BeginPlayback seeds the 0:00 time tiles + loading state) so the old
+            // audio doesn't keep going while a streamed episode's redirect chain resolves.
+            // Suppress that Stop()'s Stopped event so the barber pole runs continuously from
+            // here until the new episode's audio starts, instead of blinking off.
+            if (_player is { } p && p.State is VLCState.Opening or VLCState.Buffering or VLCState.Playing or VLCState.Paused)
+            {
+                _suppressStoppedLoadingClear = true;
+                p.Stop();
+            }
+            BeginPlayback(showLoading: !isLocal);
+
             _currentPodcastStream = (feed, episode);
             _playbackContext?.Release();
             _playbackContext = null;
@@ -2368,21 +2428,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             CurrentAlbumArt = null;
             CurrentTrackLine1 = episode.Title ?? string.Empty;
             CurrentTrackLine2 = feed.Title ?? string.Empty;
-            UpdateMainStatus(isLocal ? $"Playing: {episode.Title}" : $"Streaming: {episode.Title}");
+            UpdateMainStatus(isLocal ? $"Playing: {episode.Title}" : $"Loading: {episode.Title}");
 
-            var artUrl = !string.IsNullOrWhiteSpace(episode.Image) ? episode.Image : feed.DisplayImage;
-            if (!string.IsNullOrWhiteSpace(artUrl))
-            {
-                _ = LoadPodcastArtAsync(artUrl, episode, feed);
-            }
-
-            // LCD time labels stay blank until the first PCM buffer reaches
-            // the audio tap -- BeginPlayback cleared them and the MediaChanged
-            // podcast branch will seed the API duration once playback is
-            // actually under way (with libvlc's measured value taking priority
-            // when it has one).
-
-            var item = new MediaItem
+            SelectedItem = new MediaItem
             {
                 Id        = $"podcast:{episode.Id}",
                 Kind      = MediaKind.Podcast,
@@ -2392,13 +2440,54 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 StreamUrl = isLocal ? null : episode.EnclosureUrl,
                 FilePath  = isLocal ? source : null,
             };
-            SelectedItem = item;
 
 #if WINDOWS
             _smtcService?.UpdateMetadata(episode.Title, feed.Title, "Podcast", null);
 #endif
             _mprisService?.SetMetadata(episode.Title, feed.Title, "Podcast", episode.Image ?? feed.DisplayImage);
             _macNowPlaying?.SetMetadata(episode.Title, feed.Title, "Podcast", null);
+
+            var artUrl = !string.IsNullOrWhiteSpace(episode.Image) ? episode.Image : feed.DisplayImage;
+            if (!string.IsNullOrWhiteSpace(artUrl))
+            {
+                _ = LoadPodcastArtAsync(artUrl, episode, feed);
+            }
+        });
+    }
+
+    private async Task ResolveAndStreamPodcastAsync(Models.PodcastFeed feed, Models.PodcastEpisode episode, string url, int epoch)
+    {
+        var resolved = await ResolvePodcastUrlAsync(url);
+        StartPodcastPlayback(feed, episode, resolved, isLocal: false, epoch);
+    }
+
+    private void StartPodcastPlayback(Models.PodcastFeed feed, Models.PodcastEpisode episode, string source, bool isLocal, int epoch)
+    {
+        _log.Information("Playing podcast episode {Id} '{Title}' [{Mode}] from {Source}",
+            episode.Id, episode.Title, isLocal ? "local" : "stream", source);
+
+        UI(() =>
+        {
+            // A newer playback started while this (streamed) episode was resolving - don't
+            // hijack whatever the user moved on to. Checked here, in the same UI dispatch as
+            // the libvlc Play, so there's no gap with the epoch bump on the new playback.
+            if (epoch != _playbackEpoch)
+            {
+                _log.Debug("Podcast playback superseded (epoch {Epoch} != current {Current}); not starting {Id}",
+                    epoch, _playbackEpoch, episode.Id);
+                return;
+            }
+
+            // The UI already switched to this episode in ShowPodcastSwitching. For a stream
+            // we now have the resolved source, so move the status off "Loading...".
+            if (!isLocal)
+            {
+                UpdateMainStatus($"Streaming: {episode.Title}");
+            }
+
+            // LCD time labels stay blank until the first PCM buffer reaches the audio tap --
+            // BeginPlayback clears them and the MediaChanged podcast branch seeds the API
+            // duration once playback is under way (libvlc's measured value taking priority).
 
             try
             {
@@ -2427,7 +2516,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     }
 
                     IsSeekEnabled = true;
-                    BeginPlayback();
+                    // Streamed episodes hit the network; downloaded ones are local files.
+                    BeginPlayback(showLoading: !isLocal);
                     _ = _player.Play(_currentMedia);
                     DeferDispose(previousMedia, previousHandler);
                 }
@@ -2496,6 +2586,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void ClearPlayback()
     {
+        // Stopping supersedes any pending async playback (e.g. a podcast resolve in flight).
+        NewPlaybackEpoch();
         _playbackContext?.Release();
         _playbackContext = null;
         OnPropertyChanged(nameof(PlaybackContextUpcoming));
@@ -2857,18 +2949,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (doCopy)
             {
-                var activity = AddActivity($"Copying {unmatched.Count} track(s) to library");
                 int copied = 0;
 
                 foreach (var sourcePath in unmatched)
                 {
                     copied++;
-                    UI(() =>
-                    {
-                        activity.Detail = $"Copying {copied} of {unmatched.Count}: {Path.GetFileName(sourcePath)}";
-                        activity.Progress = (double)copied / unmatched.Count;
-                    });
-
                     var destPath = Path.Combine(App.FolderPath, Path.GetFileName(sourcePath));
 
                     try
@@ -2889,17 +2974,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     }
                     catch (Exception ex)
                     {
-                        UI(() => activity.Detail = $"Failed: {Path.GetFileName(sourcePath)} — {ex.Message}");
+                        _log.Warning(ex, "Failed to copy {Source} into the library", sourcePath);
                     }
                 }
 
-                UI(() =>
-                {
-                    activity.Status = ActivityStatus.Completed;
-                    activity.Detail = $"{copied} track(s) copied";
-                    activity.Progress = 1.0;
-                    UpdateActivityBadge();
-                });
+                _log.Information("Copied {Count} track(s) into the library", copied);
             }
         }
 
@@ -2948,10 +3027,182 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         => _connectedDevices.Values.ToList();
 
     /// <summary>
+    /// Resolves the connected device a "Device:{mount}" sidebar node points at.
+    /// </summary>
+    private ConnectedDevice? DeviceForSidebarItem(SidebarItem? item)
+    {
+        if (item?.ViewConfigKey is not { } key || !key.StartsWith("Device:"))
+        {
+            return null;
+        }
+        return _connectedDevices.TryGetValue(key["Device:".Length..], out var dev) ? dev : null;
+    }
+
+    /// <summary>
+    /// Whether dragging <paramref name="item"/> onto the given device node is allowed.
+    /// For now: a Music item dropped on a writable stock iPod (a generation whose
+    /// iTunesDB we can checksum). Other media kinds / device types are rejected so the
+    /// drop cursor shows "no".
+    /// </summary>
+    internal bool CanAcceptMediaDrop(SidebarItem? deviceItem, MediaItem? item)
+    {
+        if (item is null || item.Kind != MediaKind.Music)
+        {
+            return false;
+        }
+        var dev = DeviceForSidebarItem(deviceItem);
+        return dev is { DeviceType: DeviceType.StockIPod }
+            && IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration);
+    }
+
+    /// <summary>
+    /// Imports a dragged library track onto the dropped-on iPod (transcode + iTunesDB +
+    /// artwork + checksum). Progress shows on the LCD; errors go to the log.
+    /// </summary>
+    internal async Task ImportMediaToDeviceAsync(SidebarItem? deviceItem, MediaItem? track)
+    {
+        if (!CanAcceptMediaDrop(deviceItem, track) || track is null)
+        {
+            return;
+        }
+        var dev = DeviceForSidebarItem(deviceItem)!;
+
+        if (string.IsNullOrEmpty(track.FilePath) || !File.Exists(track.FilePath))
+        {
+            UpdateMainStatus($"Can't add “{track.Title}” — source file is missing.");
+            return;
+        }
+
+        var ffmpeg = ResolveFfmpeg();
+        if (ffmpeg is null)
+        {
+            UpdateMainStatus("ffmpeg not found on PATH — needed to transcode for the iPod.");
+            return;
+        }
+
+        // Progress shows on the LCD (the rip/progress page), not the retired activity feed.
+        var title = track.Title ?? Path.GetFileName(track.FilePath);
+        IsRipping = true;
+        RipTitle = $"Adding “{title}”";
+        RipDetail = $"Transcoding for {dev.Name}…";
+        RipPercent = 0;
+        try
+        {
+            var result = await Task.Run(() => IPodTrackImporter.ImportAsync(
+                dev.MountPath, track.FilePath, ffmpeg, dev.IpodGeneration, dev.FireWireGuid));
+
+            // Reflect it in the device list right away (no full re-scan needed).
+            AddImportedDeviceTrack(dev, track, result);
+
+            RipTitle = $"Added “{title}”";
+            RipDetail = $"On {dev.Name}";
+            RipPercent = 1;
+            await Task.Delay(1800);
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Failed to add {Track} to {Device}", track.FilePath, dev.MountPath);
+            RipTitle = "Couldn't add to iPod";
+            RipDetail = ex.Message;
+            await Task.Delay(3500);
+        }
+        finally
+        {
+            IsRipping = false;
+            RipTitle = string.Empty;
+            RipDetail = string.Empty;
+            RipPercent = 0;
+        }
+    }
+
+    /// <summary>
+    /// Reflects a just-imported track in the device's live list without a full re-scan:
+    /// builds the device MediaItem (same shape as <see cref="ScanStockIPod"/> produces)
+    /// and adds it so the iPod view updates the moment the import finishes.
+    /// </summary>
+    private void AddImportedDeviceTrack(ConnectedDevice dev, MediaItem source, IPodImportResult result)
+    {
+        long size = 0;
+        try
+        {
+            size = new FileInfo(result.DestFile).Length;
+        }
+        catch
+        {
+            /* size stays 0 - cosmetic only */
+        }
+
+        var item = new MediaItem
+        {
+            Id = $"device:{dev.MountPath}:{result.TrackId}",
+            Kind = MediaKind.Music,
+            Title = result.Title ?? source.Title,
+            Artist = source.Artist,
+            Album = source.Album,
+            Genre = source.Genre,
+            Composer = source.Composer,
+            Year = source.Year,
+            Track = source.Track,
+            TotalTracks = source.TotalTracks,
+            Disc = source.Disc,
+            TotalDiscs = source.TotalDiscs,
+            Duration = source.Duration,
+            FilePath = result.DestFile,
+            FileName = Path.GetFileName(result.DestFile),
+            Extension = Path.GetExtension(result.DestFile),
+            FileSize = size,
+            HasAlbumArt = source.HasAlbumArt,
+            IsAnalyzed = true,
+            Source = $"device:{dev.MountPath}",
+            StreamUrl = result.DestFile,
+            Dbid = result.Dbid != 0 ? result.Dbid : null,
+        };
+
+        // The import appended a new image to the ArtworkDB - drop the cached index so the
+        // next art lookup re-reads it and finds this track's thumbnail.
+        IPodArtworkReader.Invalidate(dev.MountPath);
+
+        _allItems.Add(item);
+
+        if (size > 0)
+        {
+            dev.AudioSpace += size;
+            dev.RefreshSpace();
+        }
+
+        ApplyFilter();
+    }
+
+    /// <summary>Locates ffmpeg on PATH, then a bundled copy next to the app.</summary>
+    private static string? ResolveFfmpeg()
+    {
+        var name = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathEnv))
+        {
+            var sep = OperatingSystem.IsWindows() ? ';' : ':';
+            foreach (var dir in pathEnv.Split(sep, StringSplitOptions.RemoveEmptyEntries))
+            {
+                try
+                {
+                    var candidate = Path.Combine(dir, name);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+                catch { /* malformed PATH entry */ }
+            }
+        }
+        var bundled = Path.Combine(AppContext.BaseDirectory, "tools", name);
+        return File.Exists(bundled) ? bundled : null;
+    }
+
+    /// <summary>
     /// Copies a library playlist onto a connected writable device as an M3U file under
     /// <c>{mount}/Playlists/</c>. Tracks are matched against the device's own library by
-    /// case-insensitive Artist + Title; unmatched library tracks are reported in the
-    /// activity detail but don't abort the export. The resulting M3U uses Rockbox-style
+    /// case-insensitive Artist + Title; unmatched library tracks are logged but don't
+    /// abort the export. The resulting M3U uses Rockbox-style
     /// absolute paths ("/Music/...") so the device can resolve them regardless of where
     /// its filesystem is mounted on a host.
     /// </summary>
@@ -2962,16 +3213,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var activity = AddActivity($"Sending \"{playlistItem.Name}\" to {device.Name}");
-
         try
         {
             var libraryTracks = await Task.Run(() => GetPlaylistMediaItems(playlistItem.PlaylistId.Value));
             if (libraryTracks.Count == 0)
             {
-                activity.Status = ActivityStatus.Completed;
-                activity.Detail = "Playlist is empty — nothing to send";
-                UpdateActivityBadge();
+                _log.Information("Playlist \"{Name}\" is empty — nothing to send", playlistItem.Name);
                 return;
             }
 
@@ -3013,16 +3260,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             await File.WriteAllTextAsync(targetPath, sb.ToString());
 
-            activity.Status = matched > 0 ? ActivityStatus.Completed : ActivityStatus.Failed;
-            activity.Detail = missed == 0
-                ? $"{matched} tracks written"
-                : $"{matched} written, {missed} not found on device";
-            if (matched == 0)
-            {
-                activity.Error = "None of the library tracks were found on the device";
-            }
-            UpdateActivityBadge();
-
             // Publish the newly-added playlist into the device's sidebar tree so the user
             // can navigate to it immediately without waiting for a reconnect.
             var pl = new DevicePlaylist
@@ -3047,10 +3284,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            activity.Status = ActivityStatus.Failed;
-            activity.Error = ex.Message;
-            activity.Detail = "Send failed";
-            UpdateActivityBadge();
             _log.Error(ex, "Failed to send playlist {Name} to {MountPath}", playlistItem.Name, device.MountPath);
         }
     }
@@ -4066,6 +4299,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                         _cdCoverArt = null;
                         _cdCoverArtBytes = null;
+                        CurrentCdInfo = null;
                     }
                 }
 
@@ -4134,11 +4368,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                 // Store cover art for playback display. Keep the raw bytes too - the
                 // macOS Now Playing widget needs them to build an MPMediaItemArtwork.
-                if (discInfo.CoverArtBytes != null)
+                _cdCoverArt = discInfo.CoverArtBytes != null ? BitmapFromBytes(discInfo.CoverArtBytes) : null;
+                _cdCoverArtBytes = discInfo.CoverArtBytes;
+
+                // Surface the disc's details in the CD-view info bar.
+                CurrentCdInfo = new CdInfo
                 {
-                    _cdCoverArt = BitmapFromBytes(discInfo.CoverArtBytes);
-                    _cdCoverArtBytes = discInfo.CoverArtBytes;
-                }
+                    CoverArt = _cdCoverArt,
+                    Album = discInfo.Tracks[0].Album,
+                    Artist = discInfo.Tracks[0].Artist,
+                    Year = discInfo.Tracks[0].Year,
+                    Genre = discInfo.Tracks[0].Genre,
+                    TrackCount = discInfo.Tracks.Count,
+                    TotalDuration = TimeSpan.FromTicks(discInfo.Tracks.Sum(t => t.Duration?.Ticks ?? 0)),
+                    DiscId = discInfo.DiscId,
+                    ReleaseMbid = discInfo.ReleaseMbid,
+                };
 
                 ApplyFilter();
             }
@@ -4315,8 +4560,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var albumDir = CdRipService.SanitizeForFileName(tracks[0].Album) is { Length: > 0 } al ? al : $"Audio CD ({drivePath})";
         var outputDir = Path.Combine(albumRoot, artistDir, albumDir);
 
-        var activity = AddActivity($"Ripping {tracks.Count} track(s) from {drivePath} — {options.ShortLabel}");
-
         EnsureCdDriveFree(drivePath);
 
         // Per-track timing for the speed readout. We need a reset each time the
@@ -4345,9 +4588,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 ripping.RipStatus = RipState.Ripping;
             }
-
-            activity.Detail = $"Track {p.TrackNumber} of {p.TrackCount}: {p.TrackTitle} ({p.TrackPercent:P0})";
-            activity.Progress = p.TrackPercent;
 
             if (p.TrackNumber != speedTrackNum)
             {
@@ -4386,12 +4626,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             RipPercent = p.TrackPercent;
         });
 
-        // Per-track verification feed: each finished track appends a one-line
-        // verdict to the activity's Detail so the user can see, in order,
-        // which tracks ripped cleanly and which had skipped sectors. The same
-        // information is also flashed through the LCD's RipDetail line while
-        // the next track gets going.
-        var verificationLines = new List<string>(tracks.Count);
+        // Per-track verification feed: each finished track flashes a one-line
+        // verdict on the LCD's RipDetail line while the next track gets going.
         var trackCompleted = new Progress<RipOutcome>(o =>
         {
             // Green check the moment a track is verified. Persistence comes from the
@@ -4416,9 +4652,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 line = $"⚠ Track {o.TrackNumber:D2} — {o.ReadErrorSectors} read error(s)";
             }
-            verificationLines.Add(line);
             RipDetail = line;
-            activity.Detail = string.Join("  •  ", verificationLines.TakeLast(3));
 
             // Surface the finished track in the library now. Relying on the folder
             // watcher races with flac/lame holding the file open for the whole encode,
@@ -4453,31 +4687,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var unverified = outcomes.Where(o => !o.Verified).ToList();
             if (unverified.Count == 0)
             {
-                activity.Detail = $"✓ Ripped {outcomes.Count} track(s) — all verified — to {outputDir}";
-                activity.Status = ActivityStatus.Completed;
+                _log.Information("Ripped {Count} track(s) from {DrivePath} — all verified — to {OutputDir}", outcomes.Count, drivePath, outputDir);
             }
             else
             {
                 var badList = string.Join(", ", unverified.Select(o => o.TrackNumber.ToString("D2")));
-                activity.Detail = $"⚠ Ripped {outcomes.Count} track(s), {unverified.Count} unverified: {badList}. Re-rip with higher paranoia to recover.";
-                activity.Status = ActivityStatus.Completed;
+                _log.Warning("Ripped {Count} track(s) from {DrivePath}, {Unverified} unverified: {BadList}", outcomes.Count, drivePath, unverified.Count, badList);
             }
-            activity.Progress = 1.0;
-            UpdateActivityBadge();
         }
         catch (OperationCanceledException)
         {
             _log.Information("Rip cancelled by user for {DrivePath}", drivePath);
-            activity.Detail = "Rip cancelled";
-            activity.Status = ActivityStatus.Failed;
-            UpdateActivityBadge();
         }
         catch (Exception ex)
         {
             _log.Error(ex, "Rip failed for {DrivePath}", drivePath);
-            activity.Error = ex.Message;
-            activity.Status = ActivityStatus.Failed;
-            UpdateActivityBadge();
         }
         finally
         {
@@ -4498,6 +4722,46 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
             }
         }
+    }
+
+    // -- LCD progress for long device/disc operations --------------------------------
+    // These borrow the rip's LCD page (IsRipping + RipTitle/RipDetail/RipPercent) so an
+    // import, burn, or device scan reads the same as a rip ("Adding ...", "Scanning ...").
+    // Pair Begin/End; all marshal to the UI thread so callers can drive them from a
+    // background scan. (Single-slot: a second op started mid-rip would share the page.)
+
+    private void BeginLcdBusy(string title, string detail = "")
+    {
+        UI(() =>
+        {
+            RipTitle = title;
+            RipDetail = detail;
+            RipPercent = 0;
+            IsRipping = true;
+        });
+    }
+
+    private void SetLcdBusy(string detail, double? percent = null)
+    {
+        UI(() =>
+        {
+            RipDetail = detail;
+            if (percent is { } p)
+            {
+                RipPercent = p;
+            }
+        });
+    }
+
+    private void EndLcdBusy()
+    {
+        UI(() =>
+        {
+            IsRipping = false;
+            RipTitle = string.Empty;
+            RipDetail = string.Empty;
+            RipPercent = 0;
+        });
     }
 
     internal async Task BurnTracksToCdAsync(IReadOnlyList<MediaItem> tracks)
@@ -4539,27 +4803,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         EnsureCdDriveFree(drivePath);
 
-        var activity = AddActivity($"Burning {burnTracks.Count} track(s) to {drivePath}");
+        BeginLcdBusy($"Burning {burnTracks.Count} track(s)");
         var progress = new Progress<CdBurnProgress>(p =>
-        {
-            activity.Detail = $"Track {p.TrackNumber} of {p.TrackCount} ({p.DiscPercent:P0})";
-            activity.Progress = p.DiscPercent;
-        });
+            SetLcdBusy($"Track {p.TrackNumber} of {p.TrackCount}", p.DiscPercent));
 
         try
         {
             await CdBurnService.BurnWithElevationAsync(drivePath, burnTracks, progress);
-            activity.Detail = $"Burned {burnTracks.Count} track(s) to {drivePath}";
-            activity.Progress = 1.0;
-            activity.Status = ActivityStatus.Completed;
-            UpdateActivityBadge();
+            _log.Information("Burned {Count} track(s) to {DrivePath}", burnTracks.Count, drivePath);
         }
         catch (Exception ex)
         {
             _log.Error(ex, "Burn failed for {DrivePath}", drivePath);
-            activity.Error = ex.Message;
-            activity.Status = ActivityStatus.Failed;
-            UpdateActivityBadge();
+        }
+        finally
+        {
+            EndLcdBusy();
         }
     }
 
@@ -4579,7 +4838,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var viewKey = $"Device:{device.MountPath}";
         var playlistsKey = $"Device:{device.MountPath}:Playlists";
-        ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDeviceConfig(device.MountPath, device.DeviceType));
+        ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDeviceConfig(device.MountPath));
         ListViewConfigs.Register(playlistsKey, ListViewConfigs.BuildDevicePlaylistsConfig(device.MountPath));
 
         // The device row itself IS the music view (its ViewConfigKey = "Device:{mount}").
@@ -4623,7 +4882,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         };
         DeviceItems.Add(sidebarItem);
 
-        var activity = AddActivity($"Scanning {device.Name}");
+        BeginLcdBusy($"Scanning {device.Name}");
         _log.Information("Device scan starting: MountPath={MountPath} Type={DeviceType} Name={Name}", device.MountPath, device.DeviceType, device.Name);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -4656,22 +4915,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (device.DeviceType == DeviceType.StockIPod)
             {
-                scanned = await Task.Run(() => ScanStockIPod(device, activity, FlushBatch, PublishPlaylists));
+                scanned = await Task.Run(() => ScanStockIPod(device, d => SetLcdBusy(d), FlushBatch, PublishPlaylists));
             }
             else
             {
-                scanned = await Task.Run(() => ScanRockboxDevice(device, activity, FlushBatch, PublishPlaylists));
+                scanned = await Task.Run(() => ScanRockboxDevice(device, d => SetLcdBusy(d), FlushBatch, PublishPlaylists));
             }
 
             sw.Stop();
             var afterCount = _allItems.Count;
             device.AudioSpace = scanned.Sum(i => i.FileSize ?? 0);
             device.RefreshSpace();
-
-            activity.Status = ActivityStatus.Completed;
-            activity.Detail = $"Found {scanned.Count} tracks";
-            activity.Progress = 1.0;
-            UpdateActivityBadge();
 
             _log.Information("Device scan complete: MountPath={MountPath} Tracks={Tracks} ScanMs={ScanMs} _allItems {Before}->{After}", device.MountPath, scanned.Count, sw.ElapsedMilliseconds, beforeCount, afterCount);
 
@@ -4684,18 +4938,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             sw.Stop();
-            activity.Status = ActivityStatus.Failed;
-            activity.Error = ex.Message;
-            activity.Detail = "Scan failed";
-            UpdateActivityBadge();
             _log.Error(ex, "Device scan failed: MountPath={MountPath} ElapsedMs={ElapsedMs}", device.MountPath, sw.ElapsedMilliseconds);
+        }
+        finally
+        {
+            EndLcdBusy();
         }
     }
 
     /// <summary>
     /// Re-runs device fingerprinting for the selected device without requiring a
     /// reconnect. Useful after the user has edited /.orgz/device or wants to pick up
-    /// new metadata from a freshly-booted firmware mode. Activity panel reports progress.
+    /// new metadata from a freshly-booted firmware mode.
     /// </summary>
     internal void RefreshDeviceInfo(SidebarItem item)
     {
@@ -4709,8 +4963,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
-
-        var activity = AddActivity($"Refreshing {oldDevice.Name}");
 
         try
         {
@@ -4732,23 +4984,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 oldDevice.RefreshSpace();
 
                 DeviceFingerprint.PersistDeviceRecord(oldDevice);
-
-                activity.Status = ActivityStatus.Completed;
-                activity.Detail = $"{oldDevice.Model}";
+                _log.Information("Refreshed device info: {Model} at {MountPath}", oldDevice.Model, mountPath);
             }
             else
             {
-                activity.Status = ActivityStatus.Failed;
-                activity.Error = "device no longer recognized";
+                _log.Warning("Refresh: device at {MountPath} no longer recognized", mountPath);
             }
         }
         catch (Exception ex)
         {
-            activity.Status = ActivityStatus.Failed;
-            activity.Error = ex.Message;
-            activity.Detail = "Refresh failed";
+            _log.Error(ex, "Refresh failed for {MountPath}", mountPath);
         }
-        UpdateActivityBadge();
     }
 
     internal void EjectDevice(SidebarItem item)
@@ -4757,24 +5003,31 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
+        EjectByMount(item.ViewConfigKey["Device:".Length..], item.Name);
+    }
 
-        var mountPath = item.ViewConfigKey["Device:".Length..];
-        var activity = AddActivity($"Ejecting {item.Name}");
+    /// <summary>Ejects the device currently shown in the view - the iPod-view header button.</summary>
+    [RelayCommand]
+    private void EjectSelectedDevice()
+    {
+        if (SelectedDevice is { } dev)
+        {
+            EjectByMount(dev.MountPath, dev.Name);
+        }
+    }
 
+    private void EjectByMount(string mountPath, string? name)
+    {
         if (DeviceEjector.Eject(mountPath, out var error))
         {
-            activity.Status = ActivityStatus.Completed;
-            activity.Detail = "Safely removed";
+            _log.Information("Ejected {Name} at {MountPath}", name, mountPath);
             // The WMI removal event will fire shortly and HandleDeviceDisconnected will
             // tear down the sidebar entry, view config, and items.
         }
         else
         {
-            activity.Status = ActivityStatus.Failed;
-            activity.Error = error ?? "unknown error";
-            activity.Detail = $"Eject failed: {error}";
+            _log.Warning("Eject failed for {Name} at {MountPath}: {Error}", name, mountPath, error ?? "unknown error");
         }
-        UpdateActivityBadge();
     }
 
     private void HandleDeviceDisconnected(string mountPath)
@@ -4826,18 +5079,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// cache file under <c>/.orgz/</c>. The iTunesDB parse runs every connect; it's fast
     /// enough (~1s for a 14k-track library) that shaving it isn't worth the policy break.
     /// </summary>
-    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
+    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, Action<string>? onProgress = null, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
     {
         var dbPath = Path.Combine(device.MountPath, "iPod_Control", "iTunes", "iTunesDB");
         if (!File.Exists(dbPath))
         {
-            activity.Detail = "iTunesDB missing — walking filesystem";
+            onProgress?.Invoke("iTunesDB missing — walking filesystem");
             _log.Information("iTunesDB not found at {DbPath} — falling back to filesystem walk", dbPath);
-            return ScanRockboxDevice(device, activity, flushBatch);
+            return ScanRockboxDevice(device, onProgress, flushBatch);
         }
 
         var source = $"device:{device.MountPath}";
-        activity.Detail = "Parsing iTunesDB...";
+        onProgress?.Invoke("Parsing iTunesDB...");
         ITunesDbReader.ReadAll(dbPath, device.MountPath, out var tracks, out var itunesPlaylists);
 
         // Convert iTunesDB playlists into DevicePlaylist - their TrackIds are MediaItem Ids
@@ -4894,14 +5147,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 IsAnalyzed = true,
                 Source = source,
                 StreamUrl = t.FilePath,
+                Dbid = t.Dbid != 0 ? t.Dbid : null,
             };
             items.Add(mediaItem);
             pending.Add(mediaItem);
 
             if ((i & 0xFF) == 0)
             {
-                activity.Detail = $"Read {i + 1} of {tracks.Count} tracks";
-                activity.Progress = tracks.Count > 0 ? (double)(i + 1) / tracks.Count : 1.0;
+                onProgress?.Invoke($"Read {i + 1} of {tracks.Count} tracks");
 
                 if (pending.Count > 0 && flushBatch != null)
                 {
@@ -4933,19 +5186,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// Stock iPods do NOT use this - their iTunesDB is authoritative and fast to parse, and
     /// we treat stock iPods as read-only (don't write anything to the device).
     /// </summary>
-    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, ActivityItem activity, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
+    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, Action<string>? onProgress = null, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
     {
         var source = $"device:{device.MountPath}";
 
         // Load cache first - even if the filesystem walk is slow, we can flush cached
         // items to the grid immediately and only pay for analysis on actually-new files.
-        activity.Detail = "Loading device cache...";
+        onProgress?.Invoke("Loading device cache...");
         var cached = DeviceLibraryCache.TryLoad(device.MountPath, source);
         var cacheByPath = cached
             .Where(i => !string.IsNullOrEmpty(i.FilePath))
             .ToDictionary(i => i.FilePath!, StringComparer.OrdinalIgnoreCase);
 
-        activity.Detail = "Walking filesystem...";
+        onProgress?.Invoke("Walking filesystem...");
         var files = new List<string>();
         try
         {
@@ -5018,8 +5271,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if ((i & 0x1F) == 0)
             {
-                activity.Detail = $"Analyzing {i + 1} of {files.Count}";
-                activity.Progress = files.Count > 0 ? (double)(i + 1) / files.Count : 1.0;
+                onProgress?.Invoke($"Analyzing {i + 1} of {files.Count}");
 
                 // Push live audio-bytes back to the device model so the capacity bar
                 // fills in as we go. Marshalled to UI thread because the bar bindings
