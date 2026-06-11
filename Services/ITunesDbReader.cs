@@ -41,6 +41,9 @@ public static class ITunesDbReader
         public int Rating { get; set; }          // 0-100 in iTunesDB (0, 20, 40, 60, 80, 100)
         public DateTime? LastPlayed { get; set; }
         public DateTime? DateAdded { get; set; }
+
+        /// <summary>64-bit persistent id (MHIT @0x70). Matches the ArtworkDB mhii.song_id.</summary>
+        public ulong Dbid { get; set; }
     }
 
     // MHOD data-object types we care about
@@ -190,6 +193,7 @@ public static class ITunesDbReader
             Rating = bytes.Length > pos + 28 ? bytes[pos + 28] : 0,
             DateAdded = ReadMacDate(ReadInt32(bytes, pos + 104)),
             SkipCount = ReadInt32(bytes, pos + 156),
+            Dbid = pos + 0x78 <= bytes.Length ? BitConverter.ToUInt64(bytes, pos + 0x70) : 0,
         };
 
         // Walk MHOD children
