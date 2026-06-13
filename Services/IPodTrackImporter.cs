@@ -23,6 +23,24 @@ public static class IPodTrackImporter
     private static readonly HashSet<string> CompatibleExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".m4a", ".m4b", ".aac", ".aif", ".aiff", ".wav" };
 
+    /// <summary>True when a stock iPod plays this file extension as-is (no transcode needed).</summary>
+    internal static bool IsNativelyCompatible(string extension) => CompatibleExtensions.Contains(extension);
+
+    /// <summary>
+    /// Container we produce on disk: the source extension (lower-cased) when natively
+    /// playable, otherwise ALAC in an .m4a wrapper.
+    /// </summary>
+    internal static string TargetExtension(string sourceExtension)
+        => IsNativelyCompatible(sourceExtension) ? sourceExtension.ToLowerInvariant() : ".m4a";
+
+    /// <summary>
+    /// Stock iPods (5G/5.5G) decode ALAC only up to 48 kHz / 16-bit, and the iTunesDB stores
+    /// the sample rate as <c>rate &lt;&lt; 16</c> (so anything &gt; 65535 corrupts). Keep a
+    /// source rate already &lt;= 48 kHz, otherwise resample to CD 44.1 kHz.
+    /// </summary>
+    internal static int TargetSampleRate(int sourceSampleRate)
+        => sourceSampleRate is > 0 and <= 48000 ? sourceSampleRate : 44100;
+
     public static async Task<IPodImportResult> ImportAsync(
         string mountPath,
         string sourceFile,
@@ -75,15 +93,15 @@ public static class IPodTrackImporter
 
         // --- produce an iPod-compatible file ---
         var ext = Path.GetExtension(sourceFile);
-        bool compatible = CompatibleExtensions.Contains(ext);
-        string targetExt = compatible ? ext.ToLowerInvariant() : ".m4a";
+        bool compatible = IsNativelyCompatible(ext);
+        string targetExt = TargetExtension(ext);
 
         // Stock iPods (5G/5.5G) decode ALAC only up to 48 kHz / 16-bit — hi-res
         // (e.g. 96/24) won't play and also overflows the iTunesDB sample-rate field
         // (stored as rate << 16, so anything > 65535 corrupts). Target CD resolution:
         // keep the source rate when it's already <= 48 kHz, otherwise resample to
         // 44.1 kHz, and force 16-bit. That's the lossless ceiling the hardware supports.
-        int targetSampleRate = srcSampleRate is > 0 and <= 48000 ? srcSampleRate : 44100;
+        int targetSampleRate = TargetSampleRate(srcSampleRate);
 
         string producedFile;
         bool producedIsTemp = false;
