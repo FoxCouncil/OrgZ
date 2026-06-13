@@ -217,4 +217,34 @@ public class PodcastSettingsTests : IDisposable
         PodcastSettings.SetFeedKeepIndex(9, 0);   // use default
         Assert.Equal(0, PodcastSettings.FeedKeepIndex(9));
     }
+
+    // --- Download storage (the temp dir doubles as a library root here) -------------
+
+    [Fact]
+    public void DownloadBytes_is_zero_when_nothing_downloaded()
+        => Assert.Equal(0, PodcastSettings.DownloadBytes(_tempDir));
+
+    [Fact]
+    public void DownloadBytes_sums_files_under_dotpodcasts()
+    {
+        var dir = Path.Combine(_tempDir, ".podcasts", "100");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "1.mp3"), new byte[1000]);
+        File.WriteAllBytes(Path.Combine(dir, "2.mp3"), new byte[2000]);
+
+        Assert.Equal(3000, PodcastSettings.DownloadBytes(_tempDir));
+    }
+
+    [Fact]
+    public void ClearDownloads_removes_everything_and_reports_freed_bytes()
+    {
+        var dir = Path.Combine(_tempDir, ".podcasts", "100");
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "1.mp3"), new byte[5000]);
+
+        var freed = PodcastSettings.ClearDownloads(_tempDir);
+
+        Assert.Equal(5000, freed);
+        Assert.Equal(0, PodcastSettings.DownloadBytes(_tempDir));
+    }
 }
