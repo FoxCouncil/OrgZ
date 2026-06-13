@@ -14,12 +14,20 @@ namespace OrgZ.Services.Podcast;
 public static class PodcastCache
 {
     private static readonly string DefaultCacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
+    private static string CacheDirectory { get; set; } = DefaultCacheDirectory;
     private static string ConnectionString =>
-        $"Data Source={Path.Combine(DefaultCacheDirectory, "library.db")}";
+        $"Data Source={Path.Combine(CacheDirectory, "library.db")}";
+
+    /// <summary>
+    /// Test hook: redirect the cache DB to a custom directory (pass null to restore the
+    /// default %APPDATA%/OrgZ location). Call <see cref="EnsureCreated"/> afterward to build
+    /// the schema in the new location.
+    /// </summary>
+    internal static void OverrideCacheDirectory(string? directory) => CacheDirectory = directory ?? DefaultCacheDirectory;
 
     public static void EnsureCreated()
     {
-        Directory.CreateDirectory(DefaultCacheDirectory);
+        Directory.CreateDirectory(CacheDirectory);
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
 
