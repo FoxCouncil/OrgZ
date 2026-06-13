@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using Avalonia.Controls.Documents;
 using OrgZ.Helpers;
 
 namespace OrgZ.Tests;
@@ -48,5 +49,37 @@ public class HtmlInlinesBuilderTests
         var result = HtmlInlinesBuilder.ToPlainText("<p>   Hosted on Acast</p>");
         Assert.DoesNotContain("\n ", result);
         Assert.Contains("Hosted on Acast", result);
+    }
+
+    // -- Build: anchors + bare URLs become runs carrying their target via UrlProperty --
+
+    [Fact]
+    public void Build_blank_input_is_empty()
+    {
+        Assert.Empty(HtmlInlinesBuilder.Build(null));
+        Assert.Empty(HtmlInlinesBuilder.Build(""));
+    }
+
+    [Fact]
+    public void Build_anchor_becomes_a_run_carrying_its_url()
+    {
+        var inlines = HtmlInlinesBuilder.Build("See <a href=\"https://example.com/x\">the show</a> page");
+        var link = inlines.OfType<Run>().FirstOrDefault(r => HtmlInlinesBuilder.GetUrl(r) == "https://example.com/x");
+        Assert.NotNull(link);
+        Assert.Equal("the show", link!.Text);
+    }
+
+    [Fact]
+    public void Build_bare_url_becomes_a_link_run()
+    {
+        var inlines = HtmlInlinesBuilder.Build("Visit https://acast.com/privacy for details");
+        Assert.Contains(inlines.OfType<Run>(), r => HtmlInlinesBuilder.GetUrl(r) == "https://acast.com/privacy");
+    }
+
+    [Fact]
+    public void Build_plain_text_carries_no_url()
+    {
+        var inlines = HtmlInlinesBuilder.Build("just some plain notes");
+        Assert.All(inlines.OfType<Run>(), r => Assert.Null(HtmlInlinesBuilder.GetUrl(r)));
     }
 }
