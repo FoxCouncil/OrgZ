@@ -29,6 +29,12 @@ internal class SidebarItem
     public bool IsImportPlaylistAction { get; init; }
 
     /// <summary>
+    /// True for an indented child row in a flat section (e.g. "Subscriptions" under
+    /// Podcasts in the LIBRARY list). The item template adds a left indent.
+    /// </summary>
+    public bool IsSubItem { get; init; }
+
+    /// <summary>
     /// Nested sidebar entries rendered under this one. Currently used by the DEVICES
     /// section so a connected iPod expands to show its Playlists and future sub-views
     /// (browse, settings, sync). The device row itself is the music view, so Music is

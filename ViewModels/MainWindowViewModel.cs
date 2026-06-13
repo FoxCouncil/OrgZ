@@ -125,6 +125,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // started in the meantime. Read/written on the UI thread only.
     private int _playbackEpoch;
 
+    // Podcast resume: where to seek the just-started episode to (set when it begins, applied
+    // once audio starts), and a throttle on how often we persist the live position.
+    private long? _pendingResumeMs;
+    private long _lastPodcastSaveMs;
+
     private int NewPlaybackEpoch() => ++_playbackEpoch;
 
     /// <summary>
@@ -198,6 +203,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryItems.Add(new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" });
         LibraryItems.Add(new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" });
         LibraryItems.Add(new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Podcast, ViewConfigKey = "Podcasts" });
+        // Indented "Subscriptions" row appears under Podcasts only once you're subscribed
+        // to something. Same view key so the Podcasts panel shows; IsSubItem routes the
+        // click to the panel's subscriptions view (see OnSelectedSidebarItemChanged).
+        if (Podcasts is { Subscriptions.Count: > 0 })
+        {
+            LibraryItems.Add(new() { Name = "Subscriptions", Icon = "fa-solid fa-star", Category = "LIBRARY", IsEnabled = true, IsSubItem = true, Kind = MediaKind.Podcast, ViewConfigKey = "Podcasts" });
+        }
         LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false });
 
         if (Settings.Get("OrgZ.ShowIgnored", true))
@@ -871,6 +883,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(ShowCdInfoBar));
 
+        // The indented "Subscriptions" row opens the Podcasts panel's subscriptions view.
+        // Guard on the current view so returning to it (e.g. from Music) doesn't re-navigate
+        // and push a duplicate onto the panel's back stack.
+        if (value is { IsSubItem: true, ViewConfigKey: "Podcasts" } && Podcasts is { CurrentView: not PodcastsView.Subscriptions })
+        {
+            Podcasts.ShowSubscriptions();
+        }
+
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
 
         if (!string.IsNullOrEmpty(value?.ViewConfigKey))
@@ -1068,6 +1088,39 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
         Podcasts = new PodcastsViewModel(this);
+        // Show/hide the "Subscriptions" sidebar row only when the subscription set crosses
+        // empty<->non-empty - that's all the row's presence depends on. ReloadSubscriptions
+        // does Clear() + N Add()s, and UI() posts, so reacting to every change rebuilt the
+        // (28k-item) library list N+1 times and locked the UI. Load persisted subs up front
+        // so the row shows on startup.
+        var hadSubscriptions = false;
+        Podcasts.Subscriptions.CollectionChanged += (_, _) => UI(() =>
+        {
+            var hasSubscriptions = Podcasts.Subscriptions.Count > 0;
+            if (hasSubscriptions != hadSubscriptions)
+            {
+                hadSubscriptions = hasSubscriptions;
+                RebuildLibraryItems();
+            }
+        });
+        Podcasts.ReloadSubscriptions();
+
+        // Apply the global podcast rules on a cadence: on startup, when a check is due,
+        // refresh every subscription (auto-download new episodes + prune per the Keep
+        // policy). Reload the panel's subscription tiles once a pass finishes.
+        Services.Podcast.PodcastSubscriptionService.Instance.RefreshCompleted += () => UI(() => Podcasts.ReloadSubscriptions());
+        if (Services.Podcast.PodcastSettings.IsDueForCheck)
+        {
+            _ = Services.Podcast.PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath);
+        }
+
+        // Surface podcast download progress on the LCD busy display (same as ripping/import).
+        // The service's events fire from background threads, so marshal each to the UI thread.
+        var podcastDownloads = Services.Podcast.PodcastDownloadService.Instance;
+        podcastDownloads.Started += (_, ep) => UI(() => OnPodcastDownloadStarted(ep));
+        podcastDownloads.ProgressChanged += p => UI(() => OnPodcastDownloadProgress(p));
+        podcastDownloads.Completed += (_, ep) => UI(() => OnPodcastDownloadFinished(ep.Id));
+        podcastDownloads.Failed += (epId, _) => UI(() => OnPodcastDownloadFinished(epId));
 
         // Initialize shuffle/repeat visual state from saved settings
         ShuffleOpacity = ShuffleMode == ShuffleMode.On ? 1.0 : 0.4;
@@ -1112,6 +1165,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             IsPlaybackLoading = false;
             ApplyPendingDuration();
+            // Seek to the saved podcast resume point now that the stream is playable.
+            if (_pendingResumeMs is { } resumeMs)
+            {
+                _pendingResumeMs = null;
+                try
+                {
+                    if (_player.IsSeekable)
+                    {
+                        _player.Time = resumeMs;
+                    }
+                }
+                catch { /* media not seekable yet - leave at start */ }
+            }
         });
 
         _player.EndReached += (s, e) => UI(() =>
@@ -1174,6 +1240,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (!isSeeking)
             {
                 CurrentTrackTimeNumber = e.Time;
+            }
+
+            // Persist the podcast resume position, throttled to ~5s of movement (also
+            // catches seeks). Runs off the UI thread; UpdateListenPosition opens its own
+            // connection, so it's safe.
+            if (_currentPodcastStream is { } ps && e.Time > 0 && Math.Abs(e.Time - _lastPodcastSaveMs) >= 5000)
+            {
+                _lastPodcastSaveMs = e.Time;
+                var episodeId = ps.Episode.Id;
+                var posMs = e.Time;
+                var len = _player.Length;
+                var completed = len > 0 && posMs >= len - 15000;
+                _ = Task.Run(() => Services.Podcast.PodcastCache.UpdateListenPosition(episodeId, posMs, completed));
             }
 
             // Push pivots to macOS Now Playing: the very first TimeChanged (so
@@ -1469,39 +1548,50 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // Podcast streams skip the playback-context machinery, so they need
-            // a dedicated pause/resume branch -- the music / radio branches
-            // below depend on CurrentMusicItem / CurrentStation which are both
-            // null while a podcast is playing.
-            if (_currentPodcastStream != null)
+            // Pause / resume / stop ALWAYS acts on what is actually playing - never on the
+            // active view. A pause request must never be ignored because the user happens to
+            // be looking at a different page (e.g. browsing Podcasts while music plays). The
+            // view's kind is consulted only to decide what to START when nothing is loaded.
+
+            // Radio can't truly pause a live stream - toggling stops it (and re-plays to
+            // resume). Captured to a local so nullable flow holds; guarded so a podcast is
+            // never mistaken for radio.
+            var station = CurrentStation;
+            if (station != null && _currentPodcastStream == null)
             {
                 if (_player.IsPlaying)
                 {
-                    Pause();
+                    Stop();
                 }
                 else
                 {
-                    Play();
+                    PlayRadioStation(station);
                 }
                 return;
             }
 
-            var kind = GetEffectiveKind();
+            // Anything playing - music, CD, device track, or podcast - pauses. No exceptions,
+            // no view checks. This is the line that must never be skipped.
+            if (_player.IsPlaying)
+            {
+                Pause();
+                return;
+            }
 
+            // Paused or stopped with a track still loaded - resume / restart it.
+            if (_player.State == LibVLCSharp.Shared.VLCState.Paused
+                || _currentPodcastStream != null
+                || CurrentMusicItem != null
+                || CurrentPlayingItem != null)
+            {
+                Play();
+                return;
+            }
+
+            // Nothing loaded - start something based on the active view / selection.
+            var kind = GetEffectiveKind();
             if (kind == MediaKind.Radio)
             {
-                if (CurrentStation != null && _player.IsPlaying)
-                {
-                    Stop();
-                    return;
-                }
-
-                if (CurrentStation != null)
-                {
-                    PlayRadioStation(CurrentStation);
-                    return;
-                }
-
                 if (SelectedItem?.Kind == MediaKind.Radio)
                 {
                     PlayRadioStation(SelectedItem);
@@ -1513,27 +1603,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (CurrentMusicItem == null)
+            if (SelectedItem?.Kind == MediaKind.Music)
             {
-                if (SelectedItem?.Kind == MediaKind.Music)
-                {
-                    PlayMusicItem(SelectedItem);
-                }
-                else if (FilteredItems.Count > 0)
-                {
-                    PlayMusicItem(FilteredItems[0]);
-                }
-
-                return;
+                PlayMusicItem(SelectedItem);
             }
-
-            if (_player.IsPlaying)
+            else if (FilteredItems.Count > 0)
             {
-                Pause();
-            }
-            else
-            {
-                Play();
+                PlayMusicItem(FilteredItems[0]);
             }
         });
     }
@@ -2291,6 +2367,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // over USB, downloaded podcasts) open effectively instantly, so the pole would just
         // flicker; those callers pass showLoading: false.
         IsPlaybackLoading = showLoading;
+        // Clear any stale resume target; podcast playback re-sets it right after this.
+        _pendingResumeMs = null;
         _audioTap?.ResetAudioStartTracking();
     }
 
@@ -2518,6 +2596,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     IsSeekEnabled = true;
                     // Streamed episodes hit the network; downloaded ones are local files.
                     BeginPlayback(showLoading: !isLocal);
+                    // Resume where the listener left off (set after BeginPlayback so its
+                    // reset doesn't clear it; applied once audio actually starts). Skip if
+                    // finished or barely started.
+                    var savedPos = Services.Podcast.PodcastCache.GetListenPosition(episode.Id);
+                    _pendingResumeMs = savedPos is { } sp && !sp.Completed && sp.PositionMs > 10000 ? sp.PositionMs : null;
+                    _lastPodcastSaveMs = _pendingResumeMs ?? 0;
                     _ = _player.Play(_currentMedia);
                     DeferDispose(previousMedia, previousHandler);
                 }
@@ -4762,6 +4846,72 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             RipDetail = string.Empty;
             RipPercent = 0;
         });
+    }
+
+    // Podcast downloads surfaced on the LCD busy display. Touched only on the UI thread (the
+    // download service's background events are marshalled through UI()). _downloadOwnsLcd
+    // keeps downloads from clobbering an in-progress rip/import that already owns the display.
+    private readonly Dictionary<long, (string Title, double Fraction)> _activeDownloads = new();
+    private bool _downloadOwnsLcd;
+
+    private void OnPodcastDownloadStarted(Models.PodcastEpisode ep)
+    {
+        var wasIdle = _activeDownloads.Count == 0;
+        _activeDownloads[ep.Id] = (ep.Title ?? string.Empty, 0);
+        if (wasIdle && !IsRipping)
+        {
+            _downloadOwnsLcd = true;
+            BeginLcdBusy("Downloading");
+        }
+        if (_downloadOwnsLcd)
+        {
+            UpdateDownloadLcd();
+        }
+    }
+
+    private void OnPodcastDownloadProgress(Services.Podcast.DownloadProgress p)
+    {
+        var wasIdle = _activeDownloads.Count == 0;
+        _activeDownloads[p.EpisodeId] = (p.Title, p.Fraction);
+        if (wasIdle && !IsRipping)
+        {
+            _downloadOwnsLcd = true;
+            BeginLcdBusy("Downloading");
+        }
+        if (_downloadOwnsLcd)
+        {
+            UpdateDownloadLcd();
+        }
+    }
+
+    private void OnPodcastDownloadFinished(long episodeId)
+    {
+        _activeDownloads.Remove(episodeId);
+        if (_activeDownloads.Count == 0)
+        {
+            if (_downloadOwnsLcd)
+            {
+                _downloadOwnsLcd = false;
+                EndLcdBusy();
+            }
+        }
+        else if (_downloadOwnsLcd)
+        {
+            UpdateDownloadLcd();
+        }
+    }
+
+    private void UpdateDownloadLcd()
+    {
+        if (_activeDownloads.Count == 0)
+        {
+            return;
+        }
+        var avg = _activeDownloads.Values.Average(v => v.Fraction);
+        var detail = _activeDownloads.Count == 1
+            ? _activeDownloads.Values.First().Title
+            : $"{_activeDownloads.Count} episodes";
+        SetLcdBusy(detail, avg);
     }
 
     internal async Task BurnTracksToCdAsync(IReadOnlyList<MediaItem> tracks)

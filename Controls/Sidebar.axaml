@@ -23,6 +23,9 @@
     <UserControl.Resources>
         <DataTemplate x:Key="SidebarItemTemplate" x:DataType="models:SidebarItem">
             <StackPanel Orientation="Horizontal" Spacing="10">
+                <!-- Left indent for sub-rows (e.g. Subscriptions under Podcasts). The 10px
+                     StackPanel spacing is added on top, landing the icon ~16px in. -->
+                <Border Width="6" IsVisible="{Binding IsSubItem}" />
                 <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
                     <Panel>
                         <Image Source="{Binding IconBitmap}"
