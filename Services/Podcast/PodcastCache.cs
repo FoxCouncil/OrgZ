@@ -116,6 +116,25 @@ public static class PodcastCache
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Saved resume point for an episode: (last position in ms, whether it was finished).
+    /// Null when the episode has never been played or has no recorded position.
+    /// </summary>
+    public static (long PositionMs, bool Completed)? GetListenPosition(long episodeId)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT LastPositionMs, Completed FROM PodcastListen WHERE EpisodeId = @Id";
+        cmd.Parameters.AddWithValue("@Id", episodeId);
+        using var r = cmd.ExecuteReader();
+        if (r.Read() && !r.IsDBNull(0))
+        {
+            return (r.GetInt64(0), r.GetInt32(1) != 0);
+        }
+        return null;
+    }
+
     public static List<PodcastListenEntry> GetRecentListens(int max = 50)
     {
         var list = new List<PodcastListenEntry>();

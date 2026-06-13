@@ -52,6 +52,7 @@ public sealed class PodcastDownloadService
     public static PodcastDownloadService Instance { get; } = new();
 
     public event Action<DownloadProgress>? ProgressChanged;
+    public event Action<PodcastFeed, PodcastEpisode>? Started;
     public event Action<PodcastFeed, PodcastEpisode>? Completed;
     public event Action<long, Exception>? Failed;
 
@@ -102,33 +103,47 @@ public sealed class PodcastDownloadService
             return PodcastDownloadState.NotDownloaded;
         }
 
-        // Size sanity-check. Some feeds publish enclosureLength=0 (no
-        // Content-Length on the upstream HEAD) — in that case we have no way
-        // to verify so we trust the file. When we DO have a length, we tolerate
-        // a 1% delta because some hosts report container length and write
-        // re-muxed bytes (a couple of dozen bytes off is normal).
-        try
-        {
-            var actual = new FileInfo(path).Length;
-            var expected = episode.EnclosureLength;
-            if (expected <= 0 || WithinTolerance(actual, expected))
-            {
-                return PodcastDownloadState.Downloaded;
-            }
-            _log.Warning("Episode {Id} on disk size {Actual} mismatches expected {Expected}", episode.Id, actual, expected);
-            return PodcastDownloadState.Incomplete;
-        }
-        catch
-        {
-            return PodcastDownloadState.Incomplete;
-        }
+        // A final (non-.partial) file only exists after RunJob's full-read -> atomic rename,
+        // so it is complete by construction. enclosureLength is unreliable (hosts re-mux /
+        // mis-report in BOTH directions), so second-guessing a renamed file on size just
+        // produced false "Incomplete" flags on perfectly good downloads (no green check).
+        return PodcastDownloadState.Downloaded;
     }
 
-    private static bool WithinTolerance(long actual, long expected)
+    /// <summary>
+    /// Deletes an episode's downloaded file (and any leftover .partial) from disk. Only
+    /// touches the predictable {root}/.podcasts/{feedId}/{episodeId}.* path. Returns true if
+    /// anything was removed.
+    /// </summary>
+    public static bool DeleteDownload(PodcastFeed feed, PodcastEpisode episode, string? libraryRoot)
     {
-        if (actual == expected) return true;
-        var diff = Math.Abs(actual - expected);
-        return diff <= Math.Max(64, expected / 100);
+        var path = GetLocalPath(feed, episode, libraryRoot);
+        if (path is null)
+        {
+            return false;
+        }
+
+        var removed = false;
+        foreach (var target in new[] { path, path + ".partial" })
+        {
+            try
+            {
+                if (File.Exists(target))
+                {
+                    File.Delete(target);
+                    removed = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Could not delete {Path}", target);
+            }
+        }
+        if (removed)
+        {
+            _log.Information("Removed download for episode {Id} ({Title})", episode.Id, episode.Title);
+        }
+        return removed;
     }
 
     public Task EnqueueAsync(PodcastFeed feed, PodcastEpisode episode, string libraryRoot, CancellationToken ct = default)
@@ -151,6 +166,10 @@ public sealed class PodcastDownloadService
             return Task.CompletedTask;
         }
 
+        // Fire before the work starts so listeners (LCD, row state) light up immediately,
+        // independent of whether progress events arrive (feeds with no Content-Length never
+        // emit progress).
+        Started?.Invoke(feed, episode);
         return Task.Run(() => RunJob(job), ct);
     }
 
@@ -190,7 +209,7 @@ public sealed class PodcastDownloadService
                     received += read;
                     if (totalBytes > 0)
                     {
-                        ProgressChanged?.Invoke(new DownloadProgress(ep.Id, received, totalBytes));
+                        ProgressChanged?.Invoke(new DownloadProgress(ep.Id, ep.Title ?? string.Empty, received, totalBytes));
                     }
                 }
             }
@@ -198,22 +217,25 @@ public sealed class PodcastDownloadService
             // Atomic rename: only replace target when fully written.
             File.Move(partialPath, targetPath);
 
-            Completed?.Invoke(job.Feed, ep);
+            // Drop the in-flight marker BEFORE signaling. A Completed handler refreshes the
+            // row via GetState, which reports InProgress while the job is still in _jobs — if
+            // we removed it in a finally (after the event), that refresh could race ahead of
+            // the removal and the row would spin forever instead of flipping to the check.
+            _jobs.TryRemove(ep.Id, out _);
             _log.Information("Downloaded {Title} ({Bytes} bytes) -> {Path}", ep.Title, new FileInfo(targetPath).Length, targetPath);
+            Completed?.Invoke(job.Feed, ep);
         }
         catch (OperationCanceledException)
         {
+            _jobs.TryRemove(ep.Id, out _);
             _log.Information("Download cancelled for episode {Id}", ep.Id);
             Failed?.Invoke(ep.Id, new OperationCanceledException());
         }
         catch (Exception ex)
         {
+            _jobs.TryRemove(ep.Id, out _);
             _log.Warning(ex, "Download failed for episode {Id} ({Title})", ep.Id, ep.Title);
             Failed?.Invoke(ep.Id, ex);
-        }
-        finally
-        {
-            _jobs.TryRemove(ep.Id, out _);
         }
     }
 
@@ -229,7 +251,7 @@ public sealed class PodcastDownloadService
     private sealed record DownloadJob(PodcastFeed Feed, PodcastEpisode Episode, string LibraryRoot, CancellationToken Token);
 }
 
-public readonly record struct DownloadProgress(long EpisodeId, long BytesReceived, long TotalBytes)
+public readonly record struct DownloadProgress(long EpisodeId, string Title, long BytesReceived, long TotalBytes)
 {
     public double Fraction => TotalBytes > 0 ? Math.Clamp((double)BytesReceived / TotalBytes, 0, 1) : 0;
 }
