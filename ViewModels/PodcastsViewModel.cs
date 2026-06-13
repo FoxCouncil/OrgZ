@@ -175,13 +175,20 @@ public partial class PodcastsViewModel : ObservableObject
     // -- Page state ------------------------------------------------------
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsFeedDetail), nameof(IsSubscriptions), nameof(IsFeedList))]
+    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsFeedDetail), nameof(IsSubscriptions), nameof(IsFeedList), nameof(ShowBackButton))]
     private PodcastsView _currentView = PodcastsView.Store;
 
     public bool IsStore         => CurrentView == PodcastsView.Store;
     public bool IsFeedDetail    => CurrentView == PodcastsView.FeedDetail;
     public bool IsSubscriptions => CurrentView == PodcastsView.Subscriptions;
     public bool IsFeedList      => CurrentView == PodcastsView.FeedList;
+
+    /// <summary>
+    /// The in-panel back button shows only for drill-down views (a feed or a feed list).
+    /// Store and Subscriptions are top-level entries reached from the sidebar, so they
+    /// don't show one.
+    /// </summary>
+    public bool ShowBackButton  => CurrentView is PodcastsView.FeedDetail or PodcastsView.FeedList;
 
     // -- Store rails -----------------------------------------------------
 
@@ -214,6 +221,44 @@ public partial class PodcastsViewModel : ObservableObject
 
     public bool SelectedFeedIsSubscribed =>
         SelectedFeed is not null && PodcastCache.IsSubscribed(SelectedFeed.Id);
+
+    // Per-podcast rule overrides, surfaced on the feed page (combo index 0 = "use the global
+    // default"). Loaded when the feed changes; a user change writes straight through to
+    // PodcastSettings, so the next refresh of this feed honors it.
+    private bool _loadingFeedOverrides;
+
+    [ObservableProperty]
+    private int _selectedFeedActionIndex;
+
+    [ObservableProperty]
+    private int _selectedFeedKeepIndex;
+
+    partial void OnSelectedFeedChanged(PodcastFeed? value)
+    {
+        _loadingFeedOverrides = true;
+        var feedId = value?.Id ?? 0;
+        SelectedFeedActionIndex = PodcastSettings.FeedActionIndex(feedId);
+        SelectedFeedKeepIndex = PodcastSettings.FeedKeepIndex(feedId);
+        _loadingFeedOverrides = false;
+    }
+
+    partial void OnSelectedFeedActionIndexChanged(int value)
+    {
+        if (_loadingFeedOverrides || SelectedFeed is null)
+        {
+            return;
+        }
+        PodcastSettings.SetFeedActionIndex(SelectedFeed.Id, value);
+    }
+
+    partial void OnSelectedFeedKeepIndexChanged(int value)
+    {
+        if (_loadingFeedOverrides || SelectedFeed is null)
+        {
+            return;
+        }
+        PodcastSettings.SetFeedKeepIndex(SelectedFeed.Id, value);
+    }
 
     public ObservableCollection<PodcastEpisodeRow> SelectedFeedEpisodes { get; } = [];
 
@@ -477,6 +522,16 @@ public partial class PodcastsViewModel : ObservableObject
         _ = PodcastDownloadService.Instance.EnqueueAsync(SelectedFeed, episode, libraryRoot);
         // Bump the row to InProgress immediately — the service signals Completed
         // / Failed when it's done, but the user expects the icon to flip now.
+        RefreshEpisodeRowState(episode.Id);
+    }
+
+    internal void RemoveDownload(PodcastEpisode? episode)
+    {
+        if (episode == null || SelectedFeed == null)
+        {
+            return;
+        }
+        PodcastDownloadService.DeleteDownload(SelectedFeed, episode, App.FolderPath);
         RefreshEpisodeRowState(episode.Id);
     }
 

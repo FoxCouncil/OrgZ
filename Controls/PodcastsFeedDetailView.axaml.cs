@@ -7,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using OrgZ.Helpers;
 using OrgZ.ViewModels;
+using OrgZ.Views;
 
 namespace OrgZ.Controls;
 
@@ -145,19 +146,40 @@ public partial class PodcastsFeedDetailView : UserControl
         return null;
     }
 
-    private void DownloadEpisode_Click(object? sender, RoutedEventArgs e)
+    private async void DownloadEpisode_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button b && ResolveRow(b) is { } row && ViewModel is { } vm)
+        if (sender is not Button b || ResolveRow(b) is not { } row || ViewModel is not { } vm)
         {
-            // No-op when a job is already running for this episode — the
-            // service ignores duplicate enqueues, but skipping the call here
-            // also avoids touching the row state on a redundant click.
-            if (row.IsDownloading)
-            {
-                return;
-            }
-            vm.DownloadEpisode(row.Episode);
+            return;
         }
+
+        // No-op when a job is already running for this episode — the service ignores
+        // duplicate enqueues, but skipping here avoids touching row state on a redundant click.
+        if (row.IsDownloading)
+        {
+            return;
+        }
+
+        // A downloaded episode's button is a delete affordance (it shows a trash on hover) —
+        // confirm, then remove the file. Anything else (re)downloads.
+        if (row.IsDownloaded)
+        {
+            if (TopLevel.GetTopLevel(this) is Window owner)
+            {
+                var dialog = new ConfirmDialog(
+                    "Remove download",
+                    $"Remove the downloaded file for “{row.Episode.Title}”? You can download it again later.",
+                    "Remove");
+                if (await dialog.ShowDialog<bool>(owner) != true)
+                {
+                    return;
+                }
+            }
+            vm.RemoveDownload(row.Episode);
+            return;
+        }
+
+        vm.DownloadEpisode(row.Episode);
     }
 
     private void StreamEpisode_Click(object? sender, RoutedEventArgs e)

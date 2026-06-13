@@ -103,47 +103,83 @@
 			</TabItem>
 
 			<!-- ===== Podcasts Tab =====
-			     Three policy knobs mirroring classic iTunes Podcasts preferences:
-			     refresh cadence, what to do with new episodes, and how long to
-			     keep episodes around. iPod sync preferences land here later. -->
+			     Global defaults for every subscription (refresh cadence, what to do with new
+			     episodes, retention) plus the download location / storage controls. Each combo
+			     sits on its own row with the "next check" hint below them all, so an open
+			     dropdown never lands on top of the hint. Per-podcast overrides live on the
+			     podcast's own page, not here. -->
 			<TabItem Header="Podcasts">
 				<ScrollViewer Padding="0,0,12,0">
 					<StackPanel Margin="8,12" Spacing="16">
-						<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="8,4,0,0">
-							<TextBlock Grid.Row="0" Grid.Column="0" Text="Check for new episodes:"
-									   VerticalAlignment="Center" />
-							<ComboBox Grid.Row="0" Grid.Column="1" x:Name="PodcastCheckIntervalCombo"
-									  Width="220" HorizontalAlignment="Left">
-								<ComboBoxItem Content="Every hour" Tag="hour" />
-								<ComboBoxItem Content="Every day" Tag="day" />
-								<ComboBoxItem Content="Every week" Tag="week" />
-								<ComboBoxItem Content="Manually" Tag="manual" />
-							</ComboBox>
 
-							<TextBlock Grid.Row="1" Grid.Column="1" x:Name="PodcastNextCheckText"
-									   FontSize="11" Opacity="0.6" Margin="0,4,0,12" />
+						<!-- Subscription rules (global defaults) -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Subscription Rules" FontWeight="Bold" FontSize="13" />
+								<TextBlock Text="Defaults applied to every subscription. Override these per podcast from its page."
+										   FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
 
-							<TextBlock Grid.Row="2" Grid.Column="0" Text="When new episodes are available:"
-									   VerticalAlignment="Center" />
-							<ComboBox Grid.Row="2" Grid.Column="1" x:Name="PodcastNewEpisodeActionCombo"
-									  Width="220" HorizontalAlignment="Left">
-								<ComboBoxItem Content="Download all" Tag="all" />
-								<ComboBoxItem Content="Download the most recent one" Tag="recent" />
-								<ComboBoxItem Content="Do nothing" Tag="none" />
-							</ComboBox>
+								<Grid ColumnDefinitions="200,240" RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Check for new episodes"
+											   VerticalAlignment="Center" TextWrapping="Wrap" />
+									<ComboBox Grid.Row="0" Grid.Column="1" x:Name="PodcastCheckIntervalCombo"
+											  HorizontalAlignment="Stretch">
+										<ComboBoxItem Content="Every hour" Tag="hour" />
+										<ComboBoxItem Content="Every day" Tag="day" />
+										<ComboBoxItem Content="Every week" Tag="week" />
+										<ComboBoxItem Content="Manually" Tag="manual" />
+									</ComboBox>
 
-							<TextBlock Grid.Row="3" Grid.Column="0" Text="Keep:"
-									   VerticalAlignment="Center" Margin="0,12,0,0" />
-							<ComboBox Grid.Row="3" Grid.Column="1" x:Name="PodcastKeepCombo"
-									  Width="220" HorizontalAlignment="Left" Margin="0,12,0,0">
-								<ComboBoxItem Content="All episodes" Tag="all" />
-								<ComboBoxItem Content="All unplayed episodes" Tag="unplayed" />
-								<ComboBoxItem Content="Most recent episode" Tag="last1" />
-								<ComboBoxItem Content="Most recent 2 episodes" Tag="last2" />
-								<ComboBoxItem Content="Most recent 5 episodes" Tag="last5" />
-								<ComboBoxItem Content="Most recent 10 episodes" Tag="last10" />
-							</ComboBox>
-						</Grid>
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="When new episodes are available"
+											   VerticalAlignment="Center" TextWrapping="Wrap" />
+									<ComboBox Grid.Row="1" Grid.Column="1" x:Name="PodcastNewEpisodeActionCombo"
+											  HorizontalAlignment="Stretch">
+										<ComboBoxItem Content="Download all" Tag="all" />
+										<ComboBoxItem Content="Download the most recent one" Tag="recent" />
+										<ComboBoxItem Content="Do nothing" Tag="none" />
+									</ComboBox>
+
+									<TextBlock Grid.Row="2" Grid.Column="0" Text="Keep"
+											   VerticalAlignment="Center" />
+									<ComboBox Grid.Row="2" Grid.Column="1" x:Name="PodcastKeepCombo"
+											  HorizontalAlignment="Stretch">
+										<ComboBoxItem Content="All episodes" Tag="all" />
+										<ComboBoxItem Content="All unplayed episodes" Tag="unplayed" />
+										<ComboBoxItem Content="Most recent episode" Tag="last1" />
+										<ComboBoxItem Content="Most recent 2 episodes" Tag="last2" />
+										<ComboBoxItem Content="Most recent 5 episodes" Tag="last5" />
+										<ComboBoxItem Content="Most recent 10 episodes" Tag="last10" />
+									</ComboBox>
+								</Grid>
+
+								<TextBlock x:Name="PodcastNextCheckText" FontSize="11" Opacity="0.6" />
+							</StackPanel>
+						</Border>
+
+						<!-- Downloads / storage -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Downloads" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="*,Auto">
+									<Border Grid.Column="0" Background="{StaticResource OrgZInputBackgroundBrush}"
+											BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1"
+											CornerRadius="2" Padding="8,6" Margin="0,0,8,0" VerticalAlignment="Center">
+										<TextBlock x:Name="PodcastDownloadPathText" Text="" FontSize="11" TextWrapping="Wrap" MaxHeight="36" />
+									</Border>
+									<Button Grid.Column="1" Content="Open" Width="90" VerticalAlignment="Center"
+											Click="OpenPodcastFolderButton_Click" />
+								</Grid>
+								<Grid ColumnDefinitions="*,Auto">
+									<TextBlock Grid.Column="0" x:Name="PodcastSpaceUsedText" Text="" FontSize="11"
+											   Opacity="0.8" VerticalAlignment="Center" />
+									<Button Grid.Column="1" Content="Clear downloads" Click="ClearPodcastDownloadsButton_Click" />
+								</Grid>
+							</StackPanel>
+						</Border>
+
+						<Button x:Name="PodcastRefreshButton" Content="Refresh subscriptions now"
+								HorizontalAlignment="Left" Click="RefreshPodcastsButton_Click" />
+
 					</StackPanel>
 				</ScrollViewer>
 			</TabItem>
