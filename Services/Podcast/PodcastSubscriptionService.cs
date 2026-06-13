@@ -116,12 +116,7 @@ public sealed class PodcastSubscriptionService
         episodes.Sort((a, b) => b.DatePublishedEpoch.CompareTo(a.DatePublishedEpoch));
 
         // --- Auto-download per NewEpisodeAction ---
-        var want = action switch
-        {
-            PodcastNewEpisodeAction.Recent => 1,
-            PodcastNewEpisodeAction.All    => Math.Min(PodcastSettings.KeepCount(keep) ?? DownloadAllCap, DownloadAllCap),
-            _                              => 0,
-        };
+        var want = DownloadCount(action, keep);
 
         for (var i = 0; i < want && i < episodes.Count; i++)
         {
@@ -157,18 +152,7 @@ public sealed class PodcastSubscriptionService
             .Where(ep => PodcastDownloadService.GetState(feed, ep, libraryRoot) == PodcastDownloadState.Downloaded)
             .ToList();
 
-        List<PodcastEpisode> toDelete;
-        if (keep == PodcastKeepPolicy.Unplayed)
-        {
-            toDelete = downloaded
-                .Where(ep => PodcastCache.GetListenPosition(ep.Id) is { } lp && lp.Completed)
-                .ToList();
-        }
-        else
-        {
-            var n = PodcastSettings.KeepCount(keep) ?? int.MaxValue;
-            toDelete = downloaded.Skip(n).ToList();
-        }
+        var toDelete = EpisodesToPrune(downloaded, keep, id => PodcastCache.GetListenPosition(id) is { } lp && lp.Completed);
 
         foreach (var ep in toDelete)
         {
@@ -187,5 +171,35 @@ public sealed class PodcastSubscriptionService
                 _log.Warning(ex, "Retention could not delete {Path} (in use?)", path);
             }
         }
+    }
+
+    /// <summary>How many of the newest episodes a refresh downloads under a given action.</summary>
+    internal static int DownloadCount(PodcastNewEpisodeAction action, PodcastKeepPolicy keep) => action switch
+    {
+        PodcastNewEpisodeAction.Recent => 1,
+        PodcastNewEpisodeAction.All    => Math.Min(PodcastSettings.KeepCount(keep) ?? DownloadAllCap, DownloadAllCap),
+        _                              => 0,
+    };
+
+    /// <summary>
+    /// Of a feed's already-downloaded episodes (newest first), the ones a Keep policy should
+    /// prune: none for "all", the played ones for "unplayed", everything past the last N
+    /// otherwise. Pure - the caller supplies the played-state lookup.
+    /// </summary>
+    internal static IReadOnlyList<PodcastEpisode> EpisodesToPrune(
+        IReadOnlyList<PodcastEpisode> downloadedNewestFirst,
+        PodcastKeepPolicy keep,
+        Func<long, bool> isCompleted)
+    {
+        if (keep == PodcastKeepPolicy.All)
+        {
+            return [];
+        }
+        if (keep == PodcastKeepPolicy.Unplayed)
+        {
+            return downloadedNewestFirst.Where(ep => isCompleted(ep.Id)).ToList();
+        }
+        var n = PodcastSettings.KeepCount(keep) ?? int.MaxValue;
+        return downloadedNewestFirst.Skip(n).ToList();
     }
 }
