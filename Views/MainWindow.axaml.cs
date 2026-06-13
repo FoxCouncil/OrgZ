@@ -419,7 +419,12 @@ public partial class MainWindow : Window
         // IsItemsExpanded observable and saved immediately.
         if (isGrouped)
         {
-            _currentGroupedViewKey = _lastViewConfigKey ?? _viewModel.SelectedSidebarItem?.ViewConfigKey;
+            // Key off the config being applied (the view we're entering), NOT
+            // _lastViewConfigKey - that's still the view we're leaving at this point, which
+            // made the radio groups load/save their collapse state under the previous view's
+            // key (so it "inherited" Music's or Podcasts' state depending on where you came
+            // from). config.Key is stable per grouped view.
+            _currentGroupedViewKey = config.Key;
             _groupExpansion = string.IsNullOrEmpty(_currentGroupedViewKey)
                 ? new Dictionary<string, bool>(StringComparer.Ordinal)
                 : GroupExpansionState.Load(_currentGroupedViewKey!);
@@ -427,6 +432,15 @@ public partial class MainWindow : Window
 
             GroupedDataGrid.LoadingRowGroup -= AutoCollapseRowGroup;
             GroupedDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
+
+            // The per-group LoadingRowGroup apply races on the first group: it re-realizes
+            // during initial layout and the applied-keys guard then skips re-collapsing it,
+            // so the top genre stays open. Once the grid has bound + laid out the new
+            // collection (Background priority lands after that), deterministically re-apply
+            // the saved state to EVERY group from the collection view as a backstop. This
+            // also keeps the on-screen state in sync with the stored dict, so the tap-based
+            // capture can't desync.
+            Dispatcher.UIThread.Post(ApplyGroupExpansionToAllGroups, DispatcherPriority.Background);
         }
         else
         {
@@ -460,6 +474,51 @@ public partial class MainWindow : Window
     /// Reset on every view switch in <see cref="ApplyViewConfig"/>.
     /// </summary>
     private readonly HashSet<string> _appliedExpansionKeys = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Deterministically applies the saved expand/collapse state to every group in the
+    /// active grouped view, working from the collection view's group list (so it covers
+    /// groups that haven't realized yet) rather than the racy per-realization path. Posted
+    /// once per view entry; a no-op once the grid isn't showing a grouped view.
+    /// </summary>
+    private void ApplyGroupExpansionToAllGroups()
+    {
+        if (_currentGroupedViewKey is null
+            || GroupedDataGrid.ItemsSource is not DataGridCollectionView view
+            || view.Groups is null)
+        {
+            return;
+        }
+
+        foreach (var obj in view.Groups)
+        {
+            if (obj is not DataGridCollectionViewGroup group)
+            {
+                continue;
+            }
+
+            var key = group.Key?.ToString() ?? string.Empty;
+            _appliedExpansionKeys.Add(key);
+
+            // Default unseen groups to collapsed, recording the choice so it persists.
+            var expand = _groupExpansion.TryGetValue(key, out var v) && v;
+            if (!_groupExpansion.ContainsKey(key))
+            {
+                _groupExpansion[key] = false;
+            }
+
+            if (expand)
+            {
+                GroupedDataGrid.ExpandRowGroup(group, false);
+            }
+            else
+            {
+                GroupedDataGrid.CollapseRowGroup(group, false);
+            }
+        }
+
+        PersistGroupExpansion();
+    }
 
     private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
     {
