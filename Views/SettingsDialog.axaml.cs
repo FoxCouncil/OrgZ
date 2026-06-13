@@ -3,6 +3,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using OrgZ.Services.Podcast;
 using OrgZ.ViewModels;
 
 namespace OrgZ.Views;
@@ -69,6 +70,7 @@ public partial class SettingsDialog : Window
 
         // Podcasts
         LoadPodcastSettings();
+        LoadPodcastStorage();
 
         // Advanced
         var dbDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
@@ -146,6 +148,84 @@ public partial class SettingsDialog : Window
 
         var next = lastCheck == DateTime.MinValue ? DateTime.Now : (lastCheck + span).ToLocalTime();
         PodcastNextCheckText.Text = $"Next check: {next:dddd, MMMM d, h:mm tt}";
+    }
+
+    private void LoadPodcastStorage()
+    {
+        var dir = PodcastSettings.DownloadDir(App.FolderPath);
+        PodcastDownloadPathText.Text = dir ?? "(No library folder set)";
+
+        // Sizing the folder walks the disk, so compute it off the UI thread.
+        PodcastSpaceUsedText.Text = "Space used: calculating…";
+        var root = App.FolderPath;
+        _ = Task.Run(() =>
+        {
+            var bytes = PodcastSettings.DownloadBytes(root);
+            Dispatcher.UIThread.Post(() =>
+                PodcastSpaceUsedText.Text = $"Space used: {PodcastSettings.FormatBytes(bytes)}");
+        });
+    }
+
+    private void OpenPodcastFolderButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var dir = PodcastSettings.DownloadDir(App.FolderPath);
+        if (string.IsNullOrEmpty(dir))
+        {
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(dir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = dir,
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+            // No file manager available / sandboxed - nothing actionable.
+        }
+    }
+
+    private async void ClearPodcastDownloadsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new ConfirmDialog(
+            "Clear podcast downloads",
+            "Delete all downloaded podcast episodes from disk? Your subscriptions and play history are kept.",
+            "Delete");
+        if (await dialog.ShowDialog<bool>(this) != true)
+        {
+            return;
+        }
+
+        var root = App.FolderPath;
+        PodcastSpaceUsedText.Text = "Space used: clearing…";
+        await Task.Run(() => PodcastSettings.ClearDownloads(root));
+        LoadPodcastStorage();
+    }
+
+    private async void RefreshPodcastsButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (PodcastSubscriptionService.Instance.IsRefreshing)
+        {
+            return;
+        }
+
+        var original = PodcastRefreshButton.Content;
+        PodcastRefreshButton.IsEnabled = false;
+        PodcastRefreshButton.Content = "Refreshing…";
+        try
+        {
+            await PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath);
+        }
+        finally
+        {
+            PodcastRefreshButton.Content = original;
+            PodcastRefreshButton.IsEnabled = true;
+            UpdatePodcastNextCheckText();
+            LoadPodcastStorage();
+        }
     }
 
     private void PopulateStats()

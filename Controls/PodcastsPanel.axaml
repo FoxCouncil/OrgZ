@@ -23,7 +23,7 @@
 		        Background="{StaticResource OrgZSurfaceDarkBrush}"
 		        BorderBrush="{StaticResource OrgZBorderColorBrush}"
 		        BorderThickness="0,0,0,1"
-		        IsVisible="{Binding !IsStore}"
+		        IsVisible="{Binding ShowBackButton}"
 		        Height="40">
 			<Button Command="{Binding GoBackCommand}"
 			        HorizontalAlignment="Left"
