@@ -23,7 +23,18 @@ public static class BundledStationsService
     public static List<MediaItem> LoadAll()
     {
         using var stream = AssetLoader.Open(new Uri("avares://Orgz/Assets/stations.json"));
-        var bundle = JsonSerializer.Deserialize<Bundle>(stream, JsonOptions);
+        return MapStations(JsonSerializer.Deserialize<Bundle>(stream, JsonOptions));
+    }
+
+    /// <summary>
+    /// Test seam: parse a stations.json document (as a string) into MediaItems using the
+    /// exact same mapping LoadAll applies to the bundled asset.
+    /// </summary>
+    internal static List<MediaItem> ParseStations(string json)
+        => MapStations(JsonSerializer.Deserialize<Bundle>(json, JsonOptions));
+
+    private static List<MediaItem> MapStations(Bundle? bundle)
+    {
         if (bundle?.Stations == null)
         {
             return [];
