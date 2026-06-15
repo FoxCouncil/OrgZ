@@ -18,3 +18,7 @@ license.
 > Data provided by [eurobeat.online](https://eurobeat.online).
 
 With thanks to Mandie NRG, DJ Nine, and the Eurobeat community. 🏎️💨
+
+## Special Thanks
+
+- **Fluke** - for loaning iPods for hardware testing.
