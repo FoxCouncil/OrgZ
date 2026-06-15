@@ -499,12 +499,33 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     public string NoSearchResultsMessage => $"No search results for \"{SearchText}\".";
 
     /// <summary>
-    /// DataGrid-bound view wrapping <see cref="FilteredItems"/>. When the active view config
-    /// sets <c>GroupByPath</c>, this view's <c>GroupDescriptions</c> enables Avalonia's built-in
-    /// collapsible group headers. Always non-null after the first ApplyFilter call.
+    /// DataGrid-bound view for the active UNGROUPED view (Music, Favorites, Playlists, …),
+    /// wrapping that view's filtered item list. Bound to MainDataGrid. Grouped views use
+    /// <see cref="GroupedItemsView"/> instead so the two grids never thrash each other's source.
     /// </summary>
     [ObservableProperty]
     private DataGridCollectionView? _filteredItemsView;
+
+    /// <summary>
+    /// DataGrid-bound view for the active GROUPED view (Radio is the only one), wrapping its
+    /// filtered list with <c>GroupDescriptions</c> for Avalonia's collapsible group headers.
+    /// Bound to GroupedDataGrid. Kept separate from <see cref="FilteredItemsView"/> so switching
+    /// to an ungrouped view never reassigns the grouped grid's source — that's what lets the grid
+    /// retain its row-group collapse state across view switches (no rebuild, no collapse flash).
+    /// </summary>
+    [ObservableProperty]
+    private DataGridCollectionView? _groupedItemsView;
+
+    // Per-view cache of built collection views. A view switch that lands on a key whose cached
+    // view is still valid (same library version + same filter signature) reuses it verbatim —
+    // no re-filter, no new DataGridCollectionView, and (critically for the grouped grid) no
+    // ItemsSource reassignment, so the DataGrid keeps its collapse/scroll state. Invalidated
+    // wholesale by bumping _dataVersion on any non-switch ApplyFilter (i.e. anything that
+    // actually changed library content, filters, ignored/favorite/playlist membership, sort…).
+    private readonly Dictionary<string, CachedFilterView> _viewCache = new(StringComparer.Ordinal);
+    private int _dataVersion;
+
+    private sealed record CachedFilterView(List<MediaItem> Items, DataGridCollectionView View, int Version, string Signature);
 
     // -- Radio Filters --
     //
@@ -581,7 +602,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSearchTextChanged(string value)
     {
-        ApplyFilter();
+        // During a per-view search restore on a view switch (_suppressSearchPersist == true), skip
+        // re-filtering here. OnSelectedSidebarItemChanged calls ApplyFilter(fromViewSwitch: true)
+        // immediately after, and filtering here would be a non-switch pass that bumps the cache
+        // version — forcing every view (Radio included) to rebuild on the next switch, which is
+        // exactly the collapse "flash" the cache is meant to kill. Real searches run normally.
+        if (!_suppressSearchPersist)
+        {
+            ApplyFilter();
+        }
 
         if (!_suppressSearchPersist)
         {
@@ -899,7 +928,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Settings.Save();
         }
 
-        ApplyFilter();
+        // A view switch changes nothing about content — reuse the target view's cached collection
+        // view if it's still valid (same library version + filter signature). This is the path that
+        // makes returning to Radio instant and flash-free: the grid's source instance is unchanged,
+        // so its row-group collapse state is preserved with no rebuild.
+        ApplyFilter(fromViewSwitch: true);
 
         // Restore selection to the currently playing item if it's in this view
         if (CurrentPlayingItem != null && FilteredItems.Contains(CurrentPlayingItem))
@@ -919,7 +952,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void ApplyFilter()
+    private void ApplyFilter(bool fromViewSwitch = false)
     {
         if (_activeViewConfig == null)
         {
@@ -929,8 +962,36 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // Any NON-switch call means something that affects grid content actually changed:
+        // library items, the active filter/search, ignored/favorite/playlist membership, sort.
+        // Bump the version so every cached view (including the active one) is now stale and gets
+        // rebuilt on next access. A pure view switch changes nothing, so it leaves the version
+        // alone and can reuse a still-valid cached view verbatim — the no-rebuild, no-flash path.
+        if (!fromViewSwitch)
+        {
+            _dataVersion++;
+        }
+
         var viewKey = _activeViewConfig.Key;
+        var signature = BuildFilterSignature(_activeViewConfig);
+
+        if (_viewCache.TryGetValue(viewKey, out var cached)
+            && cached.Version == _dataVersion
+            && cached.Signature == signature)
+        {
+            // Fast path: nothing relevant changed since this view was last built. Reuse the exact
+            // same list + DataGridCollectionView. For the grouped grid the ItemsSource instance is
+            // unchanged, so BindActiveView is a no-op on the binding and the grid keeps its
+            // row-group collapse + scroll state — instant switch, nothing to re-collapse.
+            FilteredItems = cached.Items;
+            BindActiveView(_activeViewConfig, cached.View);
+            UpdateViewStats(_activeViewConfig, cached.Items);
+            UpdateNavigationButtons();
+            _log.Debug("ApplyFilter reuse: ViewKey={ViewKey} Filtered={FilteredCount} Version={Version}", viewKey, cached.Items.Count, _dataVersion);
+            return;
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var startCount = _allItems.Count;
 
         try
@@ -981,14 +1042,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 items = _activeViewConfig.Sorter(items);
             }
 
-            FilteredItems = items.ToList();
+            var list = items.ToList();
+            FilteredItems = list;
 
             // Build the DataGridCollectionView wrapper. If the view config asks for grouping,
             // wire it up so Avalonia's DataGrid renders collapsible group headers, and add a
             // matching SortDescription so the group headers appear in alphabetical order
             // (otherwise DataGridCollectionView falls back to insertion order, which means
             // the first-seen genre wins the top slot regardless of name).
-            var view = new DataGridCollectionView(FilteredItems);
+            var view = new DataGridCollectionView(list);
             if (_activeViewConfig.GroupByPath != null)
             {
                 view.GroupDescriptions.Add(new DataGridPathGroupDescription(_activeViewConfig.GroupByPath));
@@ -996,51 +1058,90 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     _activeViewConfig.GroupByPath,
                     System.ComponentModel.ListSortDirection.Ascending));
             }
-            FilteredItemsView = view;
 
-            // Update radio station count in status bar
-            if (_activeViewConfig.ShowRadioFilterPanel)
-            {
-                UI(() => StatusBar.StationCount = FilteredItems.Count);
-            }
+            _viewCache[viewKey] = new CachedFilterView(list, view, _dataVersion, signature);
+            BindActiveView(_activeViewConfig, view);
 
-            // Update generic status bar for non-Music/Radio views
-            if (StatusBar.HasGenericStats)
-            {
-                UpdateGenericStatusBar();
-            }
-
-            // Music view: the footer summary must reflect the current search/filter,
-            // not the whole-library totals (UpdateData). When no search is active the
-            // filtered set is the full library, so the count is unchanged.
-            if (StatusBar.ActiveKind == MediaKind.Music)
-            {
-                var songs = FilteredItems.Count;
-                var duration = TimeSpan.FromTicks(FilteredItems.Sum(i => i.Duration?.Ticks ?? 0));
-                var size = FilteredItems.Sum(i => i.FileSize ?? 0L);
-                UI(() =>
-                {
-                    StatusBar.TotalSongs = songs;
-                    StatusBar.TotalDuration = duration;
-                    StatusBar.TotalFileSize = size;
-                });
-            }
-
+            UpdateViewStats(_activeViewConfig, list);
             UpdateNavigationButtons();
 
             sw.Stop();
-            _log.Debug("ApplyFilter ok: ViewKey={ViewKey} _allItems={AllCount} Filtered={FilteredCount} Elapsed={ElapsedMs}ms", viewKey, startCount, FilteredItems.Count, sw.ElapsedMilliseconds);
+            _log.Debug("ApplyFilter build: ViewKey={ViewKey} _allItems={AllCount} Filtered={FilteredCount} Version={Version} Elapsed={ElapsedMs}ms", viewKey, startCount, list.Count, _dataVersion, sw.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
             sw.Stop();
             // Don't leave the UI in a broken state. Log loudly, then empty FilteredItems
             // so the user sees a clean (empty) grid instead of stale/garbage rows. The
-            // exception is the actual diagnostic — DO NOT swallow without surfacing.
+            // exception is the actual diagnostic — DO NOT swallow without surfacing. Drop any
+            // cached entry for this key so the next attempt rebuilds from scratch.
             _log.Error(ex, "ApplyFilter threw: ViewKey={ViewKey} _allItems={AllCount} Elapsed={ElapsedMs}ms", viewKey, startCount, sw.ElapsedMilliseconds);
+            _viewCache.Remove(viewKey);
             FilteredItems = [];
-            FilteredItemsView = new DataGridCollectionView(FilteredItems);
+            BindActiveView(_activeViewConfig, new DataGridCollectionView(FilteredItems));
             UpdateNavigationButtons();
+        }
+    }
+
+    /// <summary>
+    /// The filter inputs that, when unchanged, make a cached view reusable. Search applies to
+    /// every view; country/genre only narrow Radio, so they're only part of its signature.
+    /// Library content changes are tracked separately via <see cref="_dataVersion"/>.
+    /// </summary>
+    private string BuildFilterSignature(ListViewConfig config)
+    {
+        var search = SearchText?.Trim() ?? string.Empty;
+        return config.ShowRadioFilterPanel
+            ? string.Join("", search, SelectedCountry, SelectedGenre)
+            : search;
+    }
+
+    /// <summary>
+    /// Routes a collection view to the grid that renders the active view: grouped views drive
+    /// GroupedDataGrid via <see cref="GroupedItemsView"/>, everything else drives MainDataGrid via
+    /// <see cref="FilteredItemsView"/>. Re-assigning the grouped grid the same instance it already
+    /// holds is a binding no-op — that's exactly why re-entering Radio doesn't rebuild or flash.
+    /// </summary>
+    private void BindActiveView(ListViewConfig config, DataGridCollectionView view)
+    {
+        if (config.GroupByPath != null)
+        {
+            GroupedItemsView = view;
+        }
+        else
+        {
+            FilteredItemsView = view;
+        }
+    }
+
+    /// <summary>Status-bar / footer stats for the active view. Shared by the build and reuse paths.</summary>
+    private void UpdateViewStats(ListViewConfig config, List<MediaItem> items)
+    {
+        // Radio station count in the status bar
+        if (config.ShowRadioFilterPanel)
+        {
+            UI(() => StatusBar.StationCount = items.Count);
+        }
+
+        // Generic status bar for non-Music/Radio views
+        if (StatusBar.HasGenericStats)
+        {
+            UpdateGenericStatusBar();
+        }
+
+        // Music view: the footer summary reflects the current search/filter, not whole-library
+        // totals (UpdateData). With no search active the filtered set is the full library.
+        if (StatusBar.ActiveKind == MediaKind.Music)
+        {
+            var songs = items.Count;
+            var duration = TimeSpan.FromTicks(items.Sum(i => i.Duration?.Ticks ?? 0));
+            var size = items.Sum(i => i.FileSize ?? 0L);
+            UI(() =>
+            {
+                StatusBar.TotalSongs = songs;
+                StatusBar.TotalDuration = duration;
+                StatusBar.TotalFileSize = size;
+            });
         }
     }
 
@@ -1052,8 +1153,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // those plus the four primitives below.
 
     /// <summary>Replaces the backing item list. Pair with <see cref="RefreshView"/>
-    /// or a sidebar selection to re-run the filter.</summary>
-    internal void SetItems(IReadOnlyList<MediaItem> items) => _allItems = items.ToList();
+    /// or a sidebar selection to re-run the filter. Bumps the cache version so a subsequent
+    /// same-view switch rebuilds instead of serving the pre-replacement cached view.</summary>
+    internal void SetItems(IReadOnlyList<MediaItem> items)
+    {
+        _allItems = items.ToList();
+        _dataVersion++;
+    }
 
     /// <summary>Re-applies the active view's filter.</summary>
     internal void RefreshView() => ApplyFilter();
