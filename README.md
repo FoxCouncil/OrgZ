@@ -2,9 +2,11 @@
 
 GATTA ORGANIzE
 
-OrgZ is a cross-platform music and radio player built with .NET 10 and Avalonia. It manages a local music library, rips CDs, streams internet radio, subscribes to podcasts, and syncs music to iPods.
+[![Latest release](https://img.shields.io/github/v/release/FoxCouncil/OrgZ)](https://github.com/FoxCouncil/OrgZ/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-manual-blue.svg)](https://foxcouncil.github.io/OrgZ/)
 
-Current version: 0.7.12 (pre-release).
+OrgZ is a cross-platform music and radio player built with .NET 10 and Avalonia. It manages a local music library, rips CDs, streams internet radio, subscribes to podcasts, and syncs music to iPods.
 
 ![Music library](docs/assets/screenshots/library-overview.png)
 
