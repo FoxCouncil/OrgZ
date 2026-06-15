@@ -433,13 +433,13 @@ public partial class MainWindow : Window
             GroupedDataGrid.LoadingRowGroup -= AutoCollapseRowGroup;
             GroupedDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
 
-            // The per-group LoadingRowGroup apply races on the first group: it re-realizes
-            // during initial layout and the applied-keys guard then skips re-collapsing it,
-            // so the top genre stays open. Once the grid has bound + laid out the new
-            // collection (Background priority lands after that), deterministically re-apply
-            // the saved state to EVERY group from the collection view as a backstop. This
-            // also keeps the on-screen state in sync with the stored dict, so the tap-based
-            // capture can't desync.
+            // Apply the saved collapse state once, in a single batch, after the grid has laid
+            // out the freshly-bound collection. It MUST run post-layout: CollapseRowGroup only
+            // works once the DataGrid has built each group's row-group info, so applying it
+            // synchronously here (before that) silently no-ops and leaves the visual expanded
+            // while the stored dict says collapsed - which inverts the next tap's !prev and
+            // desyncs persistence. One batch (not the per-realization path) keeps it from
+            // collapsing group-by-group over time.
             Dispatcher.UIThread.Post(ApplyGroupExpansionToAllGroups, DispatcherPriority.Background);
         }
         else
@@ -520,58 +520,42 @@ public partial class MainWindow : Window
         PersistGroupExpansion();
     }
 
-    private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
+    /// <summary>
+    /// Collapses every group in the active grouped view and persists it - backs the
+    /// "collapse all" button on the radio filter bar. No-op outside a grouped view.
+    /// </summary>
+    internal void CollapseAllRowGroups()
     {
-        var header = e.RowGroupHeader;
-        if (header.DataContext is not DataGridCollectionViewGroup group)
+        if (GroupedDataGrid.ItemsSource is not DataGridCollectionView view || view.Groups is null)
         {
             return;
         }
 
-        var keyString = group.Key?.ToString() ?? string.Empty;
+        foreach (var obj in view.Groups)
+        {
+            if (obj is not DataGridCollectionViewGroup group)
+            {
+                continue;
+            }
+            _groupExpansion[group.Key?.ToString() ?? string.Empty] = false;
+            GroupedDataGrid.CollapseRowGroup(group, false);
+        }
 
-        // Wire the tap observer once per realized header so user toggles still update
-        // the persisted dict, even if we skip applying state below.
+        PersistGroupExpansion();
+    }
+
+    private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
+    {
+        // No per-header collapse is applied here anymore - doing it as each header realized is
+        // what made the grid collapse group-by-group "over time". The saved state is applied
+        // in one batch by ApplyGroupExpansionToAllGroups (which also covers groups that
+        // haven't realized yet). All that remains is wiring the tap observer once per header,
+        // so user toggles keep updating the persisted dict.
+        var header = e.RowGroupHeader;
         if (_observedHeaders.Add(header))
         {
             header.Tapped += OnGroupHeaderTapped;
         }
-
-        // Skip if we've already applied saved state for this key this session.
-        // Re-applying on every realization is what causes the viewport to snap.
-        if (!_appliedExpansionKeys.Add(keyString))
-        {
-            return;
-        }
-
-        // Decide target state: saved value if we've seen the key before, else default
-        // to collapsed (and record it so next time we load, we don't keep re-collapsing).
-        bool shouldBeExpanded;
-        if (_groupExpansion.TryGetValue(keyString, out var saved))
-        {
-            shouldBeExpanded = saved;
-        }
-        else
-        {
-            shouldBeExpanded = false;
-            _groupExpansion[keyString] = false;
-            PersistGroupExpansion();
-        }
-
-        // Apply the target state. The toggle happens on a dispatcher post because doing
-        // it synchronously inside LoadingRowGroup re-entrantly can corrupt the grid's
-        // realization state - the same reason the original auto-collapse used a post.
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (shouldBeExpanded)
-            {
-                GroupedDataGrid.ExpandRowGroup(group, true);
-            }
-            else
-            {
-                GroupedDataGrid.CollapseRowGroup(group, true);
-            }
-        });
     }
 
     private void OnGroupHeaderTapped(object? sender, Avalonia.Input.TappedEventArgs e)

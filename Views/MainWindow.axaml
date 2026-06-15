@@ -377,11 +377,16 @@
 							     subscriptions / feed-detail navigation. -->
 							<controls:PodcastsPanel x:Name="PodcastsPanel" DataContext="{Binding Podcasts}" IsVisible="False" />
 
-							<!-- Separate DataGrid for grouped views (Radio) - never shares column state with MainDataGrid -->
+							<!-- Separate DataGrid for grouped views (Radio) - never shares column state with MainDataGrid.
+							     Bound to its OWN source (GroupedItemsView), not FilteredItemsView: an ungrouped-view
+							     switch reassigns FilteredItemsView, and if this grid shared it, every return to Radio
+							     would rebind to a fresh collection and rebuild expanded (the collapse "flash"). With a
+							     dedicated source the grid keeps the same DataGridCollectionView across switches, so its
+							     row-group collapse state survives and there's nothing to re-collapse. -->
 							<DataGrid x:Name="GroupedDataGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
 								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-								ItemsSource="{Binding FilteredItemsView}"
+								ItemsSource="{Binding GroupedItemsView}"
 								GridLinesVisibility="All"
 								IsReadOnly="True"
 								AutoGenerateColumns="False"

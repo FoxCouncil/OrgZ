@@ -105,9 +105,27 @@ internal static class Program
             vm.CdTrackList.Add(t);
         }
 
+        // After MusicBrainz resolves the disc, the info bar shows the matched release -
+        // here a Mandie NRG single, with HER cover paired to HER title (never borrowed).
+        if (metadata)
+        {
+            vm.CurrentCdInfo = new CdInfo
+            {
+                CoverArt = EurobeatCover("boom-boom-love-me.png"),
+                Album = "Boom Boom Love Me",
+                Artist = "Mandie NRG",
+                Year = 2023,
+                Genre = "Eurobeat",
+                TrackCount = tracks.Count,
+                TotalDuration = tracks.Aggregate(TimeSpan.Zero, (sum, t) => sum + (t.Duration ?? TimeSpan.Zero)),
+                DiscId = "kA0p9eQh7s.Hd2bN",
+                ReleaseMbid = "8f3a1c92-eurobeat",
+            };
+        }
+
         var item = new SidebarItem
         {
-            Name = metadata ? "Midnight Cartography" : "Audio CD (D:)",
+            Name = metadata ? "Boom Boom Love Me" : "Audio CD (D:)",
             Icon = "fa-solid fa-compact-disc",
             Category = "DEVICES",
             IsEnabled = true,
@@ -136,11 +154,6 @@ internal static class Program
             ViewConfigKey = "Device:screenshot",
         });
 
-        var activity = vm.AddActivity("Sending “Road Trip” to OrgZ iPod");
-        activity.Status = ActivityStatus.Completed;
-        activity.Detail = "14 tracks written";
-        vm.UpdateActivityBadge();
-        vm.IsActivityPanelVisible = true;
         return window;
     }
 
@@ -149,9 +162,9 @@ internal static class Program
     {
         var window = SeededCd(metadata: true);
         var vm = window.ViewModel;
-        vm.RipTitle = "Importing “Dead Reckoning”";
-        vm.RipDetail = "Track 3 of 8 — Time remaining: 1:12 (8.4×)";
-        vm.RipPercent = 0.36;
+        vm.RipTitle = "Importing “Boom Boom Love Me (Acappella)”";
+        vm.RipDetail = "Track 3 of 5 — Time remaining: 0:48 (9.1×)";
+        vm.RipPercent = 0.52;
         vm.IsRipping = true;
         return window;
     }
@@ -159,8 +172,8 @@ internal static class Program
     /// <summary>Fake CD TOC. With metadata = post-MusicBrainz; without = raw "Track NN".</summary>
     private static List<MediaItem> CdTracks(string driveId, bool withMetadata)
     {
-        var titles = new[] { "Compass Rose", "Latitude", "Dead Reckoning", "Meridian", "Cartographer", "The Open Sea", "Sextant", "Landfall" };
-        var durations = new[] { (4, 3), (3, 51), (5, 12), (4, 28), (3, 9), (6, 2), (4, 44), (5, 20) };
+        var titles = new[] { "Boom Boom Love Me (Extended)", "Boom Boom Love Me (Instrumental)", "Boom Boom Love Me (Acappella)", "Boom Boom Love Me (Karaoke)", "Boom Boom Love Me (Mini Mix)" };
+        var durations = new[] { (5, 42), (5, 42), (4, 18), (4, 30), (2, 55) };
 
         var list = new List<MediaItem>();
         for (int i = 0; i < durations.Length; i++)
@@ -172,10 +185,10 @@ internal static class Program
                 Kind = MediaKind.Music,
                 Source = "cdda",
                 Title = withMetadata ? titles[i] : $"Track {n:D2}",
-                Artist = withMetadata ? "Atlas Bloom" : null,
-                Album = withMetadata ? "Midnight Cartography" : null,
-                Year = withMetadata ? 2022u : null,
-                Genre = withMetadata ? "Electronic" : null,
+                Artist = withMetadata ? "Mandie NRG" : null,
+                Album = withMetadata ? "Boom Boom Love Me" : null,
+                Year = withMetadata ? 2023u : null,
+                Genre = withMetadata ? "Eurobeat" : null,
                 Track = (uint)n,
                 TotalTracks = (uint)durations.Length,
                 Duration = new TimeSpan(0, durations[i].Item1, durations[i].Item2),
@@ -190,11 +203,12 @@ internal static class Program
         var window = new MainWindow(screenshotMode: true);
         var vm = window.ViewModel;
         var lib = SampleLibrary();
-        lib.First(t => t.Title == "Afterglow").IsPlaying = true;
+        lib.First(t => t.Title == "The Beat Online (Extended Version)").IsPlaying = true;
         vm.SetItems(lib);
         vm.RefreshView();
         vm.UpdateData();
-        ApplyNowPlaying(vm, FakeAlbumArt(2), "Afterglow", "Glass Harbor — Neon Tides", 101_000, 281_000);
+        ApplyNowPlaying(vm, EurobeatCover("the-beat-online.png"),
+            "The Beat Online (Extended Version)", "Mandie NRG feat. DJ Nine — The Beat Online", 138_000, 348_000);
         return window;
     }
 
@@ -226,7 +240,8 @@ internal static class Program
         var vm = main.ViewModel;
         vm.SetItems(SampleLibrary());
         vm.RefreshView();
-        ApplyNowPlaying(vm, FakeAlbumArt(3), "Cartography", "The Slow Mornings — Paper Lanterns", 78_000, 242_000);
+        ApplyNowPlaying(vm, EurobeatCover("drivers-high.png"),
+            "Driver's High (Extended)", "Mandie NRG — Driver's High", 96_000, 330_000);
         return new MiniPlayerWindow { DataContext = vm };
     }
 
@@ -244,45 +259,18 @@ internal static class Program
         vm.ShowPlayingState();
     }
 
-    // -- Fake data ---------------------------------------------------------
+    // -- Sample data -------------------------------------------------------
+    //
+    // The sample library is real Eurobeat. Cover art shown in the screenshots is the
+    // artists' OWN work - Mandie NRG / DJ Nine digital singles - used with their
+    // permission, and only ever paired with their own track/title (never borrowed under
+    // another artist's name). The wider track-list sampling is Eurobeat song metadata
+    // from eurobeat.online ("The Super Euro Database"), used under CC BY 4.0
+    // ("Data provided by eurobeat.online"); no third-party cover art is displayed.
 
-    private static readonly (string Bg, string[] Accents)[] _palettes =
-    {
-        ("#1B2A4A", new[] { "#FF6B6B", "#4ECDC4", "#FFE66D" }),
-        ("#2D1B3D", new[] { "#E84855", "#F9DC5C", "#3185FC" }),
-        ("#0B3D2E", new[] { "#F4D35E", "#EE964B", "#F95738" }),
-        ("#3A0CA3", new[] { "#F72585", "#4CC9F0", "#B5179E" }),
-    };
-
-    /// <summary>
-    /// Generates abstract album art: solid-color shapes at random positions, some
-    /// bleeding off the clipped edges. Deterministic per seed; no real artwork.
-    /// </summary>
-    private static Bitmap FakeAlbumArt(int seed)
-    {
-        var rng = new Random(seed);
-        var pal = _palettes[((seed % _palettes.Length) + _palettes.Length) % _palettes.Length];
-
-        var canvas = new Canvas { Width = 320, Height = 320, ClipToBounds = true, Background = Brush.Parse(pal.Bg) };
-        int shapes = 3 + rng.Next(2);
-        for (int i = 0; i < shapes; i++)
-        {
-            var color = Color.Parse(pal.Accents[rng.Next(pal.Accents.Length)]);
-            double size = 120 + rng.Next(170);
-            Control shape = rng.Next(2) == 0
-                ? new Avalonia.Controls.Shapes.Ellipse { Width = size, Height = size, Fill = new SolidColorBrush(color, 0.82) }
-                : new Avalonia.Controls.Shapes.Rectangle { Width = size, Height = size * (0.5 + rng.NextDouble()), Fill = new SolidColorBrush(color, 0.82), RenderTransform = new RotateTransform(rng.Next(-35, 35)) };
-            Canvas.SetLeft(shape, rng.Next(-90, 290));   // negative / large = bleed off the edge
-            Canvas.SetTop(shape, rng.Next(-90, 290));
-            canvas.Children.Add(shape);
-        }
-
-        var rtb = new RenderTargetBitmap(new PixelSize(320, 320), new Vector(96, 96));
-        canvas.Measure(new Size(320, 320));
-        canvas.Arrange(new Rect(0, 0, 320, 320));
-        rtb.Render(canvas);
-        return rtb;
-    }
+    /// <summary>Loads one of the bundled Eurobeat cover PNGs (the artists' own releases).</summary>
+    private static Bitmap EurobeatCover(string file)
+        => new(Path.Combine(FindRepoRoot(), "tools", "docs-screenshots", "assets", "eurobeat", file));
 
     private static List<MediaItem> SampleRadio()
     {
@@ -332,12 +320,18 @@ internal static class Program
         return lib;
     }
 
-    /// <summary>Fictional albums/tracks - realistic shape, no personal or real metadata.</summary>
+    /// <summary>
+    /// Real Eurobeat. Mandie NRG / DJ Nine albums carry their own cover art (shown in the
+    /// now-playing / CD / mini-player surfaces); the "Super Eurobeat" and Japanese sampler
+    /// albums fill the grid with popular titles (metadata via eurobeat.online, CC BY 4.0)
+    /// and exercise the DataGrid's CJK rendering. No borrowed cover art is displayed.
+    /// </summary>
     private static List<MediaItem> SampleLibrary()
     {
         var items = new List<MediaItem>();
 
-        void Album(string artist, string album, uint year, string genre, params (string Title, int Mins, int Secs, int Rating)[] tracks)
+        // Single artist across the album; HasAlbumArt true only where we actually hold the cover.
+        void Album(string artist, string album, uint year, string genre, bool hasArt, params (string Title, int Mins, int Secs, int Rating)[] tracks)
         {
             for (int i = 0; i < tracks.Length; i++)
             {
@@ -356,23 +350,77 @@ internal static class Program
                     Duration = new TimeSpan(0, t.Mins, t.Secs),
                     Rating = t.Rating > 0 ? t.Rating : null,
                     Extension = ".flac",
-                    HasAlbumArt = true,
+                    HasAlbumArt = hasArt,
                     IsAnalyzed = true,
                 });
             }
         }
 
-        Album("Glass Harbor", "Neon Tides", 2019, "Electronic",
-            ("Low Light", 3, 52, 5), ("Undertow", 4, 17, 0), ("Signal Drift", 3, 28, 4),
-            ("Harbor Lights", 5, 3, 0), ("Afterglow", 4, 41, 5));
+        // Per-track artist (compilation-style). No cover art is shown for these in the grid.
+        void Various(string album, uint year, string genre, params (string Artist, string Title, int Mins, int Secs, int Rating)[] tracks)
+        {
+            for (int i = 0; i < tracks.Length; i++)
+            {
+                var t = tracks[i];
+                items.Add(new MediaItem
+                {
+                    Id = $"{album}/{i + 1}",
+                    Kind = MediaKind.Music,
+                    Title = t.Title,
+                    Artist = t.Artist,
+                    Album = album,
+                    Year = year,
+                    Genre = genre,
+                    Track = (uint)(i + 1),
+                    TotalTracks = (uint)tracks.Length,
+                    Duration = new TimeSpan(0, t.Mins, t.Secs),
+                    Rating = t.Rating > 0 ? t.Rating : null,
+                    Extension = ".flac",
+                    HasAlbumArt = false,
+                    IsAnalyzed = true,
+                });
+            }
+        }
 
-        Album("The Slow Mornings", "Paper Lanterns", 2021, "Indie",
-            ("First Light", 3, 9, 0), ("Cartography", 4, 2, 4), ("Paper Lanterns", 3, 47, 5),
-            ("Tin Roof", 2, 58, 0), ("The Long Way Home", 5, 22, 4));
+        // -- Mandie NRG / DJ Nine - their own releases (cover art cleared for display) --
+        Album("Mandie NRG feat. DJ Nine", "The Beat Online", 2023, "Eurobeat", hasArt: true,
+            ("The Beat Online (Extended Version)", 5, 48, 5),
+            ("The Beat Online (Instrumental Version)", 5, 48, 0),
+            ("The Beat Online (Acappella Version)", 4, 30, 0),
+            ("The Beat Online (DJ Nine's Radio Edit)", 3, 42, 4));
 
-        Album("Foxglove Choir", "Granite & Gold", 2023, "Folk",
-            ("Quarry Song", 4, 11, 0), ("Goldenrod", 3, 33, 5), ("Granite", 4, 55, 0),
-            ("Embers", 3, 20, 4));
+        // -- Japanese-script titles - DataGrid CJK showcase (album name in JP too).
+        //    Placed high so it's visible in the library screenshot. --
+        Various("ユーロビート・ベスト", 2019, "Eurobeat",
+            ("Key-A-Kiss", "デラックス", 4, 2, 4),
+            ("越田Rute隆人, あき", "Scream Out!", 3, 58, 5),
+            ("Queue", "愛してる", 4, 14, 0),
+            ("MAX", "あの夏へと", 4, 7, 0),
+            ("橘花音", "劫火の華", 4, 22, 5));
+
+        Album("Mandie NRG", "Driver's High", 2024, "Eurobeat", hasArt: true,
+            ("Driver's High (Extended)", 5, 30, 5),
+            ("Driver's High (Instrumental)", 5, 30, 0),
+            ("Driver's High (Acappella)", 4, 12, 0),
+            ("Driver's High (Last Version)", 4, 5, 0));
+
+        Album("Mandie NRG", "Tokyo Clash (Kaiju Red Alarm)", 2026, "Eurobeat", hasArt: true,
+            ("Tokyo Clash (Kaiju Red Alarm) (Extended)", 5, 55, 4),
+            ("Tokyo Clash (Kaiju Red Alarm) (Instrumental)", 5, 55, 0),
+            ("Tokyo Clash (Kaiju Red Alarm) (Acappella)", 4, 20, 0));
+
+        // -- Popular Super Eurobeat (metadata via eurobeat.online, CC BY 4.0) --
+        Various("Super Eurobeat", 2001, "Eurobeat",
+            ("Niko", "Night Of Fire", 5, 1, 5),
+            ("Dave Rodgers", "Deja Vu", 4, 36, 5),
+            ("Domino", "Tora Tora Tora", 4, 12, 4),
+            ("Lolita", "Try Me (I Need To Be Needed)", 4, 48, 0),
+            ("Mega NRG Man", "Seventies", 4, 20, 0),
+            ("Go Go Girls", "One Night In Arabia", 4, 5, 4),
+            ("Cherry", "Yesterday", 4, 31, 0),
+            ("Virginelle", "Fantasy", 4, 16, 0),
+            ("DJ NRG", "Kamikaze", 4, 50, 0),
+            ("Edo Boys", "No One Sleep In Tokyo", 4, 9, 5));
 
         return items;
     }

@@ -3,6 +3,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using OrgZ.ViewModels;
+using OrgZ.Views;
 
 namespace OrgZ.Controls;
 
@@ -14,6 +15,14 @@ public partial class RadioFilterPanel : UserControl
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+
+    private void CollapseAll_Click(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is MainWindow window)
+        {
+            window.CollapseAllRowGroups();
+        }
+    }
 
     private async void AddStation_Click(object? sender, RoutedEventArgs e)
     {

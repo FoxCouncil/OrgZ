@@ -25,6 +25,12 @@
                     VerticalAlignment="Center">
                 <i:Icon Value="fa-solid fa-plus" FontSize="14" />
             </Button>
+
+            <Button Click="CollapseAll_Click"
+                    ToolTip.Tip="Collapse all categories"
+                    VerticalAlignment="Center">
+                <i:Icon Value="fa-solid fa-angles-up" FontSize="14" />
+            </Button>
         </StackPanel>
     </Border>
 </UserControl>
