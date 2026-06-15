@@ -17,8 +17,11 @@ OrgZ helps you manage your local music library and discover internet radio stati
 ## Key Features
 
 - **Music Library** — Scan and organize your local audio files with full metadata extraction
-- **Radio Stations** — Browse and stream from over 95,000 internet radio stations
+- **CD Ripping** — Rip audio CDs to FLAC or MP3 with MusicBrainz metadata and cover art
+- **Radio Stations** — Browse and stream internet radio from Radio Browser and SHOUTcast
+- **Podcasts** — Subscribe to shows, auto-download episodes on your own rules, and resume playback
 - **Favorites** — Star your favorite tracks and stations for quick access
+- **Devices** — Detect iPods (stock firmware and Rockbox) and sync music, playlists, and album art
 - **Playback Continuity** — Navigate freely while your music keeps playing from where you started
 - **System Integration** — Windows media keys, taskbar controls, and System Media Transport Controls
 

@@ -16,6 +16,16 @@ Access settings via **File > Settings** or the native menu bar.
 - **Shuffle by** — Shuffle by Song or Album
 - **Auto-advance to next track** — Automatically play the next track when the current one ends
 
+## Podcasts
+
+Defaults applied to every subscription (each can be overridden from the podcast's own page):
+
+- **Check for new episodes** — Hourly, Daily, Weekly, or Manually
+- **When new episodes are available** — Download all, Download the most recent one, or Do nothing
+- **Keep** — all, unplayed only, or the last 1 / 2 / 5 / 10 episodes
+
+**Downloads** shows the download folder (with a button to open it) and the space used, plus **Clear downloads** to remove them and **Refresh subscriptions now** to check immediately. See [Podcasts](features/podcasts.md) for the full workflow.
+
 ## Stats
 
 View detailed statistics about your library including track counts, file types, total duration, and radio station breakdowns.

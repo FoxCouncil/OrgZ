@@ -16,6 +16,10 @@ OrgZ integrates with two radio station directories to give you access to thousan
 3. Use the **Country** and **Genre** dropdowns at the bottom to filter stations
 4. Double-click a station to start streaming
 
+## Genre Grouping
+
+Stations are grouped by genre under collapsible headers. Click a header to collapse or expand that genre; the state is remembered per view, so switching away and back to Radio restores it. The **collapse-all** button in the filter bar collapses every genre at once.
+
 ## Full Sync
 
 Click the sync button in the filter panel to download the complete station database (~95,000 stations). This takes a few minutes but only needs to be done occasionally.
