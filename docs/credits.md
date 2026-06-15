@@ -1,5 +1,7 @@
 # Credits
 
+*Made Because I Love A 🐯!*
+
 ## Eurobeat sample library
 
 The music shown throughout this manual's screenshots is real Eurobeat, used with the
