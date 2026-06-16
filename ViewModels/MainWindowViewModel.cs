@@ -222,16 +222,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             LibraryItems.Add(new() { Name = "Bad Format", Icon = "fa-solid fa-triangle-exclamation", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "BadFormat" });
         }
 
-        // Preserve selection if the current view still exists after the rebuild
+        // Preserve selection if the current view still exists after the rebuild. Suppress the
+        // Podcasts nav reset for this programmatic re-selection: a rebuild (e.g. the first
+        // subscribe adding the Subscriptions row) must not pull the panel off the feed the user
+        // is viewing back to the store.
         if (selectedKey != null)
         {
             var restore = LibraryItems.FirstOrDefault(i => i.ViewConfigKey == selectedKey);
             if (restore != null)
             {
-                SelectedSidebarItem = restore;
+                _suppressPodcastNavReset = true;
+                try { SelectedSidebarItem = restore; }
+                finally { _suppressPodcastNavReset = false; }
             }
         }
     }
+
+    // Set while a sidebar rebuild re-selects the current item, so OnSelectedSidebarItemChanged
+    // doesn't treat that programmatic re-selection as the user clicking a Podcasts root and reset
+    // the panel's navigation off the feed they're viewing.
+    private bool _suppressPodcastNavReset;
 
     internal ObservableCollection<SidebarItem> PlaylistItems { get; } =
     [
@@ -912,12 +922,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(ShowCdInfoBar));
 
-        // The indented "Subscriptions" row opens the Podcasts panel's subscriptions view.
-        // Guard on the current view so returning to it (e.g. from Music) doesn't re-navigate
-        // and push a duplicate onto the panel's back stack.
-        if (value is { IsSubItem: true, ViewConfigKey: "Podcasts" } && Podcasts is { CurrentView: not PodcastsView.Subscriptions })
+        // The Podcasts sidebar roots are authoritative navigation: clicking "Podcasts" always
+        // shows the store, clicking the indented "Subscriptions" row always shows the subscriptions
+        // list. Viewing a single podcast (feed detail) is a sub-state that can be reached from
+        // either root; clicking a root resets to that root's home. _suppressPodcastNavReset skips
+        // this when the change came from a sidebar REBUILD re-selecting the item (e.g. after the
+        // first subscribe), so the panel isn't yanked off a feed the user is on.
+        if (!_suppressPodcastNavReset && value?.ViewConfigKey == "Podcasts" && Podcasts is not null)
         {
-            Podcasts.ShowSubscriptions();
+            if (value.IsSubItem)
+            {
+                Podcasts.ActivateSubscriptionsRoot();
+            }
+            else
+            {
+                Podcasts.ActivateStoreRoot();
+            }
         }
 
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
