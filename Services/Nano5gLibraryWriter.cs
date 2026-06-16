@@ -1,0 +1,218 @@
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
+
+using System.Security.Cryptography;
+using Microsoft.Data.Sqlite;
+
+namespace OrgZ.Services;
+
+/// <summary>
+/// Inserts tracks into an iPod Nano 5G <c>iTunes Library.itlp</c> SQLite set
+/// (Library.itdb + Locations.itdb + Dynamic.itdb), mirroring the row pattern iTunes
+/// writes, then re-signs <c>Locations.itdb.cbk</c> via <see cref="ITunesLocationsCbk"/>.
+///
+/// Schema reverse-engineered from a real Nano 5G. Notes:
+///  - <c>item</c>/<c>album</c>/<c>artist</c> use random 64-bit persistent ids; <c>composer</c>,
+///    <c>track_artist</c>, and <c>genre_map</c> use small sequential ids (matching iTunes).
+///  - timestamps are CFAbsoluteTime (seconds since 2001-01-01 UTC).
+///  - <c>location.location_type</c> is the FourCC "FILE" (0x46494C45); <c>extension</c> is the
+///    upper-cased file extension as a space-padded big-endian FourCC ("MP3 " = 0x4D503320).
+///  - the per-device hash72 seed (iv/rnd) is recovered from the *current* (consistent) cbk
+///    before editing, then used to re-sign the updated Locations.itdb.
+/// </summary>
+public sealed class Nano5gLibraryWriter
+{
+    public sealed record TrackInsert(
+        string Title,
+        string Artist,
+        string Album,
+        string? AlbumArtist,
+        string? Genre,
+        long DurationMs,
+        int TrackNumber,
+        int DiscNumber,
+        int Year,
+        int AudioFormat,       // e.g. 301 = MP3
+        int BitRate,
+        int SampleRate,
+        int Channels,
+        long FileSize,
+        string LocationRelative, // e.g. "F12/ABCD.mp3" under iPod_Control/Music
+        int ExtensionFourCc,     // "MP3 " => 0x4D503320
+        int KindId);             // location_kind_map id (1 = "MPEG audio file")
+
+    private const int FourCcFile = 0x46494C45; // "FILE"
+
+    private readonly string _itlpDir;
+
+    public Nano5gLibraryWriter(string itlpDir) => _itlpDir = itlpDir;
+
+    /// <summary>Inserts one track across the three databases and re-signs the cbk. Returns its item pid.</summary>
+    public long AddTrack(TrackInsert t)
+    {
+        var libPath = Path.Combine(_itlpDir, "Library.itdb");
+        var locPath = Path.Combine(_itlpDir, "Locations.itdb");
+        var dynPath = Path.Combine(_itlpDir, "Dynamic.itdb");
+        var cbkPath = locPath + ".cbk";
+
+        // Recover the hash72 seed from the cbk while it still matches Locations.itdb.
+        if (!ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
+        {
+            throw new InvalidOperationException("Could not recover the device's hash72 seed from Locations.itdb.cbk.");
+        }
+
+        long itemPid;
+        using (var lib = Open(libPath))
+        {
+            using var tx = lib.BeginTransaction();
+
+            long containerPid = ScalarLong(lib, "SELECT primary_container_pid FROM db_info LIMIT 1");
+            long artistPid = FindOrCreateArtist(lib, t.Artist);
+            long albumPid = FindOrCreateAlbum(lib, t.Album, artistPid);
+            long trackArtistPid = FindOrCreateTrackArtist(lib, t.Artist);
+            long genreId = string.IsNullOrEmpty(t.Genre) ? 0 : FindOrCreateGenre(lib, t.Genre!);
+            itemPid = NewRandomPid(lib, "item");
+
+            Exec(lib, """
+                INSERT INTO item
+                  (pid, media_kind, is_song, date_modified, year, total_time_ms, track_number, disc_number,
+                   genre_id, album_pid, artist_pid, track_artist_pid,
+                   title, artist, album, album_artist, sort_title, sort_artist, sort_album,
+                   title_order, artist_order, album_order, genre_order, album_artist_order, physical_order)
+                VALUES
+                  ($pid, 1, 1, $dm, $yr, $dur, $tn, $dn,
+                   $gid, $apid, $arpid, $tapid,
+                   $title, $artist, $album, $aa, $title, $artist, $album,
+                   100, 100, 100, 100, 100, $po)
+                """,
+                ("$pid", itemPid), ("$dm", Cf2001Now()), ("$yr", t.Year), ("$dur", t.DurationMs),
+                ("$tn", t.TrackNumber), ("$dn", t.DiscNumber), ("$gid", genreId),
+                ("$apid", albumPid), ("$arpid", artistPid), ("$tapid", trackArtistPid),
+                ("$title", t.Title), ("$artist", t.Artist), ("$album", t.Album),
+                ("$aa", (object?)t.AlbumArtist ?? DBNull.Value),
+                ("$po", ScalarLong(lib, "SELECT COALESCE(MAX(physical_order),0)+1 FROM item")));
+
+            Exec(lib, """
+                INSERT INTO avformat_info (item_pid, sub_id, audio_format, bit_rate, channels, sample_rate, duration)
+                VALUES ($pid, 0, $fmt, $br, $ch, $sr, $dur)
+                """,
+                ("$pid", itemPid), ("$fmt", t.AudioFormat), ("$br", t.BitRate),
+                ("$ch", t.Channels), ("$sr", (double)t.SampleRate), ("$dur", t.DurationMs * 1000));
+
+            Exec(lib, """
+                INSERT INTO item_to_container (item_pid, container_pid, physical_order, shuffle_order)
+                VALUES ($pid, $cpid, $po, NULL)
+                """,
+                ("$pid", itemPid), ("$cpid", containerPid),
+                ("$po", ScalarLong(lib, "SELECT COALESCE(MAX(physical_order),0)+1 FROM item_to_container WHERE container_pid=$c", ("$c", containerPid))));
+
+            tx.Commit();
+        }
+
+        using (var loc = Open(locPath))
+        {
+            using var tx = loc.BeginTransaction();
+            long baseId = ScalarLong(loc, "SELECT COALESCE((SELECT id FROM base_location WHERE path='iPod_Control/Music' LIMIT 1), 1)");
+            Exec(loc, """
+                INSERT INTO location
+                  (item_pid, sub_id, base_location_id, location_type, location, extension, kind_id, date_created, file_size)
+                VALUES ($pid, 0, $base, $lt, $loc, $ext, $kind, $dc, $fs)
+                """,
+                ("$pid", itemPid), ("$base", baseId), ("$lt", FourCcFile), ("$loc", t.LocationRelative),
+                ("$ext", t.ExtensionFourCc), ("$kind", t.KindId), ("$dc", Cf2001Now()), ("$fs", t.FileSize));
+            tx.Commit();
+        }
+
+        if (File.Exists(dynPath))
+        {
+            using var dyn = Open(dynPath);
+            using var tx = dyn.BeginTransaction();
+            Exec(dyn, "INSERT INTO item_stats (item_pid) VALUES ($pid)", ("$pid", itemPid));
+            tx.Commit();
+        }
+
+        // Re-sign the now-modified Locations.itdb with the recovered seed.
+        File.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
+        return itemPid;
+    }
+
+    // ── find-or-create ───────────────────────────────────────────────────────
+
+    private static long FindOrCreateArtist(SqliteConnection c, string name)
+    {
+        long pid = ScalarLong(c, "SELECT pid FROM artist WHERE name=$n LIMIT 1", ("$n", name));
+        if (pid != 0) { return pid; }
+        pid = NewRandomPid(c, "artist");
+        Exec(c, "INSERT INTO artist (pid, kind, name, sort_name, name_order, has_songs) VALUES ($p,2,$n,$n,100,1)", ("$p", pid), ("$n", name));
+        return pid;
+    }
+
+    private static long FindOrCreateAlbum(SqliteConnection c, string name, long artistPid)
+    {
+        long pid = ScalarLong(c, "SELECT pid FROM album WHERE name=$n AND artist_pid=$a LIMIT 1", ("$n", name), ("$a", artistPid));
+        if (pid != 0) { return pid; }
+        pid = NewRandomPid(c, "album");
+        Exec(c, "INSERT INTO album (pid, kind, name, sort_name, artist_pid, name_order, sort_order, has_songs) VALUES ($p,2,$n,$n,$a,100,100,1)", ("$p", pid), ("$n", name), ("$a", artistPid));
+        return pid;
+    }
+
+    private static long FindOrCreateTrackArtist(SqliteConnection c, string name)
+    {
+        long pid = ScalarLong(c, "SELECT pid FROM track_artist WHERE name=$n LIMIT 1", ("$n", name));
+        if (pid != 0) { return pid; }
+        pid = ScalarLong(c, "SELECT COALESCE(MAX(pid),0)+1 FROM track_artist");
+        Exec(c, "INSERT INTO track_artist (pid, name, sort_name, name_order, has_songs, has_non_compilation_tracks) VALUES ($p,$n,$n,100,1,1)", ("$p", pid), ("$n", name));
+        return pid;
+    }
+
+    private static long FindOrCreateGenre(SqliteConnection c, string genre)
+    {
+        long id = ScalarLong(c, "SELECT id FROM genre_map WHERE genre=$g LIMIT 1", ("$g", genre));
+        if (id != 0) { return id; }
+        id = ScalarLong(c, "SELECT COALESCE(MAX(id),0)+1 FROM genre_map");
+        Exec(c, "INSERT INTO genre_map (id, genre, genre_order, has_music) VALUES ($i,$g,$o,1)", ("$i", id), ("$g", genre), ("$o", id * 100));
+        return id;
+    }
+
+    // ── sqlite helpers ─────────────────────────────────────────────────────────
+
+    private static SqliteConnection Open(string path)
+    {
+        // Pooling off: these live on a removable device - the file handle must release on Dispose
+        // (so the volume can be ejected and the .itdb re-read/re-signed) rather than linger in a pool.
+        var c = new SqliteConnection($"Data Source={path};Pooling=False");
+        c.Open();
+        return c;
+    }
+
+    private static void Exec(SqliteConnection c, string sql, params (string Name, object Value)[] ps)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var (name, value) in ps) { cmd.Parameters.AddWithValue(name, value); }
+        cmd.ExecuteNonQuery();
+    }
+
+    private static long ScalarLong(SqliteConnection c, string sql, params (string Name, object Value)[] ps)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var (name, value) in ps) { cmd.Parameters.AddWithValue(name, value); }
+        var o = cmd.ExecuteScalar();
+        return o is null or DBNull ? 0 : Convert.ToInt64(o);
+    }
+
+    private static long NewRandomPid(SqliteConnection c, string table)
+    {
+        while (true)
+        {
+            Span<byte> b = stackalloc byte[8];
+            RandomNumberGenerator.Fill(b);
+            long pid = BitConverter.ToInt64(b);
+            if (pid == 0) { continue; }
+            if (ScalarLong(c, $"SELECT COUNT(*) FROM {table} WHERE pid=$p", ("$p", pid)) == 0) { return pid; }
+        }
+    }
+
+    private static long Cf2001Now()
+        => (long)(DateTime.UtcNow - new DateTime(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+}
