@@ -238,6 +238,10 @@ public static class IPodScsiInquiry
 
         using (handle)
         {
+            // Drain any pending sense from a prior (possibly OS-issued) command first, so a stale
+            // CHECK CONDITION can't be misattributed to our first INQUIRY.
+            DrainRequestSense(handle);
+
             // Step 1: read VPD 0xC0 to discover which VPD pages this device supports.
             // Three possible outcomes:
             //   (a) Success with pages ≥0xC2 → read XML plist from newer iPods
@@ -252,20 +256,34 @@ public static class IPodScsiInquiry
             if (page0xC0 == null || page0xC0.Length < 4)
             {
                 log.AppendLine($"  FAIL: {err0xC0 ?? "no data"}");
-                log.AppendLine("  (device rejects EVPD — will try Apple vendor opcode 0xC6 instead)");
+                log.AppendLine("  (no usable page directory — will try Apple vendor opcode 0xC6 instead)");
             }
             else
             {
-                int page0LenBE = (page0xC0[2] << 8) | page0xC0[3];
-                int supportedCount = Math.Min(page0LenBE, page0xC0.Length - 4);
-                log.AppendLine($"  got {supportedCount} supported page codes");
+                // Raw header dump so we can see exactly what the device returns to 12 01 C0 00 FC 00.
+                var head = new StringBuilder();
+                for (int i = 0; i < Math.Min(16, page0xC0.Length); i++)
+                {
+                    head.Append($"{page0xC0[i]:X2} ");
+                }
+                log.AppendLine($"  0xC0 raw[0..16]: {head.ToString().TrimEnd()}");
+
+                // libgpod reads the directory length from the single byte 3, then each following
+                // byte is a page number. Accept every listed page (not just >=0xC2) - older code
+                // dropped legitimate 0xC0/0xC1 entries.
+                int supportedCount = Math.Min((int)page0xC0[3], page0xC0.Length - 4);
+                log.AppendLine($"  page directory: {supportedCount} entries");
 
                 var codeList = new StringBuilder();
                 for (int i = 0; i < supportedCount; i++)
                 {
                     var code = page0xC0[4 + i];
+                    if (code == 0x00)
+                    {
+                        break;  // libgpod treats the directory as null-terminated
+                    }
                     codeList.Append($"0x{code:X2} ");
-                    if (code >= 0xC2 && code <= 0xFF)
+                    if (code != 0xC0)  // no floor; only skip the directory's own page number
                     {
                         supportedPages.Add(code);
                     }
@@ -390,7 +408,202 @@ public static class IPodScsiInquiry
 #endif
     }
 
+    /// <summary>
+    /// Focused INQUIRY diagnostics for the "device vs our CDB" question: a standard INQUIRY
+    /// (EVPD=0) for the SCSI compliance byte + target sanity, VPD page 0x00 (the supported-pages
+    /// list, noting its claimed length vs bytes actually returned), and VPD page 0xC0 (the
+    /// device-info directory). If 0x00 lists 0xC0 but 0xC0 still fails, retries 0xC0 at 0xFF and a
+    /// two-step exact-length read. Captures CDB, header, byte 3, non-zero bytes, and decoded sense
+    /// for each. Needs admin (raw PhysicalDrive).
+    /// </summary>
+    public static string RunInquiryDiagnostics(string driveLetter)
+    {
+        var log = new StringBuilder();
+        log.AppendLine($"=== INQUIRY diagnostics on {driveLetter} ===");
 #if WINDOWS
+        var letter = driveLetter.TrimEnd('\\', '/');
+        if (letter.Length != 2 || letter[1] != ':')
+        {
+            log.AppendLine($"FAIL: invalid drive letter '{driveLetter}'");
+            return log.ToString();
+        }
+
+        int physicalDriveNumber;
+        using (var volHandle = CreateFile($@"\\.\{letter}", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero))
+        {
+            if (volHandle.IsInvalid) { log.AppendLine($"FAIL: open volume err={Marshal.GetLastWin32Error()}"); return log.ToString(); }
+            int sdnSize = Marshal.SizeOf<STORAGE_DEVICE_NUMBER>();
+            var sdnBuf = Marshal.AllocHGlobal(sdnSize);
+            try
+            {
+                if (!DeviceIoControl(volHandle, IOCTL_STORAGE_GET_DEVICE_NUMBER, IntPtr.Zero, 0, sdnBuf, (uint)sdnSize, out _, IntPtr.Zero))
+                { log.AppendLine($"FAIL: GET_DEVICE_NUMBER err={Marshal.GetLastWin32Error()}"); return log.ToString(); }
+                physicalDriveNumber = (int)Marshal.PtrToStructure<STORAGE_DEVICE_NUMBER>(sdnBuf).DeviceNumber;
+            }
+            finally { Marshal.FreeHGlobal(sdnBuf); }
+        }
+
+        using var handle = CreateFile($@"\\.\PhysicalDrive{physicalDriveNumber}", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            int err = Marshal.GetLastWin32Error();
+            log.AppendLine($"FAIL: open PhysicalDrive{physicalDriveNumber} err={err} ({Win32ErrorName(err)})");
+            return log.ToString();
+        }
+        log.AppendLine($"PhysicalDrive{physicalDriveNumber} opened R+W");
+
+        (byte[] data, byte status) Probe(string label, bool evpd, byte page, int alloc)
+        {
+            var (data, status, sense, werr) = InquiryProbe(handle, evpd, page, alloc);
+            var cdb = $"12 {(evpd ? 1 : 0):X2} {page:X2} {(alloc >> 8) & 0xFF:X2} {alloc & 0xFF:X2} 00";
+            if (werr != 0)
+            {
+                log.AppendLine($"{label}: CDB {cdb} -> DeviceIoControl err={werr} ({Win32ErrorName(werr)})");
+                return (data, 0xFF);
+            }
+            int nonzero = data.Length;
+            while (nonzero > 0 && data[nonzero - 1] == 0) { nonzero--; }
+            var hex = new StringBuilder();
+            for (int i = 0; i < Math.Min(32, data.Length); i++) { hex.Append($"{data[i]:X2} "); }
+            var senseStr = status != 0 ? $" sense K/C/Q={sense[2] & 0x0F:X}/{sense[12]:X2}/{sense[13]:X2}" : "";
+            log.AppendLine($"{label}: CDB {cdb}  alloc={alloc}");
+            log.AppendLine($"    status=0x{status:X2}{senseStr}  byte3(len)={data[3]}  nonzeroBytesReturned={nonzero}");
+            log.AppendLine($"    hdr[0..32]: {hex.ToString().TrimEnd()}");
+            return (data, status);
+        }
+
+        Probe("1) STD INQUIRY EVPD=0", false, 0x00, 0x24);
+        var (p00, s00) = Probe("2) VPD 0x00 supported-pages", true, 0x00, 0xFC);
+        var (_, sC0) = Probe("3) VPD 0xC0 device-info dir", true, 0xC0, 0xFC);
+
+        bool listsC0 = false;
+        if (s00 == 0 && p00.Length >= 4)
+        {
+            int n = Math.Min(p00[3], p00.Length - 4);
+            for (int i = 0; i < n; i++) { if (p00[4 + i] == 0xC0) { listsC0 = true; } }
+            log.AppendLine($"--> page 0x00: claims {p00[3]} page-bytes; lists 0xC0 = {listsC0}");
+        }
+        else
+        {
+            log.AppendLine($"--> page 0x00 unavailable (status=0x{s00:X2}) — can't read supported-pages list");
+        }
+
+        if (listsC0 && sC0 != 0)
+        {
+            log.AppendLine("middle-leaf: 0xC0 is listed but 0xC0@0xFC failed — retrying 0xFF, then exact length...");
+            Probe("4a) VPD 0xC0 alloc 0xFF", true, 0xC0, 0xFF);
+            var (peek, peekStatus) = Probe("4b) VPD 0xC0 short peek (alloc 5)", true, 0xC0, 0x05);
+            if (peekStatus == 0 && peek.Length >= 4 && peek[3] > 0)
+            {
+                Probe($"4c) VPD 0xC0 exact alloc {peek[3] + 4}", true, 0xC0, peek[3] + 4);
+            }
+        }
+
+        return log.ToString();
+#else
+        log.AppendLine("(SCSI diagnostics not supported on this platform)");
+        return log.ToString();
+#endif
+    }
+
+#if WINDOWS
+    /// <summary>
+    /// Issues a REQUEST SENSE (opcode 0x03) and discards the result, clearing any pending
+    /// contingent-allegiance / deferred sense on the target before the first real command - so a
+    /// CHECK CONDITION left by a prior (e.g. OS-issued) command can't be misread as our INQUIRY's.
+    /// Best-effort: failures are ignored.
+    /// </summary>
+    private static void DrainRequestSense(SafeFileHandleWrapper handle)
+    {
+        const int senseSize = 32;
+        const int dataSize = 252;
+        int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
+        int totalSize = structSize + senseSize + dataSize;
+        var buffer = Marshal.AllocHGlobal(totalSize);
+        try
+        {
+            for (int i = 0; i < totalSize; i++) { Marshal.WriteByte(buffer, i, 0); }
+            var cdb = new byte[16];
+            cdb[0] = 0x03;                 // REQUEST SENSE
+            cdb[4] = (byte)dataSize;       // allocation length (single byte for REQUEST SENSE)
+
+            var spt = new SCSI_PASS_THROUGH
+            {
+                Length             = (ushort)structSize,
+                CdbLength          = 6,
+                SenseInfoLength    = senseSize,
+                DataIn             = SCSI_IOCTL_DATA_IN,
+                DataTransferLength = (uint)dataSize,
+                TimeOutValue       = 10,
+                SenseInfoOffset    = (uint)structSize,
+                DataBufferOffset   = new IntPtr(structSize + senseSize),
+                Cdb                = cdb,
+            };
+            Marshal.StructureToPtr(spt, buffer, false);
+            DeviceIoControl(handle, IOCTL_SCSI_PASS_THROUGH, buffer, (uint)totalSize, buffer, (uint)totalSize, out _, IntPtr.Zero);
+        }
+        catch
+        {
+            // best-effort drain
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>
+    /// General INQUIRY sender for diagnostics: builds a 6-byte CDB (EVPD bit, page, 2-byte
+    /// allocation length at CDB[3..4]) and returns the raw response, SCSI status, sense, and
+    /// the DeviceIoControl error. Allocation length should keep its low byte non-zero and ≤0xFF
+    /// - some iPod targets honor only the low alloc byte.
+    /// </summary>
+    private static (byte[] data, byte status, byte[] sense, int win32err) InquiryProbe(SafeFileHandleWrapper handle, bool evpd, byte page, int alloc)
+    {
+        const int senseSize = 32;
+        int dataSize = Math.Max(4, alloc);
+        int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
+        int totalSize = structSize + senseSize + dataSize;
+        var buffer = Marshal.AllocHGlobal(totalSize);
+        try
+        {
+            for (int i = 0; i < totalSize; i++) { Marshal.WriteByte(buffer, i, 0); }
+            var cdb = new byte[16];
+            cdb[0] = SCSI_INQUIRY;
+            cdb[1] = (byte)(evpd ? 0x01 : 0x00);
+            cdb[2] = page;
+            cdb[3] = (byte)((alloc >> 8) & 0xFF);
+            cdb[4] = (byte)(alloc & 0xFF);
+
+            var spt = new SCSI_PASS_THROUGH
+            {
+                Length             = (ushort)structSize,
+                CdbLength          = 6,
+                SenseInfoLength    = senseSize,
+                DataIn             = SCSI_IOCTL_DATA_IN,
+                DataTransferLength = (uint)dataSize,
+                TimeOutValue       = 10,
+                SenseInfoOffset    = (uint)structSize,
+                DataBufferOffset   = new IntPtr(structSize + senseSize),
+                Cdb                = cdb,
+            };
+            Marshal.StructureToPtr(spt, buffer, false);
+
+            bool ok = DeviceIoControl(handle, IOCTL_SCSI_PASS_THROUGH, buffer, (uint)totalSize, buffer, (uint)totalSize, out _, IntPtr.Zero);
+            int werr = ok ? 0 : Marshal.GetLastWin32Error();
+            var result = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
+            var sense = new byte[senseSize];
+            Marshal.Copy(buffer + structSize, sense, 0, senseSize);
+            var data = new byte[dataSize];
+            Marshal.Copy(buffer + structSize + senseSize, data, 0, dataSize);
+            return (data, result.ScsiStatus, sense, werr);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     /// <summary>
     /// Sends Apple's vendor-specific 0xC6 READ command and returns the 256-byte ASCII
     /// SysInfo blob. Same SRB setup as InquiryVpd but 10-byte CDB and 256-byte data.
@@ -734,7 +947,12 @@ public static class IPodScsiInquiry
     {
         error = null;
         const int senseSize = 32;
-        const int dataSize = 4096;
+        // Allocation length MUST be 252 (0x00FC), matching libgpod's IPOD_XML_PAGE read. Apple's
+        // iPod firmware is picky about the INQUIRY allocation length on its vendor device-info
+        // pages: an oversized request (we used 4096) gets a malformed/empty page-list back -
+        // which is exactly why page 0xC0 reported "0 pages" on the Nano 5G. 252 is what the
+        // device-info pages were sized for, so the page list and each XML chunk come back whole.
+        const int dataSize = 252;
 
         // sizeof(SCSI_PASS_THROUGH) with default alignment - includes Cdb[16] inline.
         // x64 = 56, x86 = 44. This is what goes into sptd.Length and is the base for offsets.
@@ -798,7 +1016,12 @@ public static class IPodScsiInquiry
             var resultSpt = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
             if (resultSpt.ScsiStatus != 0)
             {
-                error = $"SCSI status=0x{resultSpt.ScsiStatus:X2} (device CHECK CONDITION — page unsupported?)";
+                var sense = new byte[senseSize];
+                Marshal.Copy(buffer + structSize, sense, 0, senseSize);
+                int sk = sense.Length > 2 ? (sense[2] & 0x0F) : 0;
+                int asc = sense.Length > 12 ? sense[12] : 0;
+                int ascq = sense.Length > 13 ? sense[13] : 0;
+                error = $"SCSI status=0x{resultSpt.ScsiStatus:X2} sense K/C/Q={sk:X}/{asc:X2}/{ascq:X2}";
                 return null;
             }
 
@@ -875,6 +1098,66 @@ public static class IPodScsiInquiry
             Logging.For("IPodScsiInquiry").Warning(ex, "VPD plist parse failed");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Derives the human OS version from the device-info plist fields read over SCSI VPD -
+    /// the same data iTunes uses, and the only on-device source that works for NOR-firmware
+    /// Nanos (4G/5G+) whose firmware image never lands on the disk. Prefers the user-facing
+    /// <c>VisibleBuildID</c> over the internal <c>BuildID</c>, translating the encoded value
+    /// through <see cref="IPodBuildIdDatabase"/>. <paramref name="detail"/> always lists the
+    /// raw build-ID values so a translation MISS can be turned into a table entry from a real
+    /// capture. Returns null when no build ID is present or none translates.
+    /// </summary>
+    public static string? ExtractOsVersion(IReadOnlyDictionary<string, string> fields, string? generation, out string detail)
+    {
+        var sb = new StringBuilder();
+        string? result = null;
+
+        foreach (var key in new[] { "VisibleBuildID", "BuildID" })
+        {
+            if (!fields.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            // A value that already reads as a dotted version is taken verbatim.
+            if (System.Text.RegularExpressions.Regex.IsMatch(raw, @"^\d+\.\d+(\.\d+)?$"))
+            {
+                sb.AppendLine($"{key} = {raw} (literal version)");
+                result ??= raw;
+                continue;
+            }
+
+            if (TryParseBuildId(raw, out var buildId))
+            {
+                var v = IPodBuildIdDatabase.LookupVersion(generation, buildId);
+                sb.AppendLine($"{key} = {raw} (0x{buildId:X8}) -> {v ?? "MISS — add ([\"" + (generation ?? "?") + "\"], 0x" + buildId.ToString("X8") + ") to IPodBuildIdDatabase"}");
+                result ??= v;
+            }
+            else
+            {
+                sb.AppendLine($"{key} = {raw} (unparseable)");
+            }
+        }
+
+        if (sb.Length == 0)
+        {
+            sb.AppendLine("no VisibleBuildID / BuildID present in the device-info plist");
+        }
+
+        detail = sb.ToString();
+        return result;
+    }
+
+    private static bool TryParseBuildId(string raw, out uint value)
+    {
+        raw = raw.Trim();
+        if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            return uint.TryParse(raw.AsSpan(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out value);
+        }
+        return uint.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out value);
     }
 
     /// <summary>
