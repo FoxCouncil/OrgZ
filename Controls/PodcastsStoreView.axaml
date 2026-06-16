@@ -18,8 +18,8 @@
 		<StyleInclude Source="avares://OrgZ/Controls/PodcastStyles.axaml" />
 	</UserControl.Styles>
 
-	<StackPanel Margin="16" Spacing="2">
-		<!-- Featured hero strip -->
+	<StackPanel Margin="16,0,16,16" Spacing="2">
+		<!-- Featured hero strip - flush with the top (iTunes-style), no top gap. -->
 		<ItemsControl ItemsSource="{Binding Featured}">
 			<ItemsControl.ItemsPanel>
 				<ItemsPanelTemplate>
@@ -28,7 +28,7 @@
 			</ItemsControl.ItemsPanel>
 			<ItemsControl.ItemTemplate>
 				<DataTemplate DataType="models:PodcastFeed">
-					<Button Classes="podcastTile" Click="FeedTile_Click" Tag="{Binding}" Margin="6">
+					<Button Classes="podcastTile" Click="FeedTile_Click" Tag="{Binding}" Margin="6,0,6,6">
 						<Border Classes="tileArt" Height="160">
 							<Grid>
 								<Image img:RemoteImage.Url="{Binding DisplayImage}" Stretch="UniformToFill" />
