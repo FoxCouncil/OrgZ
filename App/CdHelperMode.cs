@@ -215,16 +215,36 @@ internal static class CdHelperMode
             return FailWith(progress, "DrivePath required for ipod-firmware-read");
         }
 
-        var version = IPodFirmwarePartition.TryReadOsosVersion(spec.DrivePath, spec.IpodGeneration, out var diagnostic);
+        // Preferred source: the device-info plist over SCSI VPD — the same data iTunes reads,
+        // carrying VisibleBuildID across the whole 4G→Nano 7G range, including the NOR-firmware
+        // Nanos (4G/5G+) whose firmware image never lands on the disk. Only fall back to the
+        // on-disk firmware-partition osos.vers for older HDD iPods that don't answer VPD.
+        var diag = new System.Text.StringBuilder();
+        string? version = null;
+
+        var fields = IPodScsiInquiry.TryReadDeviceInfo(spec.DrivePath, out _, out var vpdDiag);
+        diag.AppendLine(vpdDiag);
+        if (fields != null)
+        {
+            version = IPodScsiInquiry.ExtractOsVersion(fields, spec.IpodGeneration, out var verDetail);
+            diag.AppendLine(verDetail);
+        }
+
+        if (version == null)
+        {
+            diag.AppendLine("VPD yielded no version — falling back to firmware-partition osos.vers…");
+            version = IPodFirmwarePartition.TryReadOsosVersion(spec.DrivePath, spec.IpodGeneration, out var ososDiag);
+            diag.AppendLine(ososDiag);
+        }
 
         progress.WriteEvent(new CdHelperEvent
         {
             Type = "ipod-firmware-result",
             OsosVersion = version,
-            Message = diagnostic,
+            Message = diag.ToString(),
         });
 
-        log.Information("cd-helper: iPod firmware read done — version={Version}", version ?? "(unknown)");
+        log.Information("cd-helper: iPod version read done — version={Version}", version ?? "(unknown)");
         return version != null ? 0 : 3;
     }
 

@@ -460,9 +460,46 @@ public static class DeviceFingerprint
             ReadSysInfoExtendedPlist(sysInfoExtPath, fields);
         }
 
+        // Authoritative read — the SCSI INQUIRY EVPD page-0xC0 walk over the raw \\.\PhysicalDriveN
+        // (the method iTunes/libgpod use). The raw device needs admin, so this only runs when OrgZ
+        // is elevated; the full per-step diagnostic (incl. the raw 0xC0 bytes) is logged so we can
+        // see exactly what the device returns.
+        if (OperatingSystem.IsWindows() && IsProcessElevated())
+        {
+            if (ScsiDiagEnabled())
+            {
+                _log.Debug("iPod INQUIRY diagnostics on {Root}:\n{Report}", root, IPodScsiInquiry.RunInquiryDiagnostics(root));
+            }
+
+            var scsiFields = IPodScsiInquiry.TryReadDeviceInfo(root, out _, out var scsiDiag);
+            _log.Debug("iPod SCSI device-info read on {Root}:\n{Diag}", root, scsiDiag);
+            if (scsiFields != null)
+            {
+                var scsiVer = IPodScsiInquiry.ExtractOsVersion(scsiFields, device.IpodGeneration, out var verDetail);
+                _log.Debug("iPod SCSI version extract: {Detail}", verDetail);
+                if (!string.IsNullOrWhiteSpace(scsiVer))
+                {
+                    device.AppleFirmwareVersion = scsiVer;
+                }
+            }
+        }
+
+        // Fallback when the authoritative read yields nothing: the iPod's VoiceOver/Speakable
+        // manifest records the firmware BuildID it was generated against. Present on Nano 5G+ even
+        // when SysInfo/SysInfoExtended and the SCSI device-info pages are absent (e.g. a unit whose
+        // device-info was wiped on restore). A richer SysInfo visibleBuildID (below) overrides it.
+        if (string.IsNullOrWhiteSpace(device.AppleFirmwareVersion))
+        {
+            var speakableVersion = TryReadSpeakableBuildId(root);
+            if (speakableVersion != null)
+            {
+                device.AppleFirmwareVersion = speakableVersion;
+            }
+        }
+
         if (fields.Count == 0)
         {
-            _log.Debug("SysInfo: empty or missing at {SysInfoPath}", sysInfoPath);
+            _log.Debug("SysInfo: empty or missing at {SysInfoPath} (Apple OS version: {Ver})", sysInfoPath, device.AppleFirmwareVersion ?? "unknown");
             return;
         }
 
@@ -516,6 +553,94 @@ public static class DeviceFingerprint
         {
             device.Serial = guid;
         }
+    }
+
+    /// <summary>Debug seam: the verbose connect-time INQUIRY diagnostics dump runs only when a
+    /// sentinel file <c>scsi-diag.flag</c> exists in OrgZ's local-app-data folder (next to the
+    /// logs). Off in steady state — the production version read (<see cref="IPodScsiInquiry.TryReadDeviceInfo"/>)
+    /// runs regardless; this only toggles the extra per-page dump used to inspect a new unit.</summary>
+    private static bool ScsiDiagEnabled()
+    {
+        try
+        {
+            var flag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ", "scsi-diag.flag");
+            return File.Exists(flag);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>True when the current process is running elevated (admin) — gates the raw
+    /// <c>\\.\PhysicalDriveN</c> SCSI read, which Windows refuses to a standard user.</summary>
+    private static bool IsProcessElevated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the Apple OS version from the iPod's VoiceOver/Speakable manifest plists
+    /// (<c>ConfigInfo.plist</c>, then <c>UISS.plist</c>) under <c>iPod_Control/Speakable</c>.
+    /// Both carry a <c>&lt;key&gt;BuildID&lt;/key&gt;&lt;string&gt;…&lt;/string&gt;</c> with the
+    /// firmware build the spoken-menu content was generated for (e.g. "1.0.2") — written by the
+    /// iPod itself, readable without elevation. Returns "iPod OS X.Y.Z" or null if absent.
+    /// </summary>
+    private static string? TryReadSpeakableBuildId(string root)
+    {
+        foreach (var name in new[] { "ConfigInfo.plist", "UISS.plist" })
+        {
+            var path = Path.Combine(root, "iPod_Control", "Speakable", name);
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                var dict = System.Xml.Linq.XDocument.Load(path).Root?.Element("dict");
+                if (dict == null)
+                {
+                    continue;
+                }
+
+                string? key = null;
+                foreach (var el in dict.Elements())
+                {
+                    if (el.Name.LocalName == "key")
+                    {
+                        key = el.Value.Trim();
+                        continue;
+                    }
+                    if (string.Equals(key, "BuildID", StringComparison.OrdinalIgnoreCase)
+                        && el.Name.LocalName == "string"
+                        && !string.IsNullOrWhiteSpace(el.Value))
+                    {
+                        var build = el.Value.Trim();
+                        _log.Debug("Speakable BuildID from {File}: {Build}", name, build);
+                        return $"iPod OS {build}";
+                    }
+                    key = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "Failed reading Speakable plist {Path}", path);
+            }
+        }
+        return null;
     }
 
     /// <summary>
