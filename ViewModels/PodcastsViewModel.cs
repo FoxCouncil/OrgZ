@@ -298,13 +298,21 @@ public partial class PodcastsViewModel : ObservableObject
     // the box step back out of the results rather than jump straight home.
     private bool _feedListIsSearch;
 
-    // -- Navigation back-stack -------------------------------------------
+    // -- Navigation roots + back-stack -----------------------------------
     //
-    // The store is "home". Each forward navigation (open a feed, browse a genre,
-    // run a search) pushes a snapshot of the view it's leaving; Back pops and
-    // restores it — list contents and selected feed included — so it returns to
-    // where you actually came from without a network re-fetch. Empty stack == home.
-    private readonly Stack<NavEntry> _navStack = new();
+    // Two independent navigation roots — the Store and the Subscriptions list — each with its OWN
+    // back-stack and current view. The sidebar switches between them, restoring exactly where you
+    // left each (a feed you'd drilled into included); switching never resets. Within a root, each
+    // forward navigation (open a feed, browse a genre, run a search) pushes a snapshot of the view
+    // it's leaving; Back pops and restores it without a network re-fetch.
+    private readonly NavRoot _storeRoot = new() { Current = new NavEntry { View = PodcastsView.Store } };
+    private readonly NavRoot _subsRoot  = new() { Current = new NavEntry { View = PodcastsView.Subscriptions } };
+    private NavRoot? _activeRootField;
+    private NavRoot _activeRoot { get => _activeRootField ??= _storeRoot; set => _activeRootField = value; }
+
+    // The active root's back-stack. Every Push/Pop below operates on whichever root is currently
+    // showing, so Store and Subscriptions accumulate their histories separately.
+    private Stack<NavEntry> _navStack => _activeRoot.Stack;
 
     // -- Commands --------------------------------------------------------
 
@@ -322,6 +330,41 @@ public partial class PodcastsViewModel : ObservableObject
         {
             main.SearchText = "";
         }
+    }
+
+    /// <summary>
+    /// Selects the Store root from the sidebar, restoring its navigation exactly where it was left
+    /// (a drilled-into feed included). No-op — and crucially no reset — if it's already active.
+    /// </summary>
+    internal void ActivateStoreRoot() => SwitchRoot(_storeRoot);
+
+    /// <summary>
+    /// Selects the Subscriptions root from the sidebar, restoring its navigation and refreshing the
+    /// list. No-op if it's already active.
+    /// </summary>
+    internal void ActivateSubscriptionsRoot()
+    {
+        var entering = _activeRoot != _subsRoot;
+        SwitchRoot(_subsRoot);
+        if (entering)
+        {
+            ReloadSubscriptions();
+        }
+    }
+
+    /// <summary>
+    /// Swaps the active navigation root, saving the outgoing root's current view and restoring the
+    /// incoming root's. Each root keeps its own back-stack, so the two histories never bleed.
+    /// </summary>
+    private void SwitchRoot(NavRoot target)
+    {
+        if (_activeRoot == target)
+        {
+            return; // already on this root — preserve its navigation, don't reset
+        }
+        _activeRoot.Current = SnapshotCurrent();   // remember where we were in the outgoing root
+        _activeRoot = target;
+        RestoreEntry(target.Current);              // restore where we left the incoming root
     }
 
     /// <summary>
@@ -893,6 +936,16 @@ internal sealed class NavEntry
     public IReadOnlyList<PodcastFeed> FeedListItems { get; init; } = [];
     public PodcastFeed? SelectedFeed { get; init; }
     public IReadOnlyList<PodcastEpisodeRow> Episodes { get; init; } = [];
+}
+
+/// <summary>
+/// One sidebar navigation root (Store or Subscriptions): its own back-stack plus a snapshot of the
+/// view currently shown under it, so switching between roots restores each independently.
+/// </summary>
+internal sealed class NavRoot
+{
+    public Stack<NavEntry> Stack { get; } = new();
+    public NavEntry Current { get; set; } = new() { View = PodcastsView.Store };
 }
 
 public sealed class PodcastCategoryRail
