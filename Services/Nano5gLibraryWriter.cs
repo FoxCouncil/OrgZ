@@ -36,9 +36,9 @@ public sealed class Nano5gLibraryWriter
         int SampleRate,
         int Channels,
         long FileSize,
-        string LocationRelative, // e.g. "F12/ABCD.mp3" under iPod_Control/Music
-        int ExtensionFourCc,     // "MP3 " => 0x4D503320
-        int KindId);             // location_kind_map id (1 = "MPEG audio file")
+        string LocationRelative, // e.g. "F12/ABCD.m4a" under iPod_Control/Music
+        int ExtensionFourCc,     // FourCC of the extension: "MP3 "=0x4D503320, "M4A "=0x4D344120
+        string KindString);      // location_kind_map kind, e.g. "MPEG audio file", "Apple Lossless audio file"
 
     private const int FourCcFile = 0x46494C45; // "FILE"
 
@@ -61,6 +61,7 @@ public sealed class Nano5gLibraryWriter
         }
 
         long itemPid;
+        long kindId;
         using (var lib = Open(libPath))
         {
             using var tx = lib.BeginTransaction();
@@ -70,6 +71,7 @@ public sealed class Nano5gLibraryWriter
             long albumPid = FindOrCreateAlbum(lib, t.Album, artistPid);
             long trackArtistPid = FindOrCreateTrackArtist(lib, t.Artist);
             long genreId = string.IsNullOrEmpty(t.Genre) ? 0 : FindOrCreateGenre(lib, t.Genre!);
+            kindId = FindOrCreateLocationKind(lib, t.KindString);   // location_kind_map lives in Library.itdb
             itemPid = NewRandomPid(lib, "item");
 
             Exec(lib, """
@@ -118,7 +120,7 @@ public sealed class Nano5gLibraryWriter
                 VALUES ($pid, 0, $base, $lt, $loc, $ext, $kind, $dc, $fs)
                 """,
                 ("$pid", itemPid), ("$base", baseId), ("$lt", FourCcFile), ("$loc", t.LocationRelative),
-                ("$ext", t.ExtensionFourCc), ("$kind", t.KindId), ("$dc", Cf2001Now()), ("$fs", t.FileSize));
+                ("$ext", t.ExtensionFourCc), ("$kind", kindId), ("$dc", Cf2001Now()), ("$fs", t.FileSize));
             tx.Commit();
         }
 
@@ -244,6 +246,15 @@ public sealed class Nano5gLibraryWriter
         if (id != 0) { return id; }
         id = ScalarLong(c, "SELECT COALESCE(MAX(id),0)+1 FROM genre_map");
         Exec(c, "INSERT INTO genre_map (id, genre, genre_order, has_music) VALUES ($i,$g,$o,1)", ("$i", id), ("$g", genre), ("$o", id * 100));
+        return id;
+    }
+
+    private static long FindOrCreateLocationKind(SqliteConnection c, string kind)
+    {
+        long id = ScalarLong(c, "SELECT id FROM location_kind_map WHERE kind=$k LIMIT 1", ("$k", kind));
+        if (id != 0) { return id; }
+        id = ScalarLong(c, "SELECT COALESCE(MAX(id),0)+1 FROM location_kind_map");
+        Exec(c, "INSERT INTO location_kind_map (id, kind) VALUES ($i,$k)", ("$i", id), ("$k", kind));
         return id;
     }
 

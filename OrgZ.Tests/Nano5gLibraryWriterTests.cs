@@ -41,7 +41,7 @@ public class Nano5gLibraryWriterTests
                 Title: "OrgZ Test Track", Artist: "OrgZ Test Artist", Album: "OrgZ Test Album",
                 AlbumArtist: null, Genre: "Eurobeat", DurationMs: 210_000, TrackNumber: 1, DiscNumber: 1,
                 Year: 2026, AudioFormat: 301, BitRate: 256, SampleRate: 44100, Channels: 2,
-                FileSize: 6_900_000, LocationRelative: "F00/ORGZ.mp3", ExtensionFourCc: 0x4D503320, KindId: 1));
+                FileSize: 6_900_000, LocationRelative: "F00/ORGZ.mp3", ExtensionFourCc: 0x4D503320, KindString: "MPEG audio file"));
 
             using (var c = OpenRo(Path.Combine(tmp, "Library.itdb")))
             {
@@ -97,7 +97,7 @@ public class Nano5gLibraryWriterTests
                 Title: "Remove Me", Artist: "Orphan Artist XYZ", Album: "Orphan Album XYZ", AlbumArtist: null,
                 Genre: "OrphanGenreXYZ", DurationMs: 120_000, TrackNumber: 1, DiscNumber: 1, Year: 2026,
                 AudioFormat: 301, BitRate: 256, SampleRate: 44100, Channels: 2,
-                FileSize: 1_000_000, LocationRelative: "F00/RMVE.mp3", ExtensionFourCc: 0x4D503320, KindId: 1));
+                FileSize: 1_000_000, LocationRelative: "F00/RMVE.mp3", ExtensionFourCc: 0x4D503320, KindString: "MPEG audio file"));
 
             using (var c = OpenRo(Path.Combine(tmp, "Library.itdb")))
             {
