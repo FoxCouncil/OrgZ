@@ -138,6 +138,28 @@ public sealed class Nano5gLibraryWriter
     }
 
     /// <summary>
+    /// Links an ArtworkDB image to a track - sets <c>artwork_status</c> + <c>artwork_cache_id</c> on
+    /// the item row, which the firmware resolves to the ArtworkDB mhii of that image id. Library.itdb
+    /// isn't checksummed, so no cbk re-sign is needed.
+    /// </summary>
+    public void SetArtwork(long itemPid, int artworkCacheId)
+    {
+        using var lib = Open(Path.Combine(_itlpDir, "Library.itdb"));
+        using var tx = lib.BeginTransaction();
+        Exec(lib, "UPDATE item SET artwork_status=1, artwork_cache_id=$c WHERE pid=$p", ("$c", artworkCacheId), ("$p", itemPid));
+
+        // Cover Flow renders ALBUM art (album.artwork_item_pid -> a track that supplies the cover).
+        // Point this track's album at it when the album has no cover yet (matches iTunes: status 0).
+        long albumPid = ScalarLong(lib, "SELECT album_pid FROM item WHERE pid=$p", ("$p", itemPid));
+        if (albumPid != 0)
+        {
+            Exec(lib, "UPDATE album SET artwork_status=0, artwork_item_pid=$i WHERE pid=$a AND COALESCE(artwork_item_pid,0)=0",
+                ("$i", itemPid), ("$a", albumPid));
+        }
+        tx.Commit();
+    }
+
+    /// <summary>
     /// Removes a track: deletes its rows from all three databases, deletes the audio file under
     /// <paramref name="musicRoot"/>, prunes now-orphaned artist/album/track_artist/genre rows, and
     /// re-signs the cbk. Safe no-op if the item isn't present.
@@ -209,6 +231,14 @@ public sealed class Nano5gLibraryWriter
         {
             Exec(c, $"DELETE FROM {table} WHERE pid=$p", ("$p", pid));
         }
+    }
+
+    /// <summary>Looks up a track's item pid by its Locations.itdb relative path
+    /// (e.g. "F00/ABCD.m4a"). Returns 0 when not present.</summary>
+    public static long FindItemPidByLocation(string itlpDir, string locationRelative)
+    {
+        using var loc = Open(Path.Combine(itlpDir, "Locations.itdb"));
+        return ScalarLong(loc, "SELECT item_pid FROM location WHERE location=$l LIMIT 1", ("$l", locationRelative));
     }
 
     // ── find-or-create ───────────────────────────────────────────────────────

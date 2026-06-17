@@ -95,7 +95,7 @@ public static class IPodTrackImporter
         // iTunesDB - route to the SQLite writer (which re-signs Locations.itdb.cbk).
         if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash72)
         {
-            return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath,
+            return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath, generation,
                 title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, ct);
         }
 
@@ -163,7 +163,7 @@ public static class IPodTrackImporter
             // The track's dbid ties the iTunesDB MHIT to the ArtworkDB mhii.
             ulong dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue);
             var coverFormats = IPodCapabilities.CoverFormatsFor(generation);
-            var (hasArt, artSize) = await TryWriteArtworkAsync(mountPath, sourceFile, ffmpegPath, dbid, coverFormats, ct);
+            var (hasArt, artSize, _) = await TryWriteArtworkAsync(mountPath, sourceFile, ffmpegPath, dbid, coverFormats, ct);
 
             // --- iTunesDB: parse -> add -> normalize -> verify -> backup -> atomic write ---
             var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
@@ -240,13 +240,13 @@ public static class IPodTrackImporter
     /// <paramref name="dbid"/> to them. Returns (false, 0) and writes nothing when
     /// the generation has no validated art formats or the source has no cover art.
     /// </summary>
-    private static async Task<(bool ok, int artworkSize)> TryWriteArtworkAsync(
+    private static async Task<(bool ok, int artworkSize, int imageId)> TryWriteArtworkAsync(
         string mountPath, string sourceFile, string ffmpegPath, ulong dbid,
         IReadOnlyList<(int FormatId, int Width, int Height)> coverFormats, CancellationToken ct)
     {
         if (coverFormats.Count == 0)
         {
-            return (false, 0);   // generation without validated artwork formats - import without art
+            return (false, 0, 0);   // generation without validated artwork formats - import without art
         }
 
         try
@@ -281,14 +281,14 @@ public static class IPodTrackImporter
                 var staged = ithmb + ".new";
                 if (!await ExtractRgb565Async(ffmpegPath, sourceFile, w, h, staged, ct))
                 {
-                    return (false, 0);   // no cover stream / ffmpeg failed
+                    return (false, 0, 0);   // no cover stream / ffmpeg failed
                 }
                 var raw = await File.ReadAllBytesAsync(staged, ct);
                 File.Delete(staged);
                 if (raw.Length != expected)
                 {
                     _log.Warning("Thumbnail F{Fmt} is {Actual}B, expected {Expected}B", formatId, raw.Length, expected);
-                    return (false, 0);
+                    return (false, 0, 0);
                 }
                 // Append after any existing thumbnails already packed in this format's file.
                 long offset = File.Exists(ithmb) ? new FileInfo(ithmb).Length : 0;
@@ -315,12 +315,12 @@ public static class IPodTrackImporter
             File.Move(tmp, dbPath, overwrite: true);
 
             _log.Information("Wrote ArtworkDB image {ImageId} (+{Count} thumbnails, {Bytes}B); {Total} image(s) total", imageId, thumbs.Count, totalSize, allImages.Count);
-            return (true, totalSize);
+            return (true, totalSize, imageId);
         }
         catch (Exception ex)
         {
             _log.Warning(ex, "Artwork generation failed; importing without art");
-            return (false, 0);
+            return (false, 0, 0);
         }
     }
 
@@ -364,7 +364,7 @@ public static class IPodTrackImporter
     /// which re-signs Locations.itdb.cbk. ALAC/AAC-native playback and artwork are follow-ups.
     /// </summary>
     private static async Task<IPodImportResult> ImportToNano5gAsync(
-        string mountPath, string sourceFile, string ffmpegPath,
+        string mountPath, string sourceFile, string ffmpegPath, string? generation,
         string? title, string? artist, string? album, string? genre,
         int year, int trackNo, int srcLengthMs, int srcSampleRate, CancellationToken ct)
     {
@@ -422,7 +422,8 @@ public static class IPodTrackImporter
             int bitrate = lengthMs > 0 ? (int)(fileSize * 8L / lengthMs) : 256;
 
             var itlp = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
-            long pid = new Nano5gLibraryWriter(itlp).AddTrack(new Nano5gLibraryWriter.TrackInsert(
+            var writer = new Nano5gLibraryWriter(itlp);
+            long pid = writer.AddTrack(new Nano5gLibraryWriter.TrackInsert(
                 Title: title ?? Path.GetFileNameWithoutExtension(sourceFile),
                 Artist: artist ?? "Unknown Artist",
                 Album: album ?? "Unknown Album",
@@ -441,7 +442,16 @@ public static class IPodTrackImporter
                 ExtensionFourCc: extFourCc,
                 KindString: kindString));
 
-            _log.Information("Nano 5G: added '{Title}' (pid={Pid}) -> {Dest}", title, pid, destFile);
+            // Album art: same ArtworkDB/.ithmb subsystem as the binary path; link it from SQLite via
+            // artwork_cache_id -> ArtworkDB image id (Library.itdb isn't checksummed, so no cbk re-sign).
+            var (hasArt, _, imageId) = await TryWriteArtworkAsync(
+                mountPath, sourceFile, ffmpegPath, (ulong)pid, IPodCapabilities.CoverFormatsFor(generation), ct);
+            if (hasArt)
+            {
+                writer.SetArtwork(pid, imageId);
+            }
+
+            _log.Information("Nano 5G: added '{Title}' (pid={Pid}, art={Art}) -> {Dest}", title, pid, hasArt, destFile);
             return new IPodImportResult((uint)(pid & 0xFFFFFFFF), $":iPod_Control:Music:{folder}:{fileName}", destFile, title, (ulong)pid);
         }
         finally
