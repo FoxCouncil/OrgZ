@@ -135,6 +135,80 @@ public sealed class Nano5gLibraryWriter
         return itemPid;
     }
 
+    /// <summary>
+    /// Removes a track: deletes its rows from all three databases, deletes the audio file under
+    /// <paramref name="musicRoot"/>, prunes now-orphaned artist/album/track_artist/genre rows, and
+    /// re-signs the cbk. Safe no-op if the item isn't present.
+    /// </summary>
+    public void RemoveTrack(long itemPid, string musicRoot)
+    {
+        var libPath = Path.Combine(_itlpDir, "Library.itdb");
+        var locPath = Path.Combine(_itlpDir, "Locations.itdb");
+        var dynPath = Path.Combine(_itlpDir, "Dynamic.itdb");
+        var cbkPath = locPath + ".cbk";
+
+        if (!ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
+        {
+            throw new InvalidOperationException("Could not recover the device's hash72 seed from Locations.itdb.cbk.");
+        }
+
+        string? relative;
+        using (var loc = Open(locPath))
+        {
+            relative = ScalarStr(loc, "SELECT location FROM location WHERE item_pid=$p", ("$p", itemPid));
+            using var tx = loc.BeginTransaction();
+            Exec(loc, "DELETE FROM location WHERE item_pid=$p", ("$p", itemPid));
+            tx.Commit();
+        }
+
+        using (var lib = Open(libPath))
+        {
+            long albumPid = ScalarLong(lib, "SELECT album_pid FROM item WHERE pid=$p", ("$p", itemPid));
+            long artistPid = ScalarLong(lib, "SELECT artist_pid FROM item WHERE pid=$p", ("$p", itemPid));
+            long trackArtistPid = ScalarLong(lib, "SELECT track_artist_pid FROM item WHERE pid=$p", ("$p", itemPid));
+            long genreId = ScalarLong(lib, "SELECT genre_id FROM item WHERE pid=$p", ("$p", itemPid));
+
+            using var tx = lib.BeginTransaction();
+            Exec(lib, "DELETE FROM item WHERE pid=$p", ("$p", itemPid));
+            Exec(lib, "DELETE FROM avformat_info WHERE item_pid=$p", ("$p", itemPid));
+            Exec(lib, "DELETE FROM item_to_container WHERE item_pid=$p", ("$p", itemPid));
+
+            PruneIfOrphan(lib, "album", "album_pid", albumPid);
+            PruneIfOrphan(lib, "artist", "artist_pid", artistPid);
+            PruneIfOrphan(lib, "track_artist", "track_artist_pid", trackArtistPid);
+            if (genreId != 0 && ScalarLong(lib, "SELECT COUNT(*) FROM item WHERE genre_id=$g", ("$g", genreId)) == 0)
+            {
+                Exec(lib, "DELETE FROM genre_map WHERE id=$g", ("$g", genreId));
+            }
+            tx.Commit();
+        }
+
+        if (File.Exists(dynPath))
+        {
+            using var dyn = Open(dynPath);
+            using var tx = dyn.BeginTransaction();
+            Exec(dyn, "DELETE FROM item_stats WHERE item_pid=$p", ("$p", itemPid));
+            tx.Commit();
+        }
+
+        if (relative is not null)
+        {
+            var abs = Path.Combine(musicRoot, relative.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(abs)) { File.Delete(abs); }
+        }
+
+        File.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
+    }
+
+    private static void PruneIfOrphan(SqliteConnection c, string table, string itemColumn, long pid)
+    {
+        if (pid == 0) { return; }
+        if (ScalarLong(c, $"SELECT COUNT(*) FROM item WHERE {itemColumn}=$p", ("$p", pid)) == 0)
+        {
+            Exec(c, $"DELETE FROM {table} WHERE pid=$p", ("$p", pid));
+        }
+    }
+
     // ── find-or-create ───────────────────────────────────────────────────────
 
     private static long FindOrCreateArtist(SqliteConnection c, string name)
@@ -199,6 +273,15 @@ public sealed class Nano5gLibraryWriter
         foreach (var (name, value) in ps) { cmd.Parameters.AddWithValue(name, value); }
         var o = cmd.ExecuteScalar();
         return o is null or DBNull ? 0 : Convert.ToInt64(o);
+    }
+
+    private static string? ScalarStr(SqliteConnection c, string sql, params (string Name, object Value)[] ps)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var (name, value) in ps) { cmd.Parameters.AddWithValue(name, value); }
+        var o = cmd.ExecuteScalar();
+        return o is null or DBNull ? null : o.ToString();
     }
 
     private static long NewRandomPid(SqliteConnection c, string table)

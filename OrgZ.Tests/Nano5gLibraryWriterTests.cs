@@ -74,6 +74,63 @@ public class Nano5gLibraryWriterTests
         }
     }
 
+    [Fact]
+    public void AddTrack_then_RemoveTrack_returns_to_baseline()
+    {
+        var src = FixtureDir();
+        if (src is null) { return; } // device fixture absent
+
+        var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
+            {
+                File.Copy(Path.Combine(src, f), Path.Combine(tmp, f));
+            }
+
+            long beforeItems = CountIn(Path.Combine(tmp, "Library.itdb"), "item");
+            long beforeArtists = CountIn(Path.Combine(tmp, "Library.itdb"), "artist");
+
+            var writer = new Nano5gLibraryWriter(tmp);
+            long pid = writer.AddTrack(new Nano5gLibraryWriter.TrackInsert(
+                Title: "Remove Me", Artist: "Orphan Artist XYZ", Album: "Orphan Album XYZ", AlbumArtist: null,
+                Genre: "OrphanGenreXYZ", DurationMs: 120_000, TrackNumber: 1, DiscNumber: 1, Year: 2026,
+                AudioFormat: 301, BitRate: 256, SampleRate: 44100, Channels: 2,
+                FileSize: 1_000_000, LocationRelative: "F00/RMVE.mp3", ExtensionFourCc: 0x4D503320, KindId: 1));
+
+            using (var c = OpenRo(Path.Combine(tmp, "Library.itdb")))
+            {
+                Assert.Equal(beforeItems + 1, Count(c, "item"));
+            }
+
+            writer.RemoveTrack(pid, Path.Combine(tmp, "Music")); // no real file → delete is skipped
+
+            using (var c = OpenRo(Path.Combine(tmp, "Library.itdb")))
+            {
+                Assert.Equal(beforeItems, Count(c, "item"));
+                Assert.Equal(0, Count(c, "item", $"pid={pid}"));
+                Assert.Equal(beforeArtists, Count(c, "artist"));          // orphan artist pruned
+                Assert.Equal(0, Count(c, "artist", "name='Orphan Artist XYZ'"));
+                Assert.Equal(0, Count(c, "genre_map", "genre='OrphanGenreXYZ'"));
+            }
+            using (var c = OpenRo(Path.Combine(tmp, "Locations.itdb")))
+            {
+                Assert.Equal(0, Count(c, "location", $"item_pid={pid}"));
+            }
+
+            var loc = File.ReadAllBytes(Path.Combine(tmp, "Locations.itdb"));
+            var cbk = File.ReadAllBytes(Path.Combine(tmp, "Locations.itdb.cbk"));
+            Assert.True(ITunesLocationsCbk.TryExtractSeed(loc, cbk, out var iv, out var rnd));
+            Assert.Equal(cbk, ITunesLocationsCbk.Build(loc, iv, rnd));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(tmp, recursive: true);
+        }
+    }
+
     private static SqliteConnection OpenRo(string path)
     {
         var c = new SqliteConnection($"Data Source={path};Mode=ReadOnly;Pooling=False");
