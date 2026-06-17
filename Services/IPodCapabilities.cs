@@ -74,11 +74,12 @@ public static class IPodCapabilities
         => generation is not null && _table.TryGetValue(generation, out var c) ? c.CoverFormats : [];
 
     /// <summary>
-    /// True when we can safely write this generation's iTunesDB today: no-checksum
-    /// click-wheel models plus hash58 (Classic 6G-7G, Nano 3G/4G - needs the
-    /// FireWireGuid). hash72/hashAB stay off - those need the SQLite stack and, for
-    /// hashAB, a proprietary algorithm not available in open source.
+    /// True when we can safely write this generation's database today: no-checksum
+    /// click-wheel models, hash58 (Classic 6G-7G, Nano 3G/4G - needs the FireWireGuid),
+    /// and hash72 (Nano 5G - the "iTunes Library.itlp" SQLite stack, signed via the cbk
+    /// seed recovered from the device). hashAB (Nano 6G/7G) stays off - its sqlite signer
+    /// is a proprietary blob (libhashab) not available in open source.
     /// </summary>
     public static bool SupportsDatabaseWrite(string? generation)
-        => ChecksumFor(generation) is IPodChecksum.None or IPodChecksum.Hash58;
+        => ChecksumFor(generation) is IPodChecksum.None or IPodChecksum.Hash58 or IPodChecksum.Hash72;
 }

@@ -91,6 +91,14 @@ public static class IPodTrackImporter
             title ??= Path.GetFileNameWithoutExtension(sourceFile);
         }
 
+        // Nano 5G (Hash72) reads the "iTunes Library.itlp" SQLite stack, not the binary
+        // iTunesDB - route to the SQLite writer (which re-signs Locations.itdb.cbk).
+        if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash72)
+        {
+            return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath,
+                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, ct);
+        }
+
         // --- produce an iPod-compatible file ---
         var ext = Path.GetExtension(sourceFile);
         bool compatible = IsNativelyCompatible(ext);
@@ -347,6 +355,115 @@ public static class IPodTrackImporter
             return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Nano 5G import path: the device reads the "iTunes Library.itlp" SQLite stack, not the binary
+    /// iTunesDB. We ensure an MP3 (the format proven on-device; the Nano 5G's own library is MP3),
+    /// copy it under iPod_Control/Music, then insert the row via <see cref="Nano5gLibraryWriter"/>,
+    /// which re-signs Locations.itdb.cbk. ALAC/AAC-native playback and artwork are follow-ups.
+    /// </summary>
+    private static async Task<IPodImportResult> ImportToNano5gAsync(
+        string mountPath, string sourceFile, string ffmpegPath,
+        string? title, string? artist, string? album, string? genre,
+        int year, int trackNo, int srcLengthMs, int srcSampleRate, CancellationToken ct)
+    {
+        var ext = Path.GetExtension(sourceFile);
+        bool isMp3 = string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase);
+
+        string produced = sourceFile;
+        bool producedIsTemp = false;
+        if (!isMp3)
+        {
+            produced = Path.Combine(Path.GetTempPath(), "orgz_mp3_" + Guid.NewGuid().ToString("N")[..8] + ".mp3");
+            producedIsTemp = true;
+            await TranscodeToMp3Async(ffmpegPath, sourceFile, produced, ct);
+        }
+
+        try
+        {
+            const string folder = "F00";
+            var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
+            Directory.CreateDirectory(destDir);
+            var fileName = RandomTrackName() + ".mp3";
+            var destFile = Path.Combine(destDir, fileName);
+            File.Copy(produced, destFile, overwrite: true);
+
+            long fileSize = new FileInfo(destFile).Length;
+            int lengthMs = srcLengthMs;
+            if (lengthMs == 0)
+            {
+                try
+                {
+                    using var of = TagLib.File.Create(destFile);
+                    lengthMs = (int)of.Properties.Duration.TotalMilliseconds;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Could not read duration of {Dest}", destFile);
+                }
+            }
+            int bitrate = lengthMs > 0 ? (int)(fileSize * 8L / lengthMs) : 256;
+
+            var itlp = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
+            long pid = new Nano5gLibraryWriter(itlp).AddTrack(new Nano5gLibraryWriter.TrackInsert(
+                Title: title ?? Path.GetFileNameWithoutExtension(sourceFile),
+                Artist: artist ?? "Unknown Artist",
+                Album: album ?? "Unknown Album",
+                AlbumArtist: null,
+                Genre: genre,
+                DurationMs: lengthMs,
+                TrackNumber: trackNo,
+                DiscNumber: 0,
+                Year: year,
+                AudioFormat: 301,                      // MP3
+                BitRate: bitrate,
+                SampleRate: srcSampleRate > 0 ? srcSampleRate : 44100,
+                Channels: 2,
+                FileSize: fileSize,
+                LocationRelative: $"{folder}/{fileName}",
+                ExtensionFourCc: 0x4D503320,            // "MP3 "
+                KindId: 1));                            // "MPEG audio file"
+
+            _log.Information("Nano 5G: added '{Title}' (pid={Pid}) -> {Dest}", title, pid, destFile);
+            return new IPodImportResult((uint)(pid & 0xFFFFFFFF), $":iPod_Control:Music:{folder}:{fileName}", destFile, title, (ulong)pid);
+        }
+        finally
+        {
+            if (producedIsTemp)
+            {
+                try { File.Delete(produced); } catch { /* best-effort temp cleanup */ }
+            }
+        }
+    }
+
+    private static async Task TranscodeToMp3Async(string ffmpegPath, string input, string output, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = ffmpegPath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+        };
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(input);
+        psi.ArgumentList.Add("-codec:a");
+        psi.ArgumentList.Add("libmp3lame");
+        psi.ArgumentList.Add("-b:a");
+        psi.ArgumentList.Add("256k");
+        psi.ArgumentList.Add("-map_metadata");
+        psi.ArgumentList.Add("0");
+        psi.ArgumentList.Add(output);
+
+        _log.Information("Transcoding to MP3: {Input} -> {Output}", input, output);
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        await p.WaitForExitAsync(ct);
+        if (p.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"ffmpeg MP3 transcode failed (exit {p.ExitCode}).");
+        }
     }
 
     private static async Task TranscodeToAlacAsync(string ffmpegPath, string input, string output, int sampleRate, CancellationToken ct)
