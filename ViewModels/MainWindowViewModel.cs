@@ -3265,6 +3265,76 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             && IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration);
     }
 
+    /// <summary>Right-click "Remove from iPod": maps the track's file to its SQLite item, deletes the
+    /// rows + audio file, prunes orphans, and re-signs the cbk - then drops it from the live list.
+    /// No-ops on devices without a remove backend (only Hash72/Nano 5G has one today).</summary>
+    internal async Task RemoveFromDeviceAsync(MediaItem? track)
+    {
+        if (track is null)
+        {
+            return;
+        }
+        var dev = DeviceForSidebarItem(SelectedSidebarItem);
+        if (dev is not { DeviceType: DeviceType.StockIPod }
+            || IPodCapabilities.ChecksumFor(dev.IpodGeneration) != IPodChecksum.Hash72)
+        {
+            return;
+        }
+
+        var itlp = Path.Combine(dev.MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
+        var musicRoot = Path.Combine(dev.MountPath, "iPod_Control", "Music");
+        var relative = DeviceRelativeLocation(track.FilePath, musicRoot);
+        if (relative is null)
+        {
+            UpdateMainStatus($"Couldn't locate “{track.Title}” on the iPod.");
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                long pid = Nano5gLibraryWriter.FindItemPidByLocation(itlp, relative);
+                if (pid == 0)
+                {
+                    throw new InvalidOperationException("Track isn't in the iPod database.");
+                }
+                new Nano5gLibraryWriter(itlp).RemoveTrack(pid, musicRoot);
+            });
+
+            _allItems.Remove(track);
+            if (track.FileSize is { } removedSize && removedSize > 0)
+            {
+                dev.AudioSpace -= removedSize;
+                dev.RefreshSpace();
+            }
+            IPodArtworkReader.Invalidate(dev.MountPath);
+            ApplyFilter();
+            UpdateMainStatus($"Removed “{track.Title}” from {dev.Name}.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Failed to remove {Track} from {Device}", track.FilePath, dev.MountPath);
+            UpdateMainStatus($"Couldn't remove “{track.Title}”: {ex.Message}");
+        }
+    }
+
+    /// <summary>Strips the device's Music root to yield a "Fxx/NAME.ext" Locations.itdb key, or null
+    /// when the path isn't under iPod_Control/Music.</summary>
+    private static string? DeviceRelativeLocation(string? absolutePath, string musicRoot)
+    {
+        if (string.IsNullOrEmpty(absolutePath))
+        {
+            return null;
+        }
+        var rel = Path.GetRelativePath(musicRoot, absolutePath);
+        if (rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel))
+        {
+            return null;
+        }
+        return rel.Replace('\\', '/');
+    }
+
     /// <summary>
     /// Imports a dragged library track onto the dropped-on iPod (transcode + iTunesDB +
     /// artwork + checksum). Progress shows on the LCD; errors go to the log.
