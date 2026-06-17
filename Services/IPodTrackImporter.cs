@@ -368,16 +368,32 @@ public static class IPodTrackImporter
         string? title, string? artist, string? album, string? genre,
         int year, int trackNo, int srcLengthMs, int srcSampleRate, CancellationToken ct)
     {
-        var ext = Path.GetExtension(sourceFile);
-        bool isMp3 = string.Equals(ext, ".mp3", StringComparison.OrdinalIgnoreCase);
+        // The Nano 5G plays MP3 and MP4-container AAC/ALAC. Pass those through; transcode anything
+        // else (FLAC/WAV/AIFF) to ALAC so it stays lossless - never down to MP3.
+        var ext = Path.GetExtension(sourceFile).ToLowerInvariant();
+        bool passthrough = ext is ".mp3" or ".m4a" or ".m4b" or ".aac";
 
+        int audioFormat, extFourCc;
+        string kindString, targetExt;
         string produced = sourceFile;
         bool producedIsTemp = false;
-        if (!isMp3)
+        int recordedSampleRate = srcSampleRate > 0 ? srcSampleRate : 44100;
+
+        if (ext == ".mp3")
         {
-            produced = Path.Combine(Path.GetTempPath(), "orgz_mp3_" + Guid.NewGuid().ToString("N")[..8] + ".mp3");
+            audioFormat = 301; extFourCc = 0x4D503320; kindString = "MPEG audio file"; targetExt = ".mp3";
+        }
+        else if (passthrough)   // .m4a/.m4b/.aac - already an MP4-container codec the iPod plays
+        {
+            audioFormat = 502; extFourCc = 0x4D344120; kindString = "MPEG-4 audio file"; targetExt = ".m4a";
+        }
+        else                     // FLAC/WAV/AIFF/etc → ALAC (lossless)
+        {
+            audioFormat = 502; extFourCc = 0x4D344120; kindString = "Apple Lossless audio file"; targetExt = ".m4a";
+            recordedSampleRate = TargetSampleRate(srcSampleRate);
+            produced = Path.Combine(Path.GetTempPath(), "orgz_alac_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
             producedIsTemp = true;
-            await TranscodeToMp3Async(ffmpegPath, sourceFile, produced, ct);
+            await TranscodeToAlacAsync(ffmpegPath, sourceFile, produced, recordedSampleRate, ct);
         }
 
         try
@@ -385,7 +401,7 @@ public static class IPodTrackImporter
             const string folder = "F00";
             var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
             Directory.CreateDirectory(destDir);
-            var fileName = RandomTrackName() + ".mp3";
+            var fileName = RandomTrackName() + targetExt;
             var destFile = Path.Combine(destDir, fileName);
             File.Copy(produced, destFile, overwrite: true);
 
@@ -416,14 +432,14 @@ public static class IPodTrackImporter
                 TrackNumber: trackNo,
                 DiscNumber: 0,
                 Year: year,
-                AudioFormat: 301,                      // MP3
+                AudioFormat: audioFormat,
                 BitRate: bitrate,
-                SampleRate: srcSampleRate > 0 ? srcSampleRate : 44100,
+                SampleRate: recordedSampleRate,
                 Channels: 2,
                 FileSize: fileSize,
                 LocationRelative: $"{folder}/{fileName}",
-                ExtensionFourCc: 0x4D503320,            // "MP3 "
-                KindId: 1));                            // "MPEG audio file"
+                ExtensionFourCc: extFourCc,
+                KindString: kindString));
 
             _log.Information("Nano 5G: added '{Title}' (pid={Pid}) -> {Dest}", title, pid, destFile);
             return new IPodImportResult((uint)(pid & 0xFFFFFFFF), $":iPod_Control:Music:{folder}:{fileName}", destFile, title, (ulong)pid);
@@ -434,39 +450,6 @@ public static class IPodTrackImporter
             {
                 try { File.Delete(produced); } catch { /* best-effort temp cleanup */ }
             }
-        }
-    }
-
-    private static async Task TranscodeToMp3Async(string ffmpegPath, string input, string output, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo(ffmpegPath)
-        {
-            RedirectStandardError = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add("-y");
-        psi.ArgumentList.Add("-i");
-        psi.ArgumentList.Add(input);
-        psi.ArgumentList.Add("-map");
-        psi.ArgumentList.Add("0:a:0");          // first audio stream only (ignore embedded cover art)
-        psi.ArgumentList.Add("-codec:a");
-        psi.ArgumentList.Add("libmp3lame");
-        psi.ArgumentList.Add("-b:a");
-        psi.ArgumentList.Add("256k");
-        psi.ArgumentList.Add("-map_metadata");
-        psi.ArgumentList.Add("0");
-        psi.ArgumentList.Add(output);
-
-        _log.Information("Transcoding to MP3: {Input} -> {Output}", input, output);
-        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        var stderr = await proc.StandardError.ReadToEndAsync(ct);   // drain stderr first, or a full pipe deadlocks WaitForExit
-        await proc.WaitForExitAsync(ct);
-        if (proc.ExitCode != 0)
-        {
-            var tail = stderr.Length > 800 ? stderr[^800..] : stderr;
-            throw new InvalidOperationException($"ffmpeg MP3 transcode exited {proc.ExitCode}: {tail}");
         }
     }
 
