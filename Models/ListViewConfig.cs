@@ -180,6 +180,8 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Remove from iPod", CommandName = "RemoveFromDevice" },
         ];
     }
 
