@@ -439,16 +439,18 @@ public static class IPodTrackImporter
 
     private static async Task TranscodeToMp3Async(string ffmpegPath, string input, string output, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo
+        var psi = new ProcessStartInfo(ffmpegPath)
         {
-            FileName = ffmpegPath,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardError = true,
         };
         psi.ArgumentList.Add("-y");
         psi.ArgumentList.Add("-i");
         psi.ArgumentList.Add(input);
+        psi.ArgumentList.Add("-map");
+        psi.ArgumentList.Add("0:a:0");          // first audio stream only (ignore embedded cover art)
         psi.ArgumentList.Add("-codec:a");
         psi.ArgumentList.Add("libmp3lame");
         psi.ArgumentList.Add("-b:a");
@@ -458,11 +460,13 @@ public static class IPodTrackImporter
         psi.ArgumentList.Add(output);
 
         _log.Information("Transcoding to MP3: {Input} -> {Output}", input, output);
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        await p.WaitForExitAsync(ct);
-        if (p.ExitCode != 0)
+        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+        var stderr = await proc.StandardError.ReadToEndAsync(ct);   // drain stderr first, or a full pipe deadlocks WaitForExit
+        await proc.WaitForExitAsync(ct);
+        if (proc.ExitCode != 0)
         {
-            throw new InvalidOperationException($"ffmpeg MP3 transcode failed (exit {p.ExitCode}).");
+            var tail = stderr.Length > 800 ? stderr[^800..] : stderr;
+            throw new InvalidOperationException($"ffmpeg MP3 transcode exited {proc.ExitCode}: {tail}");
         }
     }
 
