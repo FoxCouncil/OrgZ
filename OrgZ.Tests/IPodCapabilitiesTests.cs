@@ -69,14 +69,14 @@ public class IPodCapabilitiesTests
     [InlineData("Classic 7G")]
     [InlineData("Nano 3G")]
     [InlineData("Nano 4G")]
+    [InlineData("Nano 5G")]      // hash72 + SQLite (proven on hardware)
     public void Writable_generations(string generation)
     {
         Assert.True(IPodCapabilities.SupportsDatabaseWrite(generation));
     }
 
     [Theory]
-    [InlineData("Nano 5G")]      // hash72 + SQLite
-    [InlineData("Nano 6G")]      // hashAB + SQLite (proprietary)
+    [InlineData("Nano 6G")]      // hashAB + SQLite (proprietary blob)
     [InlineData("Touch 2G")]     // iOS
     [InlineData(null)]
     [InlineData("")]
