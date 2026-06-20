@@ -27,7 +27,7 @@ namespace OrgZ.Controls;
 public partial class LcdDisplay : UserControl
 {
     private CancellationTokenSource? _marqueeCts;
-    private bool _vuRafScheduled;
+    private DispatcherTimer? _vuTimer;
     private bool _vuActive;
     private long _vuLastFrameTicks;
     private MainWindowViewModel? _watchedViewModel;
@@ -61,21 +61,20 @@ public partial class LcdDisplay : UserControl
         };
         DetachedFromVisualTree += (_, _) =>
         {
-            _vuActive = false;
+            // Stop ticking while off-screen. _vuActive still tracks the active page,
+            // so AttachedToVisualTree restarts the meter if we return on the VU page.
+            _vuTimer?.Stop();
             _marqueeCts?.Cancel();
         };
-        // When the LCD is hosted in a window that opens later than DataContext
-        // assignment (e.g. the mini-player constructed with DataContext set in
-        // its initializer), DataContextChanged fires before this control is in
-        // a visual tree -- ScheduleNextVuFrame bails because TopLevel is null.
-        // Re-attempt the schedule once we're attached so the VU starts on the
-        // first switch to the mini-player instead of the second.
+        // When the LCD is hosted in a window whose DataContext is assigned before the
+        // window is shown (the mini-player), VU activation can be decided while this
+        // control isn't in a visual tree yet. Restart the meter once we're attached so
+        // it animates on the first switch to the mini-player.
         AttachedToVisualTree += (_, _) =>
         {
-            if (_vuActive && !_vuRafScheduled)
+            if (_vuActive)
             {
-                _vuLastFrameTicks = Environment.TickCount64;
-                ScheduleNextVuFrame();
+                StartVuTimer();
             }
         };
     }
@@ -164,39 +163,37 @@ public partial class LcdDisplay : UserControl
 
         if (_vuActive)
         {
-            _vuLastFrameTicks = Environment.TickCount64;
-            ScheduleNextVuFrame();
+            StartVuTimer();
         }
         else
         {
+            _vuTimer?.Stop();
             VuControl.Clear();
         }
     }
 
-    private void ScheduleNextVuFrame()
+    // The meter is driven by a UI-thread DispatcherTimer rather than
+    // TopLevel.RequestAnimationFrame. RAF's self-rescheduling loop only sustains on the
+    // primary window's compositor, so the VU froze in the mini-player (a secondary
+    // transparent topmost window). A timer ticks identically in every window;
+    // VuMeterControl models fall/peak in continuous (dt-based) time, so ~60 Hz looks
+    // the same as a vsync RAF loop.
+    private void StartVuTimer()
     {
-        if (_vuRafScheduled || !_vuActive)
+        if (_vuTimer == null)
         {
-            return;
-        }
-
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel == null)
-        {
-            return;
-        }
-
-        _vuRafScheduled = true;
-        topLevel.RequestAnimationFrame(_ =>
-        {
-            _vuRafScheduled = false;
-            if (!_vuActive)
+            _vuTimer = new DispatcherTimer(DispatcherPriority.Render)
             {
-                return;
-            }
-            TickVuMeter();
-            ScheduleNextVuFrame();
-        });
+                Interval = TimeSpan.FromMilliseconds(16),
+            };
+            _vuTimer.Tick += (_, _) => TickVuMeter();
+        }
+
+        _vuLastFrameTicks = Environment.TickCount64;
+        if (!_vuTimer.IsEnabled)
+        {
+            _vuTimer.Start();
+        }
     }
 
     private void TickVuMeter()
