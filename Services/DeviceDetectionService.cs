@@ -301,20 +301,75 @@ public sealed class DeviceDetectionService : IDisposable
                 return;
             }
 
-            if (_connected.ContainsKey(device.MountPath))
-            {
-                _log.Verbose("Drive {MountPath} already connected — ignoring duplicate arrival", device.MountPath);
-                return;
-            }
-
-            _connected[device.MountPath] = device;
-            _log.Information("Device connected: {MountPath} Type={DeviceType} Name={Name} Model={Model} Serial={Serial}", device.MountPath, device.DeviceType, device.Name, device.Model, device.Serial);
-            DeviceConnected?.Invoke(device);
+            RegisterIdentifiedDevice(device);
         }
         catch (Exception ex)
         {
             _log.Error(ex, "TryAddDrive failed for {DriveName}", drive.Name);
         }
+    }
+
+    /// <summary>
+    /// Registers a freshly-fingerprinted device and raises <see cref="DeviceConnected"/>.
+    /// If the mount path is already occupied by a <em>different</em> physical device
+    /// (per <see cref="IsSameConnectedDevice"/>), the previous one is disconnected first -
+    /// its OS removal event was missed or arrived late (a fast iPod hot-swap, or an iPod
+    /// re-enumerating at the same drive letter). Without this a second iPod plugged into a
+    /// reused drive letter is dropped as a "duplicate arrival" and the app keeps showing the
+    /// first device's library. Internal so the swap/dedup path is unit-testable without real
+    /// hardware fingerprinting.
+    /// </summary>
+    internal void RegisterIdentifiedDevice(ConnectedDevice device)
+    {
+        if (_connected.TryGetValue(device.MountPath, out var existing))
+        {
+            if (IsSameConnectedDevice(existing, device))
+            {
+                _log.Verbose("Drive {MountPath} already connected (same device) — ignoring duplicate arrival", device.MountPath);
+                return;
+            }
+
+            _log.Information("Drive {MountPath} now holds a different device — hot-swap (was Serial={OldSerial} GUID={OldGuid}, now Serial={NewSerial} GUID={NewGuid})",
+                device.MountPath, existing.Serial, existing.FireWireGuid, device.Serial, device.FireWireGuid);
+            _connected.Remove(device.MountPath);
+            DeviceDisconnected?.Invoke(device.MountPath);
+        }
+
+        _connected[device.MountPath] = device;
+        _log.Information("Device connected: {MountPath} Type={DeviceType} Name={Name} Model={Model} Serial={Serial}", device.MountPath, device.DeviceType, device.Name, device.Model, device.Serial);
+        DeviceConnected?.Invoke(device);
+    }
+
+    /// <summary>
+    /// Whether two devices occupying the same mount path are the same physical unit.
+    /// Compares the FireWire GUID first (the reliable per-unit id for iPods), then the
+    /// serial; when neither shares a comparable identity a differing
+    /// <see cref="ConnectedDevice.DeviceType"/> is taken as a swap, otherwise they're
+    /// assumed identical (and we lean on the OS removal event to clear the old one).
+    /// </summary>
+    internal static bool IsSameConnectedDevice(ConnectedDevice a, ConnectedDevice b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
+        if (HasText(a.FireWireGuid) && HasText(b.FireWireGuid))
+        {
+            return string.Equals(a.FireWireGuid, b.FireWireGuid, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (HasText(a.Serial) && HasText(b.Serial))
+        {
+            return string.Equals(a.Serial, b.Serial, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (a.DeviceType != b.DeviceType)
+        {
+            return false;
+        }
+
+        return true;
+
+        static bool HasText(string? s) => !string.IsNullOrWhiteSpace(s);
     }
 
     private static bool IsCdDrive(string mountPath)
