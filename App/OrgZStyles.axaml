@@ -237,9 +237,51 @@
 		<Setter Property="Padding" Value="{StaticResource OrgZMonoContentPadding}" />
 	</Style>
 
-	<!-- TabItem -->
+	<!-- Classic boxed tabs for orgzDialog windows (Settings, Media Info). Replaces the
+	     default Fluent oversized-underline headers with compact bordered folder tabs that
+	     sit on, and join, the content panel below. Part names are the Avalonia 11 Fluent
+	     TabItem/TabControl template parts. -->
+	<Style Selector="Window.orgzDialog TabControl">
+		<Setter Property="Padding" Value="0" />
+	</Style>
+	<Style Selector="Window.orgzDialog TabControl /template/ ContentPresenter#PART_SelectedContentHost">
+		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZBorderColorBrush}" />
+		<Setter Property="BorderThickness" Value="1" />
+		<Setter Property="CornerRadius" Value="0,4,4,4" />
+	</Style>
+
 	<Style Selector="Window.orgzDialog TabItem">
 		<Setter Property="FontFamily" Value="{StaticResource OrgZMonoFont}" />
+		<Setter Property="FontSize" Value="13" />
+		<Setter Property="FontWeight" Value="Normal" />
+		<Setter Property="MinHeight" Value="0" />
+		<Setter Property="Padding" Value="14,6" />
+		<!-- 2px gap between tabs; -1px bottom so the active tab overlaps the panel's top border. -->
+		<Setter Property="Margin" Value="0,0,2,-1" />
+		<Setter Property="VerticalAlignment" Value="Bottom" />
+		<Setter Property="BorderBrush" Value="{StaticResource OrgZBorderColorBrush}" />
+		<Setter Property="BorderThickness" Value="1,1,1,0" />
+		<Setter Property="CornerRadius" Value="4,4,0,0" />
+	</Style>
+	<Style Selector="Window.orgzDialog TabItem /template/ Border#PART_LayoutRoot">
+		<Setter Property="Background" Value="{StaticResource OrgZButtonBackgroundBrush}" />
+	</Style>
+	<Style Selector="Window.orgzDialog TabItem:pointerover /template/ Border#PART_LayoutRoot">
+		<Setter Property="Background" Value="{StaticResource OrgZReadonlyBackgroundBrush}" />
+	</Style>
+	<Style Selector="Window.orgzDialog TabItem:selected /template/ Border#PART_LayoutRoot">
+		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
+	</Style>
+	<Style Selector="Window.orgzDialog TabItem:selected:pointerover /template/ Border#PART_LayoutRoot">
+		<Setter Property="Background" Value="{StaticResource OrgZInputBackgroundBrush}" />
+	</Style>
+	<!-- Boxed tabs indicate selection by background, not the Fluent underline pipe. -->
+	<Style Selector="Window.orgzDialog TabItem /template/ Border#PART_SelectedPipe">
+		<Setter Property="IsVisible" Value="False" />
+	</Style>
+	<Style Selector="Window.orgzDialog TabItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+		<Setter Property="Foreground" Value="{StaticResource OrgZAccentBlueBrush}" />
 	</Style>
 
 	<!-- Slider -->
