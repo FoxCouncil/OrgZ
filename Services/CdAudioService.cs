@@ -132,6 +132,46 @@ public static class CdAudioService
     }
 
     /// <summary>
+    /// Probes whether <paramref name="drive"/> can record audio CDs (MMC CD Mastering
+    /// feature 0x002F), un-elevated, through the same SCSI passthrough used for TOC reads
+    /// - GET CONFIGURATION is a read-class command, so no UAC is needed (only the actual
+    /// WRITE at burn time is elevated).
+    /// </summary>
+    /// <remarks>
+    /// Returns the drive's reported DAO capability when the probe runs. Returns
+    /// <c>true</c> (optimistic) when the drive can't be opened for probing - e.g. a
+    /// mounted data disc blocks the un-elevated write-access handle - so we never hide a
+    /// real recorder; the burn itself re-checks <c>SupportsDaoBurn</c> and fails cleanly
+    /// on a true reader. Only a positive "no DAO" answer returns <c>false</c>.
+    /// </remarks>
+    public static bool IsAudioBurner(DriveInfo drive)
+    {
+        ArgumentNullException.ThrowIfNull(drive);
+
+        var drivePath = drive.Name.TrimEnd('\\', '/');
+        var openPath = OperatingSystem.IsMacOS() ? ResolveMacBsdDevice(drivePath) ?? drivePath : drivePath;
+
+        try
+        {
+            using var optical = OpticalDrive.Open(openPath);
+            if (optical is not IScsiTransport transport)
+            {
+                _log.Debug("Burner probe: {Drive} exposes no IScsiTransport; assuming writable", drivePath);
+                return true;
+            }
+
+            var supports = new FoxOrangebook.BurnSession(transport).SupportsDaoBurn();
+            _log.Information("Burner probe: {Drive} ({Vendor} {Product}) DAO audio burn = {Supports}", drivePath, optical.Inquiry.Vendor, optical.Inquiry.Product, supports);
+            return supports;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Burner probe could not open {Drive}; assuming writable", drivePath);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Reads the TOC from an audio CD via FoxRedbook (cross-platform SCSI passthrough).
     /// Builds cdda:// URIs for LibVLC playback and enriches via MusicBrainz + Cover Art Archive.
     /// </summary>

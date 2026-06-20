@@ -253,6 +253,21 @@
 									</StackPanel>
 								</Button>
 
+								<!-- Burn slots into the same left-edge slot as Rip, shown when a playlist /
+								     Favorites view is active and an optical drive is present. The ☢ glyph
+								     stands in for iTunes' radial burn symbol (no exact FontAwesome match). -->
+								<Button Grid.Column="0"
+								        Command="{Binding BurnCurrentViewCommand}"
+								        IsVisible="{Binding ShowBurnButton}"
+								        Padding="10,4" Cursor="Hand"
+								        Margin="0,0,8,0"
+								        ToolTip.Tip="Burn this playlist to an audio CD">
+									<StackPanel Orientation="Horizontal" Spacing="6">
+										<i:Icon Value="fa-solid fa-circle-radiation" FontSize="13" />
+										<TextBlock Text="Burn Disc…" VerticalAlignment="Center" LineHeight="14" />
+									</StackPanel>
+								</Button>
+
 								<!-- Per-view summary text. Black on the metal-textured page. -->
 								<TextBlock Grid.Column="1"
 								           DataContext="{Binding StatusBar}"
