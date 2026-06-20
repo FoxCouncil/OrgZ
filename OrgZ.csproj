@@ -90,7 +90,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="FoxRedbook" Version="1.0.0-alpha.2" />
-		<PackageReference Include="FoxOrangebook" Version="1.0.0-alpha.2" />
+		<PackageReference Include="FoxOrangebook" Version="1.0.0-alpha.3" />
 	</ItemGroup>
 
 	<!-- Strip runtime-specific native payloads we never load on the current OS.
