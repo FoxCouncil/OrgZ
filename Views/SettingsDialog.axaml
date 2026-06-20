@@ -102,6 +102,65 @@
 				</ScrollViewer>
 			</TabItem>
 
+			<!-- ===== Burning Tab ===== -->
+			<TabItem Header="Burning">
+				<ScrollViewer Padding="0,0,12,0">
+					<StackPanel Margin="8,12" Spacing="16">
+
+						<!-- Audio CD -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Audio CD" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,240" RowDefinitions="Auto">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Gap between songs" VerticalAlignment="Center" />
+									<ComboBox Grid.Row="0" Grid.Column="1" x:Name="BurnAudioGapCombo" HorizontalAlignment="Stretch">
+										<ComboBoxItem Content="None (gapless)" Tag="0" />
+										<ComboBoxItem Content="2 seconds" Tag="2" />
+									</ComboBox>
+								</Grid>
+								<CheckBox x:Name="BurnCdTextCheck" Content="Write CD-TEXT (disc + track artist / title)" />
+							</StackPanel>
+						</Border>
+
+						<!-- Data Disc -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Data Disc (CD / DVD)" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,240" RowDefinitions="Auto,Auto" RowSpacing="10">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Convert files to" VerticalAlignment="Center" />
+									<ComboBox Grid.Row="0" Grid.Column="1" x:Name="BurnDataFormatCombo" HorizontalAlignment="Stretch">
+										<ComboBoxItem Content="Keep original format" Tag="original" />
+										<ComboBoxItem Content="MP3" Tag="mp3" />
+										<ComboBoxItem Content="AAC (.m4a)" Tag="aac" />
+										<ComboBoxItem Content="Apple Lossless (.m4a)" Tag="alac" />
+										<ComboBoxItem Content="FLAC" Tag="flac" />
+										<ComboBoxItem Content="WAV" Tag="wav" />
+									</ComboBox>
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Lossy quality" VerticalAlignment="Center" />
+									<ComboBox Grid.Row="1" Grid.Column="1" x:Name="BurnLossyQualityCombo" HorizontalAlignment="Stretch">
+										<ComboBoxItem Content="128 kbps" Tag="128" />
+										<ComboBoxItem Content="192 kbps" Tag="192" />
+										<ComboBoxItem Content="256 kbps" Tag="256" />
+										<ComboBoxItem Content="320 kbps" Tag="320" />
+									</ComboBox>
+								</Grid>
+							</StackPanel>
+						</Border>
+
+						<!-- Disc Image -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="8">
+								<TextBlock Text="Disc Image" FontWeight="Bold" FontSize="13" />
+								<Border Background="{StaticResource OrgZInputBackgroundBrush}" BorderBrush="{StaticResource OrgZButtonBackgroundBrush}" BorderThickness="1" CornerRadius="2" Padding="8,6">
+									<TextBlock x:Name="BurnImageFolderText" Text="" FontSize="11" TextWrapping="Wrap" Opacity="0.7" />
+								</Border>
+							</StackPanel>
+						</Border>
+
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
 			<!-- ===== Podcasts Tab =====
 			     Global defaults for every subscription (refresh cadence, what to do with new
 			     episodes, retention) plus the download location / storage controls. Each combo

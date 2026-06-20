@@ -68,6 +68,35 @@ public partial class SettingsDialog : Window
         MiniPlayerModeReplace.IsChecked = miniMode == MiniPlayerMode.Replace;
         MiniPlayerModeSideBySide.IsChecked = miniMode == MiniPlayerMode.SideBySide;
 
+        // Burning
+        BurnAudioGapCombo.SelectedIndex = Settings.Get("OrgZ.Burn.AudioGapSeconds", 2) == 0 ? 0 : 1;
+        BurnCdTextCheck.IsChecked = Settings.Get("OrgZ.Burn.CdText", true);
+
+        BurnDataFormatCombo.SelectedIndex = Settings.Get("OrgZ.Burn.DataFormat", "original") switch
+        {
+            "original" => 0,
+            "mp3"      => 1,
+            "aac"      => 2,
+            "alac"     => 3,
+            "flac"     => 4,
+            "wav"      => 5,
+            _          => 0,
+        };
+
+        BurnLossyQualityCombo.SelectedIndex = Settings.Get("OrgZ.Burn.LossyQualityKbps", 256) switch
+        {
+            128 => 0,
+            192 => 1,
+            256 => 2,
+            320 => 3,
+            _   => 2,
+        };
+
+        // Disc images live inside the library at {library}/.disc-images - not user-configurable.
+        BurnImageFolderText.Text = string.IsNullOrEmpty(_pendingFolderPath)
+            ? "(Set a music library folder first)"
+            : Path.Combine(_pendingFolderPath, ".disc-images");
+
         // Podcasts
         LoadPodcastSettings();
         LoadPodcastStorage();
@@ -400,6 +429,12 @@ public partial class SettingsDialog : Window
 
         Settings.Set("OrgZ.ShuffleMode", ShuffleAlbumRadio.IsChecked == true ? "Album" : "Song");
         Settings.Set("OrgZ.AutoAdvance", AutoAdvanceCheck.IsChecked == true);
+
+        // Burning
+        Settings.Set("OrgZ.Burn.AudioGapSeconds", (BurnAudioGapCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "0" ? 0 : 2);
+        Settings.Set("OrgZ.Burn.CdText", BurnCdTextCheck.IsChecked == true);
+        Settings.Set("OrgZ.Burn.DataFormat", (BurnDataFormatCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "original");
+        Settings.Set("OrgZ.Burn.LossyQualityKbps", int.TryParse((BurnLossyQualityCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(), out var burnKbps) ? burnKbps : 256);
 
         // Playback → Mini-Player
         var miniMode = MiniPlayerModeSideBySide.IsChecked == true ? MiniPlayerMode.SideBySide : MiniPlayerMode.Replace;
