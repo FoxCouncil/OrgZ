@@ -168,8 +168,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton))]
     private SidebarItem? _selectedSidebarItem;
+
+    // Whether a recorder (writable optical drive) is present. Refreshed by
+    // ScanForCdAsync on the CD poll/device-change tick. Write capability is probed
+    // un-elevated via CdAudioService.IsAudioBurner (GET CONFIGURATION, same SCSI
+    // passthrough as the TOC read) and cached per drive in _burnerSupport - a drive's
+    // DAO capability never changes, so each drive is probed once.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowBurnButton))]
+    private bool _isBurnerPresent;
+
+    private readonly Dictionary<string, bool> _burnerSupport = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// iTunes-style Burn button visibility: an optical drive is present and the
+    /// active view is a burnable list (a user playlist or Favorites).
+    /// </summary>
+    public bool ShowBurnButton =>
+        IsBurnerPresent && (SelectedSidebarItem?.PlaylistId != null || SelectedSidebarItem?.IsFavorites == true);
 
     /// <summary>
     /// Watermark text for the search box. Mirrors whatever the active
@@ -421,10 +439,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // current sector finishes and the loop exits cleanly.
     private CancellationTokenSource? _ripCts;
 
+    // Active burn's cancellation source. The same LCD Cancel X trips this - a burn
+    // reuses the rip page (IsRipping), so the one button cancels whichever is running.
+    // Transcode aborts immediately; an in-flight elevated burn is left to finish the
+    // current disc (cancelling a half-written disc just makes a coaster).
+    private CancellationTokenSource? _burnCts;
+
     [RelayCommand]
     private void CancelRip()
     {
         _ripCts?.Cancel();
+        _burnCts?.Cancel();
     }
 
     // LCD "pages": the now-playing display has multiple modes the user cycles
@@ -4549,6 +4574,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _log.Information("ScanForCdAsync: AllCdDrives={All} WithMedia={WithMedia} (paths: {Paths})",
                 all.Count, drives.Count, string.Join(", ", all.Select(d => $"{d.Name}[ready={d.IsReady}]")));
 
+            // Probe each drive's write capability once (cached) so the Burn button only
+            // shows for real recorders. Probing does SCSI I/O - run it off the UI thread,
+            // and skip while a rip/burn holds the drive (uncached → optimistic "writable").
+            foreach (var d in all)
+            {
+                if (!_burnerSupport.ContainsKey(d.Name) && !IsRipping)
+                {
+                    var probe = d;
+                    _burnerSupport[d.Name] = await Task.Run(() => CdAudioService.IsAudioBurner(probe));
+                }
+            }
+
+            var presentNames = all.Select(d => d.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var stale in _burnerSupport.Keys.Where(k => !presentNames.Contains(k)).ToList())
+            {
+                _burnerSupport.Remove(stale);
+            }
+
+            // Surface recorder presence so playlist/Favorites views can show Burn.
+            IsBurnerPresent = all.Any(d => _burnerSupport.GetValueOrDefault(d.Name, true));
+
             // Check for ejected discs
             if (_cdTracks.Count > 0)
             {
@@ -5110,10 +5156,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         SetLcdBusy(detail, avg);
     }
 
-    internal async Task BurnTracksToCdAsync(IReadOnlyList<MediaItem> tracks)
+    internal async Task BurnTracksToCdAsync(IReadOnlyList<MediaItem> tracks, string? discTitle = null)
     {
         if (tracks.Count == 0)
         {
+            return;
+        }
+
+        var sources = tracks.Where(t => !string.IsNullOrEmpty(t.FilePath)).ToList();
+        if (sources.Count == 0)
+        {
+            UpdateMainStatus("Nothing to burn — these tracks have no local audio files.");
             return;
         }
 
@@ -5121,51 +5174,137 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (drive == null)
         {
             _log.Warning("Burn requested with no CD drive present");
+            UpdateMainStatus("No optical drive found to burn to.");
+            return;
+        }
+
+        // The drive only accepts CD-DA WAV (16-bit/44.1k/stereo); library tracks are
+        // MP3/AAC/FLAC/ALAC, so each source is transcoded to a sector-aligned WAV first.
+        var ffmpeg = ResolveFfmpeg();
+        if (ffmpeg is null)
+        {
+            UpdateMainStatus("ffmpeg not found on PATH — needed to transcode audio for CD burning.");
             return;
         }
 
         var drivePath = drive.Name.TrimEnd('\\', '/');
-        var burnTracks = new List<CdBurnTrack>(tracks.Count);
-        foreach (var t in tracks)
-        {
-            if (string.IsNullOrEmpty(t.FilePath))
-            {
-                _log.Warning("Burn: track {Id} has no FilePath; skipping", t.Id);
-                continue;
-            }
-
-            burnTracks.Add(new CdBurnTrack
-            {
-                WavFilePath = t.FilePath,
-                Title = t.Title,
-                Performer = t.Artist,
-            });
-        }
-
-        if (burnTracks.Count == 0)
-        {
-            return;
-        }
-
         EnsureCdDriveFree(drivePath);
 
-        BeginLcdBusy($"Burning {burnTracks.Count} track(s)");
-        var progress = new Progress<CdBurnProgress>(p =>
-            SetLcdBusy($"Track {p.TrackNumber} of {p.TrackCount}", p.DiscPercent));
+        // ~80 min is the practical CD-R ceiling. Warn but still attempt - over-burn
+        // discs exist and the drive itself has the final say on capacity.
+        var totalMinutes = sources.Sum(t => t.Duration?.TotalMinutes ?? 0);
+        if (totalMinutes > 80)
+        {
+            _log.Warning("Burn list is {Minutes:F1} min — may exceed CD-R capacity", totalMinutes);
+        }
 
+        // CD-TEXT disc performer: the shared artist when every track agrees, else null.
+        // (Per-track Title/Performer always go through; this is the album-level line.)
+        var distinctArtists = sources
+            .Select(t => t.Artist)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var discPerformer = distinctArtists.Count == 1 ? distinctArtists[0] : null;
+
+        var stagingDir = Path.Combine(Path.GetTempPath(), "OrgZ", "burn-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stagingDir);
+
+        _burnCts?.Dispose();
+        _burnCts = new CancellationTokenSource();
+        var ct = _burnCts.Token;
+
+        BeginLcdBusy($"Preparing {sources.Count} track(s)");
         try
         {
-            await CdBurnService.BurnWithElevationAsync(drivePath, burnTracks, progress);
-            _log.Information("Burned {Count} track(s) to {DrivePath}", burnTracks.Count, drivePath);
+            var burnTracks = new List<CdBurnTrack>(sources.Count);
+            for (int i = 0; i < sources.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var t = sources[i];
+                SetLcdBusy($"Converting “{t.Title}” ({i + 1}/{sources.Count})", (double)i / sources.Count);
+                var wav = Path.Combine(stagingDir, $"{i:D3}.wav");
+                await CdAudioTranscoder.ToCdAudioWavAsync(ffmpeg, t.FilePath!, wav, ct);
+                burnTracks.Add(new CdBurnTrack
+                {
+                    WavFilePath = wav,
+                    Title = t.Title,
+                    Performer = t.Artist,
+                });
+            }
+
+            SetLcdBusy($"Burning {burnTracks.Count} track(s)", 0);
+            var progress = new Progress<CdBurnProgress>(p =>
+                SetLcdBusy($"Track {p.TrackNumber} of {p.TrackCount}", p.DiscPercent));
+
+            await CdBurnService.BurnWithElevationAsync(drivePath, burnTracks, progress, discTitle, discPerformer, cancellationToken: ct);
+            _log.Information("Burned {Count} track(s) to {DrivePath} (title: {Title})", burnTracks.Count, drivePath, discTitle ?? "—");
+            UpdateMainStatus($"Burned {burnTracks.Count} track(s) to {drivePath}.");
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Information("Burn cancelled by user for {DrivePath}", drivePath);
+            UpdateMainStatus("Burn cancelled.");
         }
         catch (Exception ex)
         {
             _log.Error(ex, "Burn failed for {DrivePath}", drivePath);
+            UpdateMainStatus($"Burn failed: {ex.Message}");
         }
         finally
         {
             EndLcdBusy();
+            _burnCts?.Dispose();
+            _burnCts = null;
+            try
+            {
+                Directory.Delete(stagingDir, recursive: true);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Failed to clean burn staging dir {Dir}", stagingDir);
+            }
         }
+    }
+
+    /// <summary>
+    /// Burns the active view's tracks (a user playlist or Favorites) to disc. Bound to
+    /// the footer Burn button, which is only visible when <see cref="ShowBurnButton"/>.
+    /// </summary>
+    [RelayCommand]
+    private async Task BurnCurrentViewAsync()
+    {
+        var tracks = CollectCurrentViewBurnTracks();
+        if (tracks.Count == 0)
+        {
+            UpdateMainStatus("Nothing to burn in this view.");
+            return;
+        }
+
+        // Playlist / Favorites name becomes the CD-TEXT disc title.
+        await BurnTracksToCdAsync(tracks, SelectedSidebarItem?.Name);
+    }
+
+    /// <summary>
+    /// Gathers burnable audio for the active view: a playlist's full ordered track list,
+    /// or every local-file favorite on the Favorites view. Skips items without a local
+    /// audio file (radio stations also live in Favorites and have no FilePath).
+    /// </summary>
+    private List<MediaItem> CollectCurrentViewBurnTracks()
+    {
+        if (SelectedSidebarItem?.PlaylistId is int playlistId)
+        {
+            return GetPlaylistMediaItems(playlistId);
+        }
+
+        if (SelectedSidebarItem?.IsFavorites == true)
+        {
+            return _allItems
+                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
+                .ToList();
+        }
+
+        return [];
     }
 
     #endregion
@@ -5364,16 +5503,39 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void EjectByMount(string mountPath, string? name)
     {
+        // Let go of everything we hold on the device first, or Windows can't eject it.
+        ReleaseDeviceHandles(mountPath);
+
         if (DeviceEjector.Eject(mountPath, out var error))
         {
             _log.Information("Ejected {Name} at {MountPath}", name, mountPath);
+            UpdateMainStatus($"Ejected {name}.");
             // The WMI removal event will fire shortly and HandleDeviceDisconnected will
             // tear down the sidebar entry, view config, and items.
         }
         else
         {
             _log.Warning("Eject failed for {Name} at {MountPath}: {Error}", name, mountPath, error ?? "unknown error");
+            UpdateMainStatus($"Couldn't eject {name} — {error ?? "it may still be in use"}.");
         }
+    }
+
+    /// <summary>
+    /// Releases everything OrgZ holds on a device so the OS can eject it cleanly: stops playback when
+    /// the current track lives on it (which frees the backing file handle), drops pooled SQLite
+    /// connections (the device's <c>/.orgz/library.db</c>), and clears the cached ArtworkDB reader.
+    /// </summary>
+    private void ReleaseDeviceHandles(string mountPath)
+    {
+        if (CurrentPlayingItem?.Source == $"device:{mountPath}")
+        {
+            _log.Information("Stopping playback from {MountPath} ahead of eject", mountPath);
+            ClearPlayback();
+        }
+
+        // The /.orgz cache uses pooled per-op connections; clear the pool so its handle releases.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        IPodArtworkReader.Invalidate(mountPath);
     }
 
     private void HandleDeviceDisconnected(string mountPath)

@@ -290,10 +290,10 @@
 				        Foreground="{StaticResource OrgZLcdTextBrush}" />
 			</Button>
 
-			<!-- Cancel-rip X: mirrors the chevron on the right gutter, only visible
-			     while a rip is in flight. Posts CancelRipCommand which trips the
-			     rip's CancellationToken - current track finishes its in-flight
-			     sector read, then the loop exits cleanly. -->
+			<!-- Cancel X: mirrors the chevron on the right gutter, visible while a
+			     cancellable busy op (rip or burn) is in flight. Posts CancelRipCommand
+			     which trips the active rip/burn CancellationToken - the in-flight unit
+			     (sector read / track transcode) finishes, then the loop exits cleanly. -->
 			<Button x:Name="CancelRipButton" HorizontalAlignment="Right" VerticalAlignment="Center"
 			        Margin="0,0,6,0" Width="18" Height="18" CornerRadius="9"
 			        Padding="0" BorderThickness="0"
@@ -302,7 +302,7 @@
 			        IsVisible="{Binding IsRipping}"
 			        Cursor="Hand"
 			        PointerPressed="ChromeButton_PointerPressed"
-			        ToolTip.Tip="Cancel rip">
+			        ToolTip.Tip="Cancel">
 				<Button.Styles>
 					<Style Selector="Button">
 						<Setter Property="Background" Value="{StaticResource OrgZLcdButtonBackgroundBrush}" />
