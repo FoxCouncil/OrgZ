@@ -9,13 +9,14 @@ public partial class ConfirmDialog : Window
 {
     public ConfirmDialog() : this("Confirm", "Are you sure?", "OK") { }
 
-    public ConfirmDialog(string title, string message, string confirmLabel)
+    public ConfirmDialog(string title, string message, string confirmLabel, bool showCancel = true)
     {
         InitializeComponent();
 
         Title = title;
         MessageText.Text = message;
         ConfirmButton.Content = confirmLabel;
+        CancelButton.IsVisible = showCancel;
     }
 
     private void ConfirmButton_Click(object? sender, RoutedEventArgs e)

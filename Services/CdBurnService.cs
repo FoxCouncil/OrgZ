@@ -45,6 +45,67 @@ public static class CdBurnService
 
     private static readonly ILogger _log = Logging.For("CdBurn");
 
+    /// <summary>Result of <see cref="CheckBurnMedia"/>.</summary>
+    public enum BurnMediaStatus
+    {
+        /// <summary>A blank, writable disc is loaded - ready to burn.</summary>
+        Ready,
+        /// <summary>The drive is a recorder but no disc is loaded.</summary>
+        NoMedia,
+        /// <summary>A disc is loaded but it already has content (not blank).</summary>
+        NotBlank,
+        /// <summary>The drive can't write discs (DAO unsupported).</summary>
+        NotWritable,
+        /// <summary>The drive couldn't be opened or queried.</summary>
+        DriveError,
+    }
+
+    /// <summary>
+    /// Un-elevated pre-flight before a burn: opens <paramref name="drivePath"/> and checks a
+    /// blank, writable disc is loaded - the same SCSI passthrough as the recorder probe, so no
+    /// UAC. Lets the GUI fail fast with a clear message instead of transcoding and prompting
+    /// for elevation only to have the drive reject the burn.
+    /// </summary>
+    public static BurnMediaStatus CheckBurnMedia(string drivePath)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(drivePath);
+
+        try
+        {
+            using var drive = OpticalDrive.Open(drivePath);
+            if (drive is not IScsiTransport transport)
+            {
+                return BurnMediaStatus.DriveError;
+            }
+
+            var session = new BurnSession(transport);
+
+            if (!session.SupportsDaoBurn())
+            {
+                return BurnMediaStatus.NotWritable;
+            }
+
+            try
+            {
+                var info = session.ReadDiscInfo();
+                return info.Status == DiscStatus.Blank ? BurnMediaStatus.Ready : BurnMediaStatus.NotBlank;
+            }
+            catch (MediaNotPresentException)
+            {
+                return BurnMediaStatus.NoMedia;
+            }
+        }
+        catch (MediaNotPresentException)
+        {
+            return BurnMediaStatus.NoMedia;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Burn media pre-flight failed for {Drive}", drivePath);
+            return BurnMediaStatus.DriveError;
+        }
+    }
+
     /// <summary>
     /// Entry point used by the GUI.  On Windows, spawns an elevated copy of
     /// OrgZ.exe via <see cref="CdElevation"/> (UAC per operation); on other
