@@ -122,6 +122,7 @@ public static class MediaCache
                 CREATE TABLE IF NOT EXISTS Playlists (
                     Id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     Name        TEXT NOT NULL,
+                    Source      TEXT NOT NULL DEFAULT 'Library',
                     CreatedAt   TEXT NOT NULL,
                     UpdatedAt   TEXT NOT NULL
                 );
@@ -157,6 +158,33 @@ public static class MediaCache
         MigrateOldTables(connection);
         MigrateAddColumns(connection);
         MigrateAddCdCacheColumns(connection);
+        MigrateAddPlaylistColumns(connection);
+    }
+
+    /// <summary>
+    /// Idempotent column additions for the <c>Playlists</c> table. Existing rows pick up
+    /// the default 'Library' source.
+    /// </summary>
+    private static void MigrateAddPlaylistColumns(SqliteConnection connection)
+    {
+        var columns = new[]
+        {
+            "Source TEXT NOT NULL DEFAULT 'Library'",
+        };
+
+        foreach (var col in columns)
+        {
+            try
+            {
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"ALTER TABLE Playlists ADD COLUMN {col}";
+                cmd.ExecuteNonQuery();
+            }
+            catch (SqliteException)
+            {
+                // Column already exists
+            }
+        }
     }
 
     private static void MigrateOldTables(SqliteConnection connection)
@@ -765,17 +793,30 @@ public static class MediaCache
 
     #region Playlists
 
-    public static int CreatePlaylist(string name)
+    public static int CreatePlaylist(string name, string source = "Library")
     {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
 
         using var cmd = connection.CreateCommand();
         var now = DateTime.UtcNow.ToString("o");
-        cmd.CommandText = "INSERT INTO Playlists (Name, CreatedAt, UpdatedAt) VALUES (@name, @now, @now); SELECT last_insert_rowid();";
+        cmd.CommandText = "INSERT INTO Playlists (Name, Source, CreatedAt, UpdatedAt) VALUES (@name, @source, @now, @now); SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("@name", name);
+        cmd.Parameters.AddWithValue("@source", string.IsNullOrWhiteSpace(source) ? "Library" : source);
         cmd.Parameters.AddWithValue("@now", now);
         return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>Returns a playlist's <c>Source</c> ("Library", "M3U8", ...), or "Library" if unknown.</summary>
+    public static string GetPlaylistSource(int id)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT Source FROM Playlists WHERE Id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        return cmd.ExecuteScalar() is string s && !string.IsNullOrWhiteSpace(s) ? s : "Library";
     }
 
     public static void RenamePlaylist(int id, string newName)
@@ -815,7 +856,7 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT Id, Name, CreatedAt, UpdatedAt FROM Playlists ORDER BY Name";
+        cmd.CommandText = "SELECT Id, Name, Source, CreatedAt, UpdatedAt FROM Playlists ORDER BY Name";
 
         var playlists = new List<Playlist>();
         using var reader = cmd.ExecuteReader();
@@ -825,8 +866,9 @@ public static class MediaCache
             {
                 Id = reader.GetInt32(0),
                 Name = reader.GetString(1),
-                CreatedAt = DateTime.Parse(reader.GetString(2), null, System.Globalization.DateTimeStyles.RoundtripKind),
-                UpdatedAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                Source = reader.IsDBNull(2) ? "Library" : reader.GetString(2),
+                CreatedAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                UpdatedAt = DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
             });
         }
 
