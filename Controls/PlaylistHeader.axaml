@@ -1,0 +1,77 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:vm="using:OrgZ.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="92"
+             x:Class="OrgZ.Controls.PlaylistHeader"
+             x:DataType="models:PlaylistHeaderInfo">
+
+    <Border Background="{StaticResource OrgZSurfaceDarkBrush}"
+            BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="16,12">
+
+        <Grid ColumnDefinitions="Auto,*,Auto">
+
+            <!-- 2×2 album-art mosaic; falls back to a music glyph when the playlist has no art. -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SystemChromeGrayColor}"
+                    CornerRadius="6" Width="72" Height="72"
+                    VerticalAlignment="Center" ClipToBounds="True">
+                <Panel>
+                    <i:Icon Value="fa-solid fa-music" FontSize="30"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Opacity="0.4"
+                            IsVisible="{Binding !HasAnyCover}" />
+                    <Grid ColumnDefinitions="*,*" RowDefinitions="*,*"
+                          IsVisible="{Binding HasAnyCover}">
+                        <Image Grid.Row="0" Grid.Column="0" Source="{Binding Cover1}" Stretch="UniformToFill" />
+                        <Image Grid.Row="0" Grid.Column="1" Source="{Binding Cover2}" Stretch="UniformToFill" />
+                        <Image Grid.Row="1" Grid.Column="0" Source="{Binding Cover3}" Stretch="UniformToFill" />
+                        <Image Grid.Row="1" Grid.Column="1" Source="{Binding Cover4}" Stretch="UniformToFill" />
+                    </Grid>
+                </Panel>
+            </Border>
+
+            <!-- Name + source + stats. -->
+            <StackPanel Grid.Column="1" Margin="16,0,16,0" VerticalAlignment="Center" Spacing="3">
+                <TextBlock Text="{Binding Name}" FontSize="20" FontWeight="Bold"
+                           TextTrimming="CharacterEllipsis" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="{Binding SourceLabel}" FontSize="11" FontWeight="Bold" Opacity="0.55" />
+                    <TextBlock Text="·" FontSize="11" Opacity="0.4" />
+                    <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.7"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Actions: Burn (Sync joins it in a later phase). Command lives on the VM,
+                 reached through the hosting window like DeviceInfoBar's Eject. -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8"
+                        VerticalAlignment="Center" HorizontalAlignment="Right">
+                <Button Padding="12,6" Cursor="Hand"
+                        ToolTip.Tip="Sync this playlist to the connected device"
+                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).CanSyncToIPod, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).SyncCurrentPlaylistToIPodCommand, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-arrows-rotate" FontSize="13" />
+                        <TextBlock Text="Sync" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Padding="12,6" Cursor="Hand"
+                        ToolTip.Tip="Burn this playlist to an audio CD"
+                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).IsBurnerPresent, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).BurnCurrentViewCommand, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-circle-radiation" FontSize="13" />
+                        <TextBlock Text="Burn Disc…" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+
+</UserControl>

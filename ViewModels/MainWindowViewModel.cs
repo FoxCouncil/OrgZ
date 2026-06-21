@@ -168,7 +168,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod))]
     private SidebarItem? _selectedSidebarItem;
 
     // Whether a recorder (writable optical drive) is present. Refreshed by
@@ -188,6 +188,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     public bool ShowBurnButton =>
         IsBurnerPresent && (SelectedSidebarItem?.PlaylistId != null || SelectedSidebarItem?.IsFavorites == true);
+
+    // Header bar shown above the grid on playlist / Favorites views (mosaic + name +
+    // stats + Burn). Rebuilt by BuildPlaylistHeaderAsync on every view switch.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowPlaylistHeader))]
+    private PlaylistHeaderInfo? _currentPlaylistHeader;
+
+    public bool ShowPlaylistHeader => CurrentPlaylistHeader != null;
 
     /// <summary>
     /// Watermark text for the search box. Mirrors whatever the active
@@ -946,6 +954,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         OnPropertyChanged(nameof(ShowCdInfoBar));
+
+        _ = BuildPlaylistHeaderAsync(value);
 
         // The Podcasts sidebar roots are authoritative navigation: clicking "Podcasts" always
         // shows the store, clicking the indented "Subscriptions" row always shows the subscriptions
@@ -3231,7 +3241,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var playlistId = MediaCache.CreatePlaylist(chosenName.Trim());
+        var importSource = Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".m3u8" => "M3U8",
+            ".m3u"  => "M3U",
+            ".pls"  => "PLS",
+            ".xspf" => "XSPF",
+            _       => "Imported",
+        };
+        var playlistId = MediaCache.CreatePlaylist(chosenName.Trim(), importSource);
         foreach (var track in matched)
         {
             MediaCache.AddTrackToPlaylist(playlistId, track.Id);
@@ -3533,22 +3551,52 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 .GroupBy(i => NormalizeMatchKey(i.Artist, i.Title))
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-            var matchedPaths = new List<string>(libraryTracks.Count);
-            int matched = 0, missed = 0;
+            var mountPath = device.MountPath;
+            int matched = 0, copied = 0, missed = 0;
 
-            foreach (var libTrack in libraryTracks)
+            // Resolve each track to a device path, copying any that aren't on the device yet
+            // into {mount}/Music/{Artist}/{Album}/{file}. Copies run off the UI thread.
+            var matchedPaths = await Task.Run(() =>
             {
-                var key = NormalizeMatchKey(libTrack.Artist, libTrack.Title);
-                if (!string.IsNullOrEmpty(key) && deviceTracksByAT.TryGetValue(key, out var deviceTrack))
+                var paths = new List<string>(libraryTracks.Count);
+                for (int i = 0; i < libraryTracks.Count; i++)
                 {
-                    matchedPaths.Add(ToDeviceRelativePath(deviceTrack.FilePath!, device.MountPath));
-                    matched++;
-                }
-                else
-                {
+                    var libTrack = libraryTracks[i];
+                    var key = NormalizeMatchKey(libTrack.Artist, libTrack.Title);
+
+                    if (!string.IsNullOrEmpty(key) && deviceTracksByAT.TryGetValue(key, out var deviceTrack))
+                    {
+                        paths.Add(ToDeviceRelativePath(deviceTrack.FilePath!, mountPath));
+                        matched++;
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(libTrack.FilePath) && File.Exists(libTrack.FilePath))
+                    {
+                        var rel = BuildDeviceMusicRelativePath(libTrack);
+                        var dest = ToMountAbsolute(rel, mountPath);
+                        try
+                        {
+                            SetLcdBusy($"Copying “{libTrack.Title}” ({i + 1}/{libraryTracks.Count})", (double)i / libraryTracks.Count);
+                            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                            if (!File.Exists(dest))
+                            {
+                                File.Copy(libTrack.FilePath, dest);
+                            }
+                            paths.Add(rel);
+                            copied++;
+                            continue;
+                        }
+                        catch (Exception ex)
+                        {
+                            _log.Warning(ex, "Failed to copy {Track} onto {Mount}", libTrack.FilePath, mountPath);
+                        }
+                    }
+
                     missed++;
                 }
-            }
+                return paths;
+            });
 
             // Write the M3U file next to the device's existing playlists
             var playlistsDir = Path.Combine(device.MountPath, "Playlists");
@@ -3584,8 +3632,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 .ToList();
             PublishDevicePlaylists(device, merged);
 
-            _log.Information("Playlist sent to device: Playlist={Name} Device={MountPath} Matched={Matched} Missed={Missed}",
-                playlistItem.Name, device.MountPath, matched, missed);
+            _log.Information("Playlist sent to device: Playlist={Name} Device={MountPath} Matched={Matched} Copied={Copied} Missed={Missed}",
+                playlistItem.Name, device.MountPath, matched, copied, missed);
         }
         catch (Exception ex)
         {
@@ -3629,6 +3677,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             sb.Append(invalid.Contains(c) ? '_' : c);
         }
         return sb.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Rockbox-style device path for a library track being copied onto a device:
+    /// <c>/Music/{Artist}/{Album}/{file}</c>. Falls back to "Unknown Artist/Album" so a
+    /// track missing tags still lands somewhere sensible.
+    /// </summary>
+    internal static string BuildDeviceMusicRelativePath(MediaItem track)
+    {
+        var artist = SanitizeFileName(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
+        var album = SanitizeFileName(string.IsNullOrWhiteSpace(track.Album) ? "Unknown Album" : track.Album!);
+        var file = SanitizeFileName(!string.IsNullOrEmpty(track.FileName) ? track.FileName! : Path.GetFileName(track.FilePath ?? "track"));
+        return $"/Music/{artist}/{album}/{file}";
     }
 
     internal async Task ExportPlaylist(SidebarItem item, string format)
@@ -5166,15 +5227,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var sources = tracks.Where(t => !string.IsNullOrEmpty(t.FilePath)).ToList();
         if (sources.Count == 0)
         {
-            UpdateMainStatus("Nothing to burn — these tracks have no local audio files.");
+            await ShowBurnErrorAsync("These tracks have no local audio files to burn.");
             return;
         }
 
-        var drive = CdAudioService.GetAllCdDrives().FirstOrDefault();
+        // Prefer a known recorder when several optical drives are present (e.g. a virtual
+        // CD-ROM alongside a real burner); fall back to the first drive if none is cached yet.
+        var drives = CdAudioService.GetAllCdDrives();
+        var drive = drives.FirstOrDefault(d => _burnerSupport.GetValueOrDefault(d.Name, false))
+                    ?? drives.FirstOrDefault();
         if (drive == null)
         {
             _log.Warning("Burn requested with no CD drive present");
-            UpdateMainStatus("No optical drive found to burn to.");
+            await ShowBurnErrorAsync("No optical drive found to burn to.");
             return;
         }
 
@@ -5183,12 +5248,28 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var ffmpeg = ResolveFfmpeg();
         if (ffmpeg is null)
         {
-            UpdateMainStatus("ffmpeg not found on PATH — needed to transcode audio for CD burning.");
+            await ShowBurnErrorAsync("ffmpeg wasn't found — it's needed to convert audio for CD burning.");
             return;
         }
 
         var drivePath = drive.Name.TrimEnd('\\', '/');
         EnsureCdDriveFree(drivePath);
+
+        // Fail fast (no transcode, no UAC) if there isn't a blank, writable disc loaded.
+        // The probe is un-elevated - same SCSI passthrough as the recorder detection.
+        var media = await Task.Run(() => CdBurnService.CheckBurnMedia(drivePath));
+        if (media != CdBurnService.BurnMediaStatus.Ready)
+        {
+            _log.Information("Burn pre-flight blocked: {Status} on {Drive}", media, drivePath);
+            await ShowBurnErrorAsync(media switch
+            {
+                CdBurnService.BurnMediaStatus.NoMedia     => "Insert a blank CD-R or CD-RW disc to burn to.",
+                CdBurnService.BurnMediaStatus.NotBlank    => "The disc in the drive isn't blank. Insert a blank disc, or erase a rewritable one first.",
+                CdBurnService.BurnMediaStatus.NotWritable => "This drive can't write discs.",
+                _                                         => "Couldn't read the disc in the drive.",
+            });
+            return;
+        }
 
         // ~80 min is the practical CD-R ceiling. Warn but still attempt - over-burn
         // discs exist and the drive itself has the final say on capacity.
@@ -5213,6 +5294,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _burnCts?.Dispose();
         _burnCts = new CancellationTokenSource();
         var ct = _burnCts.Token;
+
+        string? burnError = null;
 
         BeginLcdBusy($"Preparing {sources.Count} track(s)");
         try
@@ -5249,7 +5332,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             _log.Error(ex, "Burn failed for {DrivePath}", drivePath);
-            UpdateMainStatus($"Burn failed: {ex.Message}");
+            burnError = ex.Message;
         }
         finally
         {
@@ -5265,6 +5348,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _log.Warning(ex, "Failed to clean burn staging dir {Dir}", stagingDir);
             }
         }
+
+        // Surface a failed burn as a dialog (after the LCD is cleared), not just a status line.
+        if (burnError != null)
+        {
+            await ShowBurnErrorAsync($"The burn didn't finish: {burnError}");
+        }
+    }
+
+    /// <summary>Shows an OK-only error dialog for a burn that can't start or didn't finish.</summary>
+    private async Task ShowBurnErrorAsync(string message)
+    {
+        UpdateMainStatus(message);
+        var dialog = new ConfirmDialog("Can't Burn Disc", message, "OK", showCancel: false);
+        await dialog.ShowDialog(_window);
     }
 
     /// <summary>
@@ -5283,6 +5380,53 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // Playlist / Favorites name becomes the CD-TEXT disc title.
         await BurnTracksToCdAsync(tracks, SelectedSidebarItem?.Name);
+    }
+
+    /// <summary>
+    /// Whether the active playlist can sync to a connected, writable device - drives the
+    /// header's Sync button. Rockbox devices for now (filesystem + M3U); native-iPod write
+    /// (stock iPods, which report read-only) is a later phase.
+    /// </summary>
+    public bool CanSyncToIPod =>
+        SelectedSidebarItem?.PlaylistId != null && _connectedDevices.Values.Any(d => !d.IsReadOnly);
+
+    /// <summary>
+    /// Syncs the active playlist to a connected writable device. Auto-targets the single
+    /// connected device. (Currently writes the M3U and links tracks already on the device;
+    /// copying missing music and native-iPod playlist write are the next phases.)
+    /// </summary>
+    [RelayCommand]
+    private async Task SyncCurrentPlaylistToIPodAsync()
+    {
+        if (SelectedSidebarItem is not { PlaylistId: not null } playlistItem)
+        {
+            return;
+        }
+
+        var targets = _connectedDevices.Values.Where(d => !d.IsReadOnly).ToList();
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        if (targets.Count > 1)
+        {
+            // Several writable devices - the chooser is the next step; don't guess.
+            UpdateMainStatus("Several devices are connected — pick one to sync to (chooser coming soon).");
+            return;
+        }
+
+        var device = targets[0];
+        BeginLcdBusy($"Syncing to {device.Name}");
+        try
+        {
+            await SendPlaylistToDevice(playlistItem, device);
+            UpdateMainStatus($"Synced “{playlistItem.Name}” to {device.Name}.");
+        }
+        finally
+        {
+            EndLcdBusy();
+        }
     }
 
     /// <summary>
@@ -5307,6 +5451,94 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return [];
     }
 
+    /// <summary>
+    /// Builds the playlist/Favorites header (name, source, stats, up to four mosaic covers)
+    /// for the given view, or clears it for any other view. Covers are decoded off the UI
+    /// thread; a fast re-selection is guarded so a stale build can't overwrite a newer view.
+    /// </summary>
+    private async Task BuildPlaylistHeaderAsync(SidebarItem? item)
+    {
+        List<MediaItem> tracks;
+        string name;
+        string source;
+
+        if (item?.PlaylistId is int playlistId)
+        {
+            tracks = GetPlaylistMediaItems(playlistId);
+            name = item.Name;
+            source = await Task.Run(() => MediaCache.GetPlaylistSource(playlistId));
+        }
+        else if (item?.IsFavorites == true)
+        {
+            tracks = _allItems
+                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
+                .ToList();
+            name = item.Name;
+            source = "Favorites";
+        }
+        else
+        {
+            CurrentPlaylistHeader = null;
+            return;
+        }
+
+        var count = tracks.Count;
+        var totalDuration = TimeSpan.FromTicks(tracks.Sum(t => t.Duration?.Ticks ?? 0));
+        var totalSize = tracks.Sum(t => t.FileSize ?? 0);
+        var summary = $"{count:N0} {(count == 1 ? "song" : "songs")} · {FormatPlaylistDuration(totalDuration)} · {FormatHelper.FormatFileSize(totalSize)}";
+
+        // One cover per distinct album, up to four, for the 2×2 mosaic.
+        var artItems = tracks
+            .Where(t => t.HasAlbumArt == true && !string.IsNullOrEmpty(t.FilePath))
+            .GroupBy(t => t.Album ?? t.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .Take(4)
+            .ToList();
+
+        var covers = await Task.Run(() =>
+        {
+            var loaded = new List<Bitmap>(4);
+            foreach (var t in artItems)
+            {
+                try
+                {
+                    var bytes = ExtractAlbumArtBytes(t.FilePath!);
+                    if (bytes is { Length: > 0 } && BitmapFromBytes(bytes) is { } bmp)
+                    {
+                        loaded.Add(bmp);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.Debug(ex, "Playlist header cover load failed for {Path}", t.FilePath);
+                }
+            }
+            return loaded;
+        });
+
+        // The user may have switched views while covers decoded - don't clobber the new view.
+        if (SelectedSidebarItem != item)
+        {
+            return;
+        }
+
+        CurrentPlaylistHeader = new PlaylistHeaderInfo
+        {
+            Name = name,
+            SourceLabel = source,
+            Summary = summary,
+            Cover1 = covers.ElementAtOrDefault(0),
+            Cover2 = covers.ElementAtOrDefault(1),
+            Cover3 = covers.ElementAtOrDefault(2),
+            Cover4 = covers.ElementAtOrDefault(3),
+        };
+    }
+
+    private static string FormatPlaylistDuration(TimeSpan d)
+        => d.TotalHours >= 1
+            ? $"{(int)d.TotalHours}:{d.Minutes:D2}:{d.Seconds:D2}"
+            : $"{d.Minutes}:{d.Seconds:D2}";
+
     #endregion
 
     #region Portable Devices (iPod / Rockbox)
@@ -5320,6 +5552,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _connectedDevices[device.MountPath] = device;
+        OnPropertyChanged(nameof(CanSyncToIPod));
 
         var viewKey = $"Device:{device.MountPath}";
         var playlistsKey = $"Device:{device.MountPath}:Playlists";
@@ -5544,6 +5777,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        OnPropertyChanged(nameof(CanSyncToIPod));
 
         var source = $"device:{mountPath}";
         var viewKey = $"Device:{mountPath}";
