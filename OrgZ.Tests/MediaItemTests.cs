@@ -227,38 +227,8 @@ public class MediaItemTests
         Assert.Equal("", item.FormatIssues);
     }
 
-    // -- RatingDisplay --
-
-    [Theory]
-    [InlineData(1, "★☆☆☆☆")]
-    [InlineData(2, "★★☆☆☆")]
-    [InlineData(3, "★★★☆☆")]
-    [InlineData(4, "★★★★☆")]
-    [InlineData(5, "★★★★★")]
-    public void RatingDisplay_PositiveRating_RendersStars(int rating, string expected)
-    {
-        var item = new MediaItem { Id = "x", Kind = MediaKind.Music, Rating = rating };
-        Assert.Equal(expected, item.RatingDisplay);
-    }
-
     [Fact]
-    public void RatingDisplay_NullOrZero_IsEmpty()
-    {
-        var nullItem = new MediaItem { Id = "x", Kind = MediaKind.Music };
-        var zeroItem = new MediaItem { Id = "y", Kind = MediaKind.Music, Rating = 0 };
-        Assert.Equal("", nullItem.RatingDisplay);
-        Assert.Equal("", zeroItem.RatingDisplay);
-    }
-
-    [Fact]
-    public void RatingDisplay_OutOfRange_IsClamped()
-    {
-        var over = new MediaItem { Id = "x", Kind = MediaKind.Music, Rating = 99 };
-        Assert.Equal("★★★★★", over.RatingDisplay);
-    }
-
-    [Fact]
-    public void RatingDisplay_NotifiesOnRatingChange()
+    public void Rating_NotifiesOnChange()
     {
         var item = new MediaItem { Id = "x", Kind = MediaKind.Music };
         var notified = new List<string?>();
@@ -267,6 +237,5 @@ public class MediaItemTests
         item.Rating = 3;
 
         Assert.Contains(nameof(MediaItem.Rating), notified);
-        Assert.Contains(nameof(MediaItem.RatingDisplay), notified);
     }
 }

@@ -72,6 +72,33 @@ public class ListViewConfigTests
         Assert.Null(ListViewConfigs.Get("Music")!.GroupByPath);
     }
 
+    [Fact]
+    public void DevicePodcastConfig_GroupsByAlbumOnTheDedicatedGrid()
+    {
+        // The device Podcasts view groups episodes by show (Album) and routes to the dedicated
+        // PodcastGroupedDataGrid so it never collides with Radio's columns on the shared grouped grid.
+        var config = ListViewConfigs.BuildDeviceKindConfig(@"E:\", MediaKind.Podcast);
+        Assert.Equal("Album", config.GroupByPath);
+        Assert.Equal(ViewHost.PodcastGroupedGrid, config.Host);
+    }
+
+    [Fact]
+    public void DeviceAudiobookConfig_IsFlat()
+    {
+        // Audiobooks reuse the flat device-music grid - no grouping, not the podcast grid.
+        var config = ListViewConfigs.BuildDeviceKindConfig(@"E:\", MediaKind.Audiobook);
+        Assert.Null(config.GroupByPath);
+        Assert.Equal(ViewHost.MainGrid, config.Host);
+    }
+
+    [Fact]
+    public void HostRouting_RadioIsGroupedGrid_PodcastsIsPanel()
+    {
+        Assert.Equal(ViewHost.GroupedGrid, ListViewConfigs.Get("Radio")!.Host);
+        Assert.Equal(ViewHost.PodcastsPanel, ListViewConfigs.Get("Podcasts")!.Host);
+        Assert.Equal(ViewHost.MainGrid, ListViewConfigs.Get("Music")!.Host);
+    }
+
     // -- Favorites view --
 
     [Fact]

@@ -59,23 +59,7 @@ public partial class MediaItem : ObservableObject
     private DateTime? _lastPlayed;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RatingDisplay))]
     private int? _rating;
-
-    public string RatingDisplay
-    {
-        get
-        {
-            var stars = Rating ?? 0;
-            if (stars <= 0)
-            {
-                return "";
-            }
-
-            stars = Math.Clamp(stars, 0, 5);
-            return new string('★', stars) + new string('☆', 5 - stars);
-        }
-    }
 
     [ObservableProperty]
     private int _playCount;
