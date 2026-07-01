@@ -59,7 +59,7 @@ internal partial class StatusBarViewModel : ObservableObject
     /// <summary>
     /// "12 tracks" / "12 tracks, 1:13:42" - the second clause appears only
     /// when ItemDuration is non-zero. Used by every non-Music/Radio view
-    /// (CD = tracks, Favorites = favorites, Playlists = tracks, etc).
+    /// (CD = tracks, Favorites = songs, Playlists = tracks, etc).
     /// </summary>
     public string GenericSummary
     {
@@ -68,7 +68,7 @@ internal partial class StatusBarViewModel : ObservableObject
             var head = $"{ItemCount:N0} {ItemLabel}";
             if (ItemDuration.TotalSeconds > 0)
             {
-                return $"{head}, {ItemDuration:d\\:hh\\:mm\\:ss}";
+                return $"{head}, {FormatHelper.FormatDurationLong(ItemDuration)}";
             }
             return head;
         }
