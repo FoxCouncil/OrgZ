@@ -134,7 +134,7 @@
 		<SolidColorBrush x:Key="OrgZCarouselDotInactiveBrush" Color="{StaticResource OrgZCarouselDotInactive}" />
 
 		<!-- Font -->
-		<FontFamily x:Key="OrgZMonoFont">Consolas</FontFamily>
+		<FontFamily x:Key="OrgZMonoFont">Cascadia Mono,Consolas</FontFamily>
 
 		<!-- Padding compensation for Consolas baseline offset in AccessText -->
 		<Thickness x:Key="OrgZMonoContentPadding">11,7,11,4</Thickness>
