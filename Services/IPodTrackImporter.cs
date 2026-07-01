@@ -95,7 +95,7 @@ public static class IPodTrackImporter
         // iTunesDB - route to the SQLite writer (which re-signs Locations.itdb.cbk).
         if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash72)
         {
-            return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath, generation,
+            return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath, generation, fireWireGuid,
                 title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, ct);
         }
 
@@ -190,36 +190,9 @@ public static class IPodTrackImporter
                 ArtworkSize  = artSize,
             });
 
-            ITunesDbChunkTree.Normalize(doc.Root);
-            var outBytes = ITunesDbChunkTree.Serialize(doc);
-
-            // Apply the generation's integrity checksum (in place) before commit.
-            // hash58 keys off the device FireWireGuid; without it Classic/Nano 3G+
-            // show "0 songs".
-            if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash58)
-            {
-                ITunesDbHash58.Apply(outBytes, fireWireGuid);
-                _log.Information("Applied hash58 checksum (FireWireGuid keyed)");
-            }
-
-            // Sanity: the bytes we're about to commit must re-parse and contain the track.
-            ITunesDbReader.ReadAll(WriteToTemp(outBytes, out var verifyPath), mountPath, out var vt, out _);
-            try { File.Delete(verifyPath); } catch { }
-            if (vt.All(t => t.TrackId != trackId))
-            {
-                throw new InvalidDataException("Re-parse of the new iTunesDB did not contain the added track; aborting write.");
-            }
-
-            var backup = dbPath + ".orgzbak";
-            if (!File.Exists(backup))
-            {
-                File.Copy(dbPath, backup);
-                _log.Information("Backed up original iTunesDB to {Backup}", backup);
-            }
-
-            var tmp = dbPath + ".orgztmp";
-            File.WriteAllBytes(tmp, outBytes);
-            File.Move(tmp, dbPath, overwrite: true);
+            var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+                verify: (vt, _) => vt.Any(t => t.TrackId == trackId),
+                failureMessage: "Re-parse of the new iTunesDB did not contain the added track; aborting write.");
 
             _log.Information("Imported '{Title}' as track {Id} -> {IpodPath} ({Bytes} byte DB)", title, trackId, ipodPath, outBytes.Length);
             return new IPodImportResult(trackId, ipodPath, destFile, title, dbid);
@@ -231,6 +204,126 @@ public static class IPodTrackImporter
                 try { File.Delete(producedFile); } catch { }
             }
         }
+    }
+
+    /// <summary>
+    /// Writes a user playlist (name + ordered track ids, which must already exist as MHITs)
+    /// to the binary iTunesDB, re-checksums (Hash58 when the generation needs it), verifies the
+    /// playlist re-parses, backs up the original once, and commits atomically. For Hash72 (Nano 5G)
+    /// iPods the SQLite path is used instead (<see cref="Nano5gLibraryWriter.CreatePlaylist"/>).
+    /// </summary>
+    public static void AddPlaylist(string mountPath, string? generation, string? fireWireGuid, string name, IReadOnlyList<uint> trackIds)
+    {
+        var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
+        var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+
+        ITunesDbWriter.AddPlaylist(doc, name, trackIds);
+
+        var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+            verify: (_, playlists) => playlists.Any(p => string.Equals(p.Name, name, StringComparison.Ordinal)),
+            failureMessage: "Re-parse of the new iTunesDB did not contain the playlist; aborting write.");
+
+        _log.Information("Wrote playlist '{Name}' ({Count} tracks) to iTunesDB ({Bytes} bytes)", name, trackIds.Count, outBytes.Length);
+    }
+
+    /// <summary>One downloaded episode to push: local file + the metadata for its podcast MHIT.</summary>
+    public sealed record PodcastEpisodeImport(string LocalFile, string Title, string Show, string? Description, string? RssUrl, DateTime PubDateUtc, int LengthMs, string? CoverImagePath = null);
+
+    /// <summary>
+    /// Copies every episode's file (MP3/AAC - passthrough, no transcode) into iPod_Control/Music and
+    /// adds its podcast MHIT into ONE parsed iTunesDB, then normalizes/checksums/verifies/backs-up
+    /// and writes a single time - loading + committing once rather than re-writing the whole DB per
+    /// episode. Returns the number of episodes written.
+    /// </summary>
+    public static int AddPodcastEpisodes(string mountPath, string? generation, string? fireWireGuid, IReadOnlyList<PodcastEpisodeImport> episodes, Action<int, int>? onProgress = null)
+    {
+        if (episodes.Count == 0)
+        {
+            return 0;
+        }
+
+        const string folder = "F00";
+        var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
+        Directory.CreateDirectory(destDir);
+
+        var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
+        if (!File.Exists(dbPath))
+        {
+            // No binary iTunesDB here - either an empty/non-iTunes iPod or a SQLite-DB model
+            // (Nano 5G+), which this Hash58 path doesn't handle. Fail clearly, don't crash.
+            throw new FileNotFoundException($"This iPod has no iTunesDB at '{dbPath}'. Podcast sync currently needs an iTunes-format (binary) database.", dbPath);
+        }
+        var dbBytes = File.ReadAllBytes(dbPath);
+        var doc = ITunesDbChunkTree.Parse(dbBytes);
+
+        // Idempotent re-sync: episodes already on the device (matched by show + title) are skipped so
+        // re-syncing the same downloads doesn't duplicate them. Podcast tracks are written with
+        // Album = show name, which is the dedup key used below. Reads the same bytes the parse used -
+        // no second trip through the file.
+        ITunesDbReader.ReadAll(dbBytes, mountPath, out var existingTracks, out _);
+        var existing = new HashSet<(string Show, string Title)>(
+            existingTracks.Select(t => (t.Album ?? string.Empty, t.Title ?? string.Empty)));
+
+        int added = 0;
+        var podcastEntries = new List<(string Show, uint TrackId)>(episodes.Count);
+        for (int i = 0; i < episodes.Count; i++)
+        {
+            var ep = episodes[i];
+            onProgress?.Invoke(i + 1, episodes.Count);
+            if (existing.Contains((ep.Show, ep.Title)))
+            {
+                continue;
+            }
+            try
+            {
+                var fileName = RandomTrackName() + Path.GetExtension(ep.LocalFile);
+                var destFile = Path.Combine(destDir, fileName);
+                File.Copy(ep.LocalFile, destFile, overwrite: true);
+
+                uint trackId = ITunesDbWriter.NextTrackId(doc);
+                // addToMasterPlaylists:false - podcasts must NOT be in the Library/MPL, so they
+                // surface only under Podcasts (per the iTunesDB spec).
+                ITunesDbWriter.AddTrack(doc, new NewTrack
+                {
+                    TrackId      = trackId,
+                    IpodPath     = $":iPod_Control:Music:{folder}:{fileName}",
+                    Title        = ep.Title,
+                    Artist       = ep.Show,
+                    Album        = ep.Show,
+                    FileSize     = new FileInfo(destFile).Length,
+                    LengthMs     = ep.LengthMs,
+                    DateAddedUtc = DateTime.UtcNow,
+                    Dbid         = (ulong)Random.Shared.NextInt64(1, long.MaxValue),
+                    IsPodcast    = true,
+                    Description  = ep.Description,
+                    PodcastRss   = ep.RssUrl,
+                    TimeReleased = ep.PubDateUtc,
+                }, addToMasterPlaylists: false);
+                podcastEntries.Add((ep.Show, trackId));
+                existing.Add((ep.Show, ep.Title));
+                added++;
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Failed to add podcast {File}", ep.LocalFile);
+            }
+        }
+
+        if (added == 0)
+        {
+            return 0;
+        }
+
+        // Build the Podcasts playlist: per-show group headers (groupflag=256) + grouped episodes.
+        // That show hierarchy is what the iPod's Podcasts menu actually renders.
+        ITunesDbWriter.EnsurePodcastPlaylist(doc, podcastEntries);
+
+        var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+            verify: (vt, _) => vt.Count > 0,
+            failureMessage: "Re-parse of the new iTunesDB produced no tracks; aborting write.");
+
+        _log.Information("Imported {Added} podcast episode(s) to iTunesDB ({Bytes} bytes)", added, outBytes.Length);
+        return added;
     }
 
     /// <summary>
@@ -358,13 +451,140 @@ public static class IPodTrackImporter
     }
 
     /// <summary>
+    /// Nano 5G (Hash72) podcast import: the SQLite sibling of <see cref="AddPodcastEpisodes"/>.
+    /// Passes MP3/AAC through (transcodes anything else to ALAC), copies each episode under
+    /// iPod_Control/Music, and writes it via <see cref="Nano5gLibraryWriter.AddPodcastEpisode"/>
+    /// (media_kind=4 + the Podcasts container). Returns the number of episodes written.
+    /// </summary>
+    public static async Task<int> AddPodcastEpisodesNano5gAsync(
+        string mountPath, IReadOnlyList<PodcastEpisodeImport> episodes, string ffmpegPath, string? fireWireGuid,
+        Action<int, int>? onProgress = null, CancellationToken ct = default)
+    {
+        if (episodes.Count == 0)
+        {
+            return 0;
+        }
+
+        var itlp = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
+        var writer = new Nano5gLibraryWriter(itlp, fireWireGuid);
+        const string folder = "F00";
+        var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
+        Directory.CreateDirectory(destDir);
+
+        // One CDB regeneration for the whole batch instead of one per episode - each regeneration
+        // re-reads the entire on-device library and recompresses + re-signs the iTunesCDB.
+        using var cdbBatch = writer.BeginCdbBatch();
+
+        int added = 0;
+        for (int i = 0; i < episodes.Count; i++)
+        {
+            var ep = episodes[i];
+            onProgress?.Invoke(i + 1, episodes.Count);
+
+            // Idempotent re-sync: skip episodes already on the device so syncing the same
+            // downloads again doesn't duplicate them (checked before any transcode/copy).
+            if (writer.PodcastEpisodeExists(ep.Show, ep.Title))
+            {
+                continue;
+            }
+
+            var ext = Path.GetExtension(ep.LocalFile).ToLowerInvariant();
+            int audioFormat, extFourCc;
+            string kindString, targetExt;
+            string produced = ep.LocalFile;
+            bool producedIsTemp = false;
+
+            if (ext == ".mp3")
+            {
+                audioFormat = 301; extFourCc = 0x4D503320; kindString = "MPEG audio file"; targetExt = ".mp3";
+            }
+            else if (ext is ".m4a" or ".m4b" or ".aac")
+            {
+                audioFormat = 502; extFourCc = 0x4D344120; kindString = "MPEG-4 audio file"; targetExt = ".m4a";
+            }
+            else   // FLAC/WAV/OGG/etc → ALAC (lossless), same as the music path
+            {
+                audioFormat = 502; extFourCc = 0x4D344120; kindString = "Apple Lossless audio file"; targetExt = ".m4a";
+                produced = Path.Combine(Path.GetTempPath(), "orgz_pcast_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
+                producedIsTemp = true;
+                await TranscodeToAlacAsync(ffmpegPath, ep.LocalFile, produced, 44100, ct);
+            }
+
+            try
+            {
+                var fileName = RandomTrackName() + targetExt;
+                var destFile = Path.Combine(destDir, fileName);
+                File.Copy(produced, destFile, overwrite: true);
+
+                long fileSize = new FileInfo(destFile).Length;
+                int lengthMs = ep.LengthMs;
+                int sampleRate = 44100;
+                int channels = 2;
+                try
+                {
+                    using var of = TagLib.File.Create(destFile);
+                    if (lengthMs == 0) { lengthMs = (int)of.Properties.Duration.TotalMilliseconds; }
+                    if (of.Properties.AudioSampleRate > 0) { sampleRate = of.Properties.AudioSampleRate; }
+                    if (of.Properties.AudioChannels > 0) { channels = of.Properties.AudioChannels; }
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Could not read audio properties of {Dest}", destFile);
+                }
+                int bitrate = lengthMs > 0 ? (int)(fileSize * 8L / lengthMs) : 192;
+
+                long pid = writer.AddPodcastEpisode(new Nano5gLibraryWriter.PodcastInsert(
+                    Title: ep.Title,
+                    ShowName: ep.Show,
+                    Description: ep.Description,
+                    FeedUrl: ep.RssUrl,
+                    ExternalGuid: null,
+                    ReleasedUtc: ep.PubDateUtc,
+                    DurationMs: lengthMs,
+                    AudioFormat: audioFormat,
+                    BitRate: bitrate,
+                    SampleRate: sampleRate,
+                    Channels: channels,
+                    FileSize: fileSize,
+                    LocationRelative: $"{folder}/{fileName}",
+                    ExtensionFourCc: extFourCc,
+                    KindString: kindString));
+
+                // Episode artwork: prefer the show/episode cover from the feed (podcasts often carry no
+                // embedded art), falling back to the audio file's embedded cover. Either way it's
+                // rendered into the ArtworkDB + linked to the item, exactly the way the music path does.
+                var artSource = !string.IsNullOrEmpty(ep.CoverImagePath) && File.Exists(ep.CoverImagePath)
+                    ? ep.CoverImagePath
+                    : ep.LocalFile;
+                var (hasArt, _, imageId) = await TryWriteArtworkAsync(
+                    mountPath, artSource, ffmpegPath, (ulong)pid, IPodCapabilities.CoverFormatsFor("Nano 5G"), ct);
+                if (hasArt)
+                {
+                    writer.SetArtwork(pid, imageId);
+                }
+                added++;
+            }
+            finally
+            {
+                if (producedIsTemp)
+                {
+                    try { File.Delete(produced); } catch { /* best-effort temp cleanup */ }
+                }
+            }
+        }
+
+        _log.Information("Nano 5G: added {Count} podcast episode(s)", added);
+        return added;
+    }
+
+    /// <summary>
     /// Nano 5G import path: the device reads the "iTunes Library.itlp" SQLite stack, not the binary
     /// iTunesDB. We ensure an MP3 (the format proven on-device; the Nano 5G's own library is MP3),
     /// copy it under iPod_Control/Music, then insert the row via <see cref="Nano5gLibraryWriter"/>,
     /// which re-signs Locations.itdb.cbk. ALAC/AAC-native playback and artwork are follow-ups.
     /// </summary>
     private static async Task<IPodImportResult> ImportToNano5gAsync(
-        string mountPath, string sourceFile, string ffmpegPath, string? generation,
+        string mountPath, string sourceFile, string ffmpegPath, string? generation, string? fireWireGuid,
         string? title, string? artist, string? album, string? genre,
         int year, int trackNo, int srcLengthMs, int srcSampleRate, CancellationToken ct)
     {
@@ -422,7 +642,7 @@ public static class IPodTrackImporter
             int bitrate = lengthMs > 0 ? (int)(fileSize * 8L / lengthMs) : 256;
 
             var itlp = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
-            var writer = new Nano5gLibraryWriter(itlp);
+            var writer = new Nano5gLibraryWriter(itlp, fireWireGuid);
             long pid = writer.AddTrack(new Nano5gLibraryWriter.TrackInsert(
                 Title: title ?? Path.GetFileNameWithoutExtension(sourceFile),
                 Artist: artist ?? "Unknown Artist",
@@ -498,11 +718,47 @@ public static class IPodTrackImporter
         }
     }
 
-    private static string WriteToTemp(byte[] bytes, out string path)
+    /// <summary>
+    /// Shared commit tail for every binary-iTunesDB mutation: normalizes + serializes
+    /// <paramref name="doc"/>, applies the generation's integrity checksum (hash58 is keyed off the
+    /// device FireWireGuid - without it Classic/Nano 3G+ show "0 songs"), re-parses the result and
+    /// checks it against <paramref name="verify"/> (when given), backs the original up once
+    /// (.orgzbak), and swaps the new bytes in atomically via a temp file. Returns the committed
+    /// bytes so callers can log the size. Throws before any write when verification fails.
+    /// </summary>
+    internal static byte[] CommitDb(ITunesDbDocument doc, string dbPath, string mountPath, string? generation, string? fireWireGuid,
+        Func<List<ITunesDbReader.ITunesTrack>, List<ITunesDbReader.ITunesPlaylist>, bool>? verify = null, string? failureMessage = null)
     {
-        path = Path.Combine(Path.GetTempPath(), "orgz_itdb_verify_" + Guid.NewGuid().ToString("N")[..8]);
-        File.WriteAllBytes(path, bytes);
-        return path;
+        ITunesDbChunkTree.Normalize(doc.Root);
+        var outBytes = ITunesDbChunkTree.Serialize(doc);
+
+        if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash58)
+        {
+            ITunesDbHash58.Apply(outBytes, fireWireGuid);
+            _log.Information("Applied hash58 checksum (FireWireGuid keyed)");
+        }
+
+        // Sanity: the exact bytes we're about to commit must re-parse and pass the caller's check.
+        if (verify is not null)
+        {
+            ITunesDbReader.ReadAll(outBytes, mountPath, out var tracks, out var playlists);
+            if (!verify(tracks, playlists))
+            {
+                throw new InvalidDataException(failureMessage ?? "Re-parse of the new iTunesDB failed verification; aborting write.");
+            }
+        }
+
+        var backup = dbPath + ".orgzbak";
+        if (!File.Exists(backup))
+        {
+            File.Copy(dbPath, backup);
+            _log.Information("Backed up original iTunesDB to {Backup}", backup);
+        }
+
+        var tmp = dbPath + ".orgztmp";
+        File.WriteAllBytes(tmp, outBytes);
+        File.Move(tmp, dbPath, overwrite: true);
+        return outBytes;
     }
 
     private static string RandomTrackName()
