@@ -49,4 +49,16 @@ public partial class PodcastsStoreView : UserControl
             await vm.ShowCategoryAsync(cat);
         }
     }
+
+    /// <summary>
+    /// A tile in the left-column "Subscribed" preview. Opens that show's feed-detail page - the
+    /// header's "Show All" opens the full subscriptions view instead.
+    /// </summary>
+    private async void SubscribedShow_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: PodcastSubscription sub } && ViewModel is { } vm)
+        {
+            await vm.OpenSubscriptionAsync(sub);
+        }
+    }
 }
