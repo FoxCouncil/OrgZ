@@ -176,7 +176,19 @@ internal class Program
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
     {
-        return AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().WithIcons().LogToTrace();
+        var builder = AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().WithIcons().LogToTrace();
+
+        // Automation hook: render popups (context menus, flyouts, tooltips) as in-window overlays
+        // instead of native popup windows, so they live in the visual tree where the Avalonia devtools
+        // MCP can search/click/screenshot them - right-click menus otherwise open in separate OS windows
+        // the tooling can't see. Opt-in via env var; normal runs keep native popups (which may extend
+        // past the window edge).
+        if (Environment.GetEnvironmentVariable("ORGZ_OVERLAY_POPUPS") == "1")
+        {
+            builder = builder.With(new Avalonia.Win32PlatformOptions { OverlayPopups = true });
+        }
+
+        return builder;
     }
 }
 
