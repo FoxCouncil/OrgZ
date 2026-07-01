@@ -17,7 +17,7 @@
 	     A Top-docked nav header surfaces a < Back button when the panel
 	     isn't on the Store view. FeedDetail owns its own scrolling (the
 	     DataGrid scrolls internally), so it sits as a sibling of the
-	     ScrollViewer that hosts Store + Subscriptions. -->
+	     ScrollViewer that hosts Store + FeedList + Subscriptions. -->
 	<DockPanel LastChildFill="True">
 		<Border DockPanel.Dock="Top"
 		        Background="{StaticResource OrgZSurfaceDarkBrush}"
@@ -34,9 +34,7 @@
 				<StackPanel Orientation="Horizontal" Spacing="6">
 					<i:Icon Value="fa-solid fa-chevron-left" FontSize="12"
 					        VerticalAlignment="Center" />
-					<!-- LineHeight 10 collapses the text's line box just enough
-					     to align its visual baseline with the FA glyph. -->
-					<TextBlock Text="Back" FontSize="12" LineHeight="10"
+					<TextBlock Text="Back" FontSize="12"
 					           VerticalAlignment="Center" />
 				</StackPanel>
 			</Button>

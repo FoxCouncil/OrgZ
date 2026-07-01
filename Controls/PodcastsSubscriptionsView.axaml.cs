@@ -18,20 +18,9 @@ public partial class PodcastsSubscriptionsView : UserControl
 
     private async void SubscriptionTile_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button b && b.Tag is PodcastSubscription sub && ViewModel is { } vm)
+        if (sender is Button { Tag: PodcastSubscription sub } && ViewModel is { } vm)
         {
-            await vm.OpenFeedAsync(new PodcastFeed
-            {
-                Id          = sub.FeedId,
-                PodcastGuid = sub.PodcastGuid,
-                Title       = sub.Title,
-                Author      = sub.Author,
-                Description = sub.Description,
-                HomepageUrl = sub.HomepageUrl,
-                FeedUrl     = sub.FeedUrl,
-                Image       = sub.ImageUrl,
-                Artwork     = sub.ImageUrl,
-            });
+            await vm.OpenSubscriptionAsync(sub);
         }
     }
 }

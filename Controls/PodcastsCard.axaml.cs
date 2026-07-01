@@ -20,6 +20,9 @@ public partial class PodcastsCard : UserControl
     public static readonly StyledProperty<object?> BodyContentProperty =
         AvaloniaProperty.Register<PodcastsCard, object?>(nameof(BodyContent));
 
+    public static readonly StyledProperty<object?> HeaderContentProperty =
+        AvaloniaProperty.Register<PodcastsCard, object?>(nameof(HeaderContent));
+
     public string Title
     {
         get => GetValue(TitleProperty);
@@ -30,6 +33,13 @@ public partial class PodcastsCard : UserControl
     {
         get => GetValue(BodyContentProperty);
         set => SetValue(BodyContentProperty, value);
+    }
+
+    /// <summary>Optional right-aligned content in the card's header strip (e.g. a "Show All" link).</summary>
+    public object? HeaderContent
+    {
+        get => GetValue(HeaderContentProperty);
+        set => SetValue(HeaderContentProperty, value);
     }
 
     public PodcastsCard()

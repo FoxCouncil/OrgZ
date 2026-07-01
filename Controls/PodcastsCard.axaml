@@ -28,6 +28,10 @@
 					           FontWeight="Bold"
 					           Foreground="{StaticResource OrgZCarouselTextBrush}"
 					           HorizontalAlignment="Left" />
+					<!-- Optional right-aligned header action (e.g. a "Show All" link). Null → nothing. -->
+					<ContentControl Content="{Binding #Root.HeaderContent}"
+					                HorizontalAlignment="Right"
+					                VerticalAlignment="Center" />
 				</Grid>
 			</Border>
 

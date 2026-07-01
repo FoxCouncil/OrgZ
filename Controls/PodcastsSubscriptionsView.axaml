@@ -18,6 +18,8 @@
 
 	<StackPanel Margin="16" Spacing="8">
 		<TextBlock Classes="sectionHeader" Text="Your Subscriptions" />
+		<!-- Card grid of subscribed shows; clicking a card drills into that show's episodes
+		     (the feed-detail view), where episodes are playable / downloadable. -->
 		<ItemsControl ItemsSource="{Binding Subscriptions}">
 			<ItemsControl.ItemsPanel>
 				<ItemsPanelTemplate>

@@ -184,11 +184,11 @@ public partial class PodcastsViewModel : ObservableObject
     public bool IsFeedList      => CurrentView == PodcastsView.FeedList;
 
     /// <summary>
-    /// The in-panel back button shows only for drill-down views (a feed or a feed list).
-    /// Store and Subscriptions are top-level entries reached from the sidebar, so they
-    /// don't show one.
+    /// The in-panel back button shows for every drill-down away from the store home: a feed, a feed
+    /// list, or the subscriptions list. Subscriptions now reaches the store via Back rather than a
+    /// sidebar root switch.
     /// </summary>
-    public bool ShowBackButton  => CurrentView is PodcastsView.FeedDetail or PodcastsView.FeedList;
+    public bool ShowBackButton  => CurrentView is PodcastsView.FeedDetail or PodcastsView.FeedList or PodcastsView.Subscriptions;
 
     // -- Store rails -----------------------------------------------------
 
@@ -269,6 +269,33 @@ public partial class PodcastsViewModel : ObservableObject
 
     public ObservableCollection<PodcastSubscription> Subscriptions { get; } = [];
 
+    /// <summary>True when the user has at least one subscription - gates the store's left-column
+    /// "Subscribed" section (hidden entirely when empty).</summary>
+    public bool HasSubscriptions => Subscriptions.Count > 0;
+
+    /// <summary>The first handful of subscribed shows for the store's left-column preview list; the
+    /// header's "Show All" opens the full subscriptions view.</summary>
+    public IEnumerable<PodcastSubscription> SubscribedPreview => Subscriptions.Take(6);
+
+    /// <summary>Opens a subscribed show's feed-detail page - wired from both the subscriptions cards
+    /// and the store's left-column "Subscribed" preview tiles.</summary>
+    internal Task OpenSubscriptionAsync(PodcastSubscription sub) => OpenFeedAsync(FeedFromSubscription(sub));
+
+    /// <summary>Projects a persisted subscription back onto a <see cref="PodcastFeed"/> for episode
+    /// fetches, playback and the group header art.</summary>
+    private static PodcastFeed FeedFromSubscription(PodcastSubscription sub) => new()
+    {
+        Id          = sub.FeedId,
+        PodcastGuid = sub.PodcastGuid,
+        Title       = sub.Title,
+        Author      = sub.Author,
+        Description = sub.Description,
+        HomepageUrl = sub.HomepageUrl,
+        FeedUrl     = sub.FeedUrl,
+        Image       = sub.ImageUrl,
+        Artwork     = sub.ImageUrl,
+    };
+
     // -- Feed list (shared surface for genre browse + store search) ------
     //
     // Both the left-column Categories list and the global header search box
@@ -298,21 +325,14 @@ public partial class PodcastsViewModel : ObservableObject
     // the box step back out of the results rather than jump straight home.
     private bool _feedListIsSearch;
 
-    // -- Navigation roots + back-stack -----------------------------------
+    // -- Back-stack ------------------------------------------------------
     //
-    // Two independent navigation roots - the Store and the Subscriptions list - each with its OWN
-    // back-stack and current view. The sidebar switches between them, restoring exactly where you
-    // left each (a feed you'd drilled into included); switching never resets. Within a root, each
-    // forward navigation (open a feed, browse a genre, run a search) pushes a snapshot of the view
-    // it's leaving; Back pops and restores it without a network re-fetch.
-    private readonly NavRoot _storeRoot = new() { Current = new NavEntry { View = PodcastsView.Store } };
-    private readonly NavRoot _subsRoot  = new() { Current = new NavEntry { View = PodcastsView.Subscriptions } };
-    private NavRoot? _activeRootField;
-    private NavRoot _activeRoot { get => _activeRootField ??= _storeRoot; set => _activeRootField = value; }
-
-    // The active root's back-stack. Every Push/Pop below operates on whichever root is currently
-    // showing, so Store and Subscriptions accumulate their histories separately.
-    private Stack<NavEntry> _navStack => _activeRoot.Stack;
+    // A single navigation back-stack. Every forward navigation (open a feed, browse a genre, run a
+    // search, open the subscriptions list) pushes a snapshot of the view it's leaving; Back pops and
+    // restores it without a network re-fetch. Subscriptions is reached from within the panel (the
+    // store's left-column "Show All" / feed-detail), not the sidebar, so there's no separate root to
+    // switch between.
+    private readonly Stack<NavEntry> _navStack = new();
 
     // -- Commands --------------------------------------------------------
 
@@ -330,41 +350,6 @@ public partial class PodcastsViewModel : ObservableObject
         {
             main.SearchText = "";
         }
-    }
-
-    /// <summary>
-    /// Selects the Store root from the sidebar, restoring its navigation exactly where it was left
-    /// (a drilled-into feed included). No-op - and crucially no reset - if it's already active.
-    /// </summary>
-    internal void ActivateStoreRoot() => SwitchRoot(_storeRoot);
-
-    /// <summary>
-    /// Selects the Subscriptions root from the sidebar, restoring its navigation and refreshing the
-    /// list. No-op if it's already active.
-    /// </summary>
-    internal void ActivateSubscriptionsRoot()
-    {
-        var entering = _activeRoot != _subsRoot;
-        SwitchRoot(_subsRoot);
-        if (entering)
-        {
-            ReloadSubscriptions();
-        }
-    }
-
-    /// <summary>
-    /// Swaps the active navigation root, saving the outgoing root's current view and restoring the
-    /// incoming root's. Each root keeps its own back-stack, so the two histories never bleed.
-    /// </summary>
-    private void SwitchRoot(NavRoot target)
-    {
-        if (_activeRoot == target)
-        {
-            return; // already on this root - preserve its navigation, don't reset
-        }
-        _activeRoot.Current = SnapshotCurrent();   // remember where we were in the outgoing root
-        _activeRoot = target;
-        RestoreEntry(target.Current);              // restore where we left the incoming root
     }
 
     /// <summary>
@@ -485,6 +470,9 @@ public partial class PodcastsViewModel : ObservableObject
             PodcastCache.AddSubscription(feed);
         }
         OnPropertyChanged(nameof(SelectedFeedIsSubscribed));
+        // Reflect the change immediately in the store's left-column "Subscribed" section (and the
+        // subscriptions view's source), since PodcastCache doesn't raise a change event of its own.
+        ReloadSubscriptions();
     }
 
     /// <summary>
@@ -495,7 +483,7 @@ public partial class PodcastsViewModel : ObservableObject
     /// </summary>
     internal async Task ShowEpisodeInfoAsync(PodcastEpisode episode)
     {
-        if (SelectedFeed is null)
+        if (SelectedFeed is not { } feed)
         {
             return;
         }
@@ -508,15 +496,15 @@ public partial class PodcastsViewModel : ObservableObject
         {
             Id          = $"podcast:{episode.Id}",
             Kind        = MediaKind.Podcast,
-            Source      = $"podcast:{SelectedFeed.Id}",
+            Source      = $"podcast:{feed.Id}",
             SourceId    = episode.Guid,
             Title       = episode.Title,
-            Artist      = SelectedFeed.Title,
-            Album       = SelectedFeed.Title,
+            Artist      = feed.Title,
+            Album       = feed.Title,
             Comment     = episode.Description,
             StreamUrl   = episode.EnclosureUrl,
-            HomepageUrl = SelectedFeed.HomepageUrl,
-            FaviconUrl  = episode.Image ?? SelectedFeed.DisplayImage,
+            HomepageUrl = feed.HomepageUrl,
+            FaviconUrl  = episode.Image ?? feed.DisplayImage,
             Duration    = episode.DurationSec > 0 ? TimeSpan.FromSeconds(episode.DurationSec) : null,
             DateAdded   = publishedAt,
             FileSize    = episode.EnclosureLength > 0 ? episode.EnclosureLength : null,
@@ -528,41 +516,39 @@ public partial class PodcastsViewModel : ObservableObject
     [RelayCommand]
     internal void StreamEpisode(PodcastEpisode? episode)
     {
-        if (episode == null || SelectedFeed == null) return;
+        if (SelectedFeed is not { } feed || episode is null) return;
 
-        // "Stream" is now a misnomer kept for backward compatibility with the
-        // existing button - if we have a fully downloaded copy on disk, play
-        // that instead so the user gets gapless start, no-buffering, and works
-        // offline. Falls through to the network stream when the file isn't on
-        // disk (or is partial / corrupted).
+        // "Stream" is a misnomer kept for the legacy button - if a fully downloaded
+        // copy is on disk, play that instead (gapless start, no buffering, offline).
+        // Falls through to the network stream when the file isn't on disk.
         var libraryRoot = App.FolderPath;
         if (!string.IsNullOrWhiteSpace(libraryRoot))
         {
-            var state = PodcastDownloadService.GetState(SelectedFeed, episode, libraryRoot);
+            var state = PodcastDownloadService.GetState(feed, episode, libraryRoot);
             if (state == PodcastDownloadState.Downloaded)
             {
-                var localPath = PodcastDownloadService.GetLocalPath(SelectedFeed, episode, libraryRoot);
+                var localPath = PodcastDownloadService.GetLocalPath(feed, episode, libraryRoot);
                 if (!string.IsNullOrWhiteSpace(localPath))
                 {
-                    _main.PlayPodcastEpisode(SelectedFeed, episode, localPath: localPath);
+                    _main.PlayPodcastEpisode(feed, episode, localPath: localPath);
                     return;
                 }
             }
         }
-        _main.PlayPodcastEpisodeStream(SelectedFeed, episode);
+        _main.PlayPodcastEpisodeStream(feed, episode);
     }
 
     [RelayCommand]
     internal void DownloadEpisode(PodcastEpisode? episode)
     {
-        if (episode == null || SelectedFeed == null) return;
+        if (SelectedFeed is not { } feed || episode is null) return;
         var libraryRoot = App.FolderPath;
         if (string.IsNullOrWhiteSpace(libraryRoot))
         {
             _log.Warning("Cannot download episode {Id}: library root not set", episode.Id);
             return;
         }
-        _ = PodcastDownloadService.Instance.EnqueueAsync(SelectedFeed, episode, libraryRoot);
+        _ = PodcastDownloadService.Instance.EnqueueAsync(feed, episode, libraryRoot);
         // Bump the row to InProgress immediately - the service signals Completed
         // / Failed when it's done, but the user expects the icon to flip now.
         RefreshEpisodeRowState(episode.Id);
@@ -570,11 +556,11 @@ public partial class PodcastsViewModel : ObservableObject
 
     internal void RemoveDownload(PodcastEpisode? episode)
     {
-        if (episode == null || SelectedFeed == null)
+        if (SelectedFeed is not { } feed || episode is null)
         {
             return;
         }
-        PodcastDownloadService.DeleteDownload(SelectedFeed, episode, App.FolderPath);
+        PodcastDownloadService.DeleteDownload(feed, episode, App.FolderPath);
         RefreshEpisodeRowState(episode.Id);
     }
 
@@ -853,6 +839,10 @@ public partial class PodcastsViewModel : ObservableObject
         {
             Subscriptions.Add(s);
         }
+        // Derived views the store's left-column section binds to - raise manually since they read
+        // the collection's Count / a Take() projection rather than the collection itself.
+        OnPropertyChanged(nameof(HasSubscriptions));
+        OnPropertyChanged(nameof(SubscribedPreview));
     }
 
     private void OnDownloadProgress(DownloadProgress p) { /* hook UI progress here if needed */ }
@@ -936,16 +926,6 @@ internal sealed class NavEntry
     public IReadOnlyList<PodcastFeed> FeedListItems { get; init; } = [];
     public PodcastFeed? SelectedFeed { get; init; }
     public IReadOnlyList<PodcastEpisodeRow> Episodes { get; init; } = [];
-}
-
-/// <summary>
-/// One sidebar navigation root (Store or Subscriptions): its own back-stack plus a snapshot of the
-/// view currently shown under it, so switching between roots restores each independently.
-/// </summary>
-internal sealed class NavRoot
-{
-    public Stack<NavEntry> Stack { get; } = new();
-    public NavEntry Current { get; set; } = new() { View = PodcastsView.Store };
 }
 
 public sealed class PodcastCategoryRail
