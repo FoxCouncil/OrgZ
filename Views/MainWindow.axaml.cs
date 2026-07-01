@@ -32,7 +32,13 @@ public partial class MainWindow : Window
 
     private string? _lastViewConfigKey;
     private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
-    private bool _groupedDataGridInitialized;
+    // Grouped grids whose columns have been built. Each is built exactly once - rebuilding after a
+    // grouped DataGridCollectionView was bound triggers the Avalonia spacer column bug.
+    private readonly HashSet<DataGrid> _initializedGroupedGrids = new();
+    // Whichever grouped grid is currently driving the view (GroupedDataGrid for Radio,
+    // PodcastGroupedDataGrid for a device Podcasts view). The row-group collapse/expand machinery
+    // operates on this rather than a hard-coded grid, since only one grouped view is active at a time.
+    private DataGrid? _activeGroupedGrid;
 
     internal static MediaItem? DraggedMediaItem;
     private static int _draggedPlaylistRowIndex = -1;
@@ -70,8 +76,16 @@ public partial class MainWindow : Window
         // Wired at the tunneling stage so the DataGrid doesn't eat the event first.
         MainDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
         GroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
+        PodcastGroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
         MainDataGrid.ColumnReordered += DataGrid_ColumnReordered;
         GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
+        PodcastGroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
+
+        // Keyboard context-menu key (Apps / Shift+F10) opens the focused element's context menu by
+        // re-dispatching ContextRequested - standard a11y, and it lets right-click menus be driven and
+        // screenshotted without a mouse (e.g. the Avalonia devtools MCP, which can't synthesize a
+        // right-click). Tunnel+bubble+handledEventsToo so it fires regardless of who's focused.
+        AddHandler(InputElement.KeyDownEvent, OpenContextMenuOnKey, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
 
         DataContext = _viewModel = new MainWindowViewModel(this, _screenshotMode);
 
@@ -226,9 +240,17 @@ public partial class MainWindow : Window
         Avalonia.Threading.Dispatcher.UIThread.Post(() => RestoreViewState(_lastViewConfigKey), Avalonia.Threading.DispatcherPriority.Render);
     }
 
+    /// <summary>The grouped grid a host routes to, or null for ungrouped hosts (MainGrid / the panel).</summary>
+    private DataGrid? GroupedGridFor(ViewHost host) => host switch
+    {
+        ViewHost.GroupedGrid => GroupedDataGrid,
+        ViewHost.PodcastGroupedGrid => PodcastGroupedDataGrid,
+        _ => null,
+    };
+
     private DataGrid GetActiveDataGrid()
     {
-        return GroupedDataGrid.IsVisible ? GroupedDataGrid : MainDataGrid;
+        return _activeGroupedGrid is { IsVisible: true } grouped ? grouped : MainDataGrid;
     }
 
     private ScrollViewer? GetDataGridScrollViewer()
@@ -375,15 +397,18 @@ public partial class MainWindow : Window
 
     private void ApplyViewConfig(ListViewConfig config)
     {
-        bool isPodcasts = config.Key == "Podcasts";
-        bool isGrouped = config.GroupByPath != null;
+        // The config names its host directly (ViewHost) - the grid/panel routing, the grouped-grid
+        // selection, and BindActiveView in the VM all key off the same discriminator instead of
+        // re-deriving it from view-specific flags.
+        bool isPodcasts = config.Host == ViewHost.PodcastsPanel;
 
-        // Podcasts uses its own UserControl instead of a DataGrid. Hide both grids
-        // and show the panel; the panel's internal nav switches between store /
-        // subscriptions / feed-detail without touching the DataGrid pipeline.
+        // Podcasts (the store) uses its own UserControl instead of a DataGrid. Hide the grids and show
+        // the panel; the panel's internal nav switches between store / subscriptions / feed-detail
+        // without touching the DataGrid pipeline.
         PodcastsPanel.IsVisible = isPodcasts;
-        MainDataGrid.IsVisible = !isPodcasts && !isGrouped;
-        GroupedDataGrid.IsVisible = !isPodcasts && isGrouped;
+        MainDataGrid.IsVisible = config.Host == ViewHost.MainGrid;
+        GroupedDataGrid.IsVisible = config.Host == ViewHost.GroupedGrid;
+        PodcastGroupedDataGrid.IsVisible = config.Host == ViewHost.PodcastGroupedGrid;
 
         // Set RadioFilterPanel visibility before any early-return so a previous
         // Radio view doesn't leave its country/genre dropdowns hanging in the
@@ -393,19 +418,19 @@ public partial class MainWindow : Window
         if (isPodcasts)
         {
             _ = _viewModel.Podcasts.LoadStoreAsync();
-            _viewModel.Podcasts.ReloadSubscriptions();
             return;
         }
 
-        if (isGrouped)
+        _activeGroupedGrid = GroupedGridFor(config.Host);
+        if (_activeGroupedGrid is { } groupedGrid)
         {
-            // Build columns on GroupedDataGrid exactly once - rebuilding after a grouped
-            // DataGridCollectionView was bound triggers the Avalonia spacer column bug.
-            if (!_groupedDataGridInitialized)
+            // Build columns on each grouped grid exactly once - rebuilding after a grouped
+            // DataGridCollectionView is bound triggers the Avalonia spacer column bug, which is
+            // why every distinct grouped column set (Radio, device Podcasts) owns its own grid.
+            if (_initializedGroupedGrids.Add(groupedGrid))
             {
-                BuildColumnsOn(GroupedDataGrid, config.Columns);
-                BuildContextMenuOn(GroupedDataGrid, config.ContextMenuItems);
-                _groupedDataGridInitialized = true;
+                BuildColumnsOn(groupedGrid, config.Columns);
+                BuildContextMenuOn(groupedGrid, config.ContextMenuItems);
             }
         }
         else
@@ -418,7 +443,7 @@ public partial class MainWindow : Window
         // load, each group gets the state it had last time (or collapsed by default
         // for first-time keys). User toggles are captured via the header's
         // IsItemsExpanded observable and saved immediately.
-        if (isGrouped)
+        if (_activeGroupedGrid is not null)
         {
             // Key off the config being applied (the view we're entering), NOT
             // _lastViewConfigKey - that's still the view we're leaving at this point, which
@@ -431,8 +456,11 @@ public partial class MainWindow : Window
                 : GroupExpansionState.Load(_currentGroupedViewKey!);
             _appliedExpansionKeys.Clear();
 
-            GroupedDataGrid.LoadingRowGroup -= AutoCollapseRowGroup;
-            GroupedDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
+            if (_activeGroupedGrid is { } grouped)
+            {
+                grouped.LoadingRowGroup -= AutoCollapseRowGroup;
+                grouped.LoadingRowGroup += AutoCollapseRowGroup;
+            }
 
             // Apply the saved collapse state once, in a single batch, after the grid has laid
             // out the freshly-bound collection. It MUST run post-layout: CollapseRowGroup only
@@ -485,7 +513,8 @@ public partial class MainWindow : Window
     private void ApplyGroupExpansionToAllGroups()
     {
         if (_currentGroupedViewKey is null
-            || GroupedDataGrid.ItemsSource is not DataGridCollectionView view
+            || _activeGroupedGrid is not { } grid
+            || grid.ItemsSource is not DataGridCollectionView view
             || view.Groups is null)
         {
             return;
@@ -510,11 +539,11 @@ public partial class MainWindow : Window
 
             if (expand)
             {
-                GroupedDataGrid.ExpandRowGroup(group, false);
+                grid.ExpandRowGroup(group, false);
             }
             else
             {
-                GroupedDataGrid.CollapseRowGroup(group, false);
+                grid.CollapseRowGroup(group, false);
             }
         }
 
@@ -527,7 +556,9 @@ public partial class MainWindow : Window
     /// </summary>
     internal void CollapseAllRowGroups()
     {
-        if (GroupedDataGrid.ItemsSource is not DataGridCollectionView view || view.Groups is null)
+        if (_activeGroupedGrid is not { } grid
+            || grid.ItemsSource is not DataGridCollectionView view
+            || view.Groups is null)
         {
             return;
         }
@@ -539,7 +570,7 @@ public partial class MainWindow : Window
                 continue;
             }
             _groupExpansion[group.Key?.ToString() ?? string.Empty] = false;
-            GroupedDataGrid.CollapseRowGroup(group, false);
+            grid.CollapseRowGroup(group, false);
         }
 
         PersistGroupExpansion();
@@ -766,6 +797,50 @@ public partial class MainWindow : Window
                         return img;
                     }),
                 },
+                ColumnType.Rating => new DataGridTemplateColumn
+                {
+                    Header = def.Header,
+                    CellTemplate = new FuncDataTemplate<MediaItem>((item, _) =>
+                    {
+                        // Five slots: a faint outline star always shows (75% transparent - the
+                        // "no rating here" look), with a solid star layered on top and toggled
+                        // per-slot by the rating, so re-rating updates live via the binding.
+                        var row = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            Spacing = 1,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                        };
+
+                        for (int position = 1; position <= 5; position++)
+                        {
+                            var outline = new Icon
+                            {
+                                Value = "fa-regular fa-star",
+                                FontSize = 12,
+                                Opacity = 0.25,
+                                VerticalAlignment = VerticalAlignment.Center,
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                            };
+                            var filled = new Icon
+                            {
+                                Value = "fa-solid fa-star",
+                                FontSize = 12,
+                                VerticalAlignment = VerticalAlignment.Center,
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                            };
+                            filled.Bind(IsVisibleProperty, new Binding(nameof(MediaItem.Rating))
+                            {
+                                Converter = Converters.RatingStarConverter.Instance,
+                                ConverterParameter = position,
+                            });
+
+                            row.Children.Add(new Panel { Width = 15, Height = 14, Children = { outline, filled } });
+                        }
+                        return row;
+                    }),
+                },
                 _ => new DataGridTextColumn
                 {
                     Header = def.Header,
@@ -816,6 +891,34 @@ public partial class MainWindow : Window
     /// </summary>
     internal static readonly AttachedProperty<string?> ColumnKeyProperty =
         AvaloniaProperty.RegisterAttached<MainWindow, DataGridColumn, string?>("ColumnKey");
+
+    /// <summary>
+    /// Opens the focused element's context menu when the keyboard context-menu key is pressed
+    /// (Apps, or Shift+F10) by re-dispatching a synthetic <see cref="ContextRequestedEventArgs"/> -
+    /// the same event a right-click raises. Makes every right-click menu keyboard-accessible and
+    /// driveable from automation tooling that can't synthesize a right-click.
+    /// </summary>
+    private void OpenContextMenuOnKey(object? sender, KeyEventArgs e)
+    {
+        bool isMenuKey = e.Key == Key.Apps || (e.Key == Key.F10 && e.KeyModifiers.HasFlag(KeyModifiers.Shift));
+        if (!isMenuKey)
+        {
+            return;
+        }
+        // Use the key event's target (the focused element for a real keypress; the element an
+        // automation tool dispatched the key to) - NOT FocusManager, which doesn't reflect a
+        // tool-injected focus.
+        var target = (e.Source as InputElement) ?? FocusManager?.GetFocusedElement() as InputElement;
+        if (target is not null)
+        {
+            // The hit-test handlers resolve the menu via e.Source + FindAncestorOfType, which EXCLUDES
+            // self - so raise from a visual descendant (header content) of the target, not the target
+            // itself, or the lookup returns null and no menu is built.
+            var source = target.GetVisualDescendants().OfType<InputElement>().FirstOrDefault() ?? target;
+            source.RaiseEvent(new ContextRequestedEventArgs { RoutedEvent = InputElement.ContextRequestedEvent, Source = source });
+            e.Handled = true;
+        }
+    }
 
     private void DataGrid_HeaderRightClick(object? sender, PointerPressedEventArgs e)
     {
@@ -1044,8 +1147,7 @@ public partial class MainWindow : Window
         var config = ListViewConfigs.Get(_lastViewConfigKey);
         if (config != null)
         {
-            var grid = config.GroupByPath != null ? GroupedDataGrid : MainDataGrid;
-            BuildContextMenuOn(grid, config.ContextMenuItems);
+            BuildContextMenuOn(GroupedGridFor(config.Host) ?? MainDataGrid, config.ContextMenuItems);
         }
     }
 

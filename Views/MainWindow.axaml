@@ -96,23 +96,30 @@
 			<Setter Property="Opacity" Value="0.3" />
 		</Style>
 
-		<!-- LCD-styled rip progress bar: forces the indicator fill to the dark
-		     LCD green (Foreground alone doesn't pierce the FluentTheme template). -->
-		<Style Selector="ProgressBar.lcdRip /template/ Border#PART_Indicator">
-			<Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
-		</Style>
-		<Style Selector="ProgressBar.lcdRip">
-			<Setter Property="MinHeight" Value="8" />
-		</Style>
-
 		<!-- The Slider.lcdSeek style itself lives in App/OrgZStyles.axaml so
 		     the mini-player can reuse it too. -->
+
+		<!-- Shared chrome for the media DataGrids (flat, radio-grouped, podcast-grouped):
+		     alternating row backgrounds, no cell focus box, vertically centered cell text.
+		     One definition instead of an inline copy per grid. -->
+		<Style Selector="DataGrid.mediaGrid DataGridRow">
+			<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
+		</Style>
+		<Style Selector="DataGrid.mediaGrid DataGridRow:nth-child(odd)">
+			<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
+		</Style>
+		<Style Selector="DataGrid.mediaGrid DataGridCell:focus /template/ Grid#FocusVisual">
+			<Setter Property="IsVisible" Value="False" />
+		</Style>
+		<Style Selector="DataGrid.mediaGrid DataGridCell TextBlock">
+			<Setter Property="VerticalAlignment" Value="Center" />
+		</Style>
 	</Window.Styles>
 
 	<DockPanel>
 		<DockPanel.Styles>
 			<Style Selector="ContentPresenter, TextBlock, TextBox">
-				<Setter Property="TextElement.FontFamily" Value="Consolas"/>
+				<Setter Property="TextElement.FontFamily" Value="Cascadia Mono,Consolas"/>
 			</Style>
 		</DockPanel.Styles>
 
@@ -241,18 +248,6 @@
 							     still lives on StatusBarViewModel via the inner Border's
 							     DataContext binding. -->
 							<Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0" MinHeight="24">
-								<Button Grid.Column="0"
-								        Command="{Binding RipCurrentCdCommand}"
-								        IsVisible="{Binding IsCdViewActive}"
-								        Padding="10,4" Cursor="Hand"
-								        Margin="0,0,8,0"
-								        ToolTip.Tip="Rip the disc to disk">
-									<StackPanel Orientation="Horizontal" Spacing="6">
-										<i:Icon Value="fa-solid fa-compact-disc" FontSize="13" />
-										<TextBlock Text="Rip CD…" VerticalAlignment="Center" LineHeight="14" />
-									</StackPanel>
-								</Button>
-
 								<!-- Per-view summary text. Black on the metal-textured page. -->
 								<TextBlock Grid.Column="1"
 								           DataContext="{Binding StatusBar}"
@@ -345,6 +340,7 @@
 							<Grid>
 							<!-- Regular DataGrid for non-grouped views (Music, Favorites, Playlists, Ignored) -->
 							<DataGrid x:Name="MainDataGrid"
+								Classes="mediaGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
 								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
 								ItemsSource="{Binding FilteredItemsView}"
@@ -356,20 +352,6 @@
 								Background="{DynamicResource SystemAltHighColor}"
 								HorizontalScrollBarVisibility="Auto"
 								VerticalScrollBarVisibility="Auto">
-								<DataGrid.Styles>
-									<Style Selector="DataGridRow">
-										<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-									</Style>
-									<Style Selector="DataGridRow:nth-child(odd)">
-										<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-									</Style>
-									<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
-										<Setter Property="IsVisible" Value="False" />
-									</Style>
-									<Style Selector="DataGridCell TextBlock">
-										<Setter Property="VerticalAlignment" Value="Center" />
-									</Style>
-								</DataGrid.Styles>
 								<DataGrid.Columns />
 							</DataGrid>
 
@@ -395,6 +377,7 @@
 							     dedicated source the grid keeps the same DataGridCollectionView across switches, so its
 							     row-group collapse state survives and there's nothing to re-collapse. -->
 							<DataGrid x:Name="GroupedDataGrid"
+								Classes="mediaGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
 								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
 								ItemsSource="{Binding GroupedItemsView}"
@@ -407,20 +390,28 @@
 								HorizontalScrollBarVisibility="Auto"
 								VerticalScrollBarVisibility="Auto"
 								IsVisible="False">
-								<DataGrid.Styles>
-									<Style Selector="DataGridRow">
-										<Setter Property="Background" Value="{DynamicResource SystemControlForegroundBaseMediumLowBrush}" />
-									</Style>
-									<Style Selector="DataGridRow:nth-child(odd)">
-										<Setter Property="Background" Value="{DynamicResource SystemControlBackgroundBaseLowBrush}" />
-									</Style>
-									<Style Selector="DataGridCell:focus /template/ Grid#FocusVisual">
-										<Setter Property="IsVisible" Value="False" />
-									</Style>
-									<Style Selector="DataGridCell TextBlock">
-										<Setter Property="VerticalAlignment" Value="Center" />
-									</Style>
-								</DataGrid.Styles>
+								<DataGrid.Columns />
+							</DataGrid>
+
+							<!-- Dedicated grouped grid for a device's Podcasts view - one collapsible header
+							     per show. Separate from GroupedDataGrid because that grid carries Radio's
+							     columns and the shared grid can't rebuild columns for a second set (the
+							     Avalonia spacer-column crash); this one builds its podcast columns once and
+							     never rebuilds. Bound to its OWN source so it never thrashes the radio grid. -->
+							<DataGrid x:Name="PodcastGroupedDataGrid"
+								Classes="mediaGrid"
+								DoubleTapped="DataGrid_DoubleTapped"
+								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+								ItemsSource="{Binding PodcastGroupedItemsView}"
+								GridLinesVisibility="All"
+								IsReadOnly="True"
+								AutoGenerateColumns="False"
+								CanUserSortColumns="True"
+								SelectionMode="Single"
+								Background="{DynamicResource SystemAltHighColor}"
+								HorizontalScrollBarVisibility="Auto"
+								VerticalScrollBarVisibility="Auto"
+								IsVisible="False">
 								<DataGrid.Columns />
 							</DataGrid>
 							</Grid>
