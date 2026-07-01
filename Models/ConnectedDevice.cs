@@ -125,27 +125,28 @@ public partial class ConnectedDevice : ObservableObject
     private string? _generationImageSlug;
 
     /// <summary>
-    /// Returns a FRESH Bitmap each call - callers must NOT share instances across
-    /// Image controls. Avalonia's ref-counted bitmap lifecycle disposes the underlying
-    /// SKBitmap when a binding changes, and if two Image controls share the same
-    /// Bitmap instance, the second one crashes with ObjectDisposedException during
-    /// its next layout measure. Raw PNG bytes are cached, new Bitmap is cheap (~20 KB).
+    /// The device's product colour ("Red", "Silver", "Black", ...) decoded from the model database, used
+    /// to pick the colour-specific artwork in Assets/Devices. Blank/null for models with a single finish.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GenerationImage), nameof(HasGenerationImage))]
+    private string? _color;
+
+    private const string DeviceAssetBase = "avares://Orgz/Assets/Devices/";
+
+    /// <summary>
+    /// Returns a FRESH Bitmap each call - callers must NOT share instances across Image controls.
+    /// Avalonia's ref-counted bitmap lifecycle disposes the underlying SKBitmap when a binding changes,
+    /// and if two Image controls share the same Bitmap instance, the second crashes with
+    /// ObjectDisposedException during its next layout measure. Raw PNG bytes are cached; a new Bitmap
+    /// is cheap. Resolves the best asset for this device - see <see cref="ResolveImageSlug"/>.
     /// </summary>
     public Bitmap? GenerationImage
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(IpodGeneration))
-            {
-                return null;
-            }
-
-            var slug = IpodGeneration
-                .ToLowerInvariant()
-                .Replace(' ', '_')
-                .Replace('.', '_');
-
-            if (!KnownGenerationImages.Contains(slug))
+            var slug = ResolveImageSlug();
+            if (slug is null)
             {
                 return null;
             }
@@ -154,8 +155,7 @@ public partial class ConnectedDevice : ObservableObject
             {
                 try
                 {
-                    var uri = new Uri($"avares://Orgz/Assets/Devices/ipod_{slug}.png");
-                    using var assetStream = AssetLoader.Open(uri);
+                    using var assetStream = AssetLoader.Open(new Uri($"{DeviceAssetBase}{slug}.png"));
                     var ms = new MemoryStream();
                     assetStream.CopyTo(ms);
                     _generationImageBytes = ms.ToArray();
@@ -171,33 +171,79 @@ public partial class ConnectedDevice : ObservableObject
         }
     }
 
-    public bool HasGenerationImage => _generationImageBytes != null || (!string.IsNullOrWhiteSpace(IpodGeneration) && KnownGenerationImages.Contains(IpodGeneration.ToLowerInvariant().Replace(' ', '_').Replace('.', '_')));
+    public bool HasGenerationImage => _generationImageBytes != null || ResolveImageSlug() is not null;
+
+    // Memoized ResolveImageSlug result, keyed on the inputs it derives from. Asset probing (Exists
+    // checks + the colour-fallback directory enumeration) is I/O, and GenerationImage /
+    // HasGenerationImage are bound properties re-evaluated on the UI thread - so resolve once per
+    // (generation, colour), including the "no art ships" null result.
+    private (string? Gen, string? Color, string? Slug) _resolvedSlug;
+    private bool _slugResolved;
+
+    private string? ResolveImageSlug()
+    {
+        if (_slugResolved && _resolvedSlug.Gen == IpodGeneration && _resolvedSlug.Color == Color)
+        {
+            return _resolvedSlug.Slug;
+        }
+        var slug = ResolveImageSlugCore();
+        _resolvedSlug = (IpodGeneration, Color, slug);
+        _slugResolved = true;
+        return slug;
+    }
 
     /// <summary>
-    /// Set of generation slugs we have product imagery for. Files live in
-    /// Assets/Devices/ipod_{slug}.png and get embedded at build time via the
-    /// existing &lt;AvaloniaResource Include="Assets\**" /&gt; glob in OrgZ.csproj.
-    /// When you drop a new image in, add the slug here.
-    ///
-    /// Images sourced from Wikimedia Commons under CC BY-SA 3.0 / GFDL.
-    /// See Assets/Devices/ATTRIBUTIONS.md for credit details.
+    /// Picks the artwork file base name (no extension, always the 1x - the 500px source is already sharp
+    /// at the thumbnail size, so <c>@2x</c> variants are ignored) for this device, or null when none ships.
+    /// Order: exact generation+colour (<c>ipod_nano_5g_red</c>) → generation-only (<c>ipod_4g</c>) → any
+    /// colour of that generation, so a finish the art set doesn't cover still shows the right model.
+    /// Files are embedded via the <c>&lt;AvaloniaResource Include="Assets\**" /&gt;</c> glob in OrgZ.csproj.
+    /// Art from Wikimedia Commons - see Assets/Devices/ATTRIBUTIONS.md.
     /// </summary>
-    private static readonly HashSet<string> KnownGenerationImages = new(StringComparer.OrdinalIgnoreCase)
+    private string? ResolveImageSlugCore()
     {
-        "4g",             // iPod 4G click wheel (mono)
-        "photo",          // iPod Photo (color screen, same form factor as 4G)
-        "mini_1g",
-        "mini_2g",
-        "video_5g",       // iPod 5G Video
-        "video_5_5g",     // iPod 5.5G Video (enhanced)
-        "classic_6g",
-        "classic_6_5g",
-        "classic_7g",
-        "nano_1g",
-        "nano_2g",
-        "nano_7g",
-        "shuffle_4g",
-    };
+        if (string.IsNullOrWhiteSpace(IpodGeneration))
+        {
+            return null;
+        }
+        var gen = "ipod_" + IpodGeneration.ToLowerInvariant().Replace(' ', '_').Replace('.', '_');
+
+        if (!string.IsNullOrWhiteSpace(Color))
+        {
+            var colour = $"{gen}_{Color.ToLowerInvariant().Replace(' ', '_')}";
+            if (AssetExists(colour))
+            {
+                return colour;
+            }
+        }
+        if (AssetExists(gen))
+        {
+            return gen;
+        }
+        return FirstColourFor(gen);
+    }
+
+    private static bool AssetExists(string baseName)
+        => AssetLoader.Exists(new Uri($"{DeviceAssetBase}{baseName}.png"));
+
+    /// <summary>First (alphabetical) 1x colour variant for a generation - a sensible default when the
+    /// device's exact colour isn't in the art set.</summary>
+    private static string? FirstColourFor(string gen)
+    {
+        try
+        {
+            var prefix = gen + "_";
+            return AssetLoader.GetAssets(new Uri(DeviceAssetBase), null)
+                .Select(u => Path.GetFileNameWithoutExtension(u.AbsolutePath))
+                .Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !n.Contains("@2x", StringComparison.Ordinal))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     public string ModelDisplay => string.IsNullOrWhiteSpace(Model) ? "\u2014" : Model;
 

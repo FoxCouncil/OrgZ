@@ -155,7 +155,8 @@ public static class DeviceFingerprint
             {
                 device.Model = info.DisplayNameForActualCapacity(device.TotalSpace);
                 device.IpodGeneration = info.Generation;
-                _log.Debug("libgpod serial lookup matched: Serial={Serial} -> Model={Model} Generation={Generation}", device.Serial, device.Model, info.Generation);
+                device.Color = info.Color;   // drives the colour-specific artwork in Assets/Devices
+                _log.Debug("libgpod serial lookup matched: Serial={Serial} -> Model={Model} Generation={Generation} Color={Color}", device.Serial, device.Model, info.Generation, info.Color);
             }
         }
 

@@ -13,7 +13,7 @@ High*, *Tokyo Clash*, *Boom Boom Love Me*), shown with their permission. All rig
 that artwork remain with the artists.
 
 **Track metadata** for the wider sample library (artist names, titles, years) comes from
-[eurobeat.online](https://eurobeat.online) - *The Super Euro Database* - and is used under
+[eurobeat.online](https://eurobeat.online) (*The Super Euro Database*) and is used under
 the [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/)
 license.
 
@@ -23,4 +23,4 @@ With thanks to Mandie NRG, DJ Nine, and the Eurobeat community. 🏎️💨
 
 ## Special Thanks
 
-- **Fluke** - for loaning iPods for hardware testing.
+- **Fluke**: for loaning iPods for hardware testing.
