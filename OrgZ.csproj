@@ -18,6 +18,13 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<AvaloniaResource Include="Assets\**" />
+		<!-- The Nano 5G CDB skeleton is loaded by a Service (must work headless / in tests too), so it's
+		     a plain embedded resource rather than an Avalonia asset, which needs the running app's
+		     AssetLoader. -->
+		<AvaloniaResource Remove="Assets\nano5g-cdb-skeleton.cdb" />
+		<EmbeddedResource Include="Assets\nano5g-cdb-skeleton.cdb">
+			<LogicalName>OrgZ.nano5g-cdb-skeleton.cdb</LogicalName>
+		</EmbeddedResource>
 	</ItemGroup>
 
 	<!-- Exclude the test project + tools/ helpers (both live in subfolders of the OrgZ root). -->
