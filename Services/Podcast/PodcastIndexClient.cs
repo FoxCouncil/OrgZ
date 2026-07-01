@@ -95,6 +95,24 @@ public static class PodcastIndexClient
         return resp?.Items ?? [];
     }
 
+    /// <summary>Reads a feed's episodes from the on-disk cache ONLY - never the network - so the device
+    /// sync can resolve episode publish dates while staying offline. Returns null when nothing's cached.</summary>
+    public static List<PodcastEpisode>? GetCachedEpisodesByFeedId(long feedId)
+    {
+        foreach (var max in new[] { 200, 50 })
+        {
+            var cachePath = Path.Combine(CacheDir, $"{UrlHash($"{BaseUrl}/episodes/byfeedid?id={feedId}&max={max}")}.v{CacheVersion}.json");
+            if (!File.Exists(cachePath)) { continue; }
+            try
+            {
+                var items = JsonSerializer.Deserialize<PodcastEpisodesResponse>(File.ReadAllText(cachePath), JsonOpts)?.Items;
+                if (items is { Count: > 0 }) { return items; }
+            }
+            catch { /* corrupt cache - ignore */ }
+        }
+        return null;
+    }
+
     public static async Task<PodcastFeed?> GetPodcastByFeedIdAsync(long feedId, CancellationToken ct = default)
     {
         var url = $"{BaseUrl}/podcasts/byfeedid?id={feedId}";

@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:controls="using:OrgZ.Controls"
              xmlns:models="using:OrgZ.Models"
              xmlns:vm="using:OrgZ.ViewModels"
              xmlns:converters="clr-namespace:OrgZ.Converters"
@@ -14,130 +15,112 @@
         <converters:DoubleToStarGridLengthConverter x:Key="StarConverter" />
     </UserControl.Resources>
 
-    <Border Background="{StaticResource OrgZSurfaceDarkBrush}"
-            BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
-            BorderThickness="0,0,0,1"
-            Padding="16,10">
+    <controls:MediaHeaderBar ArtSize="72">
 
-        <Border.Styles>
-            <Style Selector="TextBlock.label">
-                <Setter Property="FontSize" Value="11" />
-                <Setter Property="Opacity" Value="0.55" />
-                <Setter Property="HorizontalAlignment" Value="Right" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="Margin" Value="0,0,6,0" />
-            </Style>
-            <Style Selector="TextBlock.value">
-                <Setter Property="FontSize" Value="11" />
-                <Setter Property="FontWeight" Value="Bold" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            </Style>
-        </Border.Styles>
+        <!-- Large device image: per-generation product photo when available, else a generic icon. -->
+        <controls:MediaHeaderBar.Art>
+            <Panel>
+                <Image Source="{Binding GenerationImage}"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Margin="4"
+                       IsVisible="{Binding HasGenerationImage}" />
+                <i:Icon Value="{Binding Icon}" FontSize="36"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        IsVisible="{Binding !HasGenerationImage}" />
+            </Panel>
+        </controls:MediaHeaderBar.Art>
 
-        <DockPanel>
+        <!-- iTunes-style 2-column identity grid. Fixed column widths so long values truncate. -->
+        <controls:MediaHeaderBar.Body>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="220" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-            <!-- TOP: icon + iTunes-style identity grid + eject -->
-            <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" Classes="label" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" Classes="value" />
 
-                <!-- Large device image: per-generation product photo when available,
-                     otherwise the generic FontAwesome icon. -->
-                <Border Grid.Column="0"
-                        Background="{DynamicResource SystemChromeGrayColor}"
-                        CornerRadius="6"
-                        Width="72" Height="72"
-                        VerticalAlignment="Center"
-                        ClipToBounds="True">
-                    <Panel>
-                        <Image Source="{Binding GenerationImage}"
-                               Stretch="Uniform"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               Margin="4"
-                               IsVisible="{Binding HasGenerationImage}" />
-                        <i:Icon Value="{Binding Icon}" FontSize="36"
-                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                IsVisible="{Binding !HasGenerationImage}" />
-                    </Panel>
-                </Border>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Model:" Classes="label" />
+                <TextBlock Grid.Row="1" Grid.Column="1"
+                           x:Name="ModelValueText"
+                           Text="{Binding ModelLabelDisplay}"
+                           Classes="value"
+                           Cursor="Hand"
+                           ToolTip.Tip="Click to toggle between iPod model and hardware adapter"
+                           PointerPressed="ModelValueText_PointerPressed" />
 
-                <!-- 2-column identity grid. Column widths are fixed so long values
-                     truncate with ellipsis instead of pushing the layout around. -->
-                <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="220" />
-                        <ColumnDefinition Width="24" />
-                        <ColumnDefinition Width="130" />
-                        <ColumnDefinition Width="220" />
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Serial Number:" Classes="label" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SerialDisplay}" Classes="value" />
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" Classes="label" />
-                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" Classes="value" />
+                <TextBlock Grid.Row="0" Grid.Column="3" Text="Capacity:" Classes="label" />
+                <TextBlock Grid.Row="0" Grid.Column="4" Text="{Binding TotalSpaceLabel}" Classes="value" />
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Model:" Classes="label" />
-                    <TextBlock Grid.Row="1" Grid.Column="1"
-                               x:Name="ModelValueText"
-                               Text="{Binding ModelLabelDisplay}"
+                <TextBlock Grid.Row="1" Grid.Column="3" Text="Software Version:" Classes="label" />
+                <!-- When IsAppleFirmwareReadable (stock iPod + version unknown), the value cell
+                     becomes clickable: tapping it triggers the elevated firmware-partition read. -->
+                <Panel Grid.Row="1" Grid.Column="4"
+                       Classes.firmwareReadable="{Binding IsAppleFirmwareReadable}"
+                       PointerPressed="FirmwareValue_PointerPressed">
+                    <Panel.Styles>
+                        <Style Selector="Panel.firmwareReadable">
+                            <Setter Property="Cursor" Value="Hand" />
+                        </Style>
+                    </Panel.Styles>
+                    <TextBlock Text="{Binding FirmwareVersionDisplay}" Classes="value"
+                               IsVisible="{Binding !IsAppleFirmwareReadable}" />
+                    <TextBlock Text="Read iPod OS version…"
                                Classes="value"
-                               Cursor="Hand"
-                               ToolTip.Tip="Click to toggle between iPod model and hardware adapter"
-                               PointerPressed="ModelValueText_PointerPressed" />
+                               Opacity="0.7"
+                               ToolTip.Tip="Reads the iPod's firmware partition (requires admin)."
+                               IsVisible="{Binding IsAppleFirmwareReadable}" />
+                </Panel>
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Serial Number:" Classes="label" />
-                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SerialDisplay}" Classes="value" />
+                <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
+                <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
+            </Grid>
+        </controls:MediaHeaderBar.Body>
 
-                    <TextBlock Grid.Row="0" Grid.Column="3" Text="Capacity:" Classes="label" />
-                    <TextBlock Grid.Row="0" Grid.Column="4" Text="{Binding TotalSpaceLabel}" Classes="value" />
-
-                    <TextBlock Grid.Row="1" Grid.Column="3" Text="Software Version:" Classes="label" />
-                    <!-- When IsAppleFirmwareReadable (stock iPod + version unknown), the
-                         value cell becomes clickable: tapping it triggers the elevated
-                         firmware-partition read. Tooltip explains the UAC prompt. -->
-                    <Panel Grid.Row="1" Grid.Column="4"
-                           Classes.firmwareReadable="{Binding IsAppleFirmwareReadable}"
-                           PointerPressed="FirmwareValue_PointerPressed">
-                        <Panel.Styles>
-                            <Style Selector="Panel.firmwareReadable">
-                                <Setter Property="Cursor" Value="Hand" />
-                            </Style>
-                        </Panel.Styles>
-                        <TextBlock Text="{Binding FirmwareVersionDisplay}" Classes="value"
-                                   IsVisible="{Binding !IsAppleFirmwareReadable}" />
-                        <TextBlock Text="Read iPod OS version…"
-                                   Classes="value"
-                                   Opacity="0.7"
-                                   ToolTip.Tip="Reads the iPod's firmware partition (requires admin)."
-                                   IsVisible="{Binding IsAppleFirmwareReadable}" />
-                    </Panel>
-
-                    <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
-                    <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
-                </Grid>
-
-                <!-- Eject the device shown in this view. Disabled while any long iPod/disc
-                     operation (import, scan, burn) is running. Command + busy state live on
-                     the VM, reached through the hosting window. -->
-                <Button Grid.Column="2"
-                        VerticalAlignment="Top" HorizontalAlignment="Right"
-                        Padding="10,6" Cursor="Hand"
+        <!-- Actions: Sync (dropdown) + Eject. The dangerous Erase lives in the sidebar
+             right-click menu (Settings > Erase), never as a header button. -->
+        <controls:MediaHeaderBar.Actions>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="SyncButton" Padding="10,6" Cursor="Hand"
+                        ToolTip.Tip="Sync content to this iPod"
+                        Click="SyncButton_Click"
+                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).CanSyncPodcasts, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsBusy, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-arrows-rotate" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Text="Sync" VerticalAlignment="Center" />
+                        <i:Icon Value="fa-solid fa-caret-down" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Padding="10,6" Cursor="Hand"
                         ToolTip.Tip="Eject this iPod"
                         Command="{Binding ((vm:MainWindowViewModel)DataContext).EjectSelectedDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                        IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsRipping, RelativeSource={RelativeSource AncestorType=Window}}">
+                        IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsBusy, RelativeSource={RelativeSource AncestorType=Window}}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <i:Icon Value="fa-solid fa-eject" FontSize="13" />
+                        <i:Icon Value="fa-solid fa-eject" FontSize="13" VerticalAlignment="Center" />
                         <TextBlock Text="Eject" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-            </Grid>
+            </StackPanel>
+        </controls:MediaHeaderBar.Actions>
 
-            <!-- BOTTOM: full-width capacity bar with inline legend -->
-            <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*">
+        <!-- Footer: full-width capacity bar with inline legend. -->
+        <controls:MediaHeaderBar.Footer>
+            <Grid ColumnDefinitions="Auto,*" Margin="0,10,0,0">
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
                     <TextBlock Text="Capacity" FontSize="11" Opacity="0.55" />
@@ -151,6 +134,7 @@
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="{Binding AudioPercent, Converter={StaticResource StarConverter}}" />
+                                <ColumnDefinition Width="{Binding PodcastPercent, Converter={StaticResource StarConverter}}" />
                                 <ColumnDefinition Width="{Binding OtherPercent, Converter={StaticResource StarConverter}}" />
                                 <ColumnDefinition Width="{Binding FreePercent, Converter={StaticResource StarConverter}}" />
                             </Grid.ColumnDefinitions>
@@ -165,12 +149,20 @@
                             <Border Grid.Column="1">
                                 <Border.Background>
                                     <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                        <GradientStop Color="{StaticResource OrgZDiskPodcastStart}" Offset="0" />
+                                        <GradientStop Color="{StaticResource OrgZDiskPodcastEnd}" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <Border Grid.Column="2">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                                         <GradientStop Color="{StaticResource OrgZDiskFreeStart}" Offset="0" />
                                         <GradientStop Color="{StaticResource OrgZDiskFreeEnd}" Offset="1" />
                                     </LinearGradientBrush>
                                 </Border.Background>
                             </Border>
-                            <Border Grid.Column="2" Background="{StaticResource OrgZDiskMeterDividerBrush}" />
+                            <Border Grid.Column="3" Background="{StaticResource OrgZDiskMeterDividerBrush}" />
                         </Grid>
                     </Border>
 
@@ -186,6 +178,19 @@
                             </Border>
                             <TextBlock Text="Audio" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
                             <TextBlock Text="{Binding AudioSpaceLabel}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Width="10" Height="10" CornerRadius="1" VerticalAlignment="Center">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                        <GradientStop Color="{StaticResource OrgZDiskPodcastStart}" Offset="0" />
+                                        <GradientStop Color="{StaticResource OrgZDiskPodcastEnd}" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <TextBlock Text="Podcasts" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding PodcastSpaceLabel}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
                         </StackPanel>
 
                         <StackPanel Orientation="Horizontal" Spacing="6">
@@ -210,8 +215,8 @@
                     </StackPanel>
                 </StackPanel>
             </Grid>
+        </controls:MediaHeaderBar.Footer>
 
-        </DockPanel>
-    </Border>
+    </controls:MediaHeaderBar>
 
 </UserControl>

@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
+using OrgZ.Services;
 using OrgZ.ViewModels;
 
 namespace OrgZ.Controls;
@@ -97,6 +98,15 @@ public partial class Sidebar : UserControl
             var eject = new Avalonia.Controls.MenuItem { Header = "Eject" };
             eject.Click += (_, _) => vm.EjectDevice(sb);
             menu.Items.Add(eject);
+
+            menu.Items.Add(new Avalonia.Controls.Separator());
+
+            // Destructive operations live under Settings, away from the top bar where a misclick hurts.
+            var settings = new Avalonia.Controls.MenuItem { Header = "Settings" };
+            var erase = new Avalonia.Controls.MenuItem { Header = "Erase iPod…" };
+            erase.Click += async (_, _) => await vm.EraseDeviceAsync(sb);
+            settings.Items.Add(erase);
+            menu.Items.Add(settings);
         }
         else
         {
@@ -107,7 +117,10 @@ public partial class Sidebar : UserControl
             menu.Items.Add(eject);
         }
 
+        // Open it now: assigning ContextMenu alone needs a SECOND right-click (the first only wires
+        // it up). Opening here makes it appear on the first click. (Same pattern as the header menu.)
         treeItem.ContextMenu = menu;
+        menu.Open(treeItem);
     }
 
     private void PlaylistListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
@@ -152,11 +165,11 @@ public partial class Sidebar : UserControl
 
         menu.Items.Add(exportAs);
 
-        // "Send to Device" submenu - one item per connected WRITABLE device. Read-only
-        // devices (stock iPods) are intentionally omitted rather than greyed out, since
-        // the user picked the "never write to stock" policy.
-        var sendTo = new Avalonia.Controls.MenuItem { Header = "Send to Device" };
-        var writableDevices = vm.ConnectedDevicesSnapshot().Where(d => !d.IsReadOnly).ToList();
+        // "Sync" submenu - one item per connected device that can take a playlist (Rockbox, binary
+        // iTunesDB iPods, and the Nano 5G via its SQLite + CDB stack). Capability comes from the
+        // IPodDevice model, not the blanket "stock = read-only" flag, so genuinely-writable iPods show.
+        var sendTo = new Avalonia.Controls.MenuItem { Header = "Sync" };
+        var writableDevices = vm.ConnectedDevicesSnapshot().Where(d => IPodDevice.For(d).SupportsPlaylists).ToList();
         if (writableDevices.Count == 0)
         {
             var none = new Avalonia.Controls.MenuItem { Header = "No compatible devices", IsEnabled = false };
@@ -175,6 +188,7 @@ public partial class Sidebar : UserControl
         menu.Items.Add(sendTo);
 
         listBoxItem.ContextMenu = menu;
+        menu.Open(listBoxItem);
     }
 
     private void PlaylistListBox_DragOver(object? sender, DragEventArgs e)
