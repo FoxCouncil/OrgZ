@@ -38,7 +38,7 @@
                                 IsVisible="{Binding !HasIconBitmap}" />
                     </Panel>
                 </Border>
-                <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="0,2,0,0" />
+                <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" />
             </StackPanel>
         </DataTemplate>
         <TreeDataTemplate x:Key="DeviceTreeTemplate" x:DataType="models:SidebarItem" ItemsSource="{Binding Children}">
@@ -60,7 +60,7 @@
                     </Panel>
                 </Border>
                 <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center"
-                           Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                           TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </TreeDataTemplate>
         <ControlTheme x:Key="SidebarItemContainerTheme" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">

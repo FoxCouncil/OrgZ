@@ -21,7 +21,7 @@
              LCD typography (size and weight differ per element; only the family
              is unified). Mirrors the equivalent style in MainWindow.axaml. -->
         <Style Selector="ContentPresenter, TextBlock, TextBox">
-            <Setter Property="TextElement.FontFamily" Value="Consolas" />
+            <Setter Property="TextElement.FontFamily" Value="Cascadia Mono,Consolas" />
         </Style>
 
         <!-- Duplicate of MainWindow's slider style so the mini-player's seek and
