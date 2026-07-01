@@ -313,7 +313,7 @@ public partial class ConnectedDevice : ObservableObject
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(OtherSpace), nameof(TotalSpaceLabel), nameof(FreeSpaceLabel), nameof(AudioSpaceLabel), nameof(OtherSpaceLabel), nameof(AudioPercent), nameof(OtherPercent), nameof(FreePercent))]
+    [NotifyPropertyChangedFor(nameof(OtherSpace), nameof(TotalSpaceLabel), nameof(FreeSpaceLabel), nameof(AudioSpaceLabel), nameof(PodcastSpaceLabel), nameof(OtherSpaceLabel), nameof(AudioPercent), nameof(PodcastPercent), nameof(OtherPercent), nameof(FreePercent))]
     private long _totalSpace;
 
     [ObservableProperty]
@@ -321,17 +321,23 @@ public partial class ConnectedDevice : ObservableObject
     private long _freeSpace;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(OtherSpace), nameof(TotalSpaceLabel), nameof(FreeSpaceLabel), nameof(AudioSpaceLabel), nameof(OtherSpaceLabel), nameof(AudioPercent), nameof(OtherPercent), nameof(FreePercent))]
+    [NotifyPropertyChangedFor(nameof(OtherSpace), nameof(AudioSpaceLabel), nameof(OtherSpaceLabel), nameof(AudioPercent), nameof(OtherPercent))]
     private long _audioSpace;
 
-    public long OtherSpace => Math.Max(0, TotalSpace - FreeSpace - AudioSpace);
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(OtherSpace), nameof(PodcastSpaceLabel), nameof(OtherSpaceLabel), nameof(PodcastPercent), nameof(OtherPercent))]
+    private long _podcastSpace;
+
+    public long OtherSpace => Math.Max(0, TotalSpace - FreeSpace - AudioSpace - PodcastSpace);
 
     public string TotalSpaceLabel => FormatBytes(TotalSpace);
     public string FreeSpaceLabel => FormatBytes(FreeSpace);
     public string AudioSpaceLabel => FormatBytes(AudioSpace);
+    public string PodcastSpaceLabel => FormatBytes(PodcastSpace);
     public string OtherSpaceLabel => FormatBytes(OtherSpace);
 
     public double AudioPercent => TotalSpace > 0 ? (double)AudioSpace / TotalSpace * 100.0 : 0;
+    public double PodcastPercent => TotalSpace > 0 ? (double)PodcastSpace / TotalSpace * 100.0 : 0;
     public double OtherPercent => TotalSpace > 0 ? (double)OtherSpace / TotalSpace * 100.0 : 0;
     public double FreePercent => TotalSpace > 0 ? (double)FreeSpace / TotalSpace * 100.0 : 0;
 

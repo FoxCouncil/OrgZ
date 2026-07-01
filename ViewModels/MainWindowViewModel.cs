@@ -168,7 +168,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod), nameof(CanSyncPodcasts))]
     private SidebarItem? _selectedSidebarItem;
 
     // Whether a recorder (writable optical drive) is present. Refreshed by
@@ -229,13 +229,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryItems.Add(new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" });
         LibraryItems.Add(new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" });
         LibraryItems.Add(new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Podcast, ViewConfigKey = "Podcasts" });
-        // Indented "Subscriptions" row appears under Podcasts only once you're subscribed
-        // to something. Same view key so the Podcasts panel shows; IsSubItem routes the
-        // click to the panel's subscriptions view (see OnSelectedSidebarItemChanged).
-        if (Podcasts is { Subscriptions.Count: > 0 })
-        {
-            LibraryItems.Add(new() { Name = "Subscriptions", Icon = "fa-solid fa-star", Category = "LIBRARY", IsEnabled = true, IsSubItem = true, Kind = MediaKind.Podcast, ViewConfigKey = "Podcasts" });
-        }
         LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false });
 
         if (Settings.Get("OrgZ.ShowIgnored", true))
@@ -248,26 +241,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             LibraryItems.Add(new() { Name = "Bad Format", Icon = "fa-solid fa-triangle-exclamation", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "BadFormat" });
         }
 
-        // Preserve selection if the current view still exists after the rebuild. Suppress the
-        // Podcasts nav reset for this programmatic re-selection: a rebuild (e.g. the first
-        // subscribe adding the Subscriptions row) must not pull the panel off the feed the user
-        // is viewing back to the store.
+        // Preserve selection if the current view still exists after the rebuild.
         if (selectedKey != null)
         {
             var restore = LibraryItems.FirstOrDefault(i => i.ViewConfigKey == selectedKey);
             if (restore != null)
             {
-                _suppressPodcastNavReset = true;
-                try { SelectedSidebarItem = restore; }
-                finally { _suppressPodcastNavReset = false; }
+                SelectedSidebarItem = restore;
             }
         }
     }
-
-    // Set while a sidebar rebuild re-selects the current item, so OnSelectedSidebarItemChanged
-    // doesn't treat that programmatic re-selection as the user clicking a Podcasts root and reset
-    // the panel's navigation off the feed they're viewing.
-    private bool _suppressPodcastNavReset;
 
     internal ObservableCollection<SidebarItem> PlaylistItems { get; } =
     [
@@ -437,10 +420,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // operations (import, scan, burn) reuse this same page via BeginLcdBusy/EndLcdBusy.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowLcdCycleButton))]
-    private bool _isRipping;
-    [ObservableProperty] private string _ripTitle = string.Empty;
-    [ObservableProperty] private string _ripDetail = string.Empty;
-    [ObservableProperty] private double _ripPercent;
+    [NotifyPropertyChangedFor(nameof(BusyIndeterminate))]
+    private bool _isBusy;
+    [ObservableProperty] private string _busyTitle = string.Empty;
+    [ObservableProperty] private string _busyDetail = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BusyIndeterminate))]
+    private double _busyPercent;
+
+    /// <summary>
+    /// True while busy but with no determinate progress yet - drives the LCD's barber-pole
+    /// (indeterminate) animation so there's immediate motion instead of an empty bar. The moment a
+    /// real percent lands, the bar switches to a determinate fill.
+    /// </summary>
+    public bool BusyIndeterminate => IsBusy && BusyPercent <= 0;
 
     // Active rip's cancellation source. The Cancel X on the LCD's rip page
     // trips this; CdRipService respects the token between sector reads, so the
@@ -448,7 +441,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _ripCts;
 
     // Active burn's cancellation source. The same LCD Cancel X trips this - a burn
-    // reuses the rip page (IsRipping), so the one button cancels whichever is running.
+    // reuses the rip page (IsBusy), so the one button cancels whichever is running.
     // Transcode aborts immediately; an in-flight elevated burn is left to finish the
     // current disc (cancelling a half-written disc just makes a coaster).
     private CancellationTokenSource? _burnCts;
@@ -465,22 +458,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // and Vu (FFT bars) are always available; Rip joins them only while a rip
     // is in flight. Auto-snap to Rip when one starts so the user sees it
     // immediately; snap back to Playback when it ends.
-    public enum LcdPage { Playback, Vu, Rip }
+    public enum LcdPage { Playback, Vu, Busy }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsLcdPlayback), nameof(IsLcdVu), nameof(IsLcdRip), nameof(IsLcdPlaybackIdle), nameof(IsLcdPlaybackActive))]
+    [NotifyPropertyChangedFor(nameof(IsLcdPlayback), nameof(IsLcdVu), nameof(IsLcdBusy), nameof(IsLcdPlaybackIdle), nameof(IsLcdPlaybackActive))]
     private LcdPage _currentLcdPage = LcdPage.Playback;
 
     public bool IsLcdPlayback => CurrentLcdPage == LcdPage.Playback;
     public bool IsLcdVu => CurrentLcdPage == LcdPage.Vu;
-    public bool IsLcdRip => CurrentLcdPage == LcdPage.Rip;
+    public bool IsLcdBusy => CurrentLcdPage == LcdPage.Busy;
 
     private IReadOnlyList<LcdPage> AvailableLcdPages
     {
         get
         {
             var pages = new List<LcdPage> { LcdPage.Playback, LcdPage.Vu };
-            if (IsRipping) pages.Add(LcdPage.Rip);
+            if (IsBusy) pages.Add(LcdPage.Busy);
             return pages;
         }
     }
@@ -488,7 +481,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // Show the cycle arrows whenever there's more than one page to flip between.
     // Idle playback (nothing playing) normally hides them - but an in-progress
     // activity like a rip is itself a cyclable screen, so keep the arrows then.
-    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1 && (!IsLcdIdle || IsRipping);
+    public bool ShowLcdCycleButton => AvailableLcdPages.Count > 1 && (!IsLcdIdle || IsBusy);
 
     [RelayCommand]
     private void CycleLcdPage()
@@ -502,13 +495,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentLcdPage = pages[(i + 1) % pages.Count];
     }
 
-    partial void OnIsRippingChanged(bool value)
+    partial void OnIsBusyChanged(bool value)
     {
         if (value)
         {
-            CurrentLcdPage = LcdPage.Rip;
+            CurrentLcdPage = LcdPage.Busy;
         }
-        else if (CurrentLcdPage == LcdPage.Rip)
+        else if (CurrentLcdPage == LcdPage.Busy)
         {
             CurrentLcdPage = LcdPage.Playback;
         }
@@ -550,14 +543,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private DataGridCollectionView? _filteredItemsView;
 
     /// <summary>
-    /// DataGrid-bound view for the active GROUPED view (Radio is the only one), wrapping its
-    /// filtered list with <c>GroupDescriptions</c> for Avalonia's collapsible group headers.
-    /// Bound to GroupedDataGrid. Kept separate from <see cref="FilteredItemsView"/> so switching
-    /// to an ungrouped view never reassigns the grouped grid's source - that's what lets the grid
-    /// retain its row-group collapse state across view switches (no rebuild, no collapse flash).
+    /// DataGrid-bound view for the active GROUPED view (Radio), wrapping its filtered list with
+    /// <c>GroupDescriptions</c> for Avalonia's collapsible group headers. Bound to GroupedDataGrid.
+    /// Kept separate from <see cref="FilteredItemsView"/> so switching to an ungrouped view never
+    /// reassigns the grouped grid's source - that's what lets the grid retain its row-group collapse
+    /// state across view switches (no rebuild, no collapse flash).
     /// </summary>
     [ObservableProperty]
     private DataGridCollectionView? _groupedItemsView;
+
+    /// <summary>
+    /// DataGrid-bound view for a device Podcasts view - grouped by show, bound to the dedicated
+    /// PodcastGroupedDataGrid. Separate from <see cref="GroupedItemsView"/> because that grid carries
+    /// Radio's columns and the shared grid can't rebuild columns for a second set (Avalonia
+    /// spacer-column crash); the podcast grid builds its own podcast columns once.
+    /// </summary>
+    [ObservableProperty]
+    private DataGridCollectionView? _podcastGroupedItemsView;
 
     // Per-view cache of built collection views. A view switch that lands on a key whose cached
     // view is still valid (same library version + same filter signature) reuses it verbatim -
@@ -668,7 +670,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // (_suppressSearchPersist): re-running the podcast search would navigate the panel
         // back to the results and push a duplicate nav-stack entry. On a real switch back
         // the panel keeps whatever view the user left it on.
-        if (!_suppressSearchPersist && SelectedSidebarItem?.ViewConfigKey == "Podcasts" && Podcasts is not null)
+        if (!_suppressSearchPersist && ListViewConfigs.Get(SelectedSidebarItem?.ViewConfigKey)?.Host == ViewHost.PodcastsPanel && Podcasts is not null)
         {
             Podcasts.ApplyHeaderSearch(value);
         }
@@ -957,24 +959,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _ = BuildPlaylistHeaderAsync(value);
 
-        // The Podcasts sidebar roots are authoritative navigation: clicking "Podcasts" always
-        // shows the store, clicking the indented "Subscriptions" row always shows the subscriptions
-        // list. Viewing a single podcast (feed detail) is a sub-state that can be reached from
-        // either root; clicking a root resets to that root's home. _suppressPodcastNavReset skips
-        // this when the change came from a sidebar REBUILD re-selecting the item (e.g. after the
-        // first subscribe), so the panel isn't yanked off a feed the user is on.
-        if (!_suppressPodcastNavReset && value?.ViewConfigKey == "Podcasts" && Podcasts is not null)
-        {
-            if (value.IsSubItem)
-            {
-                Podcasts.ActivateSubscriptionsRoot();
-            }
-            else
-            {
-                Podcasts.ActivateStoreRoot();
-            }
-        }
-
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
 
         if (!string.IsNullOrEmpty(value?.ViewConfigKey))
@@ -1159,13 +1143,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     private void BindActiveView(ListViewConfig config, DataGridCollectionView view)
     {
-        if (config.GroupByPath != null)
+        switch (config.Host)
         {
-            GroupedItemsView = view;
-        }
-        else
-        {
-            FilteredItemsView = view;
+            case ViewHost.PodcastGroupedGrid:
+            {
+                PodcastGroupedItemsView = view;
+            }
+            break;
+
+            case ViewHost.GroupedGrid:
+            {
+                GroupedItemsView = view;
+            }
+            break;
+
+            default:
+            {
+                FilteredItemsView = view;
+            }
+            break;
         }
     }
 
@@ -1249,21 +1245,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
         Podcasts = new PodcastsViewModel(this);
-        // Show/hide the "Subscriptions" sidebar row only when the subscription set crosses
-        // empty<->non-empty - that's all the row's presence depends on. ReloadSubscriptions
-        // does Clear() + N Add()s, and UI() posts, so reacting to every change rebuilt the
-        // (28k-item) library list N+1 times and locked the UI. Load persisted subs up front
-        // so the row shows on startup.
-        var hadSubscriptions = false;
-        Podcasts.Subscriptions.CollectionChanged += (_, _) => UI(() =>
-        {
-            var hasSubscriptions = Podcasts.Subscriptions.Count > 0;
-            if (hasSubscriptions != hadSubscriptions)
-            {
-                hadSubscriptions = hasSubscriptions;
-                RebuildLibraryItems();
-            }
-        });
+        // Load persisted subscriptions up front so the store's left-column "Subscribed" section and
+        // the subscriptions view are populated on startup. Subscriptions no longer live in the
+        // sidebar, so a count change doesn't rebuild the library list - the panel binds the set
+        // directly and updates reactively.
         Podcasts.ReloadSubscriptions();
 
         // Apply the global podcast rules on a cadence: on startup, when a check is due,
@@ -2002,7 +1987,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         switch (item.Kind)
         {
+            // Podcasts (and audiobooks) on a device are local files - same play path as music.
+            // Streamed library podcasts go through PodcastsPanel, not here.
             case MediaKind.Music:
+            case MediaKind.Podcast:
+            case MediaKind.Audiobook:
             {
                 PlayMusicItem(item);
                 break;
@@ -2062,7 +2051,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         // The optical drive is held exclusively by the elevated rip helper during a
         // rip - don't try to play off it, and let the rip status own the play column.
-        if (IsRipping)
+        if (IsBusy)
         {
             UpdateMainStatus("Can't play the CD while it's being imported.");
             return;
@@ -2193,10 +2182,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayMusicItem(MediaItem? file)
     {
-        // Accepts Music files and downloaded Podcast files -- both are local
+        // Accepts Music, downloaded Podcast, and Audiobook files -- all local
         // paths libvlc opens via FromType.FromPath; the only difference is
         // metadata routing handled downstream.
-        if (_player == null || file == null || (file.Kind != MediaKind.Music && file.Kind != MediaKind.Podcast))
+        if (_player == null || file == null || (file.Kind != MediaKind.Music && file.Kind != MediaKind.Podcast && file.Kind != MediaKind.Audiobook))
         {
             return;
         }
@@ -3284,11 +3273,38 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     private ConnectedDevice? DeviceForSidebarItem(SidebarItem? item)
     {
-        if (item?.ViewConfigKey is not { } key || !key.StartsWith("Device:"))
+        var mount = ResolveDeviceMountPath(item?.ViewConfigKey, _connectedDevices.Keys);
+        return mount is not null && _connectedDevices.TryGetValue(mount, out var dev) ? dev : null;
+    }
+
+    /// <summary>
+    /// Resolves a sidebar <c>ViewConfigKey</c> to the mount path of the device it belongs to, or null
+    /// when it isn't a device view. The device's Podcasts/Audiobooks child views suffix the mount path
+    /// with the media kind (<c>"Device:E:\:Podcast"</c>), so a bare exact lookup misses - this matches
+    /// against the known mount paths (longest prefix wins) instead. Pulled out and made pure so the
+    /// resolution is unit-tested: a miss here silently kills "Remove from iPod" and podcast sync from
+    /// those sub-views (dev resolves null → the CRUD call no-ops), which is exactly how it regressed.
+    /// </summary>
+    internal static string? ResolveDeviceMountPath(string? viewConfigKey, IEnumerable<string> knownMountPaths)
+    {
+        if (viewConfigKey is not { } key || !key.StartsWith("Device:", StringComparison.Ordinal))
         {
             return null;
         }
-        return _connectedDevices.TryGetValue(key["Device:".Length..], out var dev) ? dev : null;
+        var rest = key["Device:".Length..];
+        string? best = null;
+        foreach (var mount in knownMountPaths)
+        {
+            if (string.Equals(rest, mount, StringComparison.OrdinalIgnoreCase))
+            {
+                return mount;   // the device's own root node ("Device:{mount}")
+            }
+            if (rest.StartsWith(mount, StringComparison.OrdinalIgnoreCase) && (best is null || mount.Length > best.Length))
+            {
+                best = mount;   // a "{mount}:Podcast" / ":Audiobook" child view - longest match wins
+            }
+        }
+        return best;
     }
 
     /// <summary>
@@ -3308,9 +3324,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             && IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration);
     }
 
-    /// <summary>Right-click "Remove from iPod": maps the track's file to its SQLite item, deletes the
-    /// rows + audio file, prunes orphans, and re-signs the cbk - then drops it from the live list.
-    /// No-ops on devices without a remove backend (only Hash72/Nano 5G has one today).</summary>
+    /// <summary>Right-click "Remove from iPod": deletes the item - any media kind - from the connected
+    /// device via the per-tier backend (Nano 5G SQLite, binary iTunesDB, or Rockbox filesystem): its
+    /// database rows and its audio file, then drops it from the live list. Reports loudly when a tier
+    /// has no remove backend.</summary>
     internal async Task RemoveFromDeviceAsync(MediaItem? track)
     {
         if (track is null)
@@ -3318,64 +3335,42 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
         var dev = DeviceForSidebarItem(SelectedSidebarItem);
-        if (dev is not { DeviceType: DeviceType.StockIPod }
-            || IPodCapabilities.ChecksumFor(dev.IpodGeneration) != IPodChecksum.Hash72)
+        if (dev is null)
         {
-            return;
-        }
-
-        var itlp = Path.Combine(dev.MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
-        var musicRoot = Path.Combine(dev.MountPath, "iPod_Control", "Music");
-        var relative = DeviceRelativeLocation(track.FilePath, musicRoot);
-        if (relative is null)
-        {
-            UpdateMainStatus($"Couldn't locate “{track.Title}” on the iPod.");
             return;
         }
 
         try
         {
-            await Task.Run(() =>
-            {
-                long pid = Nano5gLibraryWriter.FindItemPidByLocation(itlp, relative);
-                if (pid == 0)
-                {
-                    throw new InvalidOperationException("Track isn't in the iPod database.");
-                }
-                new Nano5gLibraryWriter(itlp).RemoveTrack(pid, musicRoot);
-            });
+            await IPodDevice.For(dev).RemoveTrackAsync(track);
 
             _allItems.Remove(track);
             if (track.FileSize is { } removedSize && removedSize > 0)
             {
-                dev.AudioSpace -= removedSize;
+                // Podcasts live in their own space bucket; everything else counts as audio.
+                if (track.Kind == MediaKind.Podcast)
+                {
+                    dev.PodcastSpace -= removedSize;
+                }
+                else
+                {
+                    dev.AudioSpace -= removedSize;
+                }
                 dev.RefreshSpace();
             }
             IPodArtworkReader.Invalidate(dev.MountPath);
             ApplyFilter();
             UpdateMainStatus($"Removed “{track.Title}” from {dev.Name}.");
         }
+        catch (NotImplementedException)
+        {
+            UpdateMainStatus($"Removing isn't supported on {dev.Name}.");
+        }
         catch (Exception ex)
         {
             _log.Error(ex, "Failed to remove {Track} from {Device}", track.FilePath, dev.MountPath);
             UpdateMainStatus($"Couldn't remove “{track.Title}”: {ex.Message}");
         }
-    }
-
-    /// <summary>Strips the device's Music root to yield a "Fxx/NAME.ext" Locations.itdb key, or null
-    /// when the path isn't under iPod_Control/Music.</summary>
-    private static string? DeviceRelativeLocation(string? absolutePath, string musicRoot)
-    {
-        if (string.IsNullOrEmpty(absolutePath))
-        {
-            return null;
-        }
-        var rel = Path.GetRelativePath(musicRoot, absolutePath);
-        if (rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel))
-        {
-            return null;
-        }
-        return rel.Replace('\\', '/');
     }
 
     /// <summary>
@@ -3405,96 +3400,45 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // Progress shows on the LCD (the rip/progress page), not the retired activity feed.
         var title = track.Title ?? Path.GetFileName(track.FilePath);
-        IsRipping = true;
-        RipTitle = $"Adding “{title}”";
-        RipDetail = $"Transcoding for {dev.Name}…";
-        RipPercent = 0;
+        IsBusy = true;
+        BusyTitle = $"Adding “{title}”";
+        BusyDetail = $"Transcoding for {dev.Name}…";
+        BusyPercent = 0;
         try
         {
-            var result = await Task.Run(() => IPodTrackImporter.ImportAsync(
-                dev.MountPath, track.FilePath, ffmpeg, dev.IpodGeneration, dev.FireWireGuid));
+            // Import via the device tier, then reflect it in the live list right away (no re-scan).
+            var imported = await IPodDevice.For(dev).AddTrackAsync(track, ffmpeg);
+            _allItems.Add(imported);
+            IPodArtworkReader.Invalidate(dev.MountPath);
+            if (imported.FileSize is { } sz && sz > 0)
+            {
+                dev.AudioSpace += sz;
+                dev.RefreshSpace();
+            }
+            ApplyFilter();
 
-            // Reflect it in the device list right away (no full re-scan needed).
-            AddImportedDeviceTrack(dev, track, result);
-
-            RipTitle = $"Added “{title}”";
-            RipDetail = $"On {dev.Name}";
-            RipPercent = 1;
+            BusyTitle = $"Added “{title}”";
+            BusyDetail = $"On {dev.Name}";
+            BusyPercent = 1;
             await Task.Delay(1800);
         }
         catch (Exception ex)
         {
             _log.Error(ex, "Failed to add {Track} to {Device}", track.FilePath, dev.MountPath);
-            RipTitle = "Couldn't add to iPod";
-            RipDetail = ex.Message;
+            BusyTitle = "Couldn't add to iPod";
+            BusyDetail = ex.Message;
             await Task.Delay(3500);
         }
         finally
         {
-            IsRipping = false;
-            RipTitle = string.Empty;
-            RipDetail = string.Empty;
-            RipPercent = 0;
+            IsBusy = false;
+            BusyTitle = string.Empty;
+            BusyDetail = string.Empty;
+            BusyPercent = 0;
         }
     }
 
-    /// <summary>
-    /// Reflects a just-imported track in the device's live list without a full re-scan:
-    /// builds the device MediaItem (same shape as <see cref="ScanStockIPod"/> produces)
-    /// and adds it so the iPod view updates the moment the import finishes.
-    /// </summary>
-    private void AddImportedDeviceTrack(ConnectedDevice dev, MediaItem source, IPodImportResult result)
-    {
-        long size = 0;
-        try
-        {
-            size = new FileInfo(result.DestFile).Length;
-        }
-        catch
-        {
-            /* size stays 0 - cosmetic only */
-        }
 
-        var item = new MediaItem
-        {
-            Id = $"device:{dev.MountPath}:{result.TrackId}",
-            Kind = MediaKind.Music,
-            Title = result.Title ?? source.Title,
-            Artist = source.Artist,
-            Album = source.Album,
-            Genre = source.Genre,
-            Composer = source.Composer,
-            Year = source.Year,
-            Track = source.Track,
-            TotalTracks = source.TotalTracks,
-            Disc = source.Disc,
-            TotalDiscs = source.TotalDiscs,
-            Duration = source.Duration,
-            FilePath = result.DestFile,
-            FileName = Path.GetFileName(result.DestFile),
-            Extension = Path.GetExtension(result.DestFile),
-            FileSize = size,
-            HasAlbumArt = source.HasAlbumArt,
-            IsAnalyzed = true,
-            Source = $"device:{dev.MountPath}",
-            StreamUrl = result.DestFile,
-            Dbid = result.Dbid != 0 ? result.Dbid : null,
-        };
-
-        // The import appended a new image to the ArtworkDB - drop the cached index so the
-        // next art lookup re-reads it and finds this track's thumbnail.
-        IPodArtworkReader.Invalidate(dev.MountPath);
-
-        _allItems.Add(item);
-
-        if (size > 0)
-        {
-            dev.AudioSpace += size;
-            dev.RefreshSpace();
-        }
-
-        ApplyFilter();
-    }
 
     /// <summary>Locates ffmpeg on PATH, then a bundled copy next to the app.</summary>
     private static string? ResolveFfmpeg()
@@ -3522,123 +3466,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Copies a library playlist onto a connected writable device as an M3U file under
-    /// <c>{mount}/Playlists/</c>. Tracks are matched against the device's own library by
-    /// case-insensitive Artist + Title; unmatched library tracks are logged but don't
-    /// abort the export. The resulting M3U uses Rockbox-style
-    /// absolute paths ("/Music/...") so the device can resolve them regardless of where
-    /// its filesystem is mounted on a host.
+    /// Sends a specific playlist (or Favorites) to a connected device from the sidebar's "send to device"
+    /// entry. Resolves the tracks, then hands off to the tier-agnostic <see cref="SyncPlaylistToDeviceAsync"/>
+    /// (copy/transcode + native playlist) - one path for stock iPods and Rockbox alike.
     /// </summary>
     internal async Task SendPlaylistToDevice(SidebarItem playlistItem, ConnectedDevice device)
     {
-        if (!playlistItem.PlaylistId.HasValue || device.IsReadOnly)
+        List<MediaItem> tracks;
+        if (playlistItem.PlaylistId is int pid)
+        {
+            tracks = await Task.Run(() => GetPlaylistMediaItems(pid));
+        }
+        else if (playlistItem.IsFavorites)
+        {
+            tracks = _allItems
+                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
+                .ToList();
+        }
+        else
         {
             return;
         }
 
-        try
-        {
-            var libraryTracks = await Task.Run(() => GetPlaylistMediaItems(playlistItem.PlaylistId.Value));
-            if (libraryTracks.Count == 0)
-            {
-                _log.Information("Playlist \"{Name}\" is empty — nothing to send", playlistItem.Name);
-                return;
-            }
-
-            var deviceSource = $"device:{device.MountPath}";
-            var deviceTracksByAT = _allItems
-                .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
-                .GroupBy(i => NormalizeMatchKey(i.Artist, i.Title))
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-            var mountPath = device.MountPath;
-            int matched = 0, copied = 0, missed = 0;
-
-            // Resolve each track to a device path, copying any that aren't on the device yet
-            // into {mount}/Music/{Artist}/{Album}/{file}. Copies run off the UI thread.
-            var matchedPaths = await Task.Run(() =>
-            {
-                var paths = new List<string>(libraryTracks.Count);
-                for (int i = 0; i < libraryTracks.Count; i++)
-                {
-                    var libTrack = libraryTracks[i];
-                    var key = NormalizeMatchKey(libTrack.Artist, libTrack.Title);
-
-                    if (!string.IsNullOrEmpty(key) && deviceTracksByAT.TryGetValue(key, out var deviceTrack))
-                    {
-                        paths.Add(ToDeviceRelativePath(deviceTrack.FilePath!, mountPath));
-                        matched++;
-                        continue;
-                    }
-
-                    if (!string.IsNullOrEmpty(libTrack.FilePath) && File.Exists(libTrack.FilePath))
-                    {
-                        var rel = BuildDeviceMusicRelativePath(libTrack);
-                        var dest = ToMountAbsolute(rel, mountPath);
-                        try
-                        {
-                            SetLcdBusy($"Copying “{libTrack.Title}” ({i + 1}/{libraryTracks.Count})", (double)i / libraryTracks.Count);
-                            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                            if (!File.Exists(dest))
-                            {
-                                File.Copy(libTrack.FilePath, dest);
-                            }
-                            paths.Add(rel);
-                            copied++;
-                            continue;
-                        }
-                        catch (Exception ex)
-                        {
-                            _log.Warning(ex, "Failed to copy {Track} onto {Mount}", libTrack.FilePath, mountPath);
-                        }
-                    }
-
-                    missed++;
-                }
-                return paths;
-            });
-
-            // Write the M3U file next to the device's existing playlists
-            var playlistsDir = Path.Combine(device.MountPath, "Playlists");
-            Directory.CreateDirectory(playlistsDir);
-            var safeName = SanitizeFileName(playlistItem.Name);
-            var targetPath = Path.Combine(playlistsDir, safeName + ".m3u");
-
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine("#EXTM3U");
-            sb.Append("#PLAYLIST:").AppendLine(playlistItem.Name);
-            foreach (var p in matchedPaths)
-            {
-                sb.AppendLine(p);
-            }
-            await File.WriteAllTextAsync(targetPath, sb.ToString());
-
-            // Publish the newly-added playlist into the device's sidebar tree so the user
-            // can navigate to it immediately without waiting for a reconnect.
-            var pl = new DevicePlaylist
-            {
-                Name = playlistItem.Name,
-                Key = safeName,
-                TrackIds = matchedPaths
-                    .Select(p => ToMountAbsolute(p, device.MountPath))
-                    .Where(p => !string.IsNullOrEmpty(p))
-                    .ToList(),
-            };
-            // Merge into the existing list (don't clobber other device playlists) -
-            // find any with the same Key and replace; otherwise append.
-            var merged = device.Playlists
-                .Where(existing => existing.Key != pl.Key)
-                .Append(pl)
-                .ToList();
-            PublishDevicePlaylists(device, merged);
-
-            _log.Information("Playlist sent to device: Playlist={Name} Device={MountPath} Matched={Matched} Copied={Copied} Missed={Missed}",
-                playlistItem.Name, device.MountPath, matched, copied, missed);
-        }
-        catch (Exception ex)
-        {
-            _log.Error(ex, "Failed to send playlist {Name} to {MountPath}", playlistItem.Name, device.MountPath);
-        }
+        var name = string.IsNullOrWhiteSpace(playlistItem.Name) ? "Playlist" : playlistItem.Name;
+        await SyncPlaylistToDeviceAsync(name, tracks, device);
     }
 
     internal static string NormalizeMatchKey(string? artist, string? title)
@@ -3677,19 +3528,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             sb.Append(invalid.Contains(c) ? '_' : c);
         }
         return sb.ToString().Trim();
-    }
-
-    /// <summary>
-    /// Rockbox-style device path for a library track being copied onto a device:
-    /// <c>/Music/{Artist}/{Album}/{file}</c>. Falls back to "Unknown Artist/Album" so a
-    /// track missing tags still lands somewhere sensible.
-    /// </summary>
-    internal static string BuildDeviceMusicRelativePath(MediaItem track)
-    {
-        var artist = SanitizeFileName(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
-        var album = SanitizeFileName(string.IsNullOrWhiteSpace(track.Album) ? "Unknown Album" : track.Album!);
-        var file = SanitizeFileName(!string.IsNullOrEmpty(track.FileName) ? track.FileName! : Path.GetFileName(track.FilePath ?? "track"));
-        return $"/Music/{artist}/{album}/{file}";
     }
 
     internal async Task ExportPlaylist(SidebarItem item, string format)
@@ -4024,6 +3862,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // Apply initial filter for the current tab
         ApplyFilter();
+
+        // The header may have been built in the constructor against an empty library
+        // (the saved view is restored before this async load runs) - rebuild it now that
+        // _allItems is populated so a first-run playlist/Favorites header isn't blank.
+        _ = BuildPlaylistHeaderAsync(SelectedSidebarItem);
 
         // Scan and analyze music files
         await ScanAndAnalyzeMusicAsync();
@@ -4440,7 +4283,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var label = viewKey switch
         {
-            "Favorites" => "favorites",
+            "Favorites" => "songs",
             "Ignored" => "ignored",
             "BadFormat" => "issues",
             "CdAudio" => "tracks",
@@ -4468,6 +4311,39 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         Timeout = TimeSpan.FromSeconds(5),
         DefaultRequestHeaders = { { "User-Agent", $"OrgZ/{App.Version}" } }
     };
+
+    // Dedicated client for fetching podcast show art to embed on a device. Standard browser UA - the
+    // art sits on third-party CDNs that can reject odd agents, and request logs stay anonymous.
+    private static readonly HttpClient _artHttp = new()
+    {
+        Timeout = TimeSpan.FromSeconds(8),
+        DefaultRequestHeaders = { { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } }
+    };
+
+    /// <summary>Downloads a podcast show's cover (URL) to a temp file so it can be rendered into the
+    /// iPod ArtworkDB. Returns the local path, or null when there's no URL / the fetch fails.</summary>
+    private static string? TryDownloadShowArt(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+        try
+        {
+            var bytes = _artHttp.GetByteArrayAsync(url).GetAwaiter().GetResult();
+            if (bytes.Length == 0)
+            {
+                return null;
+            }
+            var path = Path.Combine(Path.GetTempPath(), "orgz_pcart_" + Guid.NewGuid().ToString("N")[..8] + ".img");
+            File.WriteAllBytes(path, bytes);
+            return path;
+        }
+        catch
+        {
+            return null;   // no art / fetch failed - the episode just imports without a cover
+        }
+    }
 
     private async Task LoadPodcastArtAsync(string url, Models.PodcastEpisode episode, Models.PodcastFeed feed)
     {
@@ -4640,7 +4516,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // and skip while a rip/burn holds the drive (uncached → optimistic "writable").
             foreach (var d in all)
             {
-                if (!_burnerSupport.ContainsKey(d.Name) && !IsRipping)
+                if (!_burnerSupport.ContainsKey(d.Name) && !IsBusy)
                 {
                     var probe = d;
                     _burnerSupport[d.Name] = await Task.Run(() => CdAudioService.IsAudioBurner(probe));
@@ -4880,6 +4756,34 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         await RipCdTracksAsync(tracks, options);
     }
 
+    /// <summary>Ejects the optical disc shown in the CD view (the CdInfoBar Eject button).</summary>
+    [RelayCommand]
+    private void EjectCd()
+    {
+        var drivePath = _cdTracks.Select(t => DrivePathFromCdTrackId(t.Id)).FirstOrDefault(d => d != null);
+        if (drivePath == null)
+        {
+            return;
+        }
+
+        // Stop playback from the disc first, or Windows can't eject it.
+        if (CurrentPlayingItem?.Source == "cdda")
+        {
+            ClearPlayback();
+        }
+
+        if (DeviceEjector.Eject(drivePath, out var error))
+        {
+            _log.Information("Ejected disc at {Drive}", drivePath);
+            UpdateMainStatus("Disc ejected.");
+        }
+        else
+        {
+            _log.Warning("Eject failed for disc at {Drive}: {Error}", drivePath, error ?? "unknown");
+            UpdateMainStatus($"Couldn't eject the disc — {error ?? "it may still be in use"}.");
+        }
+    }
+
     public bool IsCdViewActive => SelectedSidebarItem?.ViewConfigKey == "CdAudio";
 
     private async Task<CdRipOptions?> PromptForRipOptionsAsync()
@@ -4956,10 +4860,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var speedClock = System.Diagnostics.Stopwatch.StartNew();
         long speedStartSectors = 0;
 
-        IsRipping = true;
-        RipTitle = $"Importing {tracks.Count} track(s)";
-        RipDetail = string.Empty;
-        RipPercent = 0;
+        IsBusy = true;
+        BusyTitle = $"Importing {tracks.Count} track(s)";
+        BusyDetail = string.Empty;
+        BusyPercent = 0;
 
         // Queue indicator: every track about to be ripped shows the grey spinner.
         foreach (var t in tracks)
@@ -5008,13 +4912,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 etaStr = "—";
             }
 
-            RipTitle = $"Importing “{p.TrackTitle}”";
-            RipDetail = $"Track {p.TrackNumber} of {p.TrackCount} — Time remaining: {etaStr} ({speedStr})";
-            RipPercent = p.TrackPercent;
+            BusyTitle = $"Importing “{p.TrackTitle}”";
+            BusyDetail = $"Track {p.TrackNumber} of {p.TrackCount} — Time remaining: {etaStr} ({speedStr})";
+            BusyPercent = p.TrackPercent;
         });
 
         // Per-track verification feed: each finished track flashes a one-line
-        // verdict on the LCD's RipDetail line while the next track gets going.
+        // verdict on the LCD's BusyDetail line while the next track gets going.
         var trackCompleted = new Progress<RipOutcome>(o =>
         {
             // Green check the moment a track is verified. Persistence comes from the
@@ -5039,7 +4943,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 line = $"⚠ Track {o.TrackNumber:D2} — {o.ReadErrorSectors} read error(s)";
             }
-            RipDetail = line;
+            BusyDetail = line;
 
             // Surface the finished track in the library now. Relying on the folder
             // watcher races with flac/lame holding the file open for the whole encode,
@@ -5094,10 +4998,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _ripCts?.Dispose();
             _ripCts = null;
-            IsRipping = false;
-            RipTitle = string.Empty;
-            RipDetail = string.Empty;
-            RipPercent = 0;
+            IsBusy = false;
+            BusyTitle = string.Empty;
+            BusyDetail = string.Empty;
+            BusyPercent = 0;
 
             // Clear the queued/spinning state for anything not actually ripped (e.g.
             // a cancelled rip), leaving completed tracks' green checks in place.
@@ -5112,7 +5016,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     // -- LCD progress for long device/disc operations --------------------------------
-    // These borrow the rip's LCD page (IsRipping + RipTitle/RipDetail/RipPercent) so an
+    // These borrow the rip's LCD page (IsBusy + BusyTitle/BusyDetail/BusyPercent) so an
     // import, burn, or device scan reads the same as a rip ("Adding ...", "Scanning ...").
     // Pair Begin/End; all marshal to the UI thread so callers can drive them from a
     // background scan. (Single-slot: a second op started mid-rip would share the page.)
@@ -5121,10 +5025,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         UI(() =>
         {
-            RipTitle = title;
-            RipDetail = detail;
-            RipPercent = 0;
-            IsRipping = true;
+            BusyTitle = title;
+            BusyDetail = detail;
+            BusyPercent = 0;
+            IsBusy = true;
         });
     }
 
@@ -5132,10 +5036,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         UI(() =>
         {
-            RipDetail = detail;
+            BusyDetail = detail;
             if (percent is { } p)
             {
-                RipPercent = p;
+                BusyPercent = p;
             }
         });
     }
@@ -5144,10 +5048,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         UI(() =>
         {
-            IsRipping = false;
-            RipTitle = string.Empty;
-            RipDetail = string.Empty;
-            RipPercent = 0;
+            IsBusy = false;
+            BusyTitle = string.Empty;
+            BusyDetail = string.Empty;
+            BusyPercent = 0;
         });
     }
 
@@ -5161,7 +5065,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var wasIdle = _activeDownloads.Count == 0;
         _activeDownloads[ep.Id] = (ep.Title ?? string.Empty, 0);
-        if (wasIdle && !IsRipping)
+        if (wasIdle && !IsBusy)
         {
             _downloadOwnsLcd = true;
             BeginLcdBusy("Downloading");
@@ -5176,7 +5080,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var wasIdle = _activeDownloads.Count == 0;
         _activeDownloads[p.EpisodeId] = (p.Title, p.Fraction);
-        if (wasIdle && !IsRipping)
+        if (wasIdle && !IsBusy)
         {
             _downloadOwnsLcd = true;
             BeginLcdBusy("Downloading");
@@ -5388,45 +5292,332 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// (stock iPods, which report read-only) is a later phase.
     /// </summary>
     public bool CanSyncToIPod =>
-        SelectedSidebarItem?.PlaylistId != null && _connectedDevices.Values.Any(d => !d.IsReadOnly);
+        (SelectedSidebarItem?.PlaylistId != null || SelectedSidebarItem?.IsFavorites == true)
+        && _connectedDevices.Values.Any(IsSyncTarget);
+
+    /// <summary>A connected device we can sync a playlist to: a writable filesystem device
+    /// (Rockbox), or a stock iPod whose iTunesDB/SQLite library OrgZ can write.</summary>
+    private static bool IsSyncTarget(ConnectedDevice d)
+        => !d.IsReadOnly
+        || (d.DeviceType == DeviceType.StockIPod && IPodCapabilities.SupportsDatabaseWrite(d.IpodGeneration));
 
     /// <summary>
-    /// Syncs the active playlist to a connected writable device. Auto-targets the single
-    /// connected device. (Currently writes the M3U and links tracks already on the device;
-    /// copying missing music and native-iPod playlist write are the next phases.)
+    /// Syncs the active playlist (or Favorites) to a connected device: Rockbox → copy missing
+    /// music + write the M3U; stock iPod → copy missing tracks + write a native playlist (binary
+    /// iTunesDB on Hash58 generations, or the Nano 5G SQLite container on Hash72).
     /// </summary>
     [RelayCommand]
     private async Task SyncCurrentPlaylistToIPodAsync()
     {
-        if (SelectedSidebarItem is not { PlaylistId: not null } playlistItem)
+        if (SelectedSidebarItem is not { } playlistItem || (playlistItem.PlaylistId is null && !playlistItem.IsFavorites))
         {
             return;
         }
 
-        var targets = _connectedDevices.Values.Where(d => !d.IsReadOnly).ToList();
-        if (targets.Count == 0)
+        var device = _connectedDevices.Values.FirstOrDefault(IsSyncTarget);
+        if (device == null)
         {
             return;
         }
 
-        if (targets.Count > 1)
+        var name = string.IsNullOrWhiteSpace(playlistItem.Name) ? "Playlist" : playlistItem.Name;
+        await SyncPlaylistToDeviceAsync(name, CollectCurrentViewBurnTracks(), device);
+    }
+
+    /// <summary>
+    /// Syncs a playlist's tracks to any writable device through the <see cref="IPodDevice"/> abstraction:
+    /// copies each track not already present (transcoding as the tier needs), then writes a native user
+    /// playlist referencing all of them. Tier-agnostic - the Nano 5G SQLite, binary iTunesDB, and Rockbox
+    /// filesystem paths all live behind <see cref="IPodDevice.AddTrackAsync"/> / <see cref="IPodDevice.CreatePlaylistAsync"/>.
+    /// </summary>
+    private async Task SyncPlaylistToDeviceAsync(string name, IReadOnlyList<MediaItem> tracks, ConnectedDevice device)
+    {
+        if (tracks.Count == 0)
         {
-            // Several writable devices - the chooser is the next step; don't guess.
-            UpdateMainStatus("Several devices are connected — pick one to sync to (chooser coming soon).");
+            UpdateMainStatus($"“{name}” is empty — nothing to sync.");
             return;
         }
 
-        var device = targets[0];
+        // Only the stock-iPod tiers transcode; Rockbox copies files as-is, so don't gate it on ffmpeg.
+        var ffmpeg = ResolveFfmpeg();
+        if (device.DeviceType == DeviceType.StockIPod && ffmpeg is null)
+        {
+            UpdateMainStatus("ffmpeg wasn't found — needed to transcode for the iPod.");
+            return;
+        }
+
+        var ipod = IPodDevice.For(device);
+        var deviceSource = $"device:{device.MountPath}";
+        var deviceByAT = _allItems
+            .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
+            .GroupBy(i => NormalizeMatchKey(i.Artist, i.Title), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var playlistItems = new List<MediaItem>(tracks.Count);   // matched-or-imported device items, in order
+        int matched = 0, added = 0, failed = 0;
+
         BeginLcdBusy($"Syncing to {device.Name}");
         try
         {
-            await SendPlaylistToDevice(playlistItem, device);
-            UpdateMainStatus($"Synced “{playlistItem.Name}” to {device.Name}.");
+            for (int i = 0; i < tracks.Count; i++)
+            {
+                var t = tracks[i];
+                var key = NormalizeMatchKey(t.Artist, t.Title);
+                if (!string.IsNullOrEmpty(key) && deviceByAT.TryGetValue(key, out var existing))
+                {
+                    playlistItems.Add(existing);
+                    matched++;
+                    continue;
+                }
+                if (string.IsNullOrEmpty(t.FilePath) || !File.Exists(t.FilePath))
+                {
+                    failed++;
+                    continue;
+                }
+                try
+                {
+                    SetLcdBusy($"Adding “{t.Title}” ({i + 1}/{tracks.Count})", (double)i / tracks.Count);
+                    var deviceItem = await ipod.AddTrackAsync(t, ffmpeg ?? "ffmpeg");
+                    _allItems.Add(deviceItem);
+                    playlistItems.Add(deviceItem);
+                    added++;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Sync: failed to add {Track} to {Device}", t.FilePath, device.MountPath);
+                    failed++;
+                }
+            }
+
+            if (playlistItems.Count == 0)
+            {
+                UpdateMainStatus($"Couldn't sync any tracks to {device.Name}.");
+                return;
+            }
+
+            SetLcdBusy($"Writing playlist “{name}”", 1);
+            await ipod.CreatePlaylistAsync(name, playlistItems);
+
+            // Reflect the new playlist + freshly-imported audio in OrgZ's device tree right away.
+            IPodArtworkReader.Invalidate(device.MountPath);
+            var pl = new DevicePlaylist { Name = name, Key = SanitizeFileName(name), TrackIds = playlistItems.Select(x => x.Id).ToList() };
+            PublishDevicePlaylists(device, device.Playlists.Where(e => e.Key != pl.Key).Append(pl).ToList());
+            device.AudioSpace = _allItems.Where(i => i.Source == deviceSource && i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
+            device.RefreshSpace();
+            ApplyFilter();
+
+            _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total}", name, device.MountPath, matched, added, failed, playlistItems.Count);
+            UpdateMainStatus($"Synced “{name}” to {device.Name} — {playlistItems.Count} track(s), {added} new.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Sync to {Device} failed", device.Name);
+            UpdateMainStatus($"Sync failed: {ex.Message}");
         }
         finally
         {
             EndLcdBusy();
         }
+    }
+
+    /// <summary>Whether the device shown in the info bar can take a podcast sync (a writable stock iPod).</summary>
+    public bool CanSyncPodcasts
+    {
+        get
+        {
+            var dev = DeviceForSidebarItem(SelectedSidebarItem);
+            return dev is { DeviceType: DeviceType.StockIPod } && IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration);
+        }
+    }
+
+    /// <summary>Syncs downloaded podcasts to the iPod currently shown in the device info bar.</summary>
+    [RelayCommand]
+    private async Task SyncPodcastsToIPodAsync()
+    {
+        var dev = DeviceForSidebarItem(SelectedSidebarItem);
+        if (dev is null)
+        {
+            return;
+        }
+
+        var ipod = IPodDevice.For(dev);
+        if (ipod.SupportsPodcasts)
+        {
+            await SyncPodcastsToDeviceAsync(dev, ipod);
+        }
+    }
+
+    // First-sync cap: only the most recent N downloaded episodes get pushed, so a real library
+    // (e.g. 1800+ downloads) doesn't dump everything onto the iPod before we've verified podcasts
+    // even show up. Raised/made per-show + unplayed-aware once the format is confirmed on hardware.
+    private const int PodcastSyncCap = 5;
+
+    /// <summary>
+    /// Syncs DOWNLOADED podcast episodes to a connected iPod through the <see cref="IPodDevice"/>
+    /// abstraction, which picks the right format + database for the model (binary iTunesDB, Nano 5G
+    /// SQLite, or Rockbox filesystem). Gathers files under {library}/.podcasts/{feedId}/, newest
+    /// first, capped at <see cref="PodcastSyncCap"/>. Show grouping + resume are follow-ups.
+    /// </summary>
+    private async Task SyncPodcastsToDeviceAsync(ConnectedDevice dev, IPodDevice ipod)
+    {
+        var root = App.FolderPath;
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            UpdateMainStatus("No library folder set.");
+            return;
+        }
+
+        var podcastsDir = Path.Combine(root, ".podcasts");
+        if (!Directory.Exists(podcastsDir))
+        {
+            UpdateMainStatus("No downloaded podcasts to sync.");
+            return;
+        }
+
+        var subs = Services.Podcast.PodcastCache.GetSubscriptions().ToDictionary(s => s.FeedId);
+        var ffmpeg = ResolveFfmpeg();   // only used for non-MP3/AAC episodes; most pass straight through
+
+        BeginLcdBusy($"Syncing podcasts to {dev.Name}");
+        int added = 0;
+        try
+        {
+            // Gather episodes (newest first, capped) off the UI thread.
+            var episodes = await Task.Run(() =>
+            {
+                var candidates = new List<(string File, DateTime Mtime, long FeedId)>();
+                foreach (var feedDir in Directory.EnumerateDirectories(podcastsDir))
+                {
+                    if (!long.TryParse(Path.GetFileName(feedDir), out var feedId))
+                    {
+                        continue;
+                    }
+                    foreach (var file in Directory.EnumerateFiles(feedDir))
+                    {
+                        if (!file.EndsWith(".partial", StringComparison.OrdinalIgnoreCase))
+                        {
+                            candidates.Add((file, File.GetLastWriteTimeUtc(file), feedId));
+                        }
+                    }
+                }
+
+                var picked = candidates.OrderByDescending(c => c.Mtime).Take(PodcastSyncCap).ToList();
+                SetLcdBusy($"Reading {picked.Count} episode(s)…", 0.3);
+                var list = new List<PodcastPush>(picked.Count);
+                var artByFeed = new Dictionary<long, string?>();   // show cover, fetched once per feed
+                var pubByFeed = new Dictionary<long, Dictionary<long, DateTime>>();   // feedId -> episodeId -> RSS publish date
+                var titleByFeed = new Dictionary<long, Dictionary<long, string>>();   // feedId -> episodeId -> RSS episode title
+                foreach (var (file, mtime, feedId) in picked)
+                {
+                    subs.TryGetValue(feedId, out var sub);
+
+                    // Downloaded files are named {episodeId}; map back to the local RSS feed cache
+                    // (offline) once per feed for the real publish date + episode title.
+                    if (!pubByFeed.TryGetValue(feedId, out var pubMap))
+                    {
+                        pubMap = new Dictionary<long, DateTime>();
+                        var titles = new Dictionary<long, string>();
+                        foreach (var ep in Services.Podcast.PodcastIndexClient.GetCachedEpisodesByFeedId(feedId) ?? [])
+                        {
+                            if (ep.DatePublishedEpoch > 0) { pubMap[ep.Id] = DateTimeOffset.FromUnixTimeSeconds(ep.DatePublishedEpoch).UtcDateTime; }
+                            if (!string.IsNullOrWhiteSpace(ep.Title)) { titles[ep.Id] = ep.Title!; }
+                        }
+                        pubByFeed[feedId] = pubMap;
+                        titleByFeed[feedId] = titles;
+                    }
+                    var haveEpId = long.TryParse(Path.GetFileNameWithoutExtension(file), out var epId);
+
+                    // Title precedence: the file's own ID3 tag, then the RSS episode title (so tagless
+                    // MP3s don't surface as their bare numeric episode id), then the filename.
+                    var title = Path.GetFileNameWithoutExtension(file);
+                    var lengthMs = 0;
+                    string? desc = null;
+                    try
+                    {
+                        using var tf = TagLib.File.Create(file);
+                        if (!string.IsNullOrWhiteSpace(tf.Tag.Title)) { title = tf.Tag.Title; }
+                        lengthMs = (int)tf.Properties.Duration.TotalMilliseconds;
+                        desc = tf.Tag.Comment;
+                    }
+                    catch
+                    {
+                        // tagless file - fall back to the RSS title / filename + zero duration
+                    }
+                    if (haveEpId && title == epId.ToString()
+                        && titleByFeed[feedId].TryGetValue(epId, out var rssTitle))
+                    {
+                        title = rssTitle;
+                    }
+
+                    if (!artByFeed.TryGetValue(feedId, out var coverPath))
+                    {
+                        coverPath = TryDownloadShowArt(sub?.ImageUrl);
+                        artByFeed[feedId] = coverPath;
+                    }
+
+                    var pubDate = haveEpId && pubMap.TryGetValue(epId, out var pd) ? pd : mtime;
+
+                    list.Add(new PodcastPush(file, title, sub?.Title ?? "Podcast", desc, sub?.FeedUrl, pubDate, lengthMs, coverPath));
+                }
+                return list;
+            });
+
+            if (episodes.Count == 0)
+            {
+                UpdateMainStatus("No downloaded podcasts to sync.");
+                return;
+            }
+
+            added = await ipod.AddPodcastsAsync(episodes, ffmpeg ?? "ffmpeg",
+                (done, total) => SetLcdBusy($"Copying episode {done} of {total} to {dev.Name}…", total == 0 ? 0.6 : (double)done / total));
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Podcast sync to {Device} failed", dev.MountPath);
+            UpdateMainStatus($"Podcast sync failed: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            EndLcdBusy();
+        }
+
+        // The batch podcast write only touched the on-device database - unlike the music/playlist
+        // sync it built no device MediaItems, so re-read the library to surface the new episodes in
+        // the iPod's Podcasts view without waiting for a reconnect.
+        if (added > 0)
+        {
+            await ReloadStockIPodLibraryAsync(dev);
+        }
+
+        _log.Information("Synced podcasts to {Device}: added={Added}", dev.MountPath, added);
+        UpdateMainStatus(added > 0 ? $"Synced {added} podcast episode(s) to {dev.Name}." : "No downloaded podcasts to sync.");
+    }
+
+    /// <summary>
+    /// Re-reads a stock iPod's on-device library and swaps the result into <see cref="_allItems"/>,
+    /// refreshing the capacity split and the active view. The music/playlist sync updates items in
+    /// place, but the batch podcast sync writes only the database, so it calls this to surface the
+    /// freshly-added episodes without a reconnect. No-op for non-stock devices.
+    /// </summary>
+    private async Task ReloadStockIPodLibraryAsync(ConnectedDevice device)
+    {
+        if (device.DeviceType != DeviceType.StockIPod)
+        {
+            return;
+        }
+
+        var library = await IPodDevice.For(device).ReadLibraryAsync();
+        PublishDevicePlaylists(device, library.Playlists);
+
+        var source = $"device:{device.MountPath}";
+        _allItems.RemoveAll(i => i.Source == source);
+        _allItems.AddRange(library.Tracks);
+
+        device.AudioSpace = library.Tracks.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
+        device.PodcastSpace = library.Tracks.Where(i => i.Kind == MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
+        device.RefreshSpace();
+
+        ApplyFilter();
     }
 
     /// <summary>
@@ -5545,39 +5736,44 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task HandleDeviceConnectedAsync(ConnectedDevice device)
     {
-        if (_connectedDevices.ContainsKey(device.MountPath))
+        if (_connectedDevices.TryGetValue(device.MountPath, out var existing))
         {
-            _log.Debug("HandleDeviceConnectedAsync ignored — {MountPath} already connected", device.MountPath);
-            return;
+            // Same physical device re-announced (a duplicate arrival event) - ignore.
+            if (DeviceDetectionService.IsSameConnectedDevice(existing, device))
+            {
+                _log.Debug("HandleDeviceConnectedAsync ignored — {MountPath} already connected (same device)", device.MountPath);
+                return;
+            }
+
+            // A DIFFERENT iPod now occupies this mount - the previous one's removal was
+            // missed/late. Tear it down (drops its tracks + sidebar entry) before the new one
+            // connects, so the grid doesn't keep showing the old iPod's library at the reused
+            // drive letter.
+            _log.Information("HandleDeviceConnectedAsync: {MountPath} now holds a different device — replacing \"{Old}\" with \"{New}\"", device.MountPath, existing.Name, device.Name);
+            HandleDeviceDisconnected(device.MountPath);
         }
 
         _connectedDevices[device.MountPath] = device;
         OnPropertyChanged(nameof(CanSyncToIPod));
 
         var viewKey = $"Device:{device.MountPath}";
-        var playlistsKey = $"Device:{device.MountPath}:Playlists";
         ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDeviceConfig(device.MountPath));
-        ListViewConfigs.Register(playlistsKey, ListViewConfigs.BuildDevicePlaylistsConfig(device.MountPath));
 
-        // The device row itself IS the music view (its ViewConfigKey = "Device:{mount}").
-        // Children under it are secondary views - Playlists is wired, Podcasts and
-        // Audiobooks are placeholders for future device-scoped views and stay
-        // disabled until those views land.
-        var playlistsChild = new SidebarItem
-        {
-            Name = "Playlists",
-            Icon = "fa-solid fa-list",
-            Category = "DEVICE",
-            IsEnabled = true,
-            ViewConfigKey = playlistsKey,
-        };
+        // The device row itself IS the music view (its ViewConfigKey = "Device:{mount}"). The
+        // Podcasts / Audiobooks children are device-scoped sub-views, enabled per the model's
+        // capability (via IPodDevice). They list the device's content of that kind once its library
+        // is read kind-aware (today the reader tags everything Music, so they're empty for now).
+        var ipod = IPodDevice.For(device);
+        ListViewConfigs.Register($"{viewKey}:{MediaKind.Podcast}", ListViewConfigs.BuildDeviceKindConfig(device.MountPath, MediaKind.Podcast));
+        ListViewConfigs.Register($"{viewKey}:{MediaKind.Audiobook}", ListViewConfigs.BuildDeviceKindConfig(device.MountPath, MediaKind.Audiobook));
 
         var podcastsChild = new SidebarItem
         {
             Name = "Podcasts",
             Icon = "fa-solid fa-podcast",
             Category = "DEVICE",
-            IsEnabled = false,
+            IsEnabled = ipod.SupportsPodcasts,
+            ViewConfigKey = $"{viewKey}:{MediaKind.Podcast}",
         };
 
         var audiobooksChild = new SidebarItem
@@ -5585,7 +5781,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Name = "Audiobooks",
             Icon = "fa-solid fa-headphones",
             Category = "DEVICE",
-            IsEnabled = false,
+            IsEnabled = ipod.SupportsAudiobooks,
+            ViewConfigKey = $"{viewKey}:{MediaKind.Audiobook}",
         };
 
         var sidebarItem = new SidebarItem
@@ -5596,7 +5793,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Category = "DEVICES",
             IsEnabled = true,
             ViewConfigKey = viewKey,
-            Children = { playlistsChild, podcastsChild, audiobooksChild },
+            Children = { podcastsChild, audiobooksChild },
         };
         DeviceItems.Add(sidebarItem);
 
@@ -5606,19 +5803,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            List<MediaItem> scanned;
-
             var beforeCount = _allItems.Count;
 
-            // Stream scanned items into _allItems in small batches so the grid fills in
-            // as the scan runs, instead of staying empty until the walk completes. Every
-            // batch is marshalled to the UI thread and triggers a filter re-apply when
-            // the device's sidebar entry is currently selected.
+            // Stream scanned items into _allItems in small batches so the grid fills in as the scan runs,
+            // instead of staying empty until it completes. Each batch is marshalled to the UI thread,
+            // grows the capacity bar, and re-applies the filter when this device is the selected view.
+            long audioBytes = 0;
             void FlushBatch(IReadOnlyList<MediaItem> batch)
             {
                 Dispatcher.UIThread.Post(() =>
                 {
                     _allItems.AddRange(batch);
+                    audioBytes += batch.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
+                    device.AudioSpace = audioBytes;
                     if (SelectedSidebarItem == sidebarItem)
                     {
                         ApplyFilter();
@@ -5626,26 +5823,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 });
             }
 
-            void PublishPlaylists(IReadOnlyList<DevicePlaylist> playlists)
-            {
-                PublishDevicePlaylists(device, playlists);
-            }
-
-            if (device.DeviceType == DeviceType.StockIPod)
-            {
-                scanned = await Task.Run(() => ScanStockIPod(device, d => SetLcdBusy(d), FlushBatch, PublishPlaylists));
-            }
-            else
-            {
-                scanned = await Task.Run(() => ScanRockboxDevice(device, d => SetLcdBusy(d), FlushBatch, PublishPlaylists));
-            }
+            // One polymorphic read path - the tier (SQLite .itlp, binary iTunesDB, or filesystem walk) is
+            // chosen inside IPodDevice; playlists come back with the library rather than via a callback.
+            var library = await IPodDevice.For(device).ReadLibraryAsync(FlushBatch, d => SetLcdBusy(d));
+            PublishDevicePlaylists(device, library.Playlists);
 
             sw.Stop();
             var afterCount = _allItems.Count;
-            device.AudioSpace = scanned.Sum(i => i.FileSize ?? 0);
+            device.AudioSpace = library.Tracks.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
+            device.PodcastSpace = library.Tracks.Where(i => i.Kind == MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
             device.RefreshSpace();
 
-            _log.Information("Device scan complete: MountPath={MountPath} Tracks={Tracks} ScanMs={ScanMs} _allItems {Before}->{After}", device.MountPath, scanned.Count, sw.ElapsedMilliseconds, beforeCount, afterCount);
+            _log.Information("Device scan complete: MountPath={MountPath} Tracks={Tracks} ScanMs={ScanMs} _allItems {Before}->{After}", device.MountPath, library.Tracks.Count, sw.ElapsedMilliseconds, beforeCount, afterCount);
 
             if (SelectedSidebarItem == sidebarItem)
             {
@@ -5734,6 +5923,67 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Erases a connected iPod: deletes all music/artwork and empties its library (via
+    /// <see cref="IPodDevice.EraseAsync"/>), then ejects so the wipe flushes to the removable drive
+    /// - reconnecting shows a clean, empty iPod ready to load. For second-hand iPods. Invoked from
+    /// the device right-click menu (Settings > Erase iPod).
+    /// </summary>
+    internal async Task EraseDeviceAsync(SidebarItem? item)
+    {
+        var dev = DeviceForSidebarItem(item);
+        if (dev is null)
+        {
+            return;
+        }
+
+        var confirm = new Views.ConfirmDialog(
+            "Erase iPod",
+            $"Erase EVERYTHING on “{dev.Name}”?\n\nThis permanently deletes all music, playlists, and artwork on the device, leaving it empty. It cannot be undone.",
+            "Erase");
+        if (!await confirm.ShowDialog<bool>(_window))
+        {
+            return;
+        }
+
+        var ipod = IPodDevice.For(dev);
+        BeginLcdBusy($"Erasing {dev.Name}");
+        int removed = 0;
+        try
+        {
+            removed = await ipod.EraseAsync();
+        }
+        catch (NotImplementedException)
+        {
+            UpdateMainStatus($"Erase isn't supported on {dev.Name} yet.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Erase failed for {Device}", dev.MountPath);
+            UpdateMainStatus($"Erase failed: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            EndLcdBusy();
+        }
+
+        _log.Information("Erased {Device}: removed {Count} file(s)", dev.MountPath, removed);
+
+        // Refresh IN PLACE - drop the erased device's now-stale items, clear its playlists, and zero
+        // its audio usage so the view + capacity bar show the empty library immediately. Critically
+        // we do NOT pull the device off the sidebar (the old teardown+re-add read as an eject). The
+        // iPod stays mounted and selected. (FAT32 quick-removal flushes the wipe on close.)
+        _allItems.RemoveAll(i => i.Source == $"device:{dev.MountPath}");
+        PublishDevicePlaylists(dev, Array.Empty<DevicePlaylist>());
+        dev.AudioSpace = 0;
+        dev.PodcastSpace = 0;
+        dev.RefreshSpace();
+        ApplyFilter();
+        UpdateMainStatus($"Erased {dev.Name} — {removed} file(s) removed. The library is now empty.");
+    }
+
     private void EjectByMount(string mountPath, string? name)
     {
         // Let go of everything we hold on the device first, or Windows can't eject it.
@@ -5778,17 +6028,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Release the mount-path-keyed handles (pooled SQLite connections + the cached ArtworkDB reader)
+        // and stop playback from this device. Without this, a DIFFERENT iPod arriving on the same reused
+        // drive letter would reuse the departed iPod's pooled DB handle + artwork cache and show its
+        // library - the eject path already did this, but WMI-removal and hot-swap disconnects did not.
+        ReleaseDeviceHandles(mountPath);
+
         OnPropertyChanged(nameof(CanSyncToIPod));
 
         var source = $"device:{mountPath}";
         var viewKey = $"Device:{mountPath}";
         var playlistsKey = $"Device:{mountPath}:Playlists";
-
-        // Stop playback if we're playing from this device
-        if (CurrentPlayingItem?.Source == source)
-        {
-            ClearPlayback();
-        }
 
         _allItems.RemoveAll(i => i.Source == source);
 
@@ -5812,263 +6062,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Reads an iTunesDB from a stock iPod and converts tracks to MediaItems. The iTunesDB
-    /// is authoritative - FilePaths point to scrambled names like F23/ABCD.mp3 but all
-    /// metadata (title/artist/album/play counts/ratings) comes from the DB. When the DB is
-    /// missing or unreadable, falls back to a raw filesystem walk so the grid still fills
-    /// with whatever audio we can find on the device.
-    ///
-    /// Stock iPods are treated as READ-ONLY - we never write to the device, not even a
-    /// cache file under <c>/.orgz/</c>. The iTunesDB parse runs every connect; it's fast
-    /// enough (~1s for a 14k-track library) that shaving it isn't worth the policy break.
-    /// </summary>
-    private static List<MediaItem> ScanStockIPod(ConnectedDevice device, Action<string>? onProgress = null, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
-    {
-        var dbPath = Path.Combine(device.MountPath, "iPod_Control", "iTunes", "iTunesDB");
-        if (!File.Exists(dbPath))
-        {
-            onProgress?.Invoke("iTunesDB missing — walking filesystem");
-            _log.Information("iTunesDB not found at {DbPath} — falling back to filesystem walk", dbPath);
-            return ScanRockboxDevice(device, onProgress, flushBatch);
-        }
-
-        var source = $"device:{device.MountPath}";
-        onProgress?.Invoke("Parsing iTunesDB...");
-        ITunesDbReader.ReadAll(dbPath, device.MountPath, out var tracks, out var itunesPlaylists);
-
-        // Convert iTunesDB playlists into DevicePlaylist - their TrackIds are MediaItem Ids
-        // ("device:{mount}:{trackId}") so the per-playlist view config can filter by
-        // set membership directly.
-        var devicePlaylists = new List<DevicePlaylist>();
-        foreach (var pl in itunesPlaylists)
-        {
-            if (string.IsNullOrWhiteSpace(pl.Name))
-            {
-                continue;
-            }
-            devicePlaylists.Add(new DevicePlaylist
-            {
-                Name = pl.Name!,
-                Key = $"MHYP:{pl.PlaylistId}",
-                TrackIds = pl.TrackIds.Select(tid => $"device:{device.MountPath}:{tid}").ToList(),
-            });
-        }
-        publishPlaylists?.Invoke(devicePlaylists);
-
-        var items = new List<MediaItem>(tracks.Count);
-        var pending = new List<MediaItem>(capacity: 64);
-        for (int i = 0; i < tracks.Count; i++)
-        {
-            var t = tracks[i];
-            var ext = !string.IsNullOrEmpty(t.FilePath) ? Path.GetExtension(t.FilePath) : null;
-
-            var mediaItem = new MediaItem
-            {
-                Id = $"device:{device.MountPath}:{t.TrackId}",
-                Kind = MediaKind.Music,
-                Title = t.Title,
-                Artist = t.Artist,
-                Album = t.Album,
-                Genre = t.Genre,
-                Composer = t.Composer,
-                Year = t.Year > 0 ? (uint)t.Year : null,
-                Track = t.TrackNumber > 0 ? (uint)t.TrackNumber : null,
-                TotalTracks = t.TotalTracks > 0 ? (uint)t.TotalTracks : null,
-                Disc = t.DiscNumber > 0 ? (uint)t.DiscNumber : null,
-                TotalDiscs = t.TotalDiscs > 0 ? (uint)t.TotalDiscs : null,
-                Duration = t.DurationMs > 0 ? TimeSpan.FromMilliseconds(t.DurationMs) : null,
-                FilePath = t.FilePath,
-                FileName = !string.IsNullOrEmpty(t.FilePath) ? Path.GetFileName(t.FilePath) : null,
-                Extension = ext,
-                FileSize = t.FileSize,
-                AudioBitrate = t.Bitrate > 0 ? t.Bitrate : null,
-                SampleRate = t.SampleRate > 0 ? t.SampleRate : null,
-                PlayCount = t.PlayCount,
-                Rating = t.Rating > 0 ? t.Rating / 20 : null,
-                LastPlayed = t.LastPlayed,
-                DateAdded = t.DateAdded ?? DateTime.UtcNow,
-                IsAnalyzed = true,
-                Source = source,
-                StreamUrl = t.FilePath,
-                Dbid = t.Dbid != 0 ? t.Dbid : null,
-            };
-            items.Add(mediaItem);
-            pending.Add(mediaItem);
-
-            if ((i & 0xFF) == 0)
-            {
-                onProgress?.Invoke($"Read {i + 1} of {tracks.Count} tracks");
-
-                if (pending.Count > 0 && flushBatch != null)
-                {
-                    flushBatch(pending.ToArray());
-                    pending.Clear();
-                }
-            }
-        }
-
-        if (pending.Count > 0 && flushBatch != null)
-        {
-            flushBatch(pending.ToArray());
-        }
-
-        return items;
-    }
-
-    /// <summary>
-    /// Walks a Rockbox device filesystem, analyzing every supported audio file with TagLib.
-    /// Slower than iTunesDB parsing but necessary because Rockbox has no central database.
-    /// Updates <see cref="ConnectedDevice.AudioSpace"/> progressively so the capacity bar
-    /// in the DeviceInfoBar fills in as the scan runs. When <paramref name="flushBatch"/>
-    /// is non-null, items are pushed in batches of ~32 so the grid populates incrementally
-    /// instead of remaining empty until the full walk completes.
-    ///
-    /// Uses <see cref="DeviceLibraryCache"/> to persist results to <c>{mount}/.orgz/library.db</c>
-    /// and only re-analyze files whose size+mtime differ from the cached entry. First scan
-    /// is full; every subsequent connect deltas in ~milliseconds unless the music changed.
-    /// Stock iPods do NOT use this - their iTunesDB is authoritative and fast to parse, and
-    /// we treat stock iPods as read-only (don't write anything to the device).
-    /// </summary>
-    private static List<MediaItem> ScanRockboxDevice(ConnectedDevice device, Action<string>? onProgress = null, Action<IReadOnlyList<MediaItem>>? flushBatch = null, Action<IReadOnlyList<DevicePlaylist>>? publishPlaylists = null)
-    {
-        var source = $"device:{device.MountPath}";
-
-        // Load cache first - even if the filesystem walk is slow, we can flush cached
-        // items to the grid immediately and only pay for analysis on actually-new files.
-        onProgress?.Invoke("Loading device cache...");
-        var cached = DeviceLibraryCache.TryLoad(device.MountPath, source);
-        var cacheByPath = cached
-            .Where(i => !string.IsNullOrEmpty(i.FilePath))
-            .ToDictionary(i => i.FilePath!, StringComparer.OrdinalIgnoreCase);
-
-        onProgress?.Invoke("Walking filesystem...");
-        var files = new List<string>();
-        try
-        {
-            foreach (var path in Directory.EnumerateFiles(device.MountPath, "*.*", SearchOption.AllDirectories))
-            {
-                if (FileScanner.IsSupportedExtension(path))
-                {
-                    files.Add(path);
-                }
-            }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Skip directories we can't enter - best effort
-        }
-
-        var items = new List<MediaItem>(files.Count);
-        var pending = new List<MediaItem>(capacity: 32);
-        var newlyAnalyzed = new List<MediaItem>(capacity: 32);
-        long audioBytes = 0;
-        int reused = 0;
-        int analyzed = 0;
-
-        for (int i = 0; i < files.Count; i++)
-        {
-            var path = files[i];
-            MediaItem? item;
-            try
-            {
-                var info = new FileInfo(path);
-
-                // Delta: if the cached entry matches size + mtime, reuse it verbatim and
-                // skip TagLib analysis entirely. On a steady library the vast majority of
-                // files hit this path, and the whole "scan" becomes a directory enumeration.
-                if (cacheByPath.TryGetValue(path, out var cachedItem)
-                    && cachedItem.FileSize == info.Length
-                    && cachedItem.LastModified == info.LastWriteTimeUtc)
-                {
-                    item = cachedItem;
-                    reused++;
-                }
-                else
-                {
-                    item = new MediaItem
-                    {
-                        Id = path,
-                        Kind = MediaKind.Music,
-                        FilePath = path,
-                        FileName = info.Name,
-                        Extension = info.Extension,
-                        FileSize = info.Length,
-                        LastModified = info.LastWriteTimeUtc,
-                        Source = source,
-                        StreamUrl = path,
-                    };
-                    AudioFileAnalyzer.AnalyzeFile(item);
-                    analyzed++;
-                    newlyAnalyzed.Add(item);
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Warning(ex, "Rockbox scan failed on file {Path}", path);
-                continue;
-            }
-
-            items.Add(item);
-            pending.Add(item);
-            audioBytes += item.FileSize ?? 0;
-
-            if ((i & 0x1F) == 0)
-            {
-                onProgress?.Invoke($"Analyzing {i + 1} of {files.Count}");
-
-                // Push live audio-bytes back to the device model so the capacity bar
-                // fills in as we go. Marshalled to UI thread because the bar bindings
-                // listen to property-changed events.
-                var snapshot = audioBytes;
-                Dispatcher.UIThread.Post(() => device.AudioSpace = snapshot);
-
-                if (pending.Count > 0 && flushBatch != null)
-                {
-                    flushBatch(pending.ToArray());
-                    pending.Clear();
-                }
-
-                // Persist newly-analyzed items immediately so an interrupted scan resumes
-                // from here on the next connect instead of replaying all the TagLib work.
-                if (newlyAnalyzed.Count > 0)
-                {
-                    DeviceLibraryCache.Upsert(device.MountPath, newlyAnalyzed);
-                    newlyAnalyzed.Clear();
-                }
-            }
-        }
-
-        // Final sync of the accumulated total + any tail items
-        var finalTotal = audioBytes;
-        Dispatcher.UIThread.Post(() => device.AudioSpace = finalTotal);
-
-        if (pending.Count > 0 && flushBatch != null)
-        {
-            flushBatch(pending.ToArray());
-        }
-
-        if (newlyAnalyzed.Count > 0)
-        {
-            DeviceLibraryCache.Upsert(device.MountPath, newlyAnalyzed);
-        }
-
-        _log.Information("Rockbox scan: total={Total} cached={Reused} analyzed={Analyzed}", files.Count, reused, analyzed);
-
-        // Scan completed to the end - prune cache rows for files that have been removed
-        // from the device since the last complete scan. Skipped on interrupt (this line
-        // is never reached) so a partial run doesn't erase otherwise-valid rows.
-        DeviceLibraryCache.PruneMissing(device.MountPath, items.Select(i => i.FilePath!).Where(p => !string.IsNullOrEmpty(p)));
-
-        // Read Rockbox-format M3U playlists from /Playlists/ - their TrackIds are
-        // absolute file paths, which match MediaItem.Id for Rockbox tracks (also the
-        // full path). Missing /Playlists/ folder is the common case; returns empty.
-        var playlists = M3UPlaylistReader.Read(device.MountPath);
-        publishPlaylists?.Invoke(playlists);
-
-        return items;
-    }
-
-    /// <summary>
     /// Marshals a batch of device-side playlists back to the UI thread, replaces the
     /// device's current playlist list, and rebuilds the sidebar tree children under the
     /// "Playlists" node. Also registers/unregisters the per-playlist view configs so
@@ -6088,35 +6081,36 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 device.Playlists.Add(pl);
             }
 
-            // Find the sidebar's "Playlists" child under the device parent. If the user
-            // disconnected the device between scan completion and this dispatch (unlikely
-            // but possible), the device item won't be there - just bail.
+            // Playlists hang directly off the device node (no "Playlists" grouping node).
+            // If the user disconnected between scan completion and this dispatch, the device
+            // item won't be there - just bail.
             var deviceViewKey = $"Device:{mountPath}";
-            var playlistsViewKey = $"Device:{mountPath}:Playlists";
             var deviceParent = DeviceItems.FirstOrDefault(d => d.ViewConfigKey == deviceViewKey);
-            var playlistsNode = deviceParent?.Children.FirstOrDefault(c => c.ViewConfigKey == playlistsViewKey);
-            if (playlistsNode == null)
+            if (deviceParent == null)
             {
                 return;
             }
 
-            // Remove any previously-registered per-playlist view configs for this device
-            // so a rescan replaces them cleanly instead of accumulating duplicates.
-            foreach (var stale in playlistsNode.Children.ToList())
+            // Drop previously-published playlist rows (+ their view configs) so a rescan
+            // replaces them cleanly. Identified by the per-playlist view-key prefix, so the
+            // Podcasts / Audiobooks placeholders are left in place.
+            var playlistPrefix = $"Device:{mountPath}:Playlist:";
+            foreach (var stale in deviceParent.Children.Where(c => c.ViewConfigKey?.StartsWith(playlistPrefix, StringComparison.Ordinal) == true).ToList())
             {
                 if (stale.ViewConfigKey != null)
                 {
                     ListViewConfigs.Remove(stale.ViewConfigKey);
                 }
+                deviceParent.Children.Remove(stale);
             }
-            playlistsNode.Children.Clear();
 
+            // Append the playlists below the Podcasts / Audiobooks nodes - same level, not nested.
             foreach (var pl in playlists)
             {
                 var viewKey = $"Device:{mountPath}:Playlist:{pl.Key}";
                 ListViewConfigs.Register(viewKey, ListViewConfigs.BuildDevicePlaylistConfig(viewKey, pl.TrackIds));
 
-                playlistsNode.Children.Add(new SidebarItem
+                deviceParent.Children.Add(new SidebarItem
                 {
                     Name = pl.Name,
                     Icon = "fa-solid fa-list-ul",

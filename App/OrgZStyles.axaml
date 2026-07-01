@@ -45,6 +45,8 @@
 		<Color x:Key="OrgZDiskMeterDivider">#444444</Color>
 		<Color x:Key="OrgZDiskUsedStart">#6FB4FF</Color>
 		<Color x:Key="OrgZDiskUsedEnd">#2F7EE5</Color>
+		<Color x:Key="OrgZDiskPodcastStart">#B07FE0</Color>
+		<Color x:Key="OrgZDiskPodcastEnd">#7E4FB8</Color>
 		<Color x:Key="OrgZDiskFreeStart">#A0A0A0</Color>
 		<Color x:Key="OrgZDiskFreeEnd">#606060</Color>
 
