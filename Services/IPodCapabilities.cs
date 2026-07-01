@@ -13,6 +13,8 @@ public enum IPodChecksum
     Hash72,
     /// <summary>Nano 6G/7G (2010+): hashAB + SQLite + compressed iTunesCDB.</summary>
     HashAB,
+    /// <summary>iPod Shuffle 1G/2G: no iTunesDB - plays from the big-endian "iTunesSD" track list.</summary>
+    ITunesSD,
 }
 
 /// <summary>
@@ -59,7 +61,14 @@ public static class IPodCapabilities
         ["Nano 5G"] = new([(1056, 128, 128), (1078, 80, 80), (1073, 240, 240), (1074, 50, 50)], IPodChecksum.Hash72),
         ["Nano 6G"] = new([(1073, 240, 240), (1085, 88, 88), (1089, 58, 58), (1074, 50, 50)], IPodChecksum.HashAB),
 
-        // Shuffles (iTunesSD, no screen) and Touch (iOS/SQLite) are intentionally absent.
+        // ── Tier 4: iTunesSD (Shuffle, no screen, no artwork) ──────────────
+        // 1G/2G use the classic big-endian iTunesSD; 3G/4G the newer little-endian "bdhs" - both writable.
+        ["Shuffle 1G"] = new([], IPodChecksum.ITunesSD),
+        ["Shuffle 2G"] = new([], IPodChecksum.ITunesSD),
+        ["Shuffle 3G"] = new([], IPodChecksum.ITunesSD),
+        ["Shuffle 4G"] = new([], IPodChecksum.ITunesSD),
+
+        // Touch (iOS/SQLite) is intentionally absent - no on-disk music database to write.
     };
 
     /// <summary>The checksum a generation requires, or null if we don't know the model.</summary>
@@ -81,5 +90,5 @@ public static class IPodCapabilities
     /// is a proprietary blob (libhashab) not available in open source.
     /// </summary>
     public static bool SupportsDatabaseWrite(string? generation)
-        => ChecksumFor(generation) is IPodChecksum.None or IPodChecksum.Hash58 or IPodChecksum.Hash72;
+        => ChecksumFor(generation) is IPodChecksum.None or IPodChecksum.Hash58 or IPodChecksum.Hash72 or IPodChecksum.ITunesSD;
 }

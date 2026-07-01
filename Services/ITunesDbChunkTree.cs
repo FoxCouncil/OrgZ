@@ -34,6 +34,23 @@ public sealed class ITunesDbChunk
 
     public int ReadHeaderInt32(int offset) => ITunesDbChunkTree.ReadInt32(Header, offset);
     public void WriteHeaderInt32(int offset, int value) => ITunesDbChunkTree.WriteInt32(Header, offset, value);
+
+    /// <summary>Deep copy: a new chunk with independent header/body byte arrays and cloned children.
+    /// Used to model a new playlist on an existing one (reusing its proprietary "chrome" mhods).</summary>
+    public ITunesDbChunk Clone()
+    {
+        var copy = new ITunesDbChunk
+        {
+            Magic = Magic,
+            Header = (byte[])Header.Clone(),
+            Body = (byte[])Body.Clone(),
+        };
+        foreach (var child in Children)
+        {
+            copy.Children.Add(child.Clone());
+        }
+        return copy;
+    }
 }
 
 /// <summary>

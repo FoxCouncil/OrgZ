@@ -42,8 +42,17 @@ public static class ITunesDbReader
         public DateTime? LastPlayed { get; set; }
         public DateTime? DateAdded { get; set; }
 
+        /// <summary>Podcast episode publish date (item.date_released). Surfaces as iTunes's "Release Date".</summary>
+        public DateTime? DateReleased { get; set; }
+
         /// <summary>64-bit persistent id (MHIT @0x70). Matches the ArtworkDB mhii.song_id.</summary>
         public ulong Dbid { get; set; }
+
+        /// <summary>64-bit SQLite item pid (Nano 5G+ "iTunes Library.itlp"); 0 for binary-DB tracks.</summary>
+        public long Pid { get; set; }
+
+        /// <summary>iTunes media kind (1=audio, 4=podcast, 8=audiobook), from MHIT media_type or SQLite media_kind.</summary>
+        public int MediaType { get; set; } = 1;
     }
 
     // MHOD data-object types we care about
@@ -84,11 +93,18 @@ public static class ITunesDbReader
     /// <c>device:{mount}:{trackId}</c>) to join against the live track list.
     /// </summary>
     public static void ReadAll(string iTunesDbPath, string mountPath, out List<ITunesTrack> tracks, out List<ITunesPlaylist> playlists)
+        => ReadAll(File.ReadAllBytes(iTunesDbPath), mountPath, out tracks, out playlists);
+
+    /// <summary>In-memory variant for callers that already hold the DB bytes (e.g. a writer that just
+    /// parsed the same file) - avoids a second read of the whole file.</summary>
+    public static void ReadAll(byte[] bytes, string mountPath, out List<ITunesTrack> tracks, out List<ITunesPlaylist> playlists)
     {
         tracks = [];
         playlists = [];
 
-        var bytes = File.ReadAllBytes(iTunesDbPath);
+        // Apple mirrors every playlist across the legacy (MHSD type 2) and v2 (type 3) datasets;
+        // dedup by playlist id so a mirrored playlist is reported once, not twice.
+        var seenPlaylistIds = new HashSet<uint>();
 
         // Root must be MHBD
         if (bytes.Length < 4 || !MatchMagic(bytes, 0, "mhbd"))
@@ -149,7 +165,7 @@ public static class ITunesDbReader
                     for (int i = 0; i < playlistCount && mhypPos + 12 <= bytes.Length; i++)
                     {
                         var pl = ReadMhyp(bytes, mhypPos, out int mhypTotalSize);
-                        if (pl != null && !pl.IsMaster && !pl.IsPodcastPlaylist)
+                        if (pl != null && !pl.IsMaster && !pl.IsPodcastPlaylist && seenPlaylistIds.Add(pl.PlaylistId))
                         {
                             playlists.Add(pl);
                         }
@@ -194,6 +210,13 @@ public static class ITunesDbReader
             DateAdded = ReadMacDate(ReadInt32(bytes, pos + 104)),
             SkipCount = ReadInt32(bytes, pos + 156),
             Dbid = pos + 0x78 <= bytes.Length ? BitConverter.ToUInt64(bytes, pos + 0x70) : 0,
+            // media_type: podcast/audiobook/audio, at the shared MHIT offset both writer paths pin
+            // (ITunesDbWriter.BuildMhit / the Nano 5G CDB mhit), matching libgpod. Guard on headerSize -
+            // pre-podcast-era mhits are shorter and don't carry the field, so those default to audio.
+            // Without this read, MediaType stayed 1 and every device track surfaced as Music.
+            MediaType = (headerSize >= ITunesMediaType.MhitOffset + 4 && pos + ITunesMediaType.MhitOffset + 4 <= bytes.Length)
+                ? ReadInt32(bytes, pos + ITunesMediaType.MhitOffset)
+                : ITunesMediaType.Audio,
         };
 
         // Walk MHOD children

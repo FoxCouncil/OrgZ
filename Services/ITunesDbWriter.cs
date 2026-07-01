@@ -28,6 +28,18 @@ public sealed record NewTrack
     public ulong Dbid { get; init; }
     public bool HasArtwork { get; init; }
     public int ArtworkSize { get; init; }
+
+    // --- Podcast fields (set IsPodcast to mark the MHIT as a podcast episode) ---
+    /// <summary>Marks this as a podcast: mediatype=4, bookmarkable, skip-on-shuffle, unplayed dot.</summary>
+    public bool IsPodcast { get; init; }
+    /// <summary>Episode description (MHOD type 14).</summary>
+    public string? Description { get; init; }
+    /// <summary>Episode enclosure (audio) URL (MHOD type 15).</summary>
+    public string? PodcastUrl { get; init; }
+    /// <summary>Show feed/RSS URL (MHOD type 16).</summary>
+    public string? PodcastRss { get; init; }
+    /// <summary>Episode publish date - written to time_released (0x8C). Null leaves it zero.</summary>
+    public DateTime? TimeReleased { get; init; }
 }
 
 /// <summary>
@@ -95,7 +107,7 @@ public static class ITunesDbWriter
         return max + 1;
     }
 
-    public static void AddTrack(ITunesDbDocument doc, NewTrack track)
+    public static void AddTrack(ITunesDbDocument doc, NewTrack track, bool addToMasterPlaylists = true)
     {
         var tracksMhsd = FindMhsd(doc, type: 1)
             ?? throw new InvalidDataException("iTunesDB has no track dataset (MHSD type 1).");
@@ -105,6 +117,13 @@ public static class ITunesDbWriter
         // Reference the track from every master playlist. iPods read the v2 list
         // (MHSD type 3); libgpod keeps the legacy type-2 list in sync, so we add
         // the MHIP to both masters to match what the firmware/iTunes expect.
+        // Podcasts pass addToMasterPlaylists:false - they must NOT be in the Library/MPL,
+        // which is what makes them appear only under the iPod's Podcasts menu.
+        if (!addToMasterPlaylists)
+        {
+            return;
+        }
+
         bool referenced = false;
         foreach (var master in MasterPlaylists(doc))
         {
@@ -114,6 +133,450 @@ public static class ITunesDbWriter
         if (!referenced)
         {
             throw new InvalidDataException("iTunesDB has no master playlist to add the track to.");
+        }
+    }
+
+    /// <summary>
+    /// Removes a track: drops its MHIT (id at 0x10) from the track dataset and every MHIP that
+    /// references it (track id at 0x18) from every playlist in both playlist datasets - master,
+    /// user, and the Podcasts list. Podcast/group-header MHIPs reference no track (0x18 == 0) so
+    /// they're never matched. Returns true if the MHIT was found. Callers Normalize + Serialize
+    /// (and re-checksum) after.
+    /// </summary>
+    public static bool RemoveTrack(ITunesDbDocument doc, uint trackId)
+    {
+        var tracksMhsd = FindMhsd(doc, type: 1);
+        bool removed = tracksMhsd is not null
+            && tracksMhsd.Children.RemoveAll(c => c.Magic == "mhit" && (uint)c.ReadHeaderInt32(0x10) == trackId) > 0;
+
+        foreach (var mhsd in doc.Root.Children.Where(c => c.Magic == "mhsd"
+                     && (c.ReadHeaderInt32(12) == 2 || c.ReadHeaderInt32(12) == 3)))
+        {
+            foreach (var mhyp in mhsd.Children.Where(c => c.Magic == "mhyp"))
+            {
+                mhyp.Children.RemoveAll(c => c.Magic == "mhip" && (uint)c.ReadHeaderInt32(0x18) == trackId);
+            }
+        }
+        return removed;
+    }
+
+    // ── iTunes "musicdb" (db version 0x73 / Nano 5G CDB) ──────────────────────
+    // The Nano 5G CDB uses a much richer track record than the legacy 0x184 mhit: a 624-byte mhit with
+    // 8 MHODs, cross-linked to album (mhia, dataset 4) and artist (mhii, dataset 8) table rows by a
+    // shared id space, plus an (empty) dataset 9. iTunes REJECTS the whole CDB ("cannot read the
+    // contents") when it meets the short legacy mhit. So we CLONE iTunes's own structures - these molds
+    // are the raw headers captured from a real iTunes-written CDB - and override only the per-row fields.
+    private static readonly byte[] MhitMold = Convert.FromBase64String("bWhpdHACAAAaBQAACAAAAPfBAQABAAAAIDNQTQABAADewu7lLSA1AEO6AgALAAAAEAAAANsHAACAAAAAAABErAAAAAAAAAAAAAAAAAAAAAAKAAAAAAAAAKOZSeYBAAAAAQAAAAAAAAAZJerlAAAAAJU4WJj5Q6qZAAAAAAEA//+FUgkAAAAAAABELEcAAAAADAAAAAAAAAABAAAAAAAAAJ4sSuYBAAAAlThYmPlDqpkAAAEAAAAAABACAABQQ3gAAAAAAAAAAAAgBAAAAwAAAgEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvlysAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANMEBAIhF2jt8rwwyLSA1AAAAAACAgICAgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEUBAAAAAAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAvMEBAAAAAAAAAAAAAAAAAAAAAAD4wQEAAAAAAPT///////9/AAAAAAAAAAACAAAAAAAAAAAAAAAuR+YKAAAAADJFaukBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    private static readonly byte[] MhiaMold = Convert.FromBase64String("bWhpYVgAAAA6AQAAAwAAADTBAQCNQgfGgrRACwIAAACVOFiY+UOqmQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+    private static readonly byte[] MhiiMold = Convert.FromBase64String("bWhpaVAAAACeAAAAAQAAALzBAQAs1upRQb76awIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+    private static readonly byte[] Mhsd9Mold = Convert.FromBase64String("bWhzZGAAAACAAAAACQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+
+    /// <summary>Adds a track in the iTunes musicdb (Nano 5G CDB) shape: a 624-byte mhit cloned from the
+    /// iTunes mold, cross-linked to find-or-created album (mhia) + artist (mhii) rows. Use this - NOT
+    /// <see cref="AddTrack"/> - when building the CDB, or iTunes rejects the file.</summary>
+    public static uint AddMusicdbTrack(ITunesDbDocument doc, NewTrack t, bool addToMasterPlaylists = true)
+    {
+        var tracksMhsd = FindMhsd(doc, type: 1)
+            ?? throw new InvalidDataException("iTunesCDB has no track dataset (MHSD type 1).");
+
+        // Album + artist rows first so the track id (shared counter) lands above their ids.
+        long artistId = FindOrCreateArtistRow(doc, t.Artist ?? string.Empty);
+        long albumId = FindOrCreateAlbumRow(doc, t.Album ?? string.Empty, t.Artist ?? string.Empty);
+        uint trackId = (uint)NextMusicdbId(doc);
+
+        var mhit = new ITunesDbChunk { Magic = "mhit", Header = (byte[])MhitMold.Clone() };
+        // Standard mhit fields - these offsets are version-stable, so the same writes the legacy 0x184
+        // path uses land correctly inside the 624-byte record; the mold supplies iTunes's trailing chrome.
+        mhit.WriteHeaderInt32(0x10, (int)trackId);
+        mhit.WriteHeaderInt32(0x14, 1);
+        mhit.WriteHeaderInt32(0x24, (int)t.FileSize);
+        mhit.WriteHeaderInt32(0x28, t.LengthMs);
+        mhit.WriteHeaderInt32(0x2C, t.TrackNumber);
+        mhit.WriteHeaderInt32(0x30, 0);
+        mhit.WriteHeaderInt32(0x34, t.Year);
+        mhit.WriteHeaderInt32(0x38, t.Bitrate);
+        mhit.WriteHeaderInt32(0x3C, t.SampleRate << 16);
+        mhit.WriteHeaderInt32(0x68, MacSeconds(t.DateAddedUtc));
+        Array.Clear(mhit.Header, 0x70, 8);                 // drop the mold track's persistent id
+        for (int i = 0; i < 8; i++) { mhit.Header[0x70 + i] = (byte)((t.Dbid >> (8 * i)) & 0xFF); }
+        Array.Clear(mhit.Header, 0x124, 8);                // drop the mold track's album-hash
+        mhit.WriteHeaderInt32(0x120, (int)albumId);        // → album (mhia) row
+        mhit.WriteHeaderInt32(0x1E0, (int)artistId);       // → artist (mhii) row
+
+        // Fields the 624-byte record DUPLICATES - iTunes/firmware read these copies, so a mold leftover
+        // here poisons the reconciled SQLite (the cause of wrong file sizes + "!" missing-file flags):
+        mhit.WriteHeaderInt32(0x18, FileTypeFourCc(t.IpodPath));   // filetype FourCC ("MP3 " / "M4A ")
+        mhit.WriteHeaderInt32(0x12C, (int)t.FileSize);             // file_size also lives at 0x12C
+        Array.Clear(mhit.Header, 0xA8, 8);
+        for (int i = 0; i < 8; i++) { mhit.Header[0xA8 + i] = (byte)((t.Dbid >> (8 * i)) & 0xFF); }   // dbid also @0xA8
+        // No artwork - clear the mold's artwork pointers so iTunes doesn't hunt a missing thumbnail.
+        mhit.Header[0xA4] = 0;
+        mhit.WriteHeaderInt32(0x7C, 0);
+        mhit.WriteHeaderInt32(0x80, 0);
+
+        if (t.IsPodcast)
+        {
+            ApplyPodcastMhitFlags(mhit, t);
+        }
+
+        // MHODs in iTunes order (title, artist, album-artist, album, genre, kind, location).
+        AddStringMhod(mhit, 1, t.Title);
+        AddStringMhod(mhit, 4, t.Artist);
+        AddStringMhod(mhit, 22, t.Artist);                 // album artist (fallback = artist)
+        AddStringMhod(mhit, 3, t.Album);
+        AddStringMhod(mhit, 5, t.Genre);
+        AddStringMhod(mhit, 6, KindFor(t.IpodPath));
+        AddStringMhod(mhit, 2, t.IpodPath);
+        if (t.IsPodcast)
+        {
+            AddStringMhod(mhit, 14, t.Description);
+            AddStringMhod(mhit, 15, t.PodcastUrl);
+            AddStringMhod(mhit, 16, t.PodcastRss);
+        }
+        tracksMhsd.Children.Add(mhit);
+
+        if (addToMasterPlaylists)
+        {
+            foreach (var master in MasterPlaylists(doc)) { master.Children.Add(BuildMhip(trackId)); }
+        }
+        return trackId;
+    }
+
+    /// <summary>Adds the empty dataset-9 iTunes writes (the Nano 5G expects 6 datasets, our skeleton
+    /// ships 5). Normalize re-counts the mhbd dataset total, so just appending it is enough.</summary>
+    public static void EnsureType9Dataset(ITunesDbDocument doc)
+    {
+        if (doc.Root.Children.Any(c => c.Magic == "mhsd" && c.ReadHeaderInt32(0x0C) == 9))
+        {
+            return;
+        }
+        doc.Root.Children.Add(new ITunesDbChunk { Magic = "mhsd", Header = (byte[])Mhsd9Mold.Clone() });
+    }
+
+    private static long FindOrCreateArtistRow(ITunesDbDocument doc, string artist)
+    {
+        var ds = FindMhsd(doc, type: 8);
+        if (ds is null) { return 0; }
+        foreach (var mhii in ds.Children.Where(c => c.Magic == "mhii"))
+        {
+            if (string.Equals(ReadMhodString(mhii, 300), artist, StringComparison.Ordinal))
+            {
+                return (uint)mhii.ReadHeaderInt32(0x10);
+            }
+        }
+        long id = NextMusicdbId(doc);
+        var row = new ITunesDbChunk { Magic = "mhii", Header = (byte[])MhiiMold.Clone() };
+        row.WriteHeaderInt32(0x10, (int)id);
+        WriteRandom8(row.Header, 0x14);
+        row.Children.Add(BuildStringMhod(300, artist));
+        ds.Children.Add(row);
+        return id;
+    }
+
+    private static long FindOrCreateAlbumRow(ITunesDbDocument doc, string album, string artist)
+    {
+        var ds = FindMhsd(doc, type: 4);
+        if (ds is null) { return 0; }
+        foreach (var mhia in ds.Children.Where(c => c.Magic == "mhia"))
+        {
+            if (string.Equals(ReadMhodString(mhia, 200), album, StringComparison.Ordinal)
+                && string.Equals(ReadMhodString(mhia, 201), artist, StringComparison.Ordinal))
+            {
+                return (uint)mhia.ReadHeaderInt32(0x10);
+            }
+        }
+        long id = NextMusicdbId(doc);
+        var row = new ITunesDbChunk { Magic = "mhia", Header = (byte[])MhiaMold.Clone() };
+        row.WriteHeaderInt32(0x10, (int)id);
+        WriteRandom8(row.Header, 0x14);
+        row.Children.Add(BuildStringMhod(200, album));
+        row.Children.Add(BuildStringMhod(201, artist));
+        row.Children.Add(BuildStringMhod(202, artist));
+        ds.Children.Add(row);
+        return id;
+    }
+
+    /// <summary>iTunes draws track / album / artist ids from one shared counter, so the next id is the
+    /// max across all three datasets + 1.</summary>
+    private static long NextMusicdbId(ITunesDbDocument doc)
+    {
+        long max = 0;
+        foreach (var mhsd in doc.Root.Children.Where(c => c.Magic == "mhsd"))
+        {
+            foreach (var row in mhsd.Children.Where(c => c.Magic is "mhit" or "mhia" or "mhii"))
+            {
+                max = Math.Max(max, (uint)row.ReadHeaderInt32(0x10));
+            }
+        }
+        return max + 1;
+    }
+
+    private static void WriteRandom8(byte[] header, int offset)
+    {
+        Span<byte> b = stackalloc byte[8];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(b);
+        b.CopyTo(header.AsSpan(offset, 8));
+    }
+
+    private static string KindFor(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            ".m4a" or ".aac" or ".m4b" => "MPEG-4 audio file",
+            ".aif" or ".aiff" => "AIFF audio file",
+            ".wav" => "WAV audio file",
+            _ => "MPEG audio file",
+        };
+    }
+
+    /// <summary>The filetype FourCC iTunes stores at mhit 0x18 (space-padded, big-endian).</summary>
+    private static int FileTypeFourCc(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            ".m4a" or ".aac" or ".m4b" => 0x4D344120,   // "M4A "
+            ".wav" => 0x57415620,                        // "WAV "
+            _ => 0x4D503320,                             // "MP3 "
+        };
+    }
+
+    /// <summary>
+    /// Strips the library down to its skeleton: drops every track (MHIT) from the track dataset and
+    /// every track reference (MHIP) from the master/library playlists, while leaving all datasets,
+    /// the album/type-8 lists, and user/smart playlists intact. Used to reuse an iTunes-written CDB
+    /// as a template - clear its tracks, then re-add the current library via <see cref="AddTrack"/> -
+    /// so the emitted CDB keeps iTunes's exact multi-dataset structure.
+    /// </summary>
+    public static void ClearLibrary(ITunesDbDocument doc)
+    {
+        foreach (var mhsd in doc.Root.Children.Where(c => c.Magic == "mhsd"))
+        {
+            if (mhsd.ReadHeaderInt32(0x0C) == 1)
+            {
+                mhsd.Children.RemoveAll(c => c.Magic == "mhit");   // track dataset: drop all tracks
+            }
+            else
+            {
+                // Playlist datasets: empty only the master/library list (flag byte 0x14 == 1); leave
+                // user + default/smart playlists (which AddPlaylist re-syncs / iTunes owns) alone.
+                foreach (var mhyp in mhsd.Children.Where(c => c.Magic == "mhyp" && c.Header.Length > 0x14 && c.Header[0x14] == 1))
+                {
+                    mhyp.Children.RemoveAll(c => c.Magic == "mhip");
+                }
+            }
+        }
+    }
+
+    /// <summary>Next free playlist id = max existing MHYP id + 1 (master is usually 1).</summary>
+    public static uint NextPlaylistId(ITunesDbDocument doc)
+    {
+        uint max = 1;
+        foreach (var mhsd in doc.Root.Children.Where(c => c.Magic == "mhsd"
+                     && (c.ReadHeaderInt32(12) == 2 || c.ReadHeaderInt32(12) == 3)))
+        {
+            foreach (var mhyp in mhsd.Children.Where(c => c.Magic == "mhyp"))
+            {
+                max = Math.Max(max, (uint)mhyp.ReadHeaderInt32(0x1C));
+            }
+        }
+        return max + 1;
+    }
+
+    /// <summary>
+    /// Appends a regular (non-master) user playlist to the v2 playlists dataset (MHSD type 3):
+    /// an MHYP carrying the name MHOD plus one MHIP per track. Mirrors the master-playlist shape
+    /// minus the master flag. The track ids must already exist as MHITs (added via
+    /// <see cref="AddTrack"/> or already on the device). Callers Normalize + Serialize after.
+    /// </summary>
+    public static void AddPlaylist(ITunesDbDocument doc, string name, IReadOnlyList<uint> trackIds)
+    {
+        var playlists = FindMhsd(doc, type: 3)
+            ?? throw new InvalidDataException("iTunesDB has no playlists dataset (MHSD type 3).");
+
+        // Idempotent re-sync: drop any existing user playlist with this name before re-adding.
+        RemovePlaylistsByName(doc, name);
+
+        // Build a user playlist exactly the way libgpod's write_playlist (itdb_itunesdb.c:5473) does -
+        // the public reference, no iTunes needed. 108-byte mhyp; type byte 0 (visible user list) at
+        // 0x14; the 64-bit persistent id at 0x1C (the bug was writing it to 0x20, which corrupted the
+        // always-0 field at 0x24); string-mhod-count 1 at 0x28; then a TITLE mhod + the "long" type-100
+        // playlist-pref mhod the firmware requires (mk_long_mhod_id_playlist) - mhodnum=2, NO type-102.
+        // That type-100 blob is generic (no playlist id inside) so we reuse the master's. Then one mhip
+        // per track.
+        uint pid = NextPlaylistId(doc);
+        var mhyp = NewChunk("mhyp", 0x6C);
+        // Header[0x14] stays 0 - a visible user playlist (not the master/library list).
+        ulong id64 = 0x4F52475A00000000UL | pid;               // unique, ORGZ-namespaced, can't collide
+        for (int i = 0; i < 8; i++)
+        {
+            mhyp.Header[0x1C + i] = (byte)(id64 >> (8 * i));    // 64-bit persistent id @ 0x1C
+        }
+        mhyp.Header[0x28] = 1;                                  // string mhod count
+        mhyp.Children.Add(BuildStringMhod(1, name));           // TITLE (mhod type 1)
+
+        var longMhod = MasterPlaylists(doc).FirstOrDefault()?.Children
+            .FirstOrDefault(c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 100);
+        if (longMhod is not null)
+        {
+            mhyp.Children.Add(longMhod.Clone());               // type-100 playlist-pref mhod
+        }
+        foreach (var tid in trackIds)
+        {
+            mhyp.Children.Add(BuildMhip(tid));
+        }
+        playlists.Children.Add(mhyp);
+
+        // Keep the MHLP playlist count in step with the dataset for hosts that read it.
+        var mhlp = playlists.Children.FirstOrDefault(c => c.Magic == "mhlp");
+        mhlp?.WriteHeaderInt32(0x08, playlists.Children.Count(c => c.Magic == "mhyp"));
+    }
+
+    /// <summary>Removes every non-master playlist whose name MHOD equals <paramref name="name"/>
+    /// from both playlist datasets, so a re-sync replaces rather than duplicates.</summary>
+    private static void RemovePlaylistsByName(ITunesDbDocument doc, string name)
+    {
+        foreach (var mhsd in doc.Root.Children.Where(c => c.Magic == "mhsd"
+                     && (c.ReadHeaderInt32(12) == 2 || c.ReadHeaderInt32(12) == 3)))
+        {
+            var dupes = mhsd.Children
+                .Where(c => c.Magic == "mhyp"
+                    && !(c.Header.Length > 0x14 && c.Header[0x14] == 1)   // never the master/library
+                    && string.Equals(ReadMhodString(c, 1), name, StringComparison.Ordinal))
+                .ToList();
+            foreach (var d in dupes)
+            {
+                mhsd.Children.Remove(d);
+            }
+        }
+    }
+
+    /// <summary>Reads a string MHOD of the given type from a chunk's children (UTF-16LE body
+    /// after the 16-byte sub-header), or null when absent/malformed.</summary>
+    private static string? ReadMhodString(ITunesDbChunk parent, int mhodType)
+    {
+        foreach (var mhod in parent.Children.Where(c => c.Magic == "mhod"))
+        {
+            if (mhod.ReadHeaderInt32(0x0C) != mhodType || mhod.Body is null || mhod.Body.Length < 16)
+            {
+                continue;
+            }
+            int len = BitConverter.ToInt32(mhod.Body, 4);
+            if (len < 0 || 16 + len > mhod.Body.Length)
+            {
+                continue;
+            }
+            return Encoding.Unicode.GetString(mhod.Body, 16, len);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Finds (or creates) the special Podcasts playlist - the one the iPod firmware reads to
+    /// populate its Podcasts menu - and appends an MHIP for each episode track id. The playlist is
+    /// identified/marked by <c>podcastflag = ITDB_PL_FLAG_PODCASTS (1)</c>, a 16-bit value at MHYP
+    /// offset 0x2A (per libgpod itdb_playlist_set_podcasts). A flat episode list for now; show
+    /// grouping (group-header MHIPs) is a follow-up. Callers Normalize + Serialize after.
+    /// </summary>
+    public static void EnsurePodcastPlaylist(ITunesDbDocument doc, IReadOnlyList<(string Show, uint TrackId)> episodes)
+    {
+        if (episodes.Count == 0)
+        {
+            return;
+        }
+
+        // Group episodes by show, preserving first-seen order - each show becomes a Podcasts submenu.
+        var order = new List<string>();
+        var byShow = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
+        foreach (var (show, tid) in episodes)
+        {
+            var key = string.IsNullOrWhiteSpace(show) ? "Podcast" : show;
+            if (!byShow.TryGetValue(key, out var list))
+            {
+                list = new List<uint>();
+                byShow[key] = list;
+                order.Add(key);
+            }
+            list.Add(tid);
+        }
+
+        // Write into BOTH playlist datasets (legacy type 2 + v2 type 3), sharing one playlist id.
+        int pid = -1;
+        foreach (var datasetType in new[] { 3, 2 })
+        {
+            var mhsd = FindMhsd(doc, datasetType);
+            if (mhsd is null)
+            {
+                continue;
+            }
+
+            var pl = mhsd.Children.FirstOrDefault(c => c.Magic == "mhyp"
+                && c.Header.Length > 0x2B && (c.Header[0x2A] | (c.Header[0x2B] << 8)) == 1);
+
+            if (pl is not null)
+            {
+                pid = pl.ReadHeaderInt32(0x1C);
+                foreach (var stale in pl.Children.Where(c => c.Magic == "mhip").ToList())
+                {
+                    pl.Children.Remove(stale);   // rebuild membership from this sync
+                }
+            }
+            else
+            {
+                if (pid < 0) { pid = (int)NextPlaylistId(doc); }
+
+                // Build the Podcasts list by MIRRORING this dataset's master playlist - inheriting its
+                // exact header size and every field this firmware/iTunes version expects - then
+                // overriding identity + flags. A hand-rolled 0x6C mhyp is the OLD libgpod shape; for
+                // this db version iTunes writes a larger header (0xB8) and rejects the whole CDB
+                // ("cannot read the contents") when it meets the short one - the same failure that made
+                // user-playlist mhyps unwritable to the CDB. Cloning the master is the proven shape (it
+                // mirrors what CreatePlaylist does on the SQLite side).
+                var master = mhsd.Children.FirstOrDefault(c => c.Magic == "mhyp"
+                                 && c.Header.Length > 0x14 && c.Header[0x14] == 1)
+                    ?? throw new InvalidDataException("iTunesCDB has no master playlist to model the Podcasts list on.");
+                pl = master.Clone();
+                pl.Children.RemoveAll(c => c.Magic == "mhip");    // rebuild membership from this sync
+                pl.Header[0x14] = 0;                              // not the master/library list
+                pl.WriteHeaderInt32(0x1C, pid);                   // its own playlist id
+                pl.Header[0x2A] = 1;                              // podcastflag = ITDB_PL_FLAG_PODCASTS
+                pl.Header[0x2B] = 0;
+                pl.WriteHeaderInt32(0x2C, 0x18);                  // list sort order = 24 (release date - the Podcasts value)
+
+                // Rename the cloned title MHOD to "Podcasts"; keep the master's type-100/102 chrome and
+                // its string-MHOD-count (0x28) intact so the header stays self-consistent.
+                pl.Children.RemoveAll(c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 1);
+                pl.Children.Insert(0, BuildStringMhod(1, "Podcasts"));
+                mhsd.Children.Add(pl);
+            }
+
+            // Per show: a group-header MHIP (groupflag=256 + its own group id + a title MHOD),
+            // then one MHIP per episode whose grouping ref points back at that header's group id.
+            // Start group/episode ids ABOVE the 256 groupflag sentinel so no group id (and thus no
+            // episode's groupref) ever equals 256 - otherwise the firmware reads that group's
+            // episodes as headers.
+            int nextId = 0x1000;
+            foreach (var show in order)
+            {
+                int groupId = nextId++;
+                var header = NewChunk("mhip", MhipHeaderSize);
+                header.WriteHeaderInt32(0x10, 0x100);            // grouping flag 0x100 = podcast GROUP header
+                header.WriteHeaderInt32(0x14, groupId);          // this group's id (episodes point here via 0x20)
+                // 0x18 trackid stays 0 - a header references no track
+                header.Children.Add(BuildStringMhod(1, show));   // show name → Podcasts submenu
+                pl.Children.Add(header);
+
+                foreach (var tid in byShow[show])
+                {
+                    var ep = NewChunk("mhip", MhipHeaderSize);
+                    // 0x10 grouping flag stays 0 - a normal (episode) entry
+                    ep.WriteHeaderInt32(0x14, nextId++);         // this entry's unique id
+                    ep.WriteHeaderInt32(0x18, (int)tid);         // the episode track
+                    ep.WriteHeaderInt32(0x20, groupId);          // podcast grouping reference → parent group
+                    pl.Children.Add(ep);
+                }
+            }
         }
     }
 
@@ -168,13 +631,45 @@ public static class ITunesDbWriter
             mhit.WriteHeaderInt32(0x80, t.ArtworkSize);         // artwork_size
         }
 
+        // Podcast episode: mark the mediatype + bookmark/unplayed flags and write the
+        // podcast MHODs.
+        if (t.IsPodcast)
+        {
+            ApplyPodcastMhitFlags(mhit, t);
+        }
+
         // String MHODs. Location (type 2) is required; the rest are added when present.
         AddStringMhod(mhit, 2, t.IpodPath);
         AddStringMhod(mhit, 1, t.Title);
         AddStringMhod(mhit, 3, t.Album);
         AddStringMhod(mhit, 4, t.Artist);
         AddStringMhod(mhit, 5, t.Genre);
+        if (t.IsPodcast)
+        {
+            AddStringMhod(mhit, 14, t.Description);   // episode description
+            AddStringMhod(mhit, 15, t.PodcastUrl);    // enclosure (audio) URL
+            AddStringMhod(mhit, 16, t.PodcastRss);    // show RSS/feed URL
+        }
         return mhit;
+    }
+
+    /// <summary>
+    /// Marks an mhit as a podcast episode: media_type = podcast plus the bookmark/unplayed flag
+    /// cluster and the release date. Offsets pinned against libgpod's mhit layout. Shared by the
+    /// legacy iTunesDB writer (<see cref="BuildMhit"/>) and the Nano 5G CDB writer
+    /// (<see cref="AddMusicdbTrack"/>) so the two paths can't drift.
+    /// </summary>
+    private static void ApplyPodcastMhitFlags(ITunesDbChunk mhit, NewTrack t)
+    {
+        mhit.WriteHeaderInt32(ITunesMediaType.MhitOffset, ITunesMediaType.Podcast);
+        mhit.Header[0xA5] = 1;              // skip_when_shuffling
+        mhit.Header[0xA6] = 1;              // remember_playback_position (bookmarkable)
+        mhit.Header[0xA7] = 1;              // flag4 - REQUIRED for podcasts (spec: must be 0x1/0x2)
+        mhit.Header[0xB2] = 2;              // mark_unplayed: 2 = new/unplayed (blue dot)
+        if (t.TimeReleased is { } rel)
+        {
+            mhit.WriteHeaderInt32(0x8C, MacSeconds(rel));   // time_released (episode pubdate)
+        }
     }
 
     private static void AddStringMhod(ITunesDbChunk parent, int mhodType, string? text)

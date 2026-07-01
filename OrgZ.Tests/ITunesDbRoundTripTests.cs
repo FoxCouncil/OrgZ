@@ -91,6 +91,43 @@ public class ITunesDbRoundTripTests
     }
 
     [Fact]
+    public void Podcast_track_reads_back_with_podcast_media_type()
+    {
+        // The writer marks a podcast episode with mediatype=4 at MHIT 0xD0; the reader must read the
+        // same offset so device podcasts surface as MediaKind.Podcast instead of Music. This is the
+        // regression net for that offset agreement.
+        var episode = new NewTrack
+        {
+            TrackId      = 7,
+            IpodPath     = ":iPod_Control:Music:F00:POD1.mp3",
+            Title        = "Episode 1",
+            Artist       = "The Sample Show",
+            Album        = "The Sample Show",
+            FileSize     = 5_000_000,
+            LengthMs     = 1_800_000,
+            DateAddedUtc = new DateTime(2026, 6, 8, 12, 0, 0, DateTimeKind.Utc),
+            Dbid         = 0x1234UL,
+            IsPodcast    = true,
+            Description  = "A sample episode.",
+            PodcastRss   = "https://example.com/feed.xml",
+            TimeReleased = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+        };
+
+        var t = Assert.Single(WriteThenRead(@"X:\", episode));
+        Assert.Equal(4, t.MediaType);   // ITDB_MEDIATYPE_PODCAST
+    }
+
+    [Fact]
+    public void Regular_track_is_not_tagged_as_podcast_or_audiobook()
+    {
+        // Guards against the reader blindly returning a podcast/audiobook type - a plain music track
+        // must read back as neither, so it maps to MediaKind.Music.
+        var t = Assert.Single(WriteThenRead(@"X:\", FullTrack));
+        Assert.NotEqual(4, t.MediaType);
+        Assert.NotEqual(8, t.MediaType);
+    }
+
+    [Fact]
     public void DateAdded_roundtrips_for_a_modern_date()
     {
         // Guards the uint32/1904-epoch overflow: a 2026 date must NOT come back as ~1972.
