@@ -14,10 +14,10 @@ OrgZ will scan the folder recursively for supported audio files (`.mp3`, `.flac`
 
 The main window is divided into:
 
-- **Top Bar** - Playback controls, album art, track info, seek bar, and search
-- **Sidebar** - Navigate between Music, Radio, and Favorites
-- **Content Area** - The main list view showing your media
-- **Status Bar** - Library statistics and sync status
+- **Top Bar**: Playback controls, album art, track info, seek bar, and search
+- **Sidebar**: Navigate between Music, Radio, and Favorites
+- **Content Area**: The main list view showing your media
+- **Status Bar**: Library statistics and sync status
 
 ## What's Next
 

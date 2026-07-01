@@ -12,8 +12,8 @@ be cluttered with device tracks, and vice versa.
 
 Each device also has a **Playlists** entry beneath it in the sidebar:
 
-- **Stock iPods** - playlists come from the iTunesDB.
-- **Rockbox / other** - playlists are read from `*.m3u` files in the device's
+- **Stock iPods**: playlists come from the iTunesDB.
+- **Rockbox / other**: playlists are read from `*.m3u` files in the device's
   `/Playlists/` folder.
 
 ## Sending a playlist to a device

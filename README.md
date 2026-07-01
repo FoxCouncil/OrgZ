@@ -12,14 +12,14 @@ OrgZ is a cross-platform music and radio player built with .NET 10 and Avalonia.
 
 ## Features
 
-- **Music library** - scans local audio files and reads tags, album art, and duration.
-- **CD ripping** - rips audio CDs to FLAC or MP3 and fills in titles, artist, album, year, and cover art from MusicBrainz.
-- **Internet radio** - browses and streams stations from Radio Browser and SHOUTcast.
-- **Podcasts** - subscribes to feeds, downloads episodes on configurable rules, and resumes playback where it left off.
-- **Favorites and playlists** - stars tracks and stations, and builds playlists.
-- **iPod and Rockbox** - detects connected iPods (stock firmware and Rockbox) and copies tracks, playlists, and album art to supported models.
-- **Playback** - keeps playing as you move between views; supports shuffle, repeat, and a compact mini-player.
-- **System integration** - media keys, taskbar controls, and System Media Transport Controls on Windows; Now Playing on macOS.
+- **Music library**: scans local audio files and reads tags, album art, and duration.
+- **CD ripping**: rips audio CDs to FLAC or MP3 and fills in titles, artist, album, year, and cover art from MusicBrainz.
+- **Internet radio**: browses and streams stations from Radio Browser and SHOUTcast.
+- **Podcasts**: subscribes to feeds, downloads episodes on configurable rules, and resumes playback where it left off.
+- **Favorites and playlists**: stars tracks and stations, and builds playlists.
+- **iPod and Rockbox**: detects connected iPods (stock firmware and Rockbox) and copies tracks, playlists, and album art to supported models.
+- **Playback**: keeps playing as you move between views; supports shuffle, repeat, and a compact mini-player.
+- **System integration**: media keys, taskbar controls, and System Media Transport Controls on Windows; Now Playing on macOS.
 
 ## Screenshots
 
@@ -53,6 +53,6 @@ The full manual is at <https://foxcouncil.github.io/OrgZ/>.
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 The sample library in the screenshots and manual uses cover art by Mandie NRG and DJ Nine (with permission) and Eurobeat track metadata from [eurobeat.online](https://eurobeat.online) (CC BY 4.0). See the [credits](https://foxcouncil.github.io/OrgZ/credits/).

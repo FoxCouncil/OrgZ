@@ -6,8 +6,8 @@ OrgZ integrates with two radio station directories to give you access to thousan
 
 ## Sources
 
-- **Radio Browser** - Community-maintained directory of internet radio stations
-- **SHOUTcast** - One of the oldest and largest streaming directories
+- **Radio Browser**: Community-maintained directory of internet radio stations
+- **SHOUTcast**: One of the oldest and largest streaming directories
 
 ## Getting Started with Radio
 

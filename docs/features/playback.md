@@ -1,15 +1,15 @@
 # Playback
 
-OrgZ uses LibVLC for audio playback, supporting a wide range of formats and streaming protocols.
+OrgZ uses LibVLC for audio playback, so it handles most audio formats and streaming protocols.
 
 ![Now playing](../assets/screenshots/now-playing.png)
 
 ## Controls
 
-- **Play/Pause** - Toggle playback
-- **Previous/Next** - Navigate within the current playback context
-- **Volume** - Slider with mute and max buttons
-- **Seek Bar** - Click or drag to seek within a track (disabled for live streams)
+- **Play/Pause**: Toggle playback
+- **Previous/Next**: Navigate within the current playback context
+- **Volume**: Slider with mute and max buttons
+- **Seek Bar**: Click or drag to seek within a track (disabled for live streams)
 
 ## Shuffle and Repeat
 
@@ -47,5 +47,5 @@ OrgZ supports per-track volume adjustment, equalizer presets, and start/stop tim
 
 OrgZ mirrors playback to the operating system so hardware and on-screen media controls work:
 
-- **Windows** - media keys (play/pause, next, previous), taskbar thumbnail-toolbar buttons, and System Media Transport Controls.
-- **macOS** - the Now Playing panel and media keys.
+- **Windows**: media keys (play/pause, next, previous), taskbar thumbnail-toolbar buttons, and System Media Transport Controls.
+- **macOS**: the Now Playing panel and media keys.

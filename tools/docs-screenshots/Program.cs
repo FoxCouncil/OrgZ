@@ -162,10 +162,10 @@ internal static class Program
     {
         var window = SeededCd(metadata: true);
         var vm = window.ViewModel;
-        vm.RipTitle = "Importing “Boom Boom Love Me (Acappella)”";
-        vm.RipDetail = "Track 3 of 5 — Time remaining: 0:48 (9.1×)";
-        vm.RipPercent = 0.52;
-        vm.IsRipping = true;
+        vm.BusyTitle = "Importing “Boom Boom Love Me (Acappella)”";
+        vm.BusyDetail = "Track 3 of 5 — Time remaining: 0:48 (9.1×)";
+        vm.BusyPercent = 0.52;
+        vm.IsBusy = true;
         return window;
     }
 
