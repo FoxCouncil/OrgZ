@@ -9,7 +9,7 @@ each device.
 
 | Device | How OrgZ reads it | Writable? |
 |--------|-------------------|-----------|
-| **iPod running Apple firmware** ("stock") | Parses the on-device **iTunesDB** | **Read-only** - see note below |
+| **iPod running Apple firmware** ("stock") | Parses the on-device **iTunesDB** | **Read-only**: see note below |
 | **iPod running [Rockbox](https://www.rockbox.org/)** | Walks the filesystem and reads tags with TagLib | Read / write |
 | **Other Rockbox players** (Sansa, iRiver, Cowon, FiiO, ...) | Same filesystem walk | Read / write |
 | **Generic USB players** | Removable drive with audio files | Read / write |
@@ -31,13 +31,13 @@ the library grid as they're read, and the activity panel shows progress.
 
 Selecting the device shows its **info bar** with everything OrgZ could identify:
 
-- **Model** - the decoded iPod identity (e.g. *iPod Classic 6G 80 GB*). Click the
+- **Model**: the decoded iPod identity (e.g. *iPod Classic 6G 80 GB*). Click the
   Model label to toggle to the raw **hardware** model instead - handy on modded
   iPods, where this reveals the storage adapter (e.g. *iFlash*) behind the Apple shell.
 - **Apple model number** (e.g. `MA446LL/A`), **serial**, and **FireWire GUID**.
-- **Firmware** - shows both where applicable, e.g. *iPod OS 1.3 / Rockbox 3.15*.
-- **Format** - normalized to *Windows (FAT32)*, *Mac (HFS+)*, or *Linux (ext4)*.
-- **Capacity bar** - audio vs. other vs. free space.
+- **Firmware**: shows both where applicable, e.g. *iPod OS 1.3 / Rockbox 3.15*.
+- **Format**: normalized to *Windows (FAT32)*, *Mac (HFS+)*, or *Linux (ext4)*.
+- **Capacity bar**: audio vs. other vs. free space.
 
 ### Where the identity comes from
 
@@ -50,7 +50,7 @@ complete, which is why OrgZ keeps a per-device record (below).
 
 The first time you select a device, OrgZ writes a small text file to
 `/.orgz/device` on the device itself. It's a plain `Key=Value` record (with a
-header comment) and is **safe to delete** - OrgZ regenerates it.
+header comment) and is **safe to delete**: OrgZ regenerates it.
 
 Its purpose is to **accumulate identity across firmware boots**. When an iPod
 boots Rockbox, the USB bridge hides the Apple serial and GUID; when it boots

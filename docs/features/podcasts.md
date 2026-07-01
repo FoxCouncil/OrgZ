@@ -14,9 +14,9 @@ Open a show to see its episodes, then **Subscribe**. Once you have at least one 
 
 New episodes are handled automatically according to the defaults in **Settings → Podcasts**:
 
-- **Check for new episodes** - how often feeds refresh: Hourly, Daily, Weekly, or Manually.
-- **When new episodes are available** - Download all, Download the most recent one, or Do nothing.
-- **Keep** - how many downloads to retain: all, unplayed only, or the last 1 / 2 / 5 / 10. Older downloads beyond the limit are pruned automatically.
+- **Check for new episodes**: how often feeds refresh: Hourly, Daily, Weekly, or Manually.
+- **When new episodes are available**: Download all, Download the most recent one, or Do nothing.
+- **Keep**: how many downloads to retain: all, unplayed only, or the last 1 / 2 / 5 / 10. Older downloads beyond the limit are pruned automatically.
 
 ### Per-podcast overrides
 

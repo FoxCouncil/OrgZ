@@ -8,7 +8,7 @@ page walks through a full rip and explains every option.
 
 - **Encoders.** WAV needs nothing. FLAC and MP3 shell out to `flac` and `lame`.
   OrgZ uses a system copy on your `PATH` first and falls back to the binaries
-  bundled with the app, so a normal install can rip FLAC/MP3 out of the box. If
+  bundled with the app, so a normal install can rip FLAC/MP3 without extra setup. If
   neither is found you'll get a message telling you how to install them.
 - **Windows elevation.** Reading raw CD audio requires administrator rights, so
   OrgZ launches an elevated helper and you'll see a **UAC prompt** each time you
@@ -56,14 +56,14 @@ the default next time.
 ### FLAC compression
 
 Levels **0-8** (default **5**, balanced). Higher levels make smaller files and
-take longer to encode. **The decoded audio is identical at every level** - only
+take longer to encode. **The decoded audio is identical at every level**: only
 file size and encode time change.
 
 ### MP3 quality
 
-- **VBR (variable bitrate)** - LAME `-V0` ... `-V9`. **V2 (~190 kbps)** is the
+- **VBR (variable bitrate)**: LAME `-V0` ... `-V9`. **V2 (~190 kbps)** is the
   community-standard sweet spot and the default.
-- **CBR (constant bitrate)** - a fixed 64-320 kbps across the whole file. Best
+- **CBR (constant bitrate)**: a fixed 64-320 kbps across the whole file. Best
   when something downstream needs a predictable bitrate (e.g. some streaming
   setups).
 
@@ -88,9 +88,9 @@ verification verdict per finished track.
 
 Each track is checked against AccurateRip as it completes:
 
-- **✓ Track 03 - AR2 `A1B2C3D4`** - the track ripped cleanly and its AccurateRip
+- **✓ Track 03 - AR2 `A1B2C3D4`**: the track ripped cleanly and its AccurateRip
   V2 checksum is recorded.
-- **⚠ Track 07 - 4 unverified sector(s) starting at LBA 123456** - some sectors
+- **⚠ Track 07 - 4 unverified sector(s) starting at LBA 123456**: some sectors
   exhausted the re-read budget and were written best-effort. These are the most
   likely source of audible clicks. Try a higher **Paranoia** level or clean the disc.
 

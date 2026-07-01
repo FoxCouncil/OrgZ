@@ -32,7 +32,7 @@ tab for your platform.
 
     !!! warning "Apple Silicon only"
         There is currently no Intel (x86-64) build. OrgZ runs on M1/M2/M3-class
-        Macs. `libvlc` is bundled inside the app, so playback works out of the box.
+        Macs. `libvlc` is bundled inside the app, so playback works with no extra setup.
 
     | Download | Use it when |
     |----------|-------------|
@@ -95,7 +95,7 @@ tab for your platform.
 ## Where OrgZ stores your data
 
 OrgZ keeps your library index, settings, device caches, and logs in a
-per-user data directory. Your **music files are never moved** - OrgZ only
+per-user data directory. Your **music files are never moved**: OrgZ only
 reads from the library folder you point it at (and writes ripped tracks there;
 see [Ripping CDs](../features/ripping-cds.md)).
 
