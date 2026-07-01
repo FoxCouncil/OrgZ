@@ -27,4 +27,10 @@ public sealed class PlaylistHeaderInfo
 
     /// <summary>True when at least one cover was found (drives the mosaic vs. fallback glyph).</summary>
     public bool HasAnyCover => Cover1 is not null || Cover2 is not null || Cover3 is not null || Cover4 is not null;
+
+    /// <summary>
+    /// False when <see cref="SourceLabel"/> only repeats <see cref="Name"/> (e.g. the Favorites
+    /// view, where both are "Favorites"); lets the header drop the redundant sub-bar label.
+    /// </summary>
+    public bool ShowSourceLabel => !string.Equals(SourceLabel, Name, System.StringComparison.OrdinalIgnoreCase);
 }

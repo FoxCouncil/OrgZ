@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="100"
+             x:Class="OrgZ.Controls.MediaHeaderBar"
+             x:Name="Root">
+
+    <!-- The one place the header chrome lives: surface, bottom divider, padding, the art tile,
+         the label/value detail styles, and the art|body|actions layout (+ optional footer).
+         Views fill the Art / Body / Actions / Footer slots. -->
+    <Border Background="{StaticResource OrgZSurfaceDarkBrush}"
+            BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="16,12">
+
+        <Border.Styles>
+            <Style Selector="TextBlock.label">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="Opacity" Value="0.55" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="0,0,6,0" />
+            </Style>
+            <Style Selector="TextBlock.value">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+        </Border.Styles>
+
+        <DockPanel>
+
+            <!-- Optional footer (e.g. the iPod capacity bar), full width along the bottom. -->
+            <ContentControl DockPanel.Dock="Bottom"
+                            Content="{Binding #Root.Footer}"
+                            IsVisible="{Binding #Root.Footer, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+            <Grid ColumnDefinitions="Auto,*,Auto">
+
+                <!-- Art tile: square, rounded, clipped. The view supplies what goes inside
+                     (cover image, generation art, 2×2 mosaic, or a fallback glyph). -->
+                <Border Grid.Column="0"
+                        Background="{DynamicResource SystemChromeGrayColor}"
+                        CornerRadius="6"
+                        Width="{Binding #Root.ArtSize}" Height="{Binding #Root.ArtSize}"
+                        VerticalAlignment="Center"
+                        ClipToBounds="True">
+                    <ContentControl Content="{Binding #Root.Art}" />
+                </Border>
+
+                <!-- Body: headline + details. -->
+                <ContentControl Grid.Column="1" Margin="16,0,16,0"
+                                VerticalAlignment="Center"
+                                Content="{Binding #Root.Body}" />
+
+                <!-- Actions: top-aligned button row. -->
+                <ContentControl Grid.Column="2"
+                                VerticalAlignment="Top" HorizontalAlignment="Right"
+                                Content="{Binding #Root.Actions}" />
+            </Grid>
+        </DockPanel>
+    </Border>
+
+</UserControl>
