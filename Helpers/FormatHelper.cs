@@ -44,6 +44,17 @@ internal static class FormatHelper
         return ts.ToString(@"m\:ss");
     }
 
+    /// <summary>
+    /// Total-duration form of <see cref="FormatDurationCompact(TimeSpan)"/> for summed lists: hours
+    /// absorb whole days, so a long playlist reads "50:23:11" instead of wrapping at 24h.
+    /// </summary>
+    public static string FormatDurationLong(TimeSpan ts)
+    {
+        return ts.TotalHours >= 1
+            ? $"{(int)ts.TotalHours}:{ts.Minutes:00}:{ts.Seconds:00}"
+            : $"{ts.Minutes}:{ts.Seconds:00}";
+    }
+
     public static string FormatDurationCompact(long milliseconds)
         => FormatDurationCompact(TimeSpan.FromMilliseconds(milliseconds));
 
