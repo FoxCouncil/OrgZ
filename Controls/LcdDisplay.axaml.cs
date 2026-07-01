@@ -175,14 +175,19 @@ public partial class LcdDisplay : UserControl
     // The meter is driven by a UI-thread DispatcherTimer rather than
     // TopLevel.RequestAnimationFrame. RAF's self-rescheduling loop only sustains on the
     // primary window's compositor, so the VU froze in the mini-player (a secondary
-    // transparent topmost window). A timer ticks identically in every window;
-    // VuMeterControl models fall/peak in continuous (dt-based) time, so ~60 Hz looks
-    // the same as a vsync RAF loop.
+    // transparent topmost window).
+    //
+    // The timer priority must be BELOW Render: Avalonia coalesces Render-priority dispatcher
+    // jobs with the render loop, which is pumped by the primary window's continuous frame
+    // tick. When only the mini-player is visible (main window hidden) nothing drives that
+    // band, so a Render-priority Tick starves and the meter freezes again. Background pumps
+    // on the dispatcher's normal loop in every window. VuMeterControl models fall/peak in
+    // continuous (dt-based) time, so the result looks the same as a vsync RAF loop.
     private void StartVuTimer()
     {
         if (_vuTimer == null)
         {
-            _vuTimer = new DispatcherTimer(DispatcherPriority.Render)
+            _vuTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
                 Interval = TimeSpan.FromMilliseconds(16),
             };

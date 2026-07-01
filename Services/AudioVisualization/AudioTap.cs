@@ -78,11 +78,28 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
     private const int DrainPeriodMs = 16;
     private float[] _drainScratch = new float[2048 * 2];
 
+    // --- Shared band snapshot (multi-consumer) ---------------------------
+    // CopyBandLevels* drain the analyzer's max-since-read buffers. With two LCDs
+    // (main window + mini-player) each reading on its own ~60 fps clock, the first
+    // reader emptied the buffer and the second saw silence - the mini-player VU
+    // sat dead. Instead, drain into this snapshot at most once per SnapRefreshMs;
+    // every consumer in that window reads the same cached frame, so any number of
+    // LCDs/visualizers render the meter from a single drain per frame.
+    private float[] _snapMono = [];
+    private float[] _snapLeft = [];
+    private float[] _snapRight = [];
+    private long _snapTicks;
+    private readonly object _snapLock = new();
+    private const int SnapRefreshMs = 14;
+
     public AudioTap(AudioSinkBus bus, AudioAnalyzer? analyzer = null)
     {
         ArgumentNullException.ThrowIfNull(bus);
         _bus = bus;
         _analyzer = analyzer ?? new AudioAnalyzer();
+        _snapMono = new float[_analyzer.BandCount];
+        _snapLeft = new float[_analyzer.BandCount];
+        _snapRight = new float[_analyzer.BandCount];
 
         _playCb = OnAudioPlay;
         _pauseCb = OnAudioPause;
@@ -117,9 +134,44 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         System.Threading.Interlocked.Exchange(ref _audioStartedNotified, 0);
     }
 
-    public void CopyBandLevels(Span<float> destination) => _analyzer.CopyBands(destination);
+    public void CopyBandLevels(Span<float> destination)
+    {
+        lock (_snapLock)
+        {
+            RefreshSnapshotIfStale();
+            var n = Math.Min(destination.Length, _snapMono.Length);
+            _snapMono.AsSpan(0, n).CopyTo(destination);
+        }
+    }
 
-    public void CopyBandLevelsStereo(Span<float> left, Span<float> right) => _analyzer.CopyBandsStereo(left, right);
+    public void CopyBandLevelsStereo(Span<float> left, Span<float> right)
+    {
+        lock (_snapLock)
+        {
+            RefreshSnapshotIfStale();
+            var n = Math.Min(Math.Min(left.Length, right.Length), _snapLeft.Length);
+            _snapLeft.AsSpan(0, n).CopyTo(left);
+            _snapRight.AsSpan(0, n).CopyTo(right);
+        }
+    }
+
+    /// <summary>
+    /// Drains the analyzer's max-since-read band buffers into the shared snapshot, but at most
+    /// once per <see cref="SnapRefreshMs"/>. Consumers reading on their own ~60 fps clocks
+    /// therefore share one drain per frame instead of racing to empty the buffer (which left the
+    /// second LCD - the mini-player - reading zeros). Caller holds <see cref="_snapLock"/>.
+    /// </summary>
+    private void RefreshSnapshotIfStale()
+    {
+        var now = Environment.TickCount64;
+        if (now - _snapTicks < SnapRefreshMs)
+        {
+            return;
+        }
+        _snapTicks = now;
+        _analyzer.CopyBands(_snapMono);
+        _analyzer.CopyBandsStereo(_snapLeft, _snapRight);
+    }
 
     public void Attach(MediaPlayer player)
     {
