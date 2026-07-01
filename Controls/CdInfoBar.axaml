@@ -3,56 +3,32 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:controls="using:OrgZ.Controls"
              xmlns:models="using:OrgZ.Models"
+             xmlns:vm="using:OrgZ.ViewModels"
              mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="120"
              x:Class="OrgZ.Controls.CdInfoBar"
              x:DataType="models:CdInfo">
 
-    <Border Background="{StaticResource OrgZSurfaceDarkBrush}"
-            BorderBrush="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
-            BorderThickness="0,0,0,1"
-            Padding="16,10">
+    <controls:MediaHeaderBar ArtSize="84">
 
-        <Border.Styles>
-            <Style Selector="TextBlock.label">
-                <Setter Property="FontSize" Value="11" />
-                <Setter Property="Opacity" Value="0.55" />
-                <Setter Property="HorizontalAlignment" Value="Right" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="Margin" Value="0,0,6,0" />
-            </Style>
-            <Style Selector="TextBlock.value">
-                <Setter Property="FontSize" Value="11" />
-                <Setter Property="FontWeight" Value="Bold" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            </Style>
-        </Border.Styles>
+        <!-- Cover art: the CD's front cover when available, otherwise a generic disc glyph. -->
+        <controls:MediaHeaderBar.Art>
+            <Panel>
+                <Image Source="{Binding CoverArt}"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       IsVisible="{Binding HasCoverArt}" />
+                <i:Icon Value="fa-solid fa-compact-disc" FontSize="40"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        IsVisible="{Binding !HasCoverArt}" />
+            </Panel>
+        </controls:MediaHeaderBar.Art>
 
-        <Grid ColumnDefinitions="Auto,*">
-
-            <!-- Cover art: the CD's front cover when MusicBrainz/embedded art is available,
-                 otherwise a generic disc glyph. -->
-            <Border Grid.Column="0"
-                    Background="{DynamicResource SystemChromeGrayColor}"
-                    CornerRadius="6"
-                    Width="84" Height="84"
-                    VerticalAlignment="Center"
-                    ClipToBounds="True">
-                <Panel>
-                    <Image Source="{Binding CoverArt}"
-                           Stretch="Uniform"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           IsVisible="{Binding HasCoverArt}" />
-                    <i:Icon Value="fa-solid fa-compact-disc" FontSize="40"
-                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                            IsVisible="{Binding !HasCoverArt}" />
-                </Panel>
-            </Border>
-
-            <!-- Identity grid: album/artist headline + the details we can surface. -->
-            <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+        <!-- Identity: album/artist headline + the disc details. -->
+        <controls:MediaHeaderBar.Body>
+            <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
@@ -106,7 +82,30 @@
                                ToolTip.Tip="{Binding ReleaseMbidDisplay}" />
                 </Grid>
             </Grid>
-        </Grid>
-    </Border>
+        </controls:MediaHeaderBar.Body>
+
+        <!-- Actions: Rip + Eject. -->
+        <controls:MediaHeaderBar.Actions>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Padding="10,6" Cursor="Hand"
+                        ToolTip.Tip="Rip the disc to disk"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).RipCurrentCdCommand, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-compact-disc" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Text="Rip CD…" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Padding="10,6" Cursor="Hand"
+                        ToolTip.Tip="Eject this disc"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).EjectCdCommand, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-eject" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Text="Eject" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </controls:MediaHeaderBar.Actions>
+
+    </controls:MediaHeaderBar>
 
 </UserControl>
