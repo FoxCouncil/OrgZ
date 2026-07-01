@@ -14,6 +14,7 @@ public enum ColumnType
     RightAligned,
     Badge,
     Flag,
+    Rating,
 }
 
 public record ColumnDef

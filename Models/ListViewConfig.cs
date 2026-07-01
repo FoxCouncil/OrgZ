@@ -4,6 +4,25 @@ using Avalonia.Controls;
 
 namespace OrgZ.Models;
 
+/// <summary>
+/// Which top-level control hosts a view. Each DataGrid host builds its columns exactly once -
+/// rebuilding columns after a grouped DataGridCollectionView is bound crashes inside Avalonia's
+/// column collection (the spacer-column bug) - so every distinct grouped column set needs its own
+/// grid, and the config names its host here instead of view-specific flags being re-derived at
+/// each consumer.
+/// </summary>
+public enum ViewHost
+{
+    /// <summary>The shared flat grid (Music, Favorites, playlists, devices, ...).</summary>
+    MainGrid,
+    /// <summary>The grouped grid carrying Radio's columns (genre group headers).</summary>
+    GroupedGrid,
+    /// <summary>The grouped grid carrying podcast columns (a device's Podcasts view, one group per show).</summary>
+    PodcastGroupedGrid,
+    /// <summary>The Podcasts panel UserControl - no DataGrid at all.</summary>
+    PodcastsPanel,
+}
+
 public record ListViewConfig
 {
     public required string Key { get; init; }
@@ -28,6 +47,9 @@ public record ListViewConfig
     /// Avalonia's DataGrid renders collapsible group headers automatically.
     /// </summary>
     public string? GroupByPath { get; init; }
+
+    /// <summary>The control that hosts this view - see <see cref="ViewHost"/>.</summary>
+    public ViewHost Host { get; init; } = ViewHost.MainGrid;
 }
 
 public static class ListViewConfigs
@@ -55,6 +77,7 @@ public static class ListViewConfigs
             BaseFilter = static _ => false,
             SearchFilter = static (_, _) => false,
             ContextMenuItems = [],
+            Host = ViewHost.PodcastsPanel,
         };
     }
 
@@ -91,13 +114,53 @@ public static class ListViewConfigs
         {
             Key = key,
             Columns = columns,
-            BaseFilter = item => item.Source == source,
+            BaseFilter = item => item.Source == source && item.Kind == MediaKind.Music,
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildDeviceContextMenu(),
+        };
+    }
+
+    /// <summary>
+    /// Device sub-view filtered to one media kind (the Podcasts / Audiobooks nodes under a device).
+    /// Populated for real now that both readers tag tracks by kind (binary MHIT media_type at 0xD0 +
+    /// Nano 5G media_kind). The Podcasts node groups episodes into one collapsible header per show
+    /// (Album carries the show name, matching the iPod's own Podcasts submenu) on the dedicated
+    /// PodcastGroupedDataGrid; Audiobooks reuses the flat device-music grid.
+    /// </summary>
+    public static ListViewConfig BuildDeviceKindConfig(string mountPath, MediaKind kind)
+    {
+        var source = $"device:{mountPath}";
+        var key = $"Device:{mountPath}:{kind}";
+        var isPodcast = kind == MediaKind.Podcast;
+
+        // Podcast episodes: the show becomes the group header, so the row shows just the episode
+        // title + duration. Everything else falls back to the full device-music column set.
+        List<ColumnDef> columns = isPodcast
+            ?
+            [
+                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new ColumnDef { Header = "Episode", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90, StringFormat = "h\\:mm\\:ss" },
+            ]
+            : MusicColumns();
+
+        return new ListViewConfig
+        {
+            Key = key,
+            Columns = columns,
+            BaseFilter = item => item.Source == source && item.Kind == kind,
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildDeviceContextMenu(),
+            // Group podcast episodes by show (Album) on the dedicated podcast grid. Audiobooks stay flat.
+            GroupByPath = isPodcast ? "Album" : null,
+            Host = isPodcast ? ViewHost.PodcastGroupedGrid : ViewHost.MainGrid,
         };
     }
 
@@ -204,7 +267,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110 },
             ],
             BaseFilter = item => idSet.Contains(item.Id),
             SearchFilter = (item, search) =>
@@ -234,7 +297,7 @@ public static class ListViewConfigs
         new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
         new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
         new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
-        new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
+        new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110 },
     ];
 
     private static ListViewConfig BuildMusicConfig()
@@ -286,6 +349,7 @@ public static class ListViewConfigs
             // matching the nubango taxonomy ("Alternative Rock", "Top 40 / Pop",
             // etc.) without going through GenreNormalizer's fuzzy rules.
             GroupByPath = "Tags",
+            Host = ViewHost.GroupedGrid,
         };
     }
 
@@ -395,7 +459,8 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90 },
+                new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100 },
             ],
             BaseFilter = item => item.IsFavorite,
             SearchFilter = (item, search) =>
