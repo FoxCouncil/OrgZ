@@ -92,6 +92,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private DeviceDetectionService? _deviceDetection;
     private readonly Dictionary<string, ConnectedDevice> _connectedDevices = new(StringComparer.OrdinalIgnoreCase);
 
+    // One CTS per in-flight device library scan, keyed by mount path. HandleDeviceDisconnected cancels
+    // it so a yanked (or hot-swapped) iPod's ReadLibraryAsync can't keep streaming batches into
+    // _allItems after teardown - at a reused drive letter those rows would land in the NEXT iPod's view.
+    private readonly Dictionary<string, CancellationTokenSource> _deviceScanCts = new(StringComparer.OrdinalIgnoreCase);
+
     private bool isSeeking = false;
 
     private List<MediaItem> _allItems = [];
@@ -3308,6 +3313,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Whether a view/cache key belongs to the device at <paramref name="mountPath"/> - its root view
+    /// ("Device:{mount}") or any sub-view ("Device:{mount}:Podcast", ":Audiobook", ":Playlist:{id}").
+    /// Boundary-aware on purpose: unlike a bare prefix match, "Device:/media/ipod" does NOT claim
+    /// "Device:/media/ipod-red"'s keys, so tearing one device down can't take a sibling's views with it.
+    /// Drives the disconnect teardown (view-cache eviction + selection fallback).
+    /// </summary>
+    internal static bool IsDeviceViewKeyFor(string? viewConfigKey, string mountPath)
+    {
+        if (viewConfigKey is null)
+        {
+            return false;
+        }
+        var root = $"Device:{mountPath}";
+        return string.Equals(viewConfigKey, root, StringComparison.OrdinalIgnoreCase)
+            || viewConfigKey.StartsWith($"{root}:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Whether dragging <paramref name="item"/> onto the given device node is allowed.
     /// For now: a Music item dropped on a writable stock iPod (a generation whose
     /// iTunesDB we can checksum). Other media kinds / device types are rejected so the
@@ -5742,6 +5765,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _connectedDevices[device.MountPath] = device;
+
+        // Cancellation scope for THIS device's library scan. Disconnect (or a swap re-using the drive
+        // letter) cancels it, which both aborts the read and voids every batch still queued on the
+        // dispatcher - see FlushBatch below.
+        var scanCts = new CancellationTokenSource();
+        _deviceScanCts[device.MountPath] = scanCts;
+        var scanToken = scanCts.Token;
+
         OnPropertyChanged(nameof(CanSyncToIPod));
 
         var viewKey = $"Device:{device.MountPath}";
@@ -5801,6 +5832,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 Dispatcher.UIThread.Post(() =>
                 {
+                    // The device left while this batch sat in the dispatcher queue - dropping it here is
+                    // what keeps a departed iPod's rows from re-populating _allItems after teardown.
+                    if (scanToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
                     _allItems.AddRange(batch);
                     // Approximate progressive fill while the scan streams; SetSpaceFrom below is the authority.
                     audioBytes += batch.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
@@ -5814,7 +5851,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             // One polymorphic read path - the tier (SQLite .itlp, binary iTunesDB, or filesystem walk) is
             // chosen inside IPodDevice; playlists come back with the library rather than via a callback.
-            var library = await IPodDevice.For(device).ReadLibraryAsync(FlushBatch, d => SetLcdBusy(d));
+            var library = await IPodDevice.For(device).ReadLibraryAsync(FlushBatch, d => SetLcdBusy(d), scanToken);
+            scanToken.ThrowIfCancellationRequested();   // disconnected between the last batch and completion
             PublishDevicePlaylists(device, library.Playlists);
 
             sw.Stop();
@@ -5829,6 +5867,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 ApplyFilter();
             }
         }
+        catch (OperationCanceledException) when (scanToken.IsCancellationRequested)
+        {
+            sw.Stop();
+            _log.Information("Device scan cancelled: MountPath={MountPath} disconnected mid-scan after {ElapsedMs}ms", device.MountPath, sw.ElapsedMilliseconds);
+        }
         catch (Exception ex)
         {
             sw.Stop();
@@ -5837,6 +5880,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         finally
         {
             EndLcdBusy();
+            // Only clear the registration if it's still OURS - a swap may already have installed the
+            // replacement device's CTS under this mount path.
+            if (_deviceScanCts.TryGetValue(device.MountPath, out var current) && ReferenceEquals(current, scanCts))
+            {
+                _deviceScanCts.Remove(device.MountPath);
+            }
+            scanCts.Dispose();
         }
     }
 
@@ -6013,6 +6063,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Cancel the in-flight library scan FIRST, so batches it already queued on the dispatcher void
+        // themselves (FlushBatch checks the token) instead of re-populating _allItems after the
+        // RemoveAll below.
+        if (_deviceScanCts.Remove(mountPath, out var scanCts))
+        {
+            scanCts.Cancel();
+        }
+
         // Release the mount-path-keyed handles (pooled SQLite connections + the cached ArtworkDB reader)
         // and stop playback from this device. Without this, a DIFFERENT iPod arriving on the same reused
         // drive letter would reuse the departed iPod's pooled DB handle + artwork cache and show its
@@ -6023,11 +6081,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var source = $"device:{mountPath}";
         var viewKey = $"Device:{mountPath}";
-        var playlistsKey = $"Device:{mountPath}:Playlists";
 
         _allItems.RemoveAll(i => i.Source == source);
 
-        // The device entry is a tree parent - removing it drops the Music + Playlists
+        // Evict every cached view that can still show the departed iPod's rows. The device's own view
+        // family MUST go: a different iPod arriving at the reused drive letter inherits the exact same
+        // view key, and with _dataVersion untouched by any of the removals above, ApplyFilter's reuse
+        // path would serve the OLD iPod's cached list verbatim - the swapped-in device showing its
+        // predecessor's library. The content scan catches device rows cached under non-device keys
+        // (a favorited device track sitting in the Favorites view's cache).
+        var evicted = _viewCache.Keys.Where(k => IsDeviceViewKeyFor(k, mountPath) || _viewCache[k].Items.Any(i => i.Source == source)).ToList();
+        foreach (var key in evicted)
+        {
+            _viewCache.Remove(key);
+        }
+
+        // The device entry is a tree parent - removing it drops the Music/Podcasts/Audiobooks/playlist
         // children along with it, since they're just Children of the parent SidebarItem.
         var sidebarItem = DeviceItems.FirstOrDefault(d => d.ViewConfigKey == viewKey);
         if (sidebarItem != null)
@@ -6035,14 +6104,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             DeviceItems.Remove(sidebarItem);
         }
 
-        ListViewConfigs.Remove(viewKey);
-        ListViewConfigs.Remove(playlistsKey);
+        // The whole view-config family: the root view plus the Podcast/Audiobook/per-playlist sub-views
+        // (removing only the root leaked the rest on every swap).
+        ListViewConfigs.RemoveWithSubViews(viewKey);
 
-        // If the user was viewing any part of this device tree, fall back to the library
-        var selectedKey = SelectedSidebarItem?.ViewConfigKey;
-        if (selectedKey == viewKey || selectedKey == playlistsKey)
+        // If the user was viewing any part of this device tree - including a Podcasts/Audiobooks/playlist
+        // child - fall back to the library. Otherwise, if the on-screen view's cache was evicted above,
+        // it is showing rows the device took with it: rebuild it in place (fromViewSwitch keeps
+        // _dataVersion untouched so unaffected views keep their cached state).
+        if (IsDeviceViewKeyFor(SelectedSidebarItem?.ViewConfigKey, mountPath))
         {
             SelectedSidebarItem = LibraryItems.FirstOrDefault() ?? null;
+        }
+        else if (_activeViewConfig != null && evicted.Contains(_activeViewConfig.Key))
+        {
+            ApplyFilter(fromViewSwitch: true);
         }
     }
 
@@ -6115,6 +6191,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _folderWatcher?.Dispose();
         _deviceDetection?.Dispose();
+        foreach (var scanCts in _deviceScanCts.Values)
+        {
+            scanCts.Cancel();   // disposal happens in the scan's own finally
+        }
 #if WINDOWS
         _thumbBarService?.Dispose();
         _smtcService?.Dispose();
