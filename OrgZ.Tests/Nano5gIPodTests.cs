@@ -8,24 +8,18 @@ namespace OrgZ.Tests;
 
 /// <summary>
 /// End-to-end CRUD for the Nano 5G (Hash72 / SQLite) tier through the <see cref="IPodDevice"/> interface -
-/// the stock-iPod equivalent of <see cref="RockboxIPodTests"/>. Builds a fake device mount from the local
-/// nano5g-fixture (its <c>iTunes Library.itlp</c> stack), seeds a track with the writer, then exercises
+/// the stock-iPod equivalent of <see cref="RockboxIPodTests"/>. Builds a fake device mount from a fixture
+/// (its <c>iTunes Library.itlp</c> stack), seeds a track with the writer, then exercises
 /// Read → CreatePlaylist → Remove → Erase *through the interface* so the polymorphic wiring - not just the
-/// underlying writer - is covered. Fixture-gated; no-ops in CI. No device is touched.
+/// underlying writer - is covered. Runs against the committed synthetic fixture everywhere, plus the
+/// private real-device capture when this machine has it. No device is touched.
 /// </summary>
 public class Nano5gIPodTests
 {
-    private static string? FixtureDir()
+    [Theory]
+    [MemberData(nameof(Nano5gLibraryWriterTests.FixtureDirs), MemberType = typeof(Nano5gLibraryWriterTests))]
+    public async Task Read_create_playlist_remove_and_erase_through_the_interface(string src)
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ", "nano5g-fixture");
-        return File.Exists(Path.Combine(dir, "Library.itdb")) && File.Exists(Path.Combine(dir, "Locations.itdb.cbk")) ? dir : null;
-    }
-
-    [Fact]
-    public async Task Read_create_playlist_remove_and_erase_through_the_interface()
-    {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent
 
         var mount = Path.Combine(Path.GetTempPath(), "orgz-n5gdev-" + Guid.NewGuid().ToString("N"));
         var itlp = Path.Combine(mount, "iPod_Control", "iTunes", "iTunes Library.itlp");

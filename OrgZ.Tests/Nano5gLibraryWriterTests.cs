@@ -6,24 +6,36 @@ using OrgZ.Services;
 namespace OrgZ.Tests;
 
 /// <summary>
-/// Offline Stage 2 test for <see cref="Nano5gLibraryWriter"/> - gated on the device fixture
-/// (Library/Locations/Dynamic.itdb + cbk) at <c>%LOCALAPPDATA%\OrgZ\nano5g-fixture</c>. Copies
-/// the set to a temp dir, inserts a track, and asserts the rows plus a self-consistent re-signed
-/// cbk. No device is touched. No-ops when the fixture is absent (CI).
+/// Offline tests for <see cref="Nano5gLibraryWriter"/>: copies a fixture's SQLite trio + cbk to a
+/// temp dir, mutates it, and asserts the rows plus a self-consistent re-signed cbk. Every test runs
+/// against the COMMITTED synthetic fixture (OrgZ.Tests/Fixtures/nano5g - real device schema,
+/// structural rows only, scrubbed identifiers, fabricated seed) on any machine, and additionally
+/// against the private real-device capture at <c>%LOCALAPPDATA%\OrgZ\nano5g-fixture</c> when
+/// present. No device is touched.
 /// </summary>
 public class Nano5gLibraryWriterTests
 {
-    private static string? FixtureDir()
+    /// <summary>
+    /// Every available Nano 5G fixture. The COMMITTED synthetic one (full device schema, structural
+    /// rows only, identifiers scrubbed, fabricated cbk seed) always runs - it's what keeps this tier
+    /// honest on machines without hardware. When this machine also has the private real-device
+    /// capture, every test runs a second time against it as extra validation.
+    /// </summary>
+    public static IEnumerable<object[]> FixtureDirs()
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ", "nano5g-fixture");
-        return File.Exists(Path.Combine(dir, "Library.itdb")) && File.Exists(Path.Combine(dir, "Locations.itdb.cbk")) ? dir : null;
+        yield return new object[] { Path.Combine(AppContext.BaseDirectory, "Fixtures", "nano5g") };
+
+        var real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ", "nano5g-fixture");
+        if (File.Exists(Path.Combine(real, "Library.itdb")) && File.Exists(Path.Combine(real, "Locations.itdb.cbk")))
+        {
+            yield return new object[] { real };
+        }
     }
 
-    [Fact]
-    public void AddTrack_inserts_rows_and_resigns_cbk()
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
+    public void AddTrack_inserts_rows_and_resigns_cbk(string src)
     {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent - not run here
 
         var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
@@ -74,11 +86,10 @@ public class Nano5gLibraryWriterTests
         }
     }
 
-    [Fact]
-    public void BeginCdbBatch_defers_the_CDB_rebuild_until_dispose()
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
+    public void BeginCdbBatch_defers_the_CDB_rebuild_until_dispose(string src)
     {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent
 
         // Real on-device layout (...\iPod_Control\iTunes\iTunes Library.itlp) so the regenerated
         // iTunesCDB + zeroed legacy iTunesDB land inside the temp root, where we can observe them.
@@ -131,11 +142,10 @@ public class Nano5gLibraryWriterTests
         }
     }
 
-    [Fact]
-    public void AddTrack_then_RemoveTrack_returns_to_baseline()
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
+    public void AddTrack_then_RemoveTrack_returns_to_baseline(string src)
     {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent
 
         var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
@@ -188,11 +198,10 @@ public class Nano5gLibraryWriterTests
         }
     }
 
-    [Fact]
-    public void AddPodcast_then_RemovePodcast_round_trips_with_dedup_release_date_and_no_orphans()
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
+    public void AddPodcast_then_RemovePodcast_round_trips_with_dedup_release_date_and_no_orphans(string src)
     {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent
 
         var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
@@ -255,11 +264,10 @@ public class Nano5gLibraryWriterTests
         }
     }
 
-    [Fact]
-    public void CreatePlaylist_is_visible_categorised_and_idempotent()
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
+    public void CreatePlaylist_is_visible_categorised_and_idempotent(string src)
     {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent
 
         var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
@@ -312,11 +320,10 @@ public class Nano5gLibraryWriterTests
         }
     }
 
-    [Fact]
-    public void WipeLibrary_empties_tracks_podcasts_locations_and_resigns_cbk()
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
+    public void WipeLibrary_empties_tracks_podcasts_locations_and_resigns_cbk(string src)
     {
-        var src = FixtureDir();
-        if (src is null) { return; } // device fixture absent
 
         var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
