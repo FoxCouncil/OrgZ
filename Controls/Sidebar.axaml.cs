@@ -83,14 +83,6 @@ public partial class Sidebar : UserControl
         // CD audio uses the fixed "CdAudio" key. Branch the menu accordingly.
         if (sb.ViewConfigKey?.StartsWith("Device:") == true)
         {
-            var importLib = new Avalonia.Controls.MenuItem { Header = "Import Into Library...", IsEnabled = false };
-            menu.Items.Add(importLib);
-
-            var importDevice = new Avalonia.Controls.MenuItem { Header = "Import Into iPod...", IsEnabled = false };
-            menu.Items.Add(importDevice);
-
-            menu.Items.Add(new Avalonia.Controls.Separator());
-
             var refresh = new Avalonia.Controls.MenuItem { Header = "Refresh Device Info" };
             refresh.Click += (_, _) => vm.RefreshDeviceInfo(sb);
             menu.Items.Add(refresh);
@@ -110,10 +102,13 @@ public partial class Sidebar : UserControl
         }
         else
         {
-            var rip = new Avalonia.Controls.MenuItem { Header = "Rip CD...", IsEnabled = false };
+            // The CD node: both services exist, so both act (they used to be dead placeholders).
+            var rip = new Avalonia.Controls.MenuItem { Header = "Rip CD…" };
+            rip.Click += async (_, _) => await vm.RipCurrentCdAsync();
             menu.Items.Add(rip);
 
-            var eject = new Avalonia.Controls.MenuItem { Header = "Eject", IsEnabled = false };
+            var eject = new Avalonia.Controls.MenuItem { Header = "Eject" };
+            eject.Click += (_, _) => vm.EjectCdCommand.Execute(null);
             menu.Items.Add(eject);
         }
 

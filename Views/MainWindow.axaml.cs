@@ -1069,7 +1069,10 @@ public partial class MainWindow : Window
 
             if (def.IsHeader)
             {
+                // A label, not an action: non-interactive AND visibly dimmed so it reads as the
+                // track it names rather than a clickable command sitting at full opacity.
                 menuItem.IsHitTestVisible = false;
+                menuItem.IsEnabled = false;
                 menuItem.FontWeight = FontWeight.Bold;
 
                 // Bind header text dynamically for title/artist display
