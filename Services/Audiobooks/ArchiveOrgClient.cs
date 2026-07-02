@@ -43,7 +43,7 @@ public static class ArchiveOrgClient
     private static readonly string CacheDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ", "audiobookcache");
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(12);
-    private const int CacheVersion = 1;
+    private const int CacheVersion = 2;   // v2: queries gained the mediatype:audio clause
 
     public static Task<List<AudiobookListing>> SearchAsync(string query, int rows = 25, CancellationToken ct = default)
     {
@@ -72,13 +72,15 @@ public static class ArchiveOrgClient
     /// <summary>Search matches title OR author within the LibriVox collection.</summary>
     internal static string BuildSearchUrl(string query, int rows)
     {
-        var q = Uri.EscapeDataString($"collection:{Collection} AND (title:({query}) OR creator:({query}))");
+        var q = Uri.EscapeDataString($"collection:{Collection} AND mediatype:(audio) AND (title:({query}) OR creator:({query}))");
         return $"https://archive.org/advancedsearch.php?q={q}{FieldList}&rows={rows}&output=json";
     }
 
     internal static string BuildListUrl(string sort, int rows)
     {
-        var q = Uri.EscapeDataString($"collection:{Collection}");
+        // mediatype:audio keeps the collection's housekeeping items (cover-art packs and the
+        // like) out of the store - sorting by downloads surfaced them right in "Popular".
+        var q = Uri.EscapeDataString($"collection:{Collection} AND mediatype:(audio)");
         return $"https://archive.org/advancedsearch.php?q={q}{FieldList}&sort%5B%5D={Uri.EscapeDataString(sort)}&rows={rows}&output=json";
     }
 

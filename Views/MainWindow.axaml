@@ -375,6 +375,30 @@
 							     subscriptions / feed-detail navigation. -->
 							<controls:PodcastsPanel x:Name="PodcastsPanel" DataContext="{Binding Podcasts}" IsVisible="False" />
 
+							<!-- Audiobooks composite: the golden store panel over the library audiobooks
+							     grid - unlike Podcasts, the grid stays visible under the store. The grid
+							     rides the normal FilteredItems pipeline (window DataContext), so header
+							     search, selection, playback, and the context menu behave like every
+							     other library view; only the store panel binds the Audiobooks VM. -->
+							<Grid x:Name="AudiobooksHost" RowDefinitions="3*,2*" IsVisible="False">
+								<controls:AudiobooksPanel Grid.Row="0" DataContext="{Binding Audiobooks}" />
+								<DataGrid x:Name="AudiobooksDataGrid" Grid.Row="1"
+									Classes="mediaGrid"
+									DoubleTapped="DataGrid_DoubleTapped"
+									SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+									ItemsSource="{Binding FilteredItemsView}"
+									GridLinesVisibility="All"
+									IsReadOnly="True"
+									AutoGenerateColumns="False"
+									CanUserSortColumns="True"
+									SelectionMode="Single"
+									Background="{DynamicResource SystemAltHighColor}"
+									HorizontalScrollBarVisibility="Auto"
+									VerticalScrollBarVisibility="Auto">
+									<DataGrid.Columns />
+								</DataGrid>
+							</Grid>
+
 							<!-- Separate DataGrid for grouped views (Radio) - never shares column state with MainDataGrid.
 							     Bound to its OWN source (GroupedItemsView), not FilteredItemsView: an ungrouped-view
 							     switch reassigns FilteredItemsView, and if this grid shared it, every return to Radio

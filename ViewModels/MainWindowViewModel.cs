@@ -223,6 +223,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>
     public PodcastsViewModel Podcasts { get; private set; } = null!;
 
+    public AudiobooksViewModel Audiobooks { get; private set; } = null!;
+
     /// <summary>
     /// Rebuilds the LibraryItems list. Called on startup and when settings like "Show Ignored in sidebar" change.
     /// </summary>
@@ -1252,6 +1254,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
         Podcasts = new PodcastsViewModel(this);
+        Audiobooks = new AudiobooksViewModel(this);
         // Load persisted subscriptions up front so the store's left-column "Subscribed" section and
         // the subscriptions view are populated on startup. Subscriptions no longer live in the
         // sidebar, so a count change doesn't rebuild the library list - the panel binds the set

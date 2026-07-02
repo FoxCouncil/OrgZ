@@ -9,24 +9,27 @@
              x:CompileBindings="False">
 
 	<!-- Card chrome: matches PodcastsCarousel exactly so all three columns
-	     of the podcast store header section read as a unified strip. Empty
-	     body for now; populated later. -->
-	<Border Background="{StaticResource OrgZCarouselSurfaceBrush}"
+	     of the podcast store header section read as a unified strip. The chrome
+	     brushes resolve DYNAMICALLY on purpose: a host can scope golden (or any
+	     vertical's) overrides of the OrgZCarousel* keys into its own Resources -
+	     the Audiobooks panel does - and the card re-skins without a second control.
+	     At app scope these resolve to the same purple set as ever. -->
+	<Border Background="{DynamicResource OrgZCarouselSurfaceBrush}"
 	        CornerRadius="10"
 	        ClipToBounds="True"
 	        BoxShadow="0 2 6 -1 #66000000 inset, 0 -1 2 -1 #20FFFFFF inset">
 		<DockPanel LastChildFill="True">
 			<!-- Header strip: title only - no dots, no See All, no arrows. -->
 			<Border DockPanel.Dock="Top"
-			        Background="{StaticResource OrgZCarouselHeaderShineBrush}"
-			        BorderBrush="{StaticResource OrgZCarouselDividerBrush}"
+			        Background="{DynamicResource OrgZCarouselHeaderShineBrush}"
+			        BorderBrush="{DynamicResource OrgZCarouselDividerBrush}"
 			        BorderThickness="0,0,0,1"
 			        Height="32">
 				<Grid Margin="14,0">
 					<TextBlock Text="{Binding #Root.Title}"
 					           VerticalAlignment="Center"
 					           FontWeight="Bold"
-					           Foreground="{StaticResource OrgZCarouselTextBrush}"
+					           Foreground="{DynamicResource OrgZCarouselTextBrush}"
 					           HorizontalAlignment="Left" />
 					<!-- Optional right-aligned header action (e.g. a "Show All" link). Null → nothing. -->
 					<ContentControl Content="{Binding #Root.HeaderContent}"

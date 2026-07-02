@@ -121,12 +121,13 @@ public class ArchiveOrgClientTests
     // ===== URL construction =====
 
     [Fact]
-    public void Search_url_scopes_to_librivox_and_matches_title_or_author()
+    public void Search_url_scopes_to_librivox_audio_and_matches_title_or_author()
     {
         var url = ArchiveOrgClient.BuildSearchUrl("sherlock holmes", rows: 25);
 
         Assert.StartsWith("https://archive.org/advancedsearch.php?q=", url);
         Assert.Contains(Uri.EscapeDataString("collection:librivoxaudio"), url);
+        Assert.Contains(Uri.EscapeDataString("mediatype:(audio)"), url);
         Assert.Contains(Uri.EscapeDataString("title:(sherlock holmes)"), url);
         Assert.Contains(Uri.EscapeDataString("creator:(sherlock holmes)"), url);
         Assert.Contains("rows=25", url);
@@ -134,9 +135,13 @@ public class ArchiveOrgClientTests
     }
 
     [Fact]
-    public void List_urls_sort_by_popularity_and_recency()
+    public void List_urls_sort_by_popularity_and_recency_and_exclude_non_audio()
     {
-        Assert.Contains(Uri.EscapeDataString("downloads desc"), ArchiveOrgClient.BuildListUrl("downloads desc", 25));
+        var popular = ArchiveOrgClient.BuildListUrl("downloads desc", 25);
+        Assert.Contains(Uri.EscapeDataString("downloads desc"), popular);
+        // The collection carries housekeeping items (cover-art packs); mediatype:audio keeps
+        // them out of the store, where downloads-sorting surfaced them.
+        Assert.Contains(Uri.EscapeDataString("mediatype:(audio)"), popular);
         Assert.Contains(Uri.EscapeDataString("publicdate desc"), ArchiveOrgClient.BuildListUrl("publicdate desc", 25));
     }
 
