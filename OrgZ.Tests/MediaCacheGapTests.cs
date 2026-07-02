@@ -6,7 +6,7 @@ namespace OrgZ.Tests;
 
 /// <summary>
 /// Coverage-gap tests for MediaCache, complementing the playlist-focused MediaCacheTests.
-/// Targets: SetFavorite, SetRating, IncrementPlayCount, SetLastPlayed, RemoveMusic,
+/// Targets: SetFavorite, SetRating, IncrementPlayCount, SetLastPlayed, RemoveLibraryFiles,
 /// UpsertRadioStations, GetCdMetadata + SaveCdMetadata.
 /// </summary>
 [Collection("MediaCache")]
@@ -112,16 +112,16 @@ public class MediaCacheGapTests : IDisposable
         Assert.Equal(ts, loaded.LastPlayed!.Value.ToUniversalTime());
     }
 
-    // ===== RemoveMusic =====
+    // ===== RemoveLibraryFiles =====
 
     [Fact]
-    public void RemoveMusic_deletes_listed_ids_only()
+    public void RemoveLibraryFiles_deletes_listed_ids_only()
     {
         MediaCache.UpsertMusic(Music("a"));
         MediaCache.UpsertMusic(Music("b"));
         MediaCache.UpsertMusic(Music("c"));
 
-        MediaCache.RemoveMusic(["a", "c"]);
+        MediaCache.RemoveLibraryFiles(["a", "c"]);
 
         var ids = MediaCache.LoadAll().Where(i => i.Kind == MediaKind.Music).Select(i => i.Id).ToHashSet();
         Assert.DoesNotContain("a", ids);
@@ -130,27 +130,27 @@ public class MediaCacheGapTests : IDisposable
     }
 
     [Fact]
-    public void RemoveMusic_empty_list_is_noop()
+    public void RemoveLibraryFiles_empty_list_is_noop()
     {
         MediaCache.UpsertMusic(Music("a"));
-        MediaCache.RemoveMusic([]);
+        MediaCache.RemoveLibraryFiles([]);
         Assert.Single(MediaCache.LoadAll(), i => i.Kind == MediaKind.Music);
     }
 
     [Fact]
-    public void RemoveMusic_does_not_delete_radio_rows()
+    public void RemoveLibraryFiles_does_not_delete_radio_rows()
     {
-        // The Media table has Id as PK, so music and radio IDs are distinct namespaces.
-        // RemoveMusic must filter on Kind='Music' so it can't accidentally drop a radio
-        // row even if a caller passes a radio ID by mistake.
+        // The Media table has Id as PK, so library and radio IDs are distinct namespaces.
+        // RemoveLibraryFiles must filter on the local-file kinds so it can't accidentally
+        // drop a radio row even if a caller passes a radio ID by mistake.
         MediaCache.UpsertMusic(Music("track-1"));
         MediaCache.UpsertRadioStations([Radio("station-1", title: "BBC Radio 1")]);
 
-        MediaCache.RemoveMusic(["track-1", "station-1"]);   // try removing both as music
+        MediaCache.RemoveLibraryFiles(["track-1", "station-1"]);   // try removing both as library files
 
         var loaded = MediaCache.LoadAll();
         Assert.DoesNotContain(loaded.Where(i => i.Kind == MediaKind.Music), i => i.Id == "track-1");
-        // station-1 is in the Radio kind, so the music DELETE should not have touched it
+        // station-1 is in the Radio kind, so the library DELETE should not have touched it
         Assert.Contains(loaded.Where(i => i.Kind == MediaKind.Radio), i => i.Id == "station-1");
     }
 

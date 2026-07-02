@@ -64,6 +64,84 @@ public class LocalToolSmokeTests
         }
     }
 
+    // ── ffmpeg: real MP4 audiobooks through the library detection pipeline ──
+
+    [Fact]
+    public async Task Ffmpeg_fabricated_m4b_lands_as_a_fully_analyzed_audiobook()
+    {
+        var ffmpeg = ToolOnPath("ffmpeg");
+        if (ffmpeg is null) { return; } // tool absent on this machine
+
+        var dir = Path.Combine(Path.GetTempPath(), "orgz-m4b-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var wav = Path.Combine(dir, "src.wav");
+            WritePcmWav(wav, seconds: 0.25);
+            var m4b = Path.Combine(dir, "Hyperion.m4b");
+            await RunFfmpeg(ffmpeg, $"-y -i \"{wav}\" -c:a aac -f ipod \"{m4b}\"");
+
+            // The real library pipeline: scan kinds it by container, analysis reads real MP4 tags.
+            var item = FileScanner.CreateMediaItemFromPath(m4b);
+            Assert.NotNull(item);
+            Assert.Equal(MediaKind.Audiobook, item!.Kind);
+
+            AudioFileAnalyzer.AnalyzeFile(item);
+            Assert.True(item.IsAnalyzed);
+            Assert.DoesNotContain(item.Issues, i => i.StartsWith("Failed to analyze", StringComparison.Ordinal));
+            Assert.True(item.Duration > TimeSpan.Zero);
+            Assert.NotEqual(false, item.FileNameMatchesHeaders);   // .m4b maps to the MP4 mime family
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    [Fact]
+    public async Task Stik_tagged_m4a_promotes_to_audiobook_during_analysis()
+    {
+        var ffmpeg = ToolOnPath("ffmpeg");
+        if (ffmpeg is null) { return; } // tool absent on this machine
+
+        var dir = Path.Combine(Path.GetTempPath(), "orgz-stik-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var wav = Path.Combine(dir, "src.wav");
+            WritePcmWav(wav, seconds: 0.25);
+            var m4a = Path.Combine(dir, "book.m4a");
+            await RunFfmpeg(ffmpeg, $"-y -i \"{wav}\" -c:a aac -f ipod \"{m4a}\"");
+
+            // Write the iTunes media-type atom the way iTunes does for Media Kind = Audiobook
+            // (flags 0x15 = signed integer), then run the real analyzer over it.
+            using (var tagFile = TagLib.File.Create(m4a))
+            {
+                var apple = (TagLib.Mpeg4.AppleTag)tagFile.GetTag(TagLib.TagTypes.Apple, create: true);
+                apple.SetData("stik", new TagLib.ByteVector([(byte)2]), 0x15);
+                tagFile.Save();
+            }
+
+            var item = FileScanner.CreateMediaItemFromPath(m4a);
+            Assert.NotNull(item);
+            Assert.Equal(MediaKind.Music, item!.Kind);   // .m4a alone says music - the tag decides
+
+            AudioFileAnalyzer.AnalyzeFile(item);
+            Assert.Equal(MediaKind.Audiobook, item.Kind);
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+    }
+
+    private static async Task RunFfmpeg(string ffmpeg, string args)
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ffmpeg, args) { UseShellExecute = false, RedirectStandardError = true })!;
+        await p.WaitForExitAsync();
+        Assert.Equal(0, p.ExitCode);
+    }
+
     // ── flac / lame: the CD rip encoders, fed real PCM through the product pipeline ──
 
     [Fact]

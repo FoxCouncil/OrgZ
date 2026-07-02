@@ -155,6 +155,87 @@ public class DeviceLibraryCacheTests : IDisposable
         Assert.Equal("Updated", loaded[0].Title);
     }
 
+    // ===== Kind column (schema v2) =====
+
+    [Fact]
+    public void Audiobook_kind_round_trips()
+    {
+        var book = new MediaItem
+        {
+            Id = "book-1",
+            Kind = MediaKind.Audiobook,
+            FilePath = "/Audiobooks/hyperion.m4b",
+            FileSize = 1000,
+            LastModified = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+            Title = "Hyperion",
+        };
+
+        DeviceLibraryCache.Upsert(_mountPath, [book, MakeItem("song-1", "/Music/a.mp3")]);
+        var loaded = DeviceLibraryCache.TryLoad(_mountPath, "src");
+
+        Assert.Equal(MediaKind.Audiobook, loaded.Single(i => i.Id == "book-1").Kind);
+        Assert.Equal(MediaKind.Music, loaded.Single(i => i.Id == "song-1").Kind);
+    }
+
+    [Fact]
+    public void V1_databases_migrate_and_their_rows_read_as_music()
+    {
+        // Fabricate the exact schema v1 DB a pre-audiobooks OrgZ left on a device: no Kind
+        // column, user_version=1. Opening it must ALTER in the column, and the old rows -
+        // which only ever came from music-only scans - must read as Music.
+        var dbDir = Path.Combine(_mountPath, ".orgz");
+        Directory.CreateDirectory(dbDir);
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(dbDir, "library.db")}"))
+        {
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE Media (
+                    Id               TEXT PRIMARY KEY,
+                    FilePath         TEXT NOT NULL,
+                    FileName         TEXT,
+                    Extension        TEXT,
+                    FileSize         INTEGER,
+                    LastModified     TEXT,
+                    Title            TEXT,
+                    Artist           TEXT,
+                    Album            TEXT,
+                    Genre            TEXT,
+                    Composer         TEXT,
+                    Year             INTEGER,
+                    Track            INTEGER,
+                    TotalTracks      INTEGER,
+                    Disc             INTEGER,
+                    TotalDiscs       INTEGER,
+                    DurationTicks    INTEGER,
+                    AudioBitrate     INTEGER,
+                    SampleRate       INTEGER,
+                    AudioChannels    INTEGER,
+                    CodecDescription TEXT,
+                    HasAlbumArt      INTEGER
+                );
+                CREATE TABLE Metadata (Key TEXT PRIMARY KEY, Value TEXT);
+                INSERT INTO Media (Id, FilePath, Title) VALUES ('legacy-1', '/Music/old.mp3', 'Legacy Track');
+                PRAGMA user_version = 1;
+                """;
+            cmd.ExecuteNonQuery();
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        var loaded = DeviceLibraryCache.TryLoad(_mountPath, "src");
+        var legacy = Assert.Single(loaded);
+        Assert.Equal("legacy-1", legacy.Id);
+        Assert.Equal(MediaKind.Music, legacy.Kind);
+
+        // And the migrated DB accepts kinded rows from here on.
+        DeviceLibraryCache.Upsert(_mountPath, [new MediaItem
+        {
+            Id = "book-1", Kind = MediaKind.Audiobook, FilePath = "/Audiobooks/b.m4b",
+            FileSize = 1, LastModified = DateTime.UtcNow,
+        }]);
+        Assert.Equal(MediaKind.Audiobook, DeviceLibraryCache.TryLoad(_mountPath, "src").Single(i => i.Id == "book-1").Kind);
+    }
+
     [Fact]
     public void Upsert_with_empty_list_is_noop()
     {
@@ -316,7 +397,7 @@ public class DeviceLibraryCacheTests : IDisposable
         cmd.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(cmd.ExecuteScalar());
 
-        Assert.Equal(1, version);   // CurrentSchemaVersion
+        Assert.Equal(2, version);   // CurrentSchemaVersion - v2 added the Kind column
     }
 
     [Fact]

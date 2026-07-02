@@ -76,7 +76,7 @@ public static class FilesystemLibraryScanner
                     item = new MediaItem
                     {
                         Id = path,
-                        Kind = MediaKind.Music,
+                        Kind = AudiobookDetector.KindForPath(path),
                         FilePath = path,
                         FileName = info.Name,
                         Extension = info.Extension,

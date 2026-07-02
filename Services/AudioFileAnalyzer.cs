@@ -6,7 +6,7 @@ public class AudioFileAnalyzer
 {
     public static void AnalyzeFile(MediaItem item)
     {
-        if (item.Kind != MediaKind.Music || item.IsAnalyzed || string.IsNullOrEmpty(item.FilePath))
+        if (item.Kind is not (MediaKind.Music or MediaKind.Audiobook) || item.IsAnalyzed || string.IsNullOrEmpty(item.FilePath))
         {
             return;
         }
@@ -48,6 +48,14 @@ public class AudioFileAnalyzer
 
             item.HasAlbumArt = file.Tag.Pictures?.Length > 0;
 
+            // Tag-based promotion: an .mp3/.m4a whose tags self-identify as an audiobook (iTunes
+            // stik atom or audiobook genre) becomes one here - .m4b arrived as Audiobook from the
+            // scan pass already, by extension. Never demotes.
+            if (item.Kind == MediaKind.Music && AudiobookDetector.TagsSayAudiobook(file))
+            {
+                item.Kind = MediaKind.Audiobook;
+            }
+
             item.FileNameMatchesHeaders = CheckFileNameMatchesHeaders(item, file);
 
             IdentifyIssues(item);
@@ -71,6 +79,7 @@ public class AudioFileAnalyzer
             ".flac" => mimeType.Contains("flac"),
             ".mp3" => mimeType.Contains("mpeg") || mimeType.Contains("mp3"),
             ".m4a" => mimeType.Contains("mp4") || mimeType.Contains("m4a"),
+            ".m4b" => mimeType.Contains("mp4") || mimeType.Contains("m4a") || mimeType.Contains("m4b"),
             ".aac" => mimeType.Contains("aac"),
             ".ogg" => mimeType.Contains("ogg") || mimeType.Contains("vorbis"),
             ".wav" => mimeType.Contains("wav"),
@@ -161,7 +170,7 @@ public class AudioFileAnalyzer
         uint? year, uint? track, uint? totalTracks, uint? disc, uint? totalDiscs,
         string? genre, string? composer, string? comment, uint? bpm)
     {
-        if (item.Kind != MediaKind.Music || string.IsNullOrEmpty(item.FilePath))
+        if (item.Kind is not (MediaKind.Music or MediaKind.Audiobook) || string.IsNullOrEmpty(item.FilePath))
         {
             return;
         }
