@@ -1803,7 +1803,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         FilteredItems = [];
 
         _folderWatcher?.Stop();
-        await ScanAndAnalyzeMusicAsync();
+        await ScanAndAnalyzeLibraryAsync();
         StartFolderWatcher();
     }
 
@@ -1974,7 +1974,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (App.FolderPath != string.Empty)
             {
-                await ScanAndAnalyzeMusicAsync();
+                await ScanAndAnalyzeLibraryAsync();
                 StartFolderWatcher();
             }
         }
@@ -3881,8 +3881,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // _allItems is populated so a first-run playlist/Favorites header isn't blank.
         _ = BuildPlaylistHeaderAsync(SelectedSidebarItem);
 
-        // Scan and analyze music files
-        await ScanAndAnalyzeMusicAsync();
+        // Scan and analyze the library folder (music + audiobooks)
+        await ScanAndAnalyzeLibraryAsync();
 
         // Start watching for file changes
         StartFolderWatcher();
@@ -3897,7 +3897,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _deviceDetection.Start();
     }
 
-    internal async Task ScanAndAnalyzeMusicAsync()
+    /// <summary>
+    /// True for an item that lives in the local library folder - a Music or Audiobook row with a
+    /// file path and no Source (device tracks carry "device:{mount}", CD tracks "cdda"). The
+    /// library scan reconciles ONLY these: without the Source check, a folder rescan while an
+    /// iPod is connected would sweep the device's rows out of _allItems, since device tracks are
+    /// also Kind=Music with FilePaths that are never under the library folder.
+    /// </summary>
+    internal static bool IsLocalLibraryFile(MediaItem item)
+        => item.Kind is MediaKind.Music or MediaKind.Audiobook && item.FilePath != null && item.Source == null;
+
+    internal async Task ScanAndAnalyzeLibraryAsync()
     {
         if (string.IsNullOrEmpty(App.FolderPath))
         {
@@ -3908,8 +3918,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var diskFiles = await FileScanner.ScanDirectoryAsync(App.FolderPath, recursive: true);
 
-        var musicLookup = _allItems
-            .Where(i => i.Kind == MediaKind.Music && i.FilePath != null)
+        var libraryLookup = _allItems
+            .Where(IsLocalLibraryFile)
             .ToDictionary(i => i.FilePath!, StringComparer.OrdinalIgnoreCase);
 
         var filesToAnalyze = new List<MediaItem>();
@@ -3919,7 +3929,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             diskPaths.Add(diskFile.Id);
 
-            if (musicLookup.TryGetValue(diskFile.Id, out var existing))
+            if (libraryLookup.TryGetValue(diskFile.Id, out var existing))
             {
                 if (existing.LastModified == diskFile.LastModified && existing.FileSize == diskFile.FileSize)
                 {
@@ -3938,7 +3948,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var deletedItems = _allItems
-            .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && !diskPaths.Contains(i.FilePath))
+            .Where(i => IsLocalLibraryFile(i) && !diskPaths.Contains(i.FilePath!))
             .ToList();
 
         foreach (var item in deletedItems)
@@ -3953,7 +3963,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (deletedItems.Count > 0)
         {
-            await Task.Run(() => MediaCache.RemoveMusic(deletedItems.Select(i => i.Id)));
+            await Task.Run(() => MediaCache.RemoveLibraryFiles(deletedItems.Select(i => i.Id)));
         }
 
         UpdateData();
@@ -3971,11 +3981,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>True if a music item with this file path is already tracked in the library.</summary>
+    /// <summary>True if a local library file (music or audiobook) with this path is already tracked.</summary>
     private bool LibraryContainsPath(string path)
     {
         var full = NormalizePath(path);
-        return _allItems.Any(i => i.Kind == MediaKind.Music && i.FilePath != null && NormalizePath(i.FilePath) == full);
+        return _allItems.Any(i => IsLocalLibraryFile(i) && NormalizePath(i.FilePath!) == full);
     }
 
     /// <summary>
@@ -4062,7 +4072,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 UI(async () =>
                 {
                     UpdateMainStatus("File watcher buffer overflow, rescanning...");
-                    await ScanAndAnalyzeMusicAsync();
+                    await ScanAndAnalyzeLibraryAsync();
                 });
             };
         }
@@ -4084,7 +4094,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // Paths are normalized (GetFullPath) so separator/case drift can't miss.
             var deletedPaths = changes.Deleted.Select(NormalizePath).ToList();
             var deletedItems = _allItems
-                .Where(i => i.Kind == MediaKind.Music && i.FilePath != null && IsUnderAnyDeletedPath(NormalizePath(i.FilePath), deletedPaths))
+                .Where(i => IsLocalLibraryFile(i) && IsUnderAnyDeletedPath(NormalizePath(i.FilePath!), deletedPaths))
                 .ToList();
 
             _log.Information("Watcher: {Deleted} deleted path(s) -> matched {Matched} tracked item(s)", changes.Deleted.Count, deletedItems.Count);
@@ -4100,7 +4110,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (deletedItems.Count > 0)
             {
-                await Task.Run(() => MediaCache.RemoveMusic(deletedItems.Select(i => i.Id)));
+                await Task.Run(() => MediaCache.RemoveLibraryFiles(deletedItems.Select(i => i.Id)));
             }
         }
 
@@ -4126,7 +4136,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (await WaitForFileReady(path))
             {
                 var existing = _allItems.FirstOrDefault(
-                    i => i.Kind == MediaKind.Music && i.FilePath != null &&
+                    i => IsLocalLibraryFile(i) &&
                     string.Equals(i.FilePath, path, StringComparison.OrdinalIgnoreCase));
 
                 var item = FileScanner.CreateMediaItemFromPath(path);

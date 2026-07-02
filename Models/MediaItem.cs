@@ -17,7 +17,12 @@ public partial class MediaItem : ObservableObject
 
     public required string Id { get; init; }
 
-    public required MediaKind Kind { get; init; }
+    /// <summary>
+    /// Settable (not init) for exactly one sanctioned mutation: analysis refining Music →
+    /// Audiobook when the file's tags say so (iTunes stik atom / audiobook genre) - the scan pass
+    /// constructs items before any tags are read. Everything else treats Kind as immutable.
+    /// </summary>
+    public required MediaKind Kind { get; set; }
 
     // -- Shared --
 

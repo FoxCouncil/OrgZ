@@ -9,6 +9,7 @@ public class FileScanner
         ".flac",
         ".mp3",
         ".m4a",
+        ".m4b",
         ".aac",
         ".ogg",
         ".wav",
@@ -88,7 +89,7 @@ public class FileScanner
         return new MediaItem
         {
             Id = filePath,
-            Kind = MediaKind.Music,
+            Kind = AudiobookDetector.KindForPath(filePath),
             FilePath = filePath,
             FileName = fileInfo.Name,
             Extension = fileInfo.Extension,

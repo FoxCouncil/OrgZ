@@ -22,7 +22,7 @@ public static class DeviceLibraryCache
 {
     private const string Subfolder = ".orgz";
     private const string Filename = "library.db";
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
 
     private static readonly ILogger _log = Logging.For("DeviceLibraryCache");
 
@@ -113,6 +113,7 @@ public static class DeviceLibraryCache
             var pChannels = insert.Parameters.Add("@AudioChannels", SqliteType.Integer);
             var pCodec    = insert.Parameters.Add("@CodecDescription", SqliteType.Text);
             var pArt      = insert.Parameters.Add("@HasAlbumArt", SqliteType.Integer);
+            var pKind     = insert.Parameters.Add("@Kind",      SqliteType.Text);
 
             int count = 0;
             int skipped = 0;
@@ -148,6 +149,7 @@ public static class DeviceLibraryCache
                 pChannels.Value = (object?)m.AudioChannels ?? DBNull.Value;
                 pCodec.Value    = (object?)m.CodecDescription ?? DBNull.Value;
                 pArt.Value      = m.HasAlbumArt.HasValue ? (m.HasAlbumArt.Value ? 1 : 0) : (object)DBNull.Value;
+                pKind.Value     = m.Kind.ToString();
 
                 insert.ExecuteNonQuery();
                 count++;
@@ -356,7 +358,8 @@ public static class DeviceLibraryCache
                     SampleRate       INTEGER,
                     AudioChannels    INTEGER,
                     CodecDescription TEXT,
-                    HasAlbumArt      INTEGER
+                    HasAlbumArt      INTEGER,
+                    Kind             TEXT
                 );
                 CREATE TABLE IF NOT EXISTS Metadata (
                     Key    TEXT PRIMARY KEY,
@@ -366,12 +369,16 @@ public static class DeviceLibraryCache
             cmd.ExecuteNonQuery();
         }
 
-        // Future migrations: add case blocks here, e.g.:
-        //   if (fromVersion < 2)
-        //   {
-        //       cmd.CommandText = "ALTER TABLE Media ADD COLUMN NewField TEXT";
-        //       cmd.ExecuteNonQuery();
-        //   }
+        if (fromVersion is >= 1 and < 2)
+        {
+            // v2: the row's MediaKind (Audiobook vs Music). Only v1 DBs need the ALTER - a fresh
+            // DB gets the column in the v1 CREATE TABLE above. NULL on pre-v2 rows reads as
+            // Music, matching what those scans assumed.
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "ALTER TABLE Media ADD COLUMN Kind TEXT";
+            cmd.ExecuteNonQuery();
+        }
 
         using (var bump = connection.CreateCommand())
         {
@@ -388,7 +395,7 @@ public static class DeviceLibraryCache
         Title, Artist, Album, Genre, Composer,
         Year, Track, TotalTracks, Disc, TotalDiscs,
         DurationTicks, AudioBitrate, SampleRate, AudioChannels,
-        CodecDescription, HasAlbumArt
+        CodecDescription, HasAlbumArt, Kind
         """;
 
     private const string InsertSql = """
@@ -397,13 +404,13 @@ public static class DeviceLibraryCache
             Title, Artist, Album, Genre, Composer,
             Year, Track, TotalTracks, Disc, TotalDiscs,
             DurationTicks, AudioBitrate, SampleRate, AudioChannels,
-            CodecDescription, HasAlbumArt
+            CodecDescription, HasAlbumArt, Kind
         ) VALUES (
             @Id, @FilePath, @FileName, @Extension, @FileSize, @LastModified,
             @Title, @Artist, @Album, @Genre, @Composer,
             @Year, @Track, @TotalTracks, @Disc, @TotalDiscs,
             @DurationTicks, @AudioBitrate, @SampleRate, @AudioChannels,
-            @CodecDescription, @HasAlbumArt
+            @CodecDescription, @HasAlbumArt, @Kind
         );
         """;
 
@@ -415,7 +422,7 @@ public static class DeviceLibraryCache
         public readonly int Title, Artist, Album, Genre, Composer;
         public readonly int Year, Track, TotalTracks, Disc, TotalDiscs;
         public readonly int DurationTicks, AudioBitrate, SampleRate, AudioChannels;
-        public readonly int CodecDescription, HasAlbumArt;
+        public readonly int CodecDescription, HasAlbumArt, Kind;
 
         public ColumnOrdinals(SqliteDataReader r)
         {
@@ -441,6 +448,7 @@ public static class DeviceLibraryCache
             AudioChannels    = r.GetOrdinal("AudioChannels");
             CodecDescription = r.GetOrdinal("CodecDescription");
             HasAlbumArt      = r.GetOrdinal("HasAlbumArt");
+            Kind             = r.GetOrdinal("Kind");
         }
     }
 
@@ -450,7 +458,8 @@ public static class DeviceLibraryCache
         var item = new MediaItem
         {
             Id           = r.GetString(o.Id),
-            Kind         = MediaKind.Music,
+            // Pre-v2 rows have no Kind - those scans only ever produced Music, so that's the default.
+            Kind         = GetString(r, o.Kind) is { } k && Enum.TryParse<MediaKind>(k, out var kind) ? kind : MediaKind.Music,
             FilePath     = filePath,
             FileName     = GetString(r, o.FileName),
             Extension    = GetString(r, o.Extension),

@@ -358,7 +358,11 @@ public static class MediaCache
         ExecuteUpsertMedia(connection, item);
     }
 
-    public static void RemoveMusic(IEnumerable<string> ids)
+    /// <summary>
+    /// Removes local library rows (music + audiobooks) by id. The Kind guard keeps an id
+    /// collision from ever deleting a Radio row - only local-file kinds are eligible.
+    /// </summary>
+    public static void RemoveLibraryFiles(IEnumerable<string> ids)
     {
         var idList = ids.ToList();
         if (idList.Count == 0)
@@ -374,7 +378,7 @@ public static class MediaCache
         foreach (var id in idList)
         {
             using var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Media WHERE Id = @Id AND Kind = 'Music'";
+            cmd.CommandText = "DELETE FROM Media WHERE Id = @Id AND Kind IN ('Music', 'Audiobook')";
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.ExecuteNonQuery();
         }
@@ -747,7 +751,9 @@ public static class MediaCache
         item.UseStartTime = (GetNullableInt(reader, "UseStartTime") ?? 0) != 0;
         item.UseStopTime = (GetNullableInt(reader, "UseStopTime") ?? 0) != 0;
 
-        if (kind == MediaKind.Music)
+        // A cached local file (music or audiobook) was analyzed before it was saved - mark it so
+        // the scan's delta logic doesn't re-run TagLib on unchanged files.
+        if (kind is MediaKind.Music or MediaKind.Audiobook)
         {
             item.IsAnalyzed = true;
         }
