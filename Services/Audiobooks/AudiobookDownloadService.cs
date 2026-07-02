@@ -261,6 +261,148 @@ public sealed class AudiobookDownloadService
     }
 
     /// <summary>
+    /// Downloads a purchased Libro.fm book into the same .audiobooks layout: the packaged m4b when
+    /// the title has one (single bookmarkable file), otherwise the MP3 zip parts extracted in
+    /// order. Libro.fm's files ship professionally tagged with embedded art, so no catalog stamp -
+    /// living under .audiobooks is what kinds them. Job-keyed as "libro:{isbn}".
+    /// </summary>
+    public Task EnqueueLibroAsync(LibroBook book, string token, string libraryRoot, CancellationToken ct = default)
+    {
+        var listing = ListingFor(book);
+        if (string.IsNullOrWhiteSpace(libraryRoot))
+        {
+            _log.Warning("EnqueueLibroAsync skipped for {Isbn}: library root unset", book.Isbn);
+            return Task.CompletedTask;
+        }
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (!_jobs.TryAdd(listing.Identifier, cts))
+        {
+            cts.Dispose();
+            return Task.CompletedTask;
+        }
+
+        Started?.Invoke(listing);
+        return Task.Run(() => RunLibroJob(book, listing, token, libraryRoot, cts.Token), cts.Token);
+    }
+
+    /// <summary>The .audiobooks-layout identity of a Libro.fm purchase - GetState works off this too.</summary>
+    public static AudiobookListing ListingFor(LibroBook book) => new()
+    {
+        Identifier = $"libro:{book.Isbn}",
+        Title = book.Title,
+        Creator = book.AuthorDisplay,
+    };
+
+    private async Task RunLibroJob(LibroBook book, AudiobookListing listing, string token, string libraryRoot, CancellationToken ct)
+    {
+        try
+        {
+            var dir = TargetDirectoryFor(libraryRoot, listing);
+            Directory.CreateDirectory(dir);
+
+            // Prefer the packaged m4b; fall back to the MP3 zip parts.
+            var m4bUrl = await LibroFmClient.GetM4bUrlAsync(token, book.Isbn, ct);
+            if (!string.IsNullOrWhiteSpace(m4bUrl))
+            {
+                var name = SanitizeFileName(LibroFmClient.FileNameFromPresignedUrl(m4bUrl) ?? $"{listing.Title ?? book.Isbn}.m4b");
+                await DownloadFileAsync(m4bUrl, Path.Combine(dir, name), listing, received: 0, totalBytes: 0, fileIndex: 1, fileCount: 1, ct);
+            }
+            else
+            {
+                var manifest = await LibroFmClient.GetMp3ManifestAsync(token, book.Isbn, ct)
+                    ?? throw new InvalidOperationException("Libro.fm offered neither an m4b nor an MP3 manifest for this title.");
+                if (manifest.Parts.Count == 0)
+                {
+                    throw new InvalidOperationException("The title's download manifest is empty.");
+                }
+
+                long totalBytes = manifest.Parts.Sum(p => p.SizeBytes);
+                long received = 0;
+                for (int i = 0; i < manifest.Parts.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var part = manifest.Parts[i];
+                    if (string.IsNullOrWhiteSpace(part.Url))
+                    {
+                        continue;
+                    }
+
+                    // Each part is a zip of MP3 chapters: stream it to a temp file, then extract
+                    // audio entries through the .partial → atomic-move discipline.
+                    var tempZip = Path.Combine(Path.GetTempPath(), "orgz_libro_" + Guid.NewGuid().ToString("N") + ".zip");
+                    try
+                    {
+                        received = await DownloadFileAsync(part.Url, tempZip, listing, received, totalBytes, i + 1, manifest.Parts.Count, ct);
+                        using var zip = System.IO.Compression.ZipFile.OpenRead(tempZip);
+                        foreach (var entry in zip.Entries.Where(e => FileScanner.IsSupportedExtension(e.Name)))
+                        {
+                            var target = Path.Combine(dir, SanitizeFileName(entry.Name));
+                            var partial = target + ".partial";
+                            using (var entryStream = entry.Open())
+                            using (var outStream = new FileStream(partial, FileMode.Create, FileAccess.Write))
+                            {
+                                await entryStream.CopyToAsync(outStream, ct);
+                            }
+                            File.Move(partial, target, overwrite: true);
+                        }
+                    }
+                    finally
+                    {
+                        try { File.Delete(tempZip); } catch { }
+                    }
+                }
+            }
+
+            RemoveJob(listing.Identifier);
+            _log.Information("Downloaded Libro.fm purchase {Isbn} -> {Dir}", book.Isbn, dir);
+            Completed?.Invoke(listing);
+        }
+        catch (OperationCanceledException)
+        {
+            RemoveJob(listing.Identifier);
+            _log.Information("Libro.fm download cancelled: {Isbn}", book.Isbn);
+            Failed?.Invoke(listing.Identifier, new OperationCanceledException());
+        }
+        catch (Exception ex)
+        {
+            RemoveJob(listing.Identifier);
+            _log.Warning(ex, "Libro.fm download failed: {Isbn}", book.Isbn);
+            Failed?.Invoke(listing.Identifier, ex);
+        }
+    }
+
+    /// <summary>Streams one URL to disk via .partial + atomic rename, emitting whole-book progress.
+    /// Returns the updated received-byte count.</summary>
+    private async Task<long> DownloadFileAsync(string url, string target, AudiobookListing listing, long received, long totalBytes, int fileIndex, int fileCount, CancellationToken ct)
+    {
+        var partial = target + ".partial";
+        using (var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct))
+        {
+            resp.EnsureSuccessStatusCode();
+            if (totalBytes == 0)
+            {
+                totalBytes = resp.Content.Headers.ContentLength ?? 0;
+            }
+            using var src = await resp.Content.ReadAsStreamAsync(ct);
+            using var dst = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.Read);
+            var buf = new byte[64 * 1024];
+            int read;
+            while ((read = await src.ReadAsync(buf, ct)) > 0)
+            {
+                await dst.WriteAsync(buf.AsMemory(0, read), ct);
+                received += read;
+                if (totalBytes > 0)
+                {
+                    ProgressChanged?.Invoke(new AudiobookDownloadProgress(listing.Identifier, listing.Title ?? "", received, totalBytes, fileIndex, fileCount));
+                }
+            }
+        }
+        File.Move(partial, target, overwrite: true);
+        return received;
+    }
+
+    /// <summary>
     /// Where an imported (user-owned) file lands: {library}/.audiobooks/{Author}/{Book}/{name},
     /// author/book resolved from the file's tags with filename fallbacks. Living there then makes
     /// it an audiobook regardless of how it's tagged - that IS the import gesture.

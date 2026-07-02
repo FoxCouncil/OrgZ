@@ -239,6 +239,65 @@
 								</ItemsControl>
 							</controls:PodcastsCard.BodyContent>
 						</controls:PodcastsCard>
+
+						<!-- Libro.fm - the login store: the user's own DRM-free purchases. Checkout has
+						     no API and stays on libro.fm; this signs in, lists purchases, downloads. -->
+						<controls:PodcastsCard Title="Libro.fm">
+							<controls:PodcastsCard.HeaderContent>
+								<Button Command="{Binding SignOutOfLibroCommand}" IsVisible="{Binding IsLibroLoggedIn}"
+								        Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" VerticalAlignment="Center">
+									<TextBlock Text="Sign Out" FontSize="12" Foreground="{StaticResource OrgZCarouselTextBrush}" />
+								</Button>
+							</controls:PodcastsCard.HeaderContent>
+							<controls:PodcastsCard.BodyContent>
+								<StackPanel Margin="14,10" Spacing="8">
+									<Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="8" IsVisible="{Binding !IsLibroLoggedIn}">
+										<TextBox Grid.Column="0" Text="{Binding LibroUsername, Mode=TwoWay}" PlaceholderText="Email" FontSize="12" />
+										<TextBox Grid.Column="1" Text="{Binding LibroPassword, Mode=TwoWay}" PasswordChar="●" PlaceholderText="Password" FontSize="12">
+											<TextBox.KeyBindings>
+												<KeyBinding Gesture="Enter" Command="{Binding SignInToLibroCommand}" />
+											</TextBox.KeyBindings>
+										</TextBox>
+										<Button Grid.Column="2" Command="{Binding SignInToLibroCommand}" Padding="14,6" Cursor="Hand"
+										        Background="{StaticResource OrgZCarouselButtonBrush}" Foreground="#1A1405">
+											<TextBlock Text="Sign In" FontSize="12" FontWeight="SemiBold" />
+										</Button>
+									</Grid>
+
+									<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLibroBusy}" Height="4" />
+
+									<ItemsControl ItemsSource="{Binding LibroBooks}" IsVisible="{Binding IsLibroLoggedIn}">
+										<ItemsControl.ItemsPanel>
+											<ItemsPanelTemplate>
+												<UniformGrid Columns="6" />
+											</ItemsPanelTemplate>
+										</ItemsControl.ItemsPanel>
+										<ItemsControl.ItemTemplate>
+											<DataTemplate DataType="vm:LibroBookRow">
+												<Button Classes="podcastTile" Click="LibroBook_Click" Tag="{Binding}">
+													<StackPanel Spacing="4">
+														<Border Classes="tileArt" Height="110">
+															<Grid>
+																<Image img:RemoteImage.Url="{Binding Book.CoverUrl}" Stretch="UniformToFill" />
+																<i:Icon Value="fa-solid fa-circle-check" FontSize="18"
+																        Foreground="{StaticResource OrgZAccentGoldBrush}"
+																        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0"
+																        IsVisible="{Binding IsDownloaded}" />
+															</Grid>
+														</Border>
+														<TextBlock Text="{Binding Book.Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
+														<TextBlock Text="{Binding Book.AuthorDisplay}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
+													</StackPanel>
+												</Button>
+											</DataTemplate>
+										</ItemsControl.ItemTemplate>
+									</ItemsControl>
+
+									<TextBlock Text="{Binding LibroStatusText}" FontSize="11" Foreground="{StaticResource OrgZAccentGoldBrush}"
+									           IsVisible="{Binding LibroStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
+								</StackPanel>
+							</controls:PodcastsCard.BodyContent>
+						</controls:PodcastsCard>
 					</StackPanel>
 				</StackPanel>
 			</ScrollViewer>

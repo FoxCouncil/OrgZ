@@ -27,4 +27,13 @@ public partial class AudiobooksPanel : UserControl
             _ = vm.OpenBookAsync(book);
         }
     }
+
+    private void LibroBook_Click(object? sender, RoutedEventArgs e)
+    {
+        // A purchased tile IS its download gesture; an already-downloaded one has nothing to do.
+        if (Vm is { } vm && (sender as Control)?.Tag is LibroBookRow { IsDownloaded: false } row)
+        {
+            _ = vm.DownloadLibroBookAsync(row.Book);
+        }
+    }
 }
