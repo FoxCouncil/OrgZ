@@ -123,6 +123,26 @@ public partial class Sidebar : UserControl
         menu.Open(treeItem);
     }
 
+    private void LibraryListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    {
+        // Only the Audiobooks entry carries a menu today - the import gesture for books the user
+        // already owns. Everything else swallows the click rather than showing an empty menu.
+        var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
+        if (listBoxItem?.DataContext is not SidebarItem sb || sb.ViewConfigKey != "Audiobooks" || DataContext is not MainWindowViewModel vm)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var menu = new Avalonia.Controls.ContextMenu();
+        var import = new Avalonia.Controls.MenuItem { Header = "Import Audiobooks…" };
+        import.Click += (_, _) => _ = vm.ImportAudiobooksAsync();
+        menu.Items.Add(import);
+
+        listBoxItem.ContextMenu = menu;
+        menu.Open(listBoxItem);
+    }
+
     private void PlaylistListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
     {
         var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();

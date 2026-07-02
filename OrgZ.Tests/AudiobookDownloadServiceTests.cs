@@ -286,6 +286,53 @@ public class AudiobookDownloadServiceTests
         }
     }
 
+    // ===== Own-file import - tags pick the shelf, filenames are the fallback =====
+
+    [Fact]
+    public void Import_destination_comes_from_the_files_tags()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "orgz-abimp-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var wav = Path.Combine(dir, "chapter 01.wav");
+            WriteMinimalWav(wav);
+            using (var file = TagLib.File.Create(wav))
+            {
+                var id3 = (TagLib.Id3v2.Tag)file.GetTag(TagLib.TagTypes.Id3v2, create: true);
+                id3.Performers = ["Dan Simmons"];
+                id3.Album = "Hyperion";
+                file.Save();
+            }
+
+            Assert.Equal(@"C:\Music\.audiobooks\Dan Simmons\Hyperion\chapter 01.wav",
+                AudiobookDownloadService.ImportDestinationFor(@"C:\Music", wav));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Import_destination_falls_back_to_the_filename_for_untagged_files()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "orgz-abimp2-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var m4b = Path.Combine(dir, "Some Book.m4b");
+            File.WriteAllBytes(m4b, new byte[16]);   // TagLib can't read it - fallbacks stand
+
+            Assert.Equal(@"C:\Music\.audiobooks\Unknown Author\Some Book\Some Book.m4b",
+                AudiobookDownloadService.ImportDestinationFor(@"C:\Music", m4b));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
     // ===== Cover picking - the real cover file beats the image-service thumb =====
 
     [Fact]
