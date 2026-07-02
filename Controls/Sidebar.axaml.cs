@@ -83,17 +83,11 @@ public partial class Sidebar : UserControl
         // CD audio uses the fixed "CdAudio" key. Branch the menu accordingly.
         if (sb.ViewConfigKey?.StartsWith("Device:") == true)
         {
-            // One Sync gesture: "Sync" runs the saved plan (or opens the settings on first sync).
-            // Configuring what to sync lives under the Settings submenu - NOT a second root item.
+            // Top level is the two everyday actions only - Sync and Eject. Everything else
+            // (config + the destructive erase) lives under Settings.
             var sync = new Avalonia.Controls.MenuItem { Header = "Sync" };
             sync.Click += async (_, _) => await vm.SyncDeviceAsync(sb);
             menu.Items.Add(sync);
-
-            menu.Items.Add(new Avalonia.Controls.Separator());
-
-            var refresh = new Avalonia.Controls.MenuItem { Header = "Refresh Device Info" };
-            refresh.Click += (_, _) => vm.RefreshDeviceInfo(sb);
-            menu.Items.Add(refresh);
 
             var eject = new Avalonia.Controls.MenuItem { Header = "Eject" };
             eject.Click += (_, _) => vm.EjectDevice(sb);
@@ -101,9 +95,11 @@ public partial class Sidebar : UserControl
 
             menu.Items.Add(new Avalonia.Controls.Separator());
 
-            // Settings submenu: sync configuration + the destructive erase (kept off the top level
-            // where a misclick hurts).
             var settings = new Avalonia.Controls.MenuItem { Header = "Settings" };
+
+            var refresh = new Avalonia.Controls.MenuItem { Header = "Refresh Device Info" };
+            refresh.Click += (_, _) => vm.RefreshDeviceInfo(sb);
+            settings.Items.Add(refresh);
 
             var syncSettings = new Avalonia.Controls.MenuItem { Header = "Sync Settings…" };
             syncSettings.Click += async (_, _) => await vm.SyncDeviceAsync(sb, forceSettings: true);
