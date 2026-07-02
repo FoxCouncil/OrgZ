@@ -316,4 +316,22 @@ public class AudiobookMediaCacheTests : IDisposable
 
         Assert.DoesNotContain(MediaCache.LoadAll(), i => i.Id == "hyperion");
     }
+
+    [Fact]
+    public void Resume_position_round_trips_and_survives_a_reupsert()
+    {
+        MediaCache.UpsertMusic(Audiobook("hyperion"));
+
+        MediaCache.UpdatePlaybackPosition("hyperion", 1_234_567);
+        Assert.Equal(1_234_567, MediaCache.LoadAll().Single(i => i.Id == "hyperion").LastPositionMs);
+
+        // The general upsert must NOT own this column - a re-analysis writing a fresh item
+        // (LastPositionMs 0) can't clobber the live resume point.
+        MediaCache.UpsertMusic(Audiobook("hyperion"));
+        Assert.Equal(1_234_567, MediaCache.LoadAll().Single(i => i.Id == "hyperion").LastPositionMs);
+
+        // Finishing the book resets it.
+        MediaCache.UpdatePlaybackPosition("hyperion", 0);
+        Assert.Equal(0, MediaCache.LoadAll().Single(i => i.Id == "hyperion").LastPositionMs);
+    }
 }

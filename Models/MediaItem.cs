@@ -331,4 +331,10 @@ public partial class MediaItem : ObservableObject
 
     [ObservableProperty]
     private bool _useStopTime;
+
+    /// <summary>
+    /// Audiobook resume point (ms). Saved throttled during playback, applied on the next play,
+    /// reset to 0 when the book finishes. Meaningless (always 0) for other kinds.
+    /// </summary>
+    public long LastPositionMs { get; set; }
 }
