@@ -438,7 +438,7 @@ public static class ListViewConfigs
             ShowRadioFilterPanel = true,
             // Tags carries the canonical RadioGenre display name set by the
             // bundled-stations loader. Grouping by it gives clean headers
-            // matching the nubango taxonomy ("Alternative Rock", "Top 40 / Pop",
+            // matching the OrgZ taxonomy ("Alternative Rock", "Synthwave",
             // etc.) without going through GenreNormalizer's fuzzy rules.
             GroupByPath = "Tags",
             Host = ViewHost.GroupedGrid,

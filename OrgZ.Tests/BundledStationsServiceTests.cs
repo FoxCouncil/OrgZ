@@ -15,8 +15,8 @@ public class BundledStationsServiceTests
         {
           "schemaVersion": 1,
           "stations": [
-            { "id": "s1", "name": "Eighties FM", "streamUrl": "http://e.fm/s", "streamFormat": "mp3", "bitrate": 128, "genreId": 2, "country": "USA", "countryCode": "US", "homepage": "http://e.fm", "logoUrl": "http://e.fm/l.png" },
-            { "id": "s2", "name": "Pop HLS", "streamUrl": "http://h.fm/s.m3u8", "streamFormat": "hls", "bitrate": 0, "genreId": 26, "country": "UK", "countryCode": "GB" },
+            { "id": "s1", "name": "Eighties FM", "streamUrl": "http://e.fm/s", "streamFormat": "mp3", "bitrate": 128, "genreId": 4, "country": "USA", "countryCode": "US", "homepage": "http://e.fm", "logoUrl": "http://e.fm/l.png" },
+            { "id": "s2", "name": "Synthwave HLS", "streamUrl": "http://h.fm/s.m3u8", "streamFormat": "hls", "bitrate": 0, "genreId": 28, "country": "UK", "countryCode": "GB" },
             { "id": "", "name": "No Id", "streamUrl": "http://x", "streamFormat": "mp3", "bitrate": 64, "genreId": 1, "country": "X", "countryCode": "X" },
             { "id": "s4", "name": "No Url", "streamUrl": "", "streamFormat": "mp3", "bitrate": 64, "genreId": 1, "country": "X", "countryCode": "X" }
           ]
@@ -49,8 +49,8 @@ public class BundledStationsServiceTests
     public void ParseStations_maps_genreId_to_display_tag()
     {
         var items = BundledStationsService.ParseStations(Json);
-        Assert.Equal("80's", items.First(i => i.Id == "s1").Tags);          // genreId 2
-        Assert.Equal("Top 40 / Pop", items.First(i => i.Id == "s2").Tags);  // genreId 26
+        Assert.Equal("80s", items.First(i => i.Id == "s1").Tags);        // genreId 4
+        Assert.Equal("Synthwave", items.First(i => i.Id == "s2").Tags);  // genreId 28
     }
 
     [Fact]

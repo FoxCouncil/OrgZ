@@ -306,9 +306,10 @@ public partial class SettingsDialog : Window
         StatRadioFavorites.Text = favorites.ToString("N0");
         StatRadioCountries.Text = countries.ToString("N0");
 
-        // Radio Genres (normalized, iTunes-style buckets)
+        // Radio Genres - Tags carries the canonical taxonomy display name
+        // (bundled loader and the Add Station dialog both write it).
         var genreGroups = radioItems
-            .GroupBy(s => s.NormalizedGenre)
+            .GroupBy(s => string.IsNullOrWhiteSpace(s.Tags) ? "—" : s.Tags!)
             .OrderByDescending(g => g.Count())
             .ToList();
 

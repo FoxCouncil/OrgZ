@@ -307,7 +307,7 @@ public partial class MediaInfoDialog : Window
         RadioInfoName.Text = item.Title ?? "";
         RadioInfoTags.Text = item.Tags ?? "";
         RadioInfoStreamUrl.Text = item.StreamUrl ?? "";
-        RadioInfoSource.Text = item.NormalizedGenre;
+        RadioInfoSource.Text = string.IsNullOrWhiteSpace(item.Tags) ? "—" : item.Tags;
         RadioInfoCountry.Text = item.Country ?? "";
         RadioInfoHomepage.Text = item.HomepageUrl ?? "";
         RadioInfoCodec.Text = item.CodecLabel;

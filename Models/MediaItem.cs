@@ -293,12 +293,6 @@ public partial class MediaItem : ObservableObject
 
     public string? Tags { get; init; }
 
-    /// <summary>
-    /// Provider-neutral canonical genre derived from <see cref="Tags"/> via <see cref="GenreNormalizer"/>.
-    /// Used as the DataGrid group key for the Radio view.
-    /// </summary>
-    public string NormalizedGenre => Services.GenreNormalizer.ExtractPrimaryGenre(Tags);
-
     public string? Codec { get; init; }
 
     public string CodecLabel => Codec?.ToUpperInvariant() switch
