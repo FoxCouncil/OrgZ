@@ -135,6 +135,40 @@ public static class ArchiveOrgClient
             : null;
     }
 
+    /// <summary>
+    /// The item's best cover image file: the largest non-thumbnail JPEG/PNG the item carries -
+    /// the real cover LibriVox uploads, not the ~180px image-service thumb. Null when the item
+    /// has no usable image (callers can fall back to <see cref="AudiobookListing.CoverUrl"/>).
+    /// </summary>
+    internal static ArchiveItemFile? PickCoverFile(IReadOnlyList<ArchiveItemFile> files)
+        => files
+            .Where(f => f.Name is not null
+                        && (f.Name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)
+                            || f.Name.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase)
+                            || f.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                        && f.Format?.Contains("thumb", StringComparison.OrdinalIgnoreCase) != true)
+            .OrderByDescending(f => long.TryParse(f.Size, out var s) ? s : 0)
+            .FirstOrDefault();
+
+    /// <summary>
+    /// archive.org descriptions are HTML fragments. Renders them as plain text: br/p become
+    /// line breaks, tags drop, entities decode, whitespace collapses.
+    /// </summary>
+    internal static string? StripHtml(string? html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return null;
+        }
+
+        var text = System.Text.RegularExpressions.Regex.Replace(html, @"<\s*(br|/p)\s*/?\s*>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", string.Empty);
+        text = System.Net.WebUtility.HtmlDecode(text);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]+", " ");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\n{3,}", "\n\n");
+        return text.Trim();
+    }
+
     /// <summary>Test seam: the exact deserialization the live path uses, runnable on fixtures.</summary>
     internal static T? ParseJson<T>(string json) where T : class
         => JsonSerializer.Deserialize<T>(json, JsonOpts);

@@ -329,22 +329,6 @@ public partial class AudiobooksViewModel : ObservableObject
         return rows;
     }
 
-    /// <summary>
-    /// archive.org descriptions are HTML fragments. Renders them as plain text: br/p become
-    /// line breaks, tags drop, entities decode, whitespace collapses.
-    /// </summary>
-    internal static string? StripHtml(string? html)
-    {
-        if (string.IsNullOrWhiteSpace(html))
-        {
-            return null;
-        }
-
-        var text = System.Text.RegularExpressions.Regex.Replace(html, @"<\s*(br|/p)\s*/?\s*>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        text = System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", string.Empty);
-        text = System.Net.WebUtility.HtmlDecode(text);
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]+", " ");
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\n{3,}", "\n\n");
-        return text.Trim();
-    }
+    /// <summary>Shared with the download stamp - see <see cref="ArchiveOrgClient.StripHtml"/>.</summary>
+    internal static string? StripHtml(string? html) => ArchiveOrgClient.StripHtml(html);
 }

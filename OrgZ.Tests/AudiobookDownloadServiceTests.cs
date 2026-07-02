@@ -123,10 +123,18 @@ public class AudiobookDownloadServiceTests
         }
     }
 
-    // ===== The genre stamp =====
+    // ===== The catalog-metadata stamp =====
+
+    private static readonly ArchiveItemMetadataFields Meta = new()
+    {
+        Title = "The Book",
+        Creator = "Jane Author",
+        Description = "<i>A story.</i><br />Second line.",
+        Year = "1902",
+    };
 
     [Fact]
-    public void Genre_stamp_marks_untagged_files_and_leaves_selfidentified_ones_alone()
+    public void Stamp_writes_the_catalog_onto_a_bare_file()
     {
         var dir = Path.Combine(Path.GetTempPath(), "orgz-abtag-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -134,24 +142,74 @@ public class AudiobookDownloadServiceTests
         {
             var wav = Path.Combine(dir, "chapter.wav");
             WriteMinimalWav(wav);
+            var cover = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3 };   // JPEG-ish payload - TagLib stores what it's given
 
-            AudiobookDownloadService.EnsureAudiobookGenre(wav);
-            using (var file = TagLib.File.Create(wav))
-            {
-                Assert.True(AudiobookDetector.TagsSayAudiobook(file));
-            }
+            AudiobookDownloadService.StampMetadata(wav, Book(), Meta, cover, trackNumber: 2, trackCount: 12);
 
-            // Idempotent: a second stamp must not stack another genre entry.
-            AudiobookDownloadService.EnsureAudiobookGenre(wav);
-            using (var file = TagLib.File.Create(wav))
-            {
-                Assert.Single(file.Tag.Genres, g => g.Contains("audiobook", StringComparison.OrdinalIgnoreCase));
-            }
+            using var file = TagLib.File.Create(wav);
+            Assert.Equal("Jane Author", file.Tag.FirstPerformer);
+            Assert.Equal("The Book", file.Tag.Album);
+            Assert.Equal("The Book — Part 2", file.Tag.Title);   // multi-file sets number their parts
+            Assert.Equal(2u, file.Tag.Track);
+            Assert.Equal(12u, file.Tag.TrackCount);
+            Assert.Equal(1902u, file.Tag.Year);
+            Assert.Equal("A story.\nSecond line.", file.Tag.Comment);   // HTML-stripped description
+            Assert.True(AudiobookDetector.TagsSayAudiobook(file));
+            Assert.Single(file.Tag.Pictures);
         }
         finally
         {
             try { Directory.Delete(dir, recursive: true); } catch { }
         }
+    }
+
+    [Fact]
+    public void Stamp_respects_what_the_file_already_carries_and_never_stacks_genres()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "orgz-abtag2-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var wav = Path.Combine(dir, "chapter.wav");
+            WriteMinimalWav(wav);
+            using (var file = TagLib.File.Create(wav))
+            {
+                var id3 = (TagLib.Id3v2.Tag)file.GetTag(TagLib.TagTypes.Id3v2, create: true);
+                id3.Title = "Chapter One — Down the Rabbit-Hole";
+                id3.Year = 1865;
+                file.Save();
+            }
+
+            AudiobookDownloadService.StampMetadata(wav, Book(), Meta, coverBytes: null, trackNumber: 1, trackCount: 12);
+            AudiobookDownloadService.StampMetadata(wav, Book(), Meta, coverBytes: null, trackNumber: 1, trackCount: 12);   // idempotent
+
+            using var stamped = TagLib.File.Create(wav);
+            Assert.Equal("Chapter One — Down the Rabbit-Hole", stamped.Tag.Title);   // the file's own title wins
+            Assert.Equal(1865u, stamped.Tag.Year);                                    // as does its year
+            Assert.Equal("The Book", stamped.Tag.Album);                              // the catalog is authoritative for the book fields
+            Assert.Single(stamped.Tag.Genres, g => g.Contains("audiobook", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    // ===== Cover picking - the real cover file beats the image-service thumb =====
+
+    [Fact]
+    public void Cover_picker_takes_the_largest_nonthumb_image()
+    {
+        List<ArchiveItemFile> files =
+        [
+            new() { Name = "book_thumb.jpg", Format = "JPEG Thumb", Size = "9000000" },
+            new() { Name = "book_cover.jpg", Format = "JPEG", Size = "500000" },
+            new() { Name = "book_small.png", Format = "PNG", Size = "20000" },
+            new() { Name = "chapter.mp3", Format = "64Kbps MP3", Size = "26502144" },
+        ];
+
+        Assert.Equal("book_cover.jpg", ArchiveOrgClient.PickCoverFile(files)?.Name);
+        Assert.Null(ArchiveOrgClient.PickCoverFile([new ArchiveItemFile { Name = "chapter.mp3", Format = "64Kbps MP3" }]));
     }
 
     private static void WriteMinimalWav(string path)

@@ -122,6 +122,11 @@ public sealed class AudiobookDownloadService
             var dir = TargetDirectoryFor(libraryRoot, book);
             Directory.CreateDirectory(dir);
 
+            // The item's real cover (largest non-thumb image file), fetched once and embedded in
+            // every audio file below; the image-service thumb is the fallback. Best-effort - a
+            // book without art still downloads.
+            var coverBytes = await FetchCoverAsync(book, item.Files, ct);
+
             long totalBytes = files.Sum(f => ParseSize(f.Size));
             long received = 0;
 
@@ -163,13 +168,11 @@ public sealed class AudiobookDownloadService
 
                 File.Move(partial, target, overwrite: true);
 
-                // MP3 chapters need the genre tag for the scan to promote them; the m4b container
-                // says audiobook on its own. Tagging after the atomic move is fine - if the folder
-                // watcher raced in between, the mtime change makes the delta scan re-analyze.
-                if (name.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase))
-                {
-                    EnsureAudiobookGenre(target);
-                }
+                // Stamp the feed metadata into the file - LibriVox uploads carry threadbare tags,
+                // and we're holding the authoritative catalog data. Stamping after the atomic move
+                // is fine: if the folder watcher raced in between, the mtime change makes the
+                // delta scan re-analyze.
+                StampMetadata(target, book, item.Metadata, coverBytes, trackNumber: i + 1, trackCount: files.Count);
             }
 
             // Drop the in-flight marker BEFORE signaling, so a Completed handler that re-probes
@@ -221,27 +224,84 @@ public sealed class AudiobookDownloadService
     internal static long ParseSize(string? size)
         => long.TryParse(size, out var bytes) && bytes > 0 ? bytes : 0;
 
+    private static async Task<byte[]?> FetchCoverAsync(AudiobookListing book, IReadOnlyList<ArchiveItemFile> files, CancellationToken ct)
+    {
+        try
+        {
+            var coverFile = ArchiveOrgClient.PickCoverFile(files);
+            var url = coverFile?.Name is { } name
+                ? ArchiveOrgClient.DownloadUrlFor(book.Identifier, name)
+                : book.CoverUrl;
+            return await _http.GetByteArrayAsync(url, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Cover fetch failed for {Identifier} — downloading without art", book.Identifier);
+            return null;
+        }
+    }
+
     /// <summary>
-    /// Stamps an "Audiobook" genre onto a file whose tags don't already self-identify - the
-    /// signal <see cref="AudiobookDetector"/> promotes on. Best-effort: a tagging failure is
-    /// logged, and the file simply lands as Music until the user re-kinds it.
+    /// Writes the catalog's metadata into a downloaded file, so Get Info (and any player, and the
+    /// iPod sync later) sees the real book instead of LibriVox's threadbare upload tags. The
+    /// catalog is authoritative for author/book/track-order/genre; title, year, comment, and art
+    /// only fill in when the file doesn't already carry them. Best-effort: a tagging failure is
+    /// logged and the download still succeeds (an untagged MP3 lands as Music until re-kinded -
+    /// unless it lives under .audiobooks, where location decides).
     /// </summary>
-    internal static void EnsureAudiobookGenre(string path)
+    internal static void StampMetadata(string path, AudiobookListing book, ArchiveItemMetadataFields? meta, byte[]? coverBytes, int trackNumber, int trackCount)
     {
         try
         {
             using var file = TagLib.File.Create(path);
-            if (AudiobookDetector.TagsSayAudiobook(file))
+            var tag = file.Tag;
+
+            if (!string.IsNullOrWhiteSpace(book.Creator))
             {
-                return;
+                tag.Performers = [book.Creator];
+                tag.AlbumArtists = [book.Creator];
             }
-            var genres = (file.Tag.Genres ?? []).Append("Audiobook").ToArray();
-            file.Tag.Genres = genres;
+            if (!string.IsNullOrWhiteSpace(book.Title))
+            {
+                tag.Album = book.Title;
+                if (string.IsNullOrWhiteSpace(tag.Title))
+                {
+                    tag.Title = trackCount > 1 ? $"{book.Title} — Part {trackNumber}" : book.Title;
+                }
+            }
+
+            tag.Track = (uint)trackNumber;
+            tag.TrackCount = (uint)trackCount;
+
+            if (!AudiobookDetector.TagsSayAudiobook(file))
+            {
+                tag.Genres = (tag.Genres ?? []).Append("Audiobook").ToArray();
+            }
+
+            if (tag.Year == 0 && uint.TryParse(meta?.Year, out var year) && year > 0)
+            {
+                tag.Year = year;
+            }
+
+            if (string.IsNullOrWhiteSpace(tag.Comment) && ArchiveOrgClient.StripHtml(meta?.Description) is { } description)
+            {
+                tag.Comment = description.Length > 2000 ? description[..2000] : description;
+            }
+
+            if ((tag.Pictures?.Length ?? 0) == 0 && coverBytes is { Length: > 0 })
+            {
+                tag.Pictures = [new TagLib.Picture(new TagLib.ByteVector(coverBytes)) { Type = TagLib.PictureType.FrontCover }];
+            }
+
             file.Save();
         }
         catch (Exception ex)
         {
-            _log.Warning(ex, "Could not stamp the Audiobook genre on {Path}", path);
+            _log.Warning(ex, "Could not stamp catalog metadata on {Path}", path);
         }
     }
 }
