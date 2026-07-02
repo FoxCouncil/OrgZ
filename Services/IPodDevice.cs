@@ -549,6 +549,19 @@ public sealed class RockboxIPod : IPodDevice
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() => FilesystemLibraryScanner.Scan(Device, onBatch, onProgress, ct), ct);
 
+    public override Task<int> EraseAsync(CancellationToken ct = default)
+        => Task.Run(() =>
+        {
+            // Wipe the OrgZ-managed content roots - music, podcasts, playlists - and NOTHING else.
+            // /.rockbox is the firmware: the device must stay bootable, so it is never touched, and
+            // neither is anything else the user keeps on the drive. Returns audio files removed
+            // (playlist files go too but don't count - same accounting as the other tiers).
+            int removed = DeleteFilesUnder(Path.Combine(MountPath, "Music"))
+                        + DeleteFilesUnder(Path.Combine(MountPath, "Podcasts"));
+            DeleteFilesUnder(Path.Combine(MountPath, "Playlists"));
+            return removed;
+        }, ct);
+
     private static string BuildMusicRelativePath(MediaItem track)
     {
         var artist = Sanitize(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
@@ -561,17 +574,19 @@ public sealed class RockboxIPod : IPodDevice
 }
 
 /// <summary>
-/// iPod Shuffle 1G/2G: screenless, no iTunesDB - audio files live under <c>iPod_Control/Music/F00</c> and
-/// the play order is the big-endian <c>iTunesSD</c> track list (<see cref="ShuffleSdWriter"/>). No named
-/// playlists or podcast grouping (nowhere to show them), so those fold into the single track list.
+/// iPod Shuffle: screenless, no iTunesDB - audio files live under <c>iPod_Control/Music/F00</c> and
+/// the play order is the <c>iTunesSD</c> track list (big-endian classic on 1G/2G, little-endian
+/// "bdhs" on 3G/4G). Podcasts and playlists ARE offered, they just fold into the single track
+/// list: episodes sync as plain tracks (no grouping to show), and syncing a playlist replaces the
+/// device's whole list - which is what a Shuffle is.
 /// </summary>
 public sealed class ShuffleIPod : IPodDevice
 {
     public ShuffleIPod(ConnectedDevice device) : base(device) { }
 
     public override bool SupportsDatabaseWrite => true;
-    public override bool SupportsPlaylists => false;   // one shuffle list, no named playlists
-    public override bool SupportsPodcasts => false;    // no podcast concept; episodes sync as plain tracks
+    public override bool SupportsPlaylists => true;    // the playlist BECOMES the device's one list
+    public override bool SupportsPodcasts => true;     // episodes land as plain tracks
     public override bool SupportsArtwork => false;
 
     private string ITunesDir => Path.Combine(MountPath, "iPod_Control", "iTunes");

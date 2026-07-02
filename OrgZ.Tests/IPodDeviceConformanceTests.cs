@@ -58,7 +58,7 @@ public class IPodDeviceConformanceTests
     //          generation      dbWrite playlists podcasts artwork
     [InlineData("Video 5.5G",   true,   true,     true,    true)]
     [InlineData("Nano 5G",      true,   true,     true,    true)]
-    [InlineData("Shuffle 2G",   true,   false,    false,   false)]
+    [InlineData("Shuffle 2G",   true,   true,     true,    false)]   // podcasts/playlists fold into the one list
     [InlineData("Nano 7G",      false,  false,    false,   false)]
     public void Capability_claims_are_the_agreed_spec(string generation, bool dbWrite, bool playlists, bool podcasts, bool artwork)
     {
@@ -175,6 +175,93 @@ public class IPodDeviceConformanceTests
             var ipod = NewBinaryIPod(mount, "Classic 7G", fireWireGuid: null);
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => ipod.AddTrackAsync(LibraryTrack(srcDir, "Nope"), "ffmpeg-not-installed"));
+        }
+        finally
+        {
+            TryDelete(mount);
+            TryDelete(srcDir);
+        }
+    }
+
+    // ── shuffle tier: podcasts + playlists fold into the single track list ────
+    // These capabilities are CLAIMED (flags true), so the lifecycle must prove them: episodes land
+    // as plain tracks in the iTunesSD order, and syncing a playlist REPLACES the device's list -
+    // that's what a screenless one-list device is.
+
+    [Theory]
+    [InlineData("Shuffle 2G")]   // classic big-endian iTunesSD
+    [InlineData("Shuffle 4G")]   // little-endian bdhs
+    public async Task Shuffle_tier_podcasts_land_as_tracks_and_a_playlist_replaces_the_list(string generation)
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-conf-" + Guid.NewGuid().ToString("N"));
+        var srcDir = Path.Combine(Path.GetTempPath(), "orgz-confsrc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "iTunes"));
+        Directory.CreateDirectory(srcDir);
+        try
+        {
+            var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, Name = "SHUF", IpodGeneration = generation };
+            var ipod = IPodDevice.For(device);
+            Assert.IsType<ShuffleIPod>(ipod);
+            Assert.True(ipod.SupportsPodcasts);
+            Assert.True(ipod.SupportsPlaylists);
+
+            // Podcast episodes land as plain tracks in the device list.
+            int pushed = await ipod.AddPodcastsAsync(
+            [
+                Episode(srcDir, "DEADLOCK", "Episode One"),
+                Episode(srcDir, "DEADLOCK", "Episode Two"),
+            ], "ffmpeg-not-installed");
+            Assert.Equal(2, pushed);
+            var afterPodcasts = await ipod.ReadLibraryAsync();
+            Assert.Equal(2, afterPodcasts.Tracks.Count);
+
+            // Re-pushing the same episodes adds nothing (same on-device path).
+            Assert.Equal(0, await ipod.AddPodcastsAsync([Episode(srcDir, "DEADLOCK", "Episode One")], "ffmpeg-not-installed"));
+
+            // A playlist sync REPLACES the device's one list with exactly its tracks.
+            var song = await ipod.AddTrackAsync(LibraryTrack(srcDir, "Night of Fire"), "ffmpeg-not-installed");
+            Assert.Equal(3, (await ipod.ReadLibraryAsync()).Tracks.Count);
+            await ipod.CreatePlaylistAsync("Only This", [song]);
+            var afterPlaylist = await ipod.ReadLibraryAsync();
+            var only = Assert.Single(afterPlaylist.Tracks);
+            Assert.Equal(song.FilePath, only.FilePath);
+        }
+        finally
+        {
+            TryDelete(mount);
+            TryDelete(srcDir);
+        }
+    }
+
+    // ── rockbox tier: erase empties the library, never the firmware ───────────
+
+    [Fact]
+    public async Task Rockbox_erase_empties_music_podcasts_playlists_but_never_the_firmware()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-conf-" + Guid.NewGuid().ToString("N"));
+        var srcDir = Path.Combine(Path.GetTempPath(), "orgz-confsrc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(srcDir);
+        Directory.CreateDirectory(Path.Combine(mount, ".rockbox"));
+        var firmwareFile = Path.Combine(mount, ".rockbox", "rockbox-info.txt");
+        File.WriteAllText(firmwareFile, "Version: 3.15");
+        try
+        {
+            var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.RockboxIPod, Name = "RBX" };
+            var ipod = IPodDevice.For(device);
+
+            await ipod.AddTrackAsync(LibraryTrack(srcDir, "Gas Gas Gas"), "ffmpeg-not-installed");
+            await ipod.AddPodcastsAsync([Episode(srcDir, "DEADLOCK", "Episode One")], "ffmpeg-not-installed");
+            var populated = await ipod.ReadLibraryAsync();
+            Assert.Equal(2, populated.Tracks.Count);
+            await ipod.CreatePlaylistAsync("Keepers", populated.Tracks);
+
+            int removed = await ipod.EraseAsync();
+            Assert.True(removed >= 2);   // both audio files at minimum (the /Podcasts m3u8 rides along)
+
+            var afterErase = await ipod.ReadLibraryAsync();
+            Assert.Empty(afterErase.Tracks);
+            Assert.Empty(Directory.EnumerateFiles(Path.Combine(mount, "Playlists")));
+            Assert.True(File.Exists(firmwareFile), "/.rockbox must survive an erase — the firmware lives there");
         }
         finally
         {
