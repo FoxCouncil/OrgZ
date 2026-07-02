@@ -109,7 +109,9 @@ public class FileScanner
     /// True when any directory segment between <paramref name="rootDirectory"/>
     /// and <paramref name="filePath"/> starts with a dot. Used to skip podcast
     /// downloads (.podcasts/) and any other hidden-by-convention scratch area
-    /// the user may stash inside their library.
+    /// the user may stash inside their library. ONE exemption: .audiobooks/ is
+    /// OrgZ-owned LIBRARY content (store downloads + user-dropped books) - the
+    /// dot only keeps it tidy in Explorer, the scan must still walk it.
     /// </summary>
     private static bool IsInHiddenSubdirectory(string filePath, string rootDirectory)
     {
@@ -120,6 +122,7 @@ public class FileScanner
             // Last segment is the filename itself -- a leading dot on a file
             // is fine, we only care about parent directory names being hidden.
             if (segment == Path.GetFileName(filePath)) break;
+            if (segment.Equals(AudiobookDetector.AudiobooksFolderName, StringComparison.OrdinalIgnoreCase)) continue;
             if (segment.StartsWith('.')) return true;
         }
         return false;
