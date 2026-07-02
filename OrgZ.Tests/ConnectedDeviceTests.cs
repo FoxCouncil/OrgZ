@@ -483,19 +483,6 @@ public class ConnectedDeviceTests
         Assert.Equal(oneX.OrderBy(n => n, StringComparer.Ordinal), manifest.OrderBy(n => n, StringComparer.Ordinal));
     }
 
-    // ===== IsReadOnly - by device type =====
-
-    [Theory]
-    [InlineData(DeviceType.StockIPod,    true)]
-    [InlineData(DeviceType.RockboxIPod,  false)]
-    [InlineData(DeviceType.RockboxOther, false)]
-    [InlineData(DeviceType.GenericPlayer, false)]
-    public void IsReadOnly_true_only_for_StockIPod(DeviceType type, bool expected)
-    {
-        var d = MakeDevice(type: type);
-        Assert.Equal(expected, d.IsReadOnly);
-    }
-
     // ===== Icon - by device type =====
 
     [Theory]

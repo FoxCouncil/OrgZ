@@ -88,7 +88,9 @@ public abstract class IPodDevice
     /// <summary>Resolves the right device tier for a connected device (its model + checksum).</summary>
     public static IPodDevice For(ConnectedDevice device) => device.DeviceType switch
     {
-        DeviceType.RockboxIPod or DeviceType.RockboxOther => new RockboxIPod(device),
+        // The Rockbox tier is really the FILESYSTEM tier - plain files + M3U8s, no database - which
+        // is exactly what any generic mass-storage player is too.
+        DeviceType.RockboxIPod or DeviceType.RockboxOther or DeviceType.GenericPlayer => new RockboxIPod(device),
         DeviceType.StockIPod => IPodCapabilities.ChecksumFor(device.IpodGeneration) switch
         {
             IPodChecksum.Hash72 => new Nano5gIPod(device),
@@ -96,7 +98,7 @@ public abstract class IPodDevice
             IPodChecksum.ITunesSD => new ShuffleIPod(device),
             _ => new UnsupportedIPod(device),   // hashAB+ : no open-source signer
         },
-        _ => new UnsupportedIPod(device),       // GenericPlayer / Unknown
+        _ => new UnsupportedIPod(device),       // Unknown
     };
 
     /// <summary>Maps a list of <see cref="PodcastPush"/> to the importer's episode record.</summary>
@@ -745,7 +747,8 @@ public sealed class ShuffleIPod : IPodDevice
     private static string Sanitize(string s) => string.Join("_", s.Split(Path.GetInvalidFileNameChars()));
 }
 
-/// <summary>Detected but not safely writable yet (Nano 6G+/HashAB, Shuffle 3G/4G, Touch, generic drives).</summary>
+/// <summary>Detected but not safely writable yet (Nano 6G/7G HashAB - no open-source signer - plus
+/// Touch and undetected generations). Every operation throws the loud base-class gap.</summary>
 public sealed class UnsupportedIPod : IPodDevice
 {
     public UnsupportedIPod(ConnectedDevice device) : base(device) { }

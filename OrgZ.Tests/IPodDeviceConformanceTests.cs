@@ -42,7 +42,7 @@ public class IPodDeviceConformanceTests
     [Theory]
     [InlineData(DeviceType.RockboxIPod,   typeof(RockboxIPod))]
     [InlineData(DeviceType.RockboxOther,  typeof(RockboxIPod))]
-    [InlineData(DeviceType.GenericPlayer, typeof(UnsupportedIPod))]
+    [InlineData(DeviceType.GenericPlayer, typeof(RockboxIPod))]   // any mass-storage player IS the filesystem tier
     [InlineData(DeviceType.Unknown,       typeof(UnsupportedIPod))]
     public void Factory_routes_non_stock_devices_by_type(DeviceType type, Type expectedTier)
     {
