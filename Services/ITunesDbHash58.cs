@@ -80,6 +80,13 @@ public static class ITunesDbHash58
         {
             throw new InvalidDataException("iTunesDB too small to hold a hash58 checksum.");
         }
+        // The hash region (0x58..0x6C) must sit INSIDE the mhbd header - writing past headerSize
+        // lands on the first child mhsd's magic and silently destroys the database.
+        int mhbdHeaderSize = db[4] | (db[5] << 8) | (db[6] << 16) | (db[7] << 24);
+        if (mhbdHeaderSize < 0x6C)
+        {
+            throw new InvalidDataException($"mhbd header (0x{mhbdHeaderSize:X}) is too small to hold the hash58 checksum region (needs ≥ 0x6C).");
+        }
         var fwid = ParseFireWireGuid(fireWireGuidHex);
 
         // hashing_scheme @0x30 = HASH58 (1). Set before hashing - it's covered.

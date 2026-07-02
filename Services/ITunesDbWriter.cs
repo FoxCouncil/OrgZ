@@ -70,7 +70,10 @@ public static class ITunesDbWriter
     /// </summary>
     public static ITunesDbDocument CreateEmpty()
     {
-        var mhbd = NewChunk("mhbd", 0x68);
+        // 0xBC is the mhbd header size iTunes itself writes (libgpod's layout). It must be at
+        // LEAST 0x6C: hash58 embeds its 20-byte HMAC at 0x58..0x6C INSIDE the header - a smaller
+        // header puts the hash tail on top of the first child mhsd's magic and destroys the DB.
+        var mhbd = NewChunk("mhbd", 0xBC);
         mhbd.WriteHeaderInt32(0x10, 0x19);   // db version (iPod Video / iTunes 7 era)
 
         var tracks = NewChunk("mhsd", 0x60);

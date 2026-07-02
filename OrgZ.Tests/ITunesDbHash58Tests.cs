@@ -15,10 +15,13 @@ public class ITunesDbHash58Tests
 {
     private const string Guid = "000A27001597690A";
 
-    private static byte[] MakeDb()
+    private static byte[] MakeDb(int mhbdHeaderSize = 0xBC)
     {
         var db = new byte[0x100];
         db[0] = (byte)'m'; db[1] = (byte)'h'; db[2] = (byte)'b'; db[3] = (byte)'d';
+        // A realistic mhbd header size - the hash region (0x58..0x6C) must fit INSIDE the header,
+        // and Apply refuses buffers where it wouldn't (it would overwrite the first child's magic).
+        db[4] = (byte)(mhbdHeaderSize & 0xFF); db[5] = (byte)((mhbdHeaderSize >> 8) & 0xFF);
         // give db_id (0x18) and unk_0x32 (0x32) distinctive non-zero content
         for (int i = 0; i < 8; i++) db[0x18 + i] = (byte)(0xA0 + i);
         for (int i = 0; i < 20; i++) db[0x32 + i] = (byte)(0x10 + i);
@@ -64,5 +67,13 @@ public class ITunesDbHash58Tests
     public void Rejects_missing_or_short_guid(string? guid)
     {
         Assert.Throws<InvalidOperationException>(() => ITunesDbHash58.Apply(MakeDb(), guid));
+    }
+
+    [Fact]
+    public void Rejects_an_mhbd_header_too_small_to_hold_the_hash()
+    {
+        // The 0x58..0x6C hash tail would land on the first child mhsd's magic - the corruption the
+        // conformance suite caught when signing a freshly created DB with an undersized header.
+        Assert.Throws<InvalidDataException>(() => ITunesDbHash58.Apply(MakeDb(mhbdHeaderSize: 0x68), Guid));
     }
 }
