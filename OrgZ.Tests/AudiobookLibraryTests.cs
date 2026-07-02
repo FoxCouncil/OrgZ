@@ -136,4 +136,79 @@ public class AudiobookLibraryTests : IDisposable
         Assert.False(got!.IsUserProvided);
         Assert.Contains(AudiobookLibrary.ReDownloadable(_root), a => a.SourceKey == book.Identifier);
     }
+
+    // ===== the owned-books shelf: whole books, not files =====
+
+    private string BookDir(string author, string title) => Path.Combine(_root, AudiobookDetector.AudiobooksFolderName, author, title);
+
+    private static MediaItem Chapter(string bookDir, string file, string title, string author, int track, int minutes)
+    {
+        var path = Path.Combine(bookDir, file);
+        return new MediaItem
+        {
+            Id = path, Kind = MediaKind.Audiobook, FilePath = path, FileName = file,
+            Album = title, Artist = author, Track = (uint)track, Duration = TimeSpan.FromMinutes(minutes),
+        };
+    }
+
+    [Fact]
+    public void Owned_shelf_collapses_a_multi_chapter_book_into_one_entry_in_play_order()
+    {
+        var dir = BookDir("Herman Melville", "Moby Dick");
+        var items = new[]
+        {
+            Chapter(dir, "ch02.mp3", "Moby Dick", "Herman Melville", 2, 20),
+            Chapter(dir, "ch01.mp3", "Moby Dick", "Herman Melville", 1, 30),
+            Chapter(dir, "ch03.mp3", "Moby Dick", "Herman Melville", 3, 10),
+        };
+
+        var book = Assert.Single(AudiobookLibrary.AssembleOwned(_root, items));
+        Assert.Equal("Moby Dick", book.Title);
+        Assert.Equal("Herman Melville", book.Author);
+        Assert.True(book.IsDownloaded);
+        Assert.Equal(3, book.ChapterCount);
+        Assert.Equal(TimeSpan.FromMinutes(60), book.TotalDuration);
+        Assert.Equal(new[] { "ch01.mp3", "ch02.mp3", "ch03.mp3" }, book.Chapters.Select(c => c.FileName));
+        Assert.False(book.CanReDownload);
+    }
+
+    [Fact]
+    public void Owned_shelf_shows_an_acquired_book_whose_download_is_gone_as_redownloadable()
+    {
+        AudiobookLibrary.RecordArchiveAcquisition(Archive());   // recorded, no files on disk
+
+        var entry = Assert.Single(AudiobookLibrary.AssembleOwned(_root, Array.Empty<MediaItem>()));
+        Assert.Equal("Moby Dick", entry.Title);
+        Assert.False(entry.IsDownloaded);
+        Assert.Equal(0, entry.ChapterCount);
+        Assert.True(entry.CanReDownload);
+    }
+
+    [Fact]
+    public void Owned_shelf_marks_a_downloaded_user_book_as_not_redownloadable()
+    {
+        var dir = BookDir("Cory Doctorow", "Little Brother");
+        var item = Chapter(dir, "part1.mp3", "Little Brother", "Cory Doctorow", 1, 45);
+        AudiobookLibrary.ReconcileUserFiles(_root, [item.FilePath!]);   // adopted as user-provided
+
+        var book = Assert.Single(AudiobookLibrary.AssembleOwned(_root, [item]));
+        Assert.True(book.IsDownloaded);
+        Assert.True(book.IsUserProvided);
+        Assert.False(book.CanReDownload);
+    }
+
+    [Fact]
+    public void A_downloaded_store_book_appears_once_and_is_enriched_from_its_record()
+    {
+        var book = Archive();
+        AudiobookLibrary.RecordArchiveAcquisition(book);
+        var dir = AudiobookDownloadService.TargetDirectoryFor(_root, book);
+        Directory.CreateDirectory(dir);
+        File.WriteAllBytes(Path.Combine(dir, "book.m4b"), new byte[16]);
+        var item = Chapter(dir, "book.m4b", book.Title!, book.Creator!, 1, 200);
+
+        var entry = Assert.Single(AudiobookLibrary.AssembleOwned(_root, [item]));   // once, not twice
+        Assert.True(entry.IsDownloaded);
+        Assert.Equal(book.Identifier, entry.SourceKey);   // carried over from the acquisition record
+    }
 }

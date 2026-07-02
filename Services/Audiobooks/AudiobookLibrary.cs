@@ -164,4 +164,86 @@ public static class AudiobookLibrary
         Title      = media.Title,
         Creator    = media.Creator,
     };
+
+    // ── the owned-books view ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The owned-books shelf: every book the user has, as whole books (not files). Downloaded books
+    /// collapse their chapter files into one entry; a book that's been acquired but whose download is
+    /// gone appears too, marked not-downloaded so the card can offer a re-fetch. Sorted by title.
+    /// </summary>
+    public static List<OwnedBook> AssembleOwned(string? libraryRoot, IEnumerable<MediaItem> audiobookItems)
+    {
+        var books = new List<OwnedBook>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Downloaded books - group the on-disk chapter files by their book directory.
+        foreach (var group in audiobookItems.Where(i => i.FilePath is not null).GroupBy(i => BookDirOf(i.FilePath!)))
+        {
+            var chapters = group
+                .OrderBy(i => i.Track ?? uint.MaxValue)
+                .ThenBy(i => i.FileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var rep = chapters[0];
+            var acq = libraryRoot is null ? null : AcquisitionForDir(libraryRoot, group.Key);
+
+            books.Add(new OwnedBook
+            {
+                BookFolder     = group.Key,
+                Title          = rep.Album ?? Path.GetFileName(group.Key),
+                Author         = rep.Artist ?? Path.GetFileName(Path.GetDirectoryName(group.Key) ?? ""),
+                ChapterCount   = chapters.Count,
+                TotalDuration  = TimeSpan.FromTicks(chapters.Sum(c => (c.Duration ?? TimeSpan.Zero).Ticks)),
+                IsDownloaded   = true,
+                IsUserProvided = acq?.IsUserProvided ?? false,
+                SourceKey      = acq?.SourceKey,
+                RemoteCoverUrl = acq?.ImageUrl,
+                Chapters       = chapters,
+            });
+            seen.Add(group.Key);
+        }
+
+        // Acquired-but-not-downloaded books - the re-downloadable records with no files on disk.
+        if (!string.IsNullOrWhiteSpace(libraryRoot))
+        {
+            foreach (var a in ReDownloadable(libraryRoot))
+            {
+                var dir = AudiobookDownloadService.TargetDirectoryFor(libraryRoot, ListingFrom(a));
+                if (!seen.Add(dir))
+                {
+                    continue;
+                }
+                books.Add(new OwnedBook
+                {
+                    BookFolder     = dir,
+                    Title          = a.Title ?? Path.GetFileName(dir),
+                    Author         = a.Creator,
+                    ChapterCount   = 0,
+                    TotalDuration  = TimeSpan.Zero,
+                    IsDownloaded   = false,
+                    IsUserProvided = a.IsUserProvided,
+                    SourceKey      = a.SourceKey,
+                    RemoteCoverUrl = a.ImageUrl,
+                });
+            }
+        }
+
+        return books.OrderBy(b => b.Title, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>The book directory a file belongs to - the canonical Title folder, or its own directory when it sits outside the standard layout.</summary>
+    private static string BookDirOf(string filePath) => AudiobookDetector.BookFolderFor(filePath) ?? Path.GetDirectoryName(filePath) ?? filePath;
+
+    /// <summary>The acquisition whose folder is <paramref name="dir"/>, if any - used to enrich a downloaded book with its record (source, cover, user-provided flag).</summary>
+    private static AcquiredMedia? AcquisitionForDir(string libraryRoot, string dir)
+    {
+        foreach (var a in AcquisitionStore.GetAll(AcquiredMediaKind.Audiobook))
+        {
+            if (string.Equals(AudiobookDownloadService.TargetDirectoryFor(libraryRoot, ListingFrom(a)), dir, StringComparison.OrdinalIgnoreCase))
+            {
+                return a;
+            }
+        }
+        return null;
+    }
 }
