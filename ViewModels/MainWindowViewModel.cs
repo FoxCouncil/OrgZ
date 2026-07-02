@@ -3575,6 +3575,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Whether the item is already on the device (by artist+title) - the Sync submenu greys out
+    /// such a device, the same "already there, adding is a no-op" cue the Add-to-Playlist submenu
+    /// gives for the current playlist.
+    /// </summary>
+    internal bool IsItemAlreadyOnDevice(MediaItem item, ConnectedDevice device)
+    {
+        var key = NormalizeMatchKey(item.Artist, item.Title);
+        if (string.IsNullOrEmpty(key))
+        {
+            return false;
+        }
+        var source = $"device:{device.MountPath}";
+        return _allItems.Any(i => i.Source == source && NormalizeMatchKey(i.Artist, i.Title) == key);
+    }
+
+    /// <summary>
     /// Media right-click > Sync > (device): imports one track onto the device through its tier
     /// backend (media_type auto-detected for audiobooks). Skips a track already there by
     /// artist+title, and never creates a playlist - the single item just joins the device library.
