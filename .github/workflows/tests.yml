@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The suite is fixture-independent (synthetic device fixtures are committed) and the runner
+      # exit code is the gate - a crashed test host reports failure here even when the console
+      # summary looks green, which is exactly how a silent StackOverflow once hid a third of the
+      # suite. Release configuration matches the pre-commit hook.
+      - name: Run test suite
+        run: dotnet test OrgZ.Tests/OrgZ.Tests.csproj -c Release --nologo
