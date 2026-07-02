@@ -67,6 +67,30 @@ public class AudiobookDownloadServiceTests
         }
     }
 
+    [Fact]
+    public void A_legit_album_folder_starting_with_dots_is_scanned_not_skipped()
+    {
+        // Regression: the old blanket "any dotted folder is hidden" rule dropped real albums like
+        // "...Baby One More Time" and "...And Justice for All" from the library.
+        var root = Path.Combine(Path.GetTempPath(), "orgz-dotalbum-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var track = Path.Combine(root, "Britney Spears", "...Baby One More Time", "01 - Baby One More Time.mp3");
+            Directory.CreateDirectory(Path.GetDirectoryName(track)!);
+            File.WriteAllBytes(track, new byte[16]);
+
+            var items = FileScanner.ScanDirectoryAsync(root).GetAwaiter().GetResult();
+
+            var found = Assert.Single(items);
+            Assert.Equal(track, found.FilePath);
+            Assert.Equal(MediaKind.Music, found.Kind);   // a dotted ALBUM folder is not audiobook-by-location
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
     [Theory]
     [InlineData(@"C:\Music\.audiobooks\Author\Book\01.mp3", true)]    // location marks it, no tags needed
     [InlineData(@"C:\Music\.AUDIOBOOKS\book.mp3", true)]              // case-insensitive

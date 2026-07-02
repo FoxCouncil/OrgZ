@@ -106,12 +106,21 @@ public class FileScanner
     }
 
     /// <summary>
-    /// True when any directory segment between <paramref name="rootDirectory"/>
-    /// and <paramref name="filePath"/> starts with a dot. Used to skip podcast
-    /// downloads (.podcasts/) and any other hidden-by-convention scratch area
-    /// the user may stash inside their library. ONE exemption: .audiobooks/ is
-    /// OrgZ-owned LIBRARY content (store downloads + user-dropped books) - the
-    /// dot only keeps it tidy in Explorer, the scan must still walk it.
+    /// OrgZ-managed scratch folders kept OUT of the music scan by exact name. Deliberately NOT a
+    /// blanket "any dotted folder" rule - that wrongly skipped legitimate dot-named ALBUMS like
+    /// "...Baby One More Time" and "...And Justice for All". <c>.audiobooks</c> is absent on
+    /// purpose: it's library content the scan must walk.
+    /// </summary>
+    private static readonly HashSet<string> ManagedSkipFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".podcasts",   // podcast downloads belong to the Podcasts view, not the music library
+        ".orgz",       // any OrgZ cache/scratch a user's library might carry
+    };
+
+    /// <summary>
+    /// True when any parent directory of <paramref name="filePath"/> (under
+    /// <paramref name="rootDirectory"/>) is an OrgZ-managed scratch folder. Only those exact names
+    /// are skipped - an ordinary folder that happens to start with a dot is walked normally.
     /// </summary>
     private static bool IsInHiddenSubdirectory(string filePath, string rootDirectory)
     {
@@ -119,11 +128,9 @@ public class FileScanner
         var sep = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
         foreach (var segment in relative.Split(sep, StringSplitOptions.RemoveEmptyEntries))
         {
-            // Last segment is the filename itself -- a leading dot on a file
-            // is fine, we only care about parent directory names being hidden.
+            // Last segment is the filename itself - only parent directory names gate the skip.
             if (segment == Path.GetFileName(filePath)) break;
-            if (segment.Equals(AudiobookDetector.AudiobooksFolderName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (segment.StartsWith('.')) return true;
+            if (ManagedSkipFolders.Contains(segment)) return true;
         }
         return false;
     }
