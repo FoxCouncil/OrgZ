@@ -42,7 +42,6 @@
 			<NativeMenuItem Header="Window">
 				<NativeMenu>
 					<NativeMenuItem Header="Switch to Mini-Player" Command="{Binding ToggleMiniPlayerCommand}" Gesture="Alt+Shift+M" />
-					<NativeMenuItem Header="Show Full Player" Command="{Binding ShowMainWindowCommand}" Gesture="Alt+Shift+F" />
 				</NativeMenu>
 			</NativeMenuItem>
 			<NativeMenuItem Header="Help">
@@ -114,7 +113,7 @@
 		<Style Selector="DataGrid.mediaGrid DataGridCell TextBlock">
 			<Setter Property="VerticalAlignment" Value="Center" />
 		</Style>
-		<!-- Group headers read "70's (50 Items)" / "DEADLOCK... (2 Items)" - the grouping property's
+		<!-- Group headers read "70s (50 Items)" / "DEADLOCK... (2 Items)" - the grouping property's
 		     name ("Tags:", "Album:") is plumbing, not information. -->
 		<Style Selector="DataGrid.mediaGrid DataGridRowGroupHeader">
 			<Setter Property="IsPropertyNameVisible" Value="False" />
