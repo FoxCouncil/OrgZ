@@ -130,7 +130,8 @@
 			<!-- ==================== Store landing ==================== -->
 			<ScrollViewer IsVisible="{Binding IsStore}"
 			              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-				<StackPanel Margin="16,12,16,16" Spacing="12">
+				<!-- Flush with the top like the podcasts store (iTunes-style), no top gap. -->
+				<StackPanel Margin="16,0,16,16" Spacing="12">
 					<!-- No search box here on purpose: the global header search drives the whole
 					     composite - it filters the library grid through the normal pipeline AND
 					     runs the (debounced) store search that fills the Results card below. -->
