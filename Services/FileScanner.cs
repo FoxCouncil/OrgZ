@@ -42,10 +42,8 @@ public class FileScanner
                         break;
                     }
 
-                    // Skip dot-prefixed folders -- .podcasts/ holds downloaded
-                    // episodes which belong to the Podcasts view, not Music.
-                    // Generalised so any future .* directory the user (or we)
-                    // create is treated as hidden the way unix conventions imply.
+                    // Skip only OrgZ's own .podcasts/ downloads (Podcasts view owns them).
+                    // NOT a blanket "any dotted folder" rule -- dot-named albums get scanned.
                     if (IsInHiddenSubdirectory(filePath, directoryPath))
                     {
                         continue;
@@ -106,15 +104,15 @@ public class FileScanner
     }
 
     /// <summary>
-    /// OrgZ-managed scratch folders kept OUT of the music scan by exact name. Deliberately NOT a
-    /// blanket "any dotted folder" rule - that wrongly skipped legitimate dot-named ALBUMS like
-    /// "...Baby One More Time" and "...And Justice for All". <c>.audiobooks</c> is absent on
-    /// purpose: it's library content the scan must walk.
+    /// The ONLY folders kept out of the music scan - skipped by exact name, not by any "starts with
+    /// a dot" rule (that wrongly dropped legit dot-named albums like "...Baby One More Time"). Just
+    /// <c>.podcasts</c>: its episode files are MP3s that would otherwise pollute the Music view, and
+    /// they're owned by the Podcasts view instead. Everything else - <c>.audiobooks</c> (library
+    /// content), a user's <c>.tools</c>, any dotted album - is walked normally.
     /// </summary>
     private static readonly HashSet<string> ManagedSkipFolders = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".podcasts",   // podcast downloads belong to the Podcasts view, not the music library
-        ".orgz",       // any OrgZ cache/scratch a user's library might carry
+        ".podcasts",
     };
 
     /// <summary>
