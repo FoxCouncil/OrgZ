@@ -6300,10 +6300,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Fewer than four distinct covers: repeat them cyclically to fill the 2×2 (Fox's call -
-        // duplicating the art reads better than empty cells; one album fills all four).
+        // 2-3 distinct covers: repeat them cyclically to fill the 2×2 (Fox's call - dup reads better
+        // than empty cells). A SINGLE cover is left alone: the header shows it as one full square
+        // (see PlaylistHeaderInfo.IsSingleCover), not a 2×2 of four shrunken copies of itself.
         var mosaic = covers;
-        if (covers.Count is > 0 and < 4)
+        if (covers.Count is > 1 and < 4)
         {
             mosaic = Enumerable.Range(0, 4).Select(i => covers[i % covers.Count]).ToList();
         }
