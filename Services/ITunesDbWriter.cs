@@ -32,6 +32,10 @@ public sealed record NewTrack
     // --- Podcast fields (set IsPodcast to mark the MHIT as a podcast episode) ---
     /// <summary>Marks this as a podcast: mediatype=4, bookmarkable, skip-on-shuffle, unplayed dot.</summary>
     public bool IsPodcast { get; init; }
+
+    /// <summary>Marks this as an audiobook: mediatype=8, bookmarkable, skip-on-shuffle - the iPod
+    /// files it under Audiobooks and remembers the playback position.</summary>
+    public bool IsAudiobook { get; init; }
     /// <summary>Episode description (MHOD type 14).</summary>
     public string? Description { get; init; }
     /// <summary>Episode enclosure (audio) URL (MHOD type 15).</summary>
@@ -220,6 +224,10 @@ public static class ITunesDbWriter
         if (t.IsPodcast)
         {
             ApplyPodcastMhitFlags(mhit, t);
+        }
+        else if (t.IsAudiobook)
+        {
+            ApplyAudiobookMhitFlags(mhit);
         }
 
         // MHODs in iTunes order (title, artist, album-artist, album, genre, kind, location).
@@ -635,10 +643,14 @@ public static class ITunesDbWriter
         }
 
         // Podcast episode: mark the mediatype + bookmark/unplayed flags and write the
-        // podcast MHODs.
+        // podcast MHODs. Audiobooks get their own mediatype + bookmark cluster.
         if (t.IsPodcast)
         {
             ApplyPodcastMhitFlags(mhit, t);
+        }
+        else if (t.IsAudiobook)
+        {
+            ApplyAudiobookMhitFlags(mhit);
         }
 
         // String MHODs. Location (type 2) is required; the rest are added when present.
@@ -673,6 +685,19 @@ public static class ITunesDbWriter
         {
             mhit.WriteHeaderInt32(0x8C, MacSeconds(rel));   // time_released (episode pubdate)
         }
+    }
+
+    /// <summary>
+    /// Marks an mhit as an audiobook: media_type = 8 plus the bookmark cluster - audiobooks
+    /// remember their playback position and stay out of shuffle, matching what libgpod writes
+    /// for ITDB_MEDIATYPE_AUDIOBOOK. Unlike podcasts there is no unplayed dot, no flag4
+    /// requirement, and no release date.
+    /// </summary>
+    private static void ApplyAudiobookMhitFlags(ITunesDbChunk mhit)
+    {
+        mhit.WriteHeaderInt32(ITunesMediaType.MhitOffset, ITunesMediaType.Audiobook);
+        mhit.Header[0xA5] = 1;              // skip_when_shuffling
+        mhit.Header[0xA6] = 1;              // remember_playback_position (bookmarkable)
     }
 
     private static void AddStringMhod(ITunesDbChunk parent, int mhodType, string? text)

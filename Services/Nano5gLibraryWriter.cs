@@ -38,7 +38,8 @@ public sealed class Nano5gLibraryWriter
         long FileSize,
         string LocationRelative, // e.g. "F12/ABCD.m4a" under iPod_Control/Music
         int ExtensionFourCc,     // FourCC of the extension: "MP3 "=0x4D503320, "M4A "=0x4D344120
-        string KindString);      // location_kind_map kind, e.g. "MPEG audio file", "Apple Lossless audio file"
+        string KindString,       // location_kind_map kind, e.g. "MPEG audio file", "Apple Lossless audio file"
+        bool IsAudiobook = false); // media_kind=8 + is_song=0 - the Nano files it under Audiobooks
 
     private const int FourCcFile = 0x46494C45; // "FILE"
 
@@ -134,6 +135,8 @@ public sealed class Nano5gLibraryWriter
             kindId = FindOrCreateLocationKind(lib, t.KindString);   // location_kind_map lives in Library.itdb
             itemPid = NewRandomPid(lib, "item");
 
+            // Audiobooks land as media_kind=8 / is_song=0 (matching what iTunes writes for
+            // ITDB_MEDIATYPE_AUDIOBOOK) - the Nano's own Audiobooks menu filters on that.
             Exec(lib, """
                 INSERT INTO item
                   (pid, media_kind, is_song, date_modified, year, total_time_ms, track_number, disc_number,
@@ -141,12 +144,13 @@ public sealed class Nano5gLibraryWriter
                    title, artist, album, album_artist, sort_title, sort_artist, sort_album,
                    title_order, artist_order, album_order, genre_order, album_artist_order, physical_order)
                 VALUES
-                  ($pid, 1, 1, $dm, $yr, $dur, $tn, $dn,
+                  ($pid, $mk, $song, $dm, $yr, $dur, $tn, $dn,
                    $gid, $apid, $arpid, $tapid,
                    $title, $artist, $album, $aa, $title, $artist, $album,
                    100, 100, 100, 100, 100, $po)
                 """,
-                ("$pid", itemPid), ("$dm", Cf2001Now()), ("$yr", t.Year), ("$dur", t.DurationMs),
+                ("$pid", itemPid), ("$mk", t.IsAudiobook ? ITunesMediaType.Audiobook : 1), ("$song", t.IsAudiobook ? 0 : 1),
+                ("$dm", Cf2001Now()), ("$yr", t.Year), ("$dur", t.DurationMs),
                 ("$tn", t.TrackNumber), ("$dn", t.DiscNumber), ("$gid", genreId),
                 ("$apid", albumPid), ("$arpid", artistPid), ("$tapid", trackArtistPid),
                 ("$title", t.Title), ("$artist", t.Artist), ("$album", t.Album),
@@ -615,6 +619,7 @@ public sealed class Nano5gLibraryWriter
             bool isPodcast = t.MediaType == ITunesMediaType.Podcast;
             uint trackId = ITunesDbWriter.AddMusicdbTrack(doc, new NewTrack
             {
+                IsAudiobook = t.MediaType == ITunesMediaType.Audiobook,
                 TrackId = 0,   // assigned inside AddMusicdbTrack from the shared id space
                 IpodPath = ToIpodPath(t.FilePath, mountPath),
                 Title = t.Title,

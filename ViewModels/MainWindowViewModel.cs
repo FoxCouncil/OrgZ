@@ -3345,20 +3345,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Whether dragging <paramref name="item"/> onto the given device node is allowed.
-    /// For now: a Music item dropped on a writable stock iPod (a generation whose
-    /// iTunesDB we can checksum). Other media kinds / device types are rejected so the
-    /// drop cursor shows "no".
+    /// Whether dragging <paramref name="item"/> onto the given device node is allowed: a Music
+    /// item on any writable stock iPod, or an Audiobook when the tier carries audiobooks NATIVELY
+    /// (media_type/media_kind 8) - a device without the concept refuses rather than mislabeling a
+    /// book as a song. Other media kinds / device types reject so the drop cursor shows "no".
     /// </summary>
     internal bool CanAcceptMediaDrop(SidebarItem? deviceItem, MediaItem? item)
     {
-        if (item is null || item.Kind != MediaKind.Music)
+        if (item is null || item.Kind is not (MediaKind.Music or MediaKind.Audiobook))
         {
             return false;
         }
         var dev = DeviceForSidebarItem(deviceItem);
-        return dev is { DeviceType: DeviceType.StockIPod }
-            && IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration);
+        if (dev is not { DeviceType: DeviceType.StockIPod } || !IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration))
+        {
+            return false;
+        }
+        return item.Kind != MediaKind.Audiobook || IPodDevice.For(dev).SupportsAudiobooks;
     }
 
     /// <summary>Right-click "Remove from iPod": deletes the item - any media kind - from the connected

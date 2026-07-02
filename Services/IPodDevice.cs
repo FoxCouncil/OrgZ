@@ -36,8 +36,13 @@ public abstract class IPodDevice
     public abstract bool SupportsPodcasts { get; }
     public abstract bool SupportsArtwork { get; }
 
-    /// <summary>Tracks <see cref="SupportsPodcasts"/> for now; diverges once audiobook write lands.</summary>
-    public virtual bool SupportsAudiobooks => SupportsPodcasts;
+    /// <summary>
+    /// Whether the tier can carry audiobooks as AUDIOBOOKS (media_type/media_kind 8, bookmarkable)
+    /// rather than mislabeled songs. Off by default - each tier that really writes the kind claims
+    /// it explicitly. The Shuffle stays false: our iTunesSD/bdhs writers carry no audiobook concept
+    /// (the bookmark flag is written as 0), and a book shuffled into songs is worse than absent.
+    /// </summary>
+    public virtual bool SupportsAudiobooks => false;
 
     // ── operations (default = explicit gap) ──────────────────────────────────
     /// <summary>Pushes downloaded podcast episodes; returns how many were written.</summary>
@@ -247,6 +252,7 @@ public sealed class Nano5gIPod : IPodDevice
     public override bool SupportsPlaylists => true;
     public override bool SupportsPodcasts => true;
     public override bool SupportsArtwork => true;
+    public override bool SupportsAudiobooks => true;   // media_kind=8 via the SQLite writer
 
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() => IPodTrackImporter.AddPodcastEpisodesNano5gAsync(MountPath, ToEpisodes(episodes), ffmpegPath, Device.FireWireGuid, onProgress, ct), ct);
@@ -330,6 +336,7 @@ public sealed class BinaryIPod : IPodDevice
     public override bool SupportsPlaylists => true;
     public override bool SupportsPodcasts => true;
     public override bool SupportsArtwork => true;
+    public override bool SupportsAudiobooks => true;   // media_type=8 in the binary iTunesDB MHIT
 
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() => IPodTrackImporter.AddPodcastEpisodes(MountPath, Device.IpodGeneration, Device.FireWireGuid, ToEpisodes(episodes), onProgress), ct);
@@ -445,6 +452,7 @@ public sealed class RockboxIPod : IPodDevice
     public override bool SupportsPlaylists => true;
     public override bool SupportsPodcasts => true;
     public override bool SupportsArtwork => true;          // sidecar/embedded art, the player handles it
+    public override bool SupportsAudiobooks => true;       // plain files - .m4b by container, tagged MP3s by genre, both re-detected on read
 
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
         => Task.Run(async () =>

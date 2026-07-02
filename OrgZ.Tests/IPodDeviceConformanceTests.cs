@@ -55,18 +55,19 @@ public class IPodDeviceConformanceTests
     // AND the lifecycle below proving the newly claimed operation.
 
     [Theory]
-    //          generation      dbWrite playlists podcasts artwork
-    [InlineData("Video 5.5G",   true,   true,     true,    true)]
-    [InlineData("Nano 5G",      true,   true,     true,    true)]
-    [InlineData("Shuffle 2G",   true,   true,     true,    false)]   // podcasts/playlists fold into the one list
-    [InlineData("Nano 7G",      false,  false,    false,   false)]
-    public void Capability_claims_are_the_agreed_spec(string generation, bool dbWrite, bool playlists, bool podcasts, bool artwork)
+    //          generation      dbWrite playlists podcasts artwork audiobooks
+    [InlineData("Video 5.5G",   true,   true,     true,    true,   true)]
+    [InlineData("Nano 5G",      true,   true,     true,    true,   true)]
+    [InlineData("Shuffle 2G",   true,   true,     true,    false,  false)]   // podcasts/playlists fold into the one list; no audiobook concept in iTunesSD - a book shuffled into songs is worse than absent
+    [InlineData("Nano 7G",      false,  false,    false,   false,  false)]
+    public void Capability_claims_are_the_agreed_spec(string generation, bool dbWrite, bool playlists, bool podcasts, bool artwork, bool audiobooks)
     {
         var ipod = IPodDevice.For(new ConnectedDevice { MountPath = @"L:\", DeviceType = DeviceType.StockIPod, Name = "POD", IpodGeneration = generation });
         Assert.Equal(dbWrite,   ipod.SupportsDatabaseWrite);
         Assert.Equal(playlists, ipod.SupportsPlaylists);
         Assert.Equal(podcasts,  ipod.SupportsPodcasts);
         Assert.Equal(artwork,   ipod.SupportsArtwork);
+        Assert.Equal(audiobooks, ipod.SupportsAudiobooks);
     }
 
     // ── unsupported tier: gaps must be LOUD ───────────────────────────────────
@@ -140,17 +141,26 @@ public class IPodDeviceConformanceTests
             // Idempotent re-sync: pushing the same episodes again adds nothing.
             Assert.Equal(0, await ipod.AddPodcastsAsync([Episode(srcDir, "DEADLOCK", "Episode One")], "ffmpeg-not-installed"));
 
+            // ── AUDIOBOOK (an .m4b imports as media_type=8 and reads back as an audiobook - the
+            //    iPod's NATIVE audiobook support, not a book mislabeled as a song) ──
+            var book = await ipod.AddTrackAsync(AudiobookTrack(srcDir, "The Art of War"), "ffmpeg-not-installed");
+            Assert.EndsWith(".m4b", book.FilePath!, StringComparison.OrdinalIgnoreCase);   // container passes through
+            var afterBook = await ipod.ReadLibraryAsync();
+            Assert.Equal(5, afterBook.Tracks.Count);
+            var bookBack = Assert.Single(afterBook.Tracks, t => t.Kind == MediaKind.Audiobook);
+            Assert.Equal("The Art of War", bookBack.Title);
+
             // ── REMOVE (database row + audio file) ──
-            var doomed = afterPodcasts.Tracks.First(t => t.Title == "Deja Vu");
+            var doomed = afterBook.Tracks.First(t => t.Title == "Deja Vu");
             await ipod.RemoveTrackAsync(doomed);
             var afterRemove = await ipod.ReadLibraryAsync();
-            Assert.Equal(3, afterRemove.Tracks.Count);
+            Assert.Equal(4, afterRemove.Tracks.Count);
             Assert.DoesNotContain(afterRemove.Tracks, t => t.Title == "Deja Vu");
             Assert.False(File.Exists(doomed.FilePath));
 
             // ── ERASE (empty and ready to load) ──
             int removed = await ipod.EraseAsync();
-            Assert.True(removed >= 3);
+            Assert.True(removed >= 4);
             var afterErase = await ipod.ReadLibraryAsync();
             Assert.Empty(afterErase.Tracks);
             Assert.Empty(Directory.GetFiles(Path.Combine(mount, "iPod_Control", "Music"), "*", SearchOption.AllDirectories));
@@ -318,6 +328,24 @@ public class IPodDeviceConformanceTests
         WriteTaglessMp3(path);
         return new PodcastPush(path, title, show, "notes", "https://example.test/feed.xml",
             new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc), LengthMs: 1_800_000);
+    }
+
+    /// <summary>A library-side audiobook backed by a deliberately tagless .m4b - the CONTAINER is
+    /// the audiobook signal (no TagLib needed), and the title falls back to the filename.</summary>
+    private static MediaItem AudiobookTrack(string srcDir, string title)
+    {
+        var path = Path.Combine(srcDir, title + ".m4b");
+        File.WriteAllBytes(path, new byte[512]);
+        return new MediaItem
+        {
+            Id = path,
+            Kind = MediaKind.Audiobook,
+            FilePath = path,
+            FileName = Path.GetFileName(path),
+            Title = title,
+            Artist = "Sun Tzu",
+            Album = title,
+        };
     }
 
     /// <summary>A few MPEG frame-sync bytes - enough to be an "mp3" for the copy path while making
