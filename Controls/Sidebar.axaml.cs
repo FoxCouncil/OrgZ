@@ -83,15 +83,11 @@ public partial class Sidebar : UserControl
         // CD audio uses the fixed "CdAudio" key. Branch the menu accordingly.
         if (sb.ViewConfigKey?.StartsWith("Device:") == true)
         {
-            // One Sync gesture: "Sync" runs the saved plan (or opens settings on first sync);
-            // "Sync Settings..." always opens the panel. Both replace the old header podcast dropdown.
+            // One Sync gesture: "Sync" runs the saved plan (or opens the settings on first sync).
+            // Configuring what to sync lives under the Settings submenu - NOT a second root item.
             var sync = new Avalonia.Controls.MenuItem { Header = "Sync" };
             sync.Click += async (_, _) => await vm.SyncDeviceAsync(sb);
             menu.Items.Add(sync);
-
-            var syncSettings = new Avalonia.Controls.MenuItem { Header = "Sync Settings…" };
-            syncSettings.Click += async (_, _) => await vm.SyncDeviceAsync(sb, forceSettings: true);
-            menu.Items.Add(syncSettings);
 
             menu.Items.Add(new Avalonia.Controls.Separator());
 
@@ -105,11 +101,20 @@ public partial class Sidebar : UserControl
 
             menu.Items.Add(new Avalonia.Controls.Separator());
 
-            // Destructive operations live under Settings, away from the top bar where a misclick hurts.
+            // Settings submenu: sync configuration + the destructive erase (kept off the top level
+            // where a misclick hurts).
             var settings = new Avalonia.Controls.MenuItem { Header = "Settings" };
+
+            var syncSettings = new Avalonia.Controls.MenuItem { Header = "Sync Settings…" };
+            syncSettings.Click += async (_, _) => await vm.SyncDeviceAsync(sb, forceSettings: true);
+            settings.Items.Add(syncSettings);
+
+            settings.Items.Add(new Avalonia.Controls.Separator());
+
             var erase = new Avalonia.Controls.MenuItem { Header = "Erase iPod…" };
             erase.Click += async (_, _) => await vm.EraseDeviceAsync(sb);
             settings.Items.Add(erase);
+
             menu.Items.Add(settings);
         }
         else
