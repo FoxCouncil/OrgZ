@@ -396,8 +396,6 @@ public partial class ConnectedDevice : ObservableObject
         return unit >= 3 ? $"{size:0.##} {units[unit]}" : $"{size:0} {units[unit]}";
     }
 
-    public bool IsReadOnly => DeviceType == DeviceType.StockIPod;
-
     /// <summary>
     /// Playlists discovered on the device during the scan. For stock iPods this comes
     /// from iTunesDB MHYP/MHIP chunks; for Rockbox from <c>Playlists/*.m3u</c> files.

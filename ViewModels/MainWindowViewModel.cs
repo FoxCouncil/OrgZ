@@ -5288,18 +5288,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// Whether the active playlist can sync to a connected, writable device - drives the
-    /// header's Sync button. Rockbox devices for now (filesystem + M3U); native-iPod write
-    /// (stock iPods, which report read-only) is a later phase.
+    /// header's Sync button. One authority: the device tier's own capability claim, the same
+    /// gate the sidebar's Sync submenu uses.
     /// </summary>
     public bool CanSyncToIPod =>
         (SelectedSidebarItem?.PlaylistId != null || SelectedSidebarItem?.IsFavorites == true)
         && _connectedDevices.Values.Any(IsSyncTarget);
 
-    /// <summary>A connected device we can sync a playlist to: a writable filesystem device
-    /// (Rockbox), or a stock iPod whose iTunesDB/SQLite library OrgZ can write.</summary>
-    private static bool IsSyncTarget(ConnectedDevice d)
-        => !d.IsReadOnly
-        || (d.DeviceType == DeviceType.StockIPod && IPodCapabilities.SupportsDatabaseWrite(d.IpodGeneration));
+    /// <summary>A connected device we can sync a playlist to - whatever tier claims playlists
+    /// (filesystem players, binary iTunesDB iPods, the Nano 5G SQLite stack, Shuffles).</summary>
+    private static bool IsSyncTarget(ConnectedDevice d) => IPodDevice.For(d).SupportsPlaylists;
 
     /// <summary>
     /// Syncs the active playlist (or Favorites) to a connected device: Rockbox → copy missing
@@ -5420,13 +5418,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Whether the device shown in the info bar can take a podcast sync (a writable stock iPod).</summary>
+    /// <summary>Whether the device shown in the info bar can take a podcast sync - the tier's own claim.</summary>
     public bool CanSyncPodcasts
     {
         get
         {
             var dev = DeviceForSidebarItem(SelectedSidebarItem);
-            return dev is { DeviceType: DeviceType.StockIPod } && IPodCapabilities.SupportsDatabaseWrite(dev.IpodGeneration);
+            return dev is not null && IPodDevice.For(dev).SupportsPodcasts;
         }
     }
 
