@@ -31,6 +31,9 @@ public partial class AudiobooksViewModel : ObservableObject
     internal AudiobooksViewModel(MainWindowViewModel main)
     {
         _main = main;
+        AudiobookDownloadService.Instance.ProgressChanged += OnDownloadProgress;
+        AudiobookDownloadService.Instance.Completed += OnDownloadCompleted;
+        AudiobookDownloadService.Instance.Failed += OnDownloadFailed;
     }
 
     /// <summary>
@@ -205,6 +208,9 @@ public partial class AudiobooksViewModel : ObservableObject
         CurrentView = AudiobooksView.BookDetail;
         BookDescription = null;
         BookChapters.Clear();
+        DownloadState = AudiobookDownloadService.Instance.GetState(book, App.FolderPath);
+        DownloadProgressPercent = 0;
+        DownloadProgressText = null;
 
         IsBookLoading = true;
         try
@@ -225,6 +231,83 @@ public partial class AudiobooksViewModel : ObservableObject
         {
             IsBookLoading = false;
         }
+    }
+
+    // ── download ───────────────────────────────────────────────────────────────
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanDownload), nameof(IsDownloadingBook), nameof(IsBookDownloaded))]
+    private AudiobookDownloadState _downloadState;
+
+    public bool CanDownload => DownloadState == AudiobookDownloadState.NotDownloaded;
+    public bool IsDownloadingBook => DownloadState == AudiobookDownloadState.InProgress;
+    public bool IsBookDownloaded => DownloadState == AudiobookDownloadState.Downloaded;
+
+    [ObservableProperty]
+    private double _downloadProgressPercent;
+
+    [ObservableProperty]
+    private string? _downloadProgressText;
+
+    [ObservableProperty]
+    private string? _downloadErrorText;
+
+    [RelayCommand]
+    private async Task DownloadAsync()
+    {
+        if (SelectedBook is not { } book || string.IsNullOrWhiteSpace(App.FolderPath))
+        {
+            return;
+        }
+        DownloadState = AudiobookDownloadState.InProgress;
+        DownloadProgressPercent = 0;
+        DownloadProgressText = "Starting…";
+        DownloadErrorText = null;
+        await AudiobookDownloadService.Instance.EnqueueAsync(book, App.FolderPath);
+    }
+
+    private void OnDownloadProgress(AudiobookDownloadProgress p)
+    {
+        if (p.Identifier != SelectedBook?.Identifier)
+        {
+            return;
+        }
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            DownloadProgressPercent = p.Total > 0 ? 100.0 * p.Received / p.Total : 0;
+            DownloadProgressText = p.FileCount > 1
+                ? $"File {p.FileIndex} of {p.FileCount} — {DownloadProgressPercent:0}%"
+                : $"{DownloadProgressPercent:0}%";
+        });
+    }
+
+    private void OnDownloadCompleted(AudiobookListing book)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (book.Identifier == SelectedBook?.Identifier)
+            {
+                DownloadState = AudiobookDownloadState.Downloaded;
+                DownloadProgressText = null;
+            }
+            // The files live inside the watched library folder; a delta scan folds them into
+            // _allItems as audiobooks (the m4b by container, tagged MP3s by genre promotion),
+            // which is exactly what fills the grid under the store.
+            _ = _main?.ScanAndAnalyzeLibraryAsync();
+        });
+    }
+
+    private void OnDownloadFailed(string identifier, Exception ex)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (identifier == SelectedBook?.Identifier)
+            {
+                DownloadState = AudiobookDownloadState.NotDownloaded;
+                DownloadProgressText = null;
+                DownloadErrorText = ex is OperationCanceledException ? null : ex.Message;
+            }
+        });
     }
 
     // ── pure pieces (unit-tested) ──────────────────────────────────────────────

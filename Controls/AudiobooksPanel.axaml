@@ -84,6 +84,27 @@
 					<StackPanel Grid.Column="1" Spacing="10">
 						<TextBlock Text="{Binding SelectedBook.Title}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" Foreground="{StaticResource OrgZTextForegroundBrush}" />
 						<TextBlock Text="{Binding SelectedBook.Creator}" FontSize="14" Foreground="{StaticResource OrgZAccentGoldBrush}" />
+
+						<!-- Download states: the gold button, the in-flight progress, or the done check. -->
+						<Button Command="{Binding DownloadCommand}" IsVisible="{Binding CanDownload}"
+						        Padding="16,7" Cursor="Hand" HorizontalAlignment="Left"
+						        Background="{StaticResource OrgZCarouselButtonBrush}" Foreground="#1A1405">
+							<StackPanel Orientation="Horizontal" Spacing="7">
+								<i:Icon Value="fa-solid fa-download" FontSize="13" VerticalAlignment="Center" />
+								<TextBlock Text="Download" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+							</StackPanel>
+						</Button>
+						<StackPanel Spacing="4" IsVisible="{Binding IsDownloadingBook}">
+							<ProgressBar Value="{Binding DownloadProgressPercent}" Maximum="100" Height="8" Width="260" HorizontalAlignment="Left" />
+							<TextBlock Text="{Binding DownloadProgressText}" FontSize="11" Foreground="{StaticResource OrgZMutedTextBrush}" />
+						</StackPanel>
+						<StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding IsBookDownloaded}">
+							<i:Icon Value="fa-solid fa-circle-check" FontSize="14" Foreground="{StaticResource OrgZAccentGoldBrush}" VerticalAlignment="Center" />
+							<TextBlock Text="Downloaded" FontSize="13" Foreground="{StaticResource OrgZAccentGoldBrush}" VerticalAlignment="Center" />
+						</StackPanel>
+						<TextBlock Text="{Binding DownloadErrorText}" FontSize="11" Foreground="{StaticResource OrgZDangerTextBrush}"
+						           IsVisible="{Binding DownloadErrorText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
+
 						<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBookLoading}" Height="4" />
 						<TextBlock Text="{Binding BookDescription}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource OrgZSubtitleTextBrush}" />
 

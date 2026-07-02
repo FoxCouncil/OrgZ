@@ -15,12 +15,35 @@ public static class AudiobookDetector
     /// <summary>The iTunes MP4 "stik" media-type atom value iTunes writes for Media Kind = Audiobook.</summary>
     private const byte StikAudiobook = 2;
 
+    /// <summary>
+    /// The library's audiobook home: store downloads land here, and dropping your own files in IS
+    /// the import gesture - anything under it is an audiobook by location, tags or no tags.
+    /// </summary>
+    public const string AudiobooksFolderName = ".audiobooks";
+
     public static bool IsAudiobookExtension(string? extension)
         => string.Equals(extension, ".m4b", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Extension-only kind for a freshly scanned path - no file IO, safe for the fast scan pass.</summary>
+    /// <summary>Extension-or-location kind for a freshly scanned path - no file IO, safe for the fast scan pass.</summary>
     public static MediaKind KindForPath(string filePath)
-        => IsAudiobookExtension(Path.GetExtension(filePath)) ? MediaKind.Audiobook : MediaKind.Music;
+        => IsAudiobookExtension(Path.GetExtension(filePath)) || IsInAudiobooksFolder(filePath)
+            ? MediaKind.Audiobook
+            : MediaKind.Music;
+
+    /// <summary>Whether any directory segment of the path is the .audiobooks folder.</summary>
+    internal static bool IsInAudiobooksFolder(string filePath)
+    {
+        var dir = Path.GetDirectoryName(filePath);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (string.Equals(Path.GetFileName(dir), AudiobooksFolderName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            dir = Path.GetDirectoryName(dir);
+        }
+        return false;
+    }
 
     /// <summary>
     /// Whether an open file's tags identify it as an audiobook: the iTunes stik atom (what iTunes
