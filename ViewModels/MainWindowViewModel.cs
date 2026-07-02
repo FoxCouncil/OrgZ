@@ -4385,6 +4385,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             await Task.Run(() => MediaCache.RemoveLibraryFiles(deletedItems.Select(i => i.Id)));
         }
 
+        // Fold the scanned audiobook files against the acquisition records: adopt user-dropped
+        // books (dropping a file into .audiobooks IS the acquire gesture) and forget user-provided
+        // records whose files are gone. Store downloads are left as re-downloadable records here.
+        var audiobookFiles = diskFiles.Where(f => f.Kind == MediaKind.Audiobook).Select(f => f.Id).ToList();
+        await Task.Run(() => Services.Audiobooks.AudiobookLibrary.ReconcileUserFiles(App.FolderPath, audiobookFiles));
+
         UpdateData();
     }
 
