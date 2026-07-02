@@ -3182,6 +3182,75 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         PlaylistsChanged?.Invoke();
     }
 
+    /// <summary>
+    /// "Import Audiobooks..." (the Audiobooks sidebar entry's context menu): picks files the user
+    /// already owns and copies them into {library}/.audiobooks/{Author}/{Book}/ - where LOCATION
+    /// makes them audiobooks regardless of tagging - then folds them in with a delta scan.
+    /// </summary>
+    internal async Task ImportAudiobooksAsync()
+    {
+        if (string.IsNullOrWhiteSpace(App.FolderPath))
+        {
+            UpdateMainStatus("Set a library folder first.");
+            return;
+        }
+
+        var files = await _window.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+        {
+            Title = "Import Audiobooks",
+            AllowMultiple = true,
+            FileTypeFilter =
+            [
+                new Avalonia.Platform.Storage.FilePickerFileType("Audiobook Files") { Patterns = ["*.m4b", "*.m4a", "*.mp3", "*.aac"] },
+                new Avalonia.Platform.Storage.FilePickerFileType("All Files") { Patterns = ["*"] }
+            ]
+        });
+        if (files.Count == 0)
+        {
+            return;
+        }
+
+        int copied = 0, skipped = 0;
+        await Task.Run(() =>
+        {
+            foreach (var picked in files)
+            {
+                var source = picked.Path.LocalPath;
+                if (!FileScanner.IsSupportedExtension(source))
+                {
+                    skipped++;
+                    continue;
+                }
+                try
+                {
+                    var dest = AudiobookDownloadService.ImportDestinationFor(App.FolderPath, source);
+                    if (File.Exists(dest))
+                    {
+                        skipped++;   // already imported - importing twice shouldn't duplicate
+                        continue;
+                    }
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    File.Copy(source, dest);
+                    copied++;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Audiobook import failed for {Source}", source);
+                    skipped++;
+                }
+            }
+        });
+
+        _log.Information("Audiobook import: {Copied} copied, {Skipped} skipped", copied, skipped);
+        UpdateMainStatus(skipped == 0
+            ? $"Imported {copied} audiobook file(s)."
+            : $"Imported {copied} audiobook file(s), skipped {skipped}.");
+        if (copied > 0)
+        {
+            await ScanAndAnalyzeLibraryAsync();
+        }
+    }
+
     [RelayCommand]
     internal async Task ImportPlaylist()
     {

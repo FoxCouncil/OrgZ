@@ -260,6 +260,43 @@ public sealed class AudiobookDownloadService
         return deleted;
     }
 
+    /// <summary>
+    /// Where an imported (user-owned) file lands: {library}/.audiobooks/{Author}/{Book}/{name},
+    /// author/book resolved from the file's tags with filename fallbacks. Living there then makes
+    /// it an audiobook regardless of how it's tagged - that IS the import gesture.
+    /// </summary>
+    public static string ImportDestinationFor(string libraryRoot, string sourceFile)
+    {
+        string author = "Unknown Author";
+        string bookName = Path.GetFileNameWithoutExtension(sourceFile);
+        try
+        {
+            using var tf = TagLib.File.Create(sourceFile);
+            if (!string.IsNullOrWhiteSpace(tf.Tag.FirstPerformer))
+            {
+                author = tf.Tag.FirstPerformer;
+            }
+            else if (!string.IsNullOrWhiteSpace(tf.Tag.FirstAlbumArtist))
+            {
+                author = tf.Tag.FirstAlbumArtist;
+            }
+            if (!string.IsNullOrWhiteSpace(tf.Tag.Album))
+            {
+                bookName = tf.Tag.Album;
+            }
+            else if (!string.IsNullOrWhiteSpace(tf.Tag.Title))
+            {
+                bookName = tf.Tag.Title;
+            }
+        }
+        catch
+        {
+            // Untagged or unreadable - the filename fallbacks stand.
+        }
+        return Path.Combine(libraryRoot, AudiobookDetector.AudiobooksFolderName,
+            SanitizeSegment(author), SanitizeSegment(bookName), SanitizeFileName(Path.GetFileName(sourceFile)));
+    }
+
     private static async Task<byte[]?> FetchCoverAsync(AudiobookListing book, IReadOnlyList<ArchiveItemFile> files, CancellationToken ct)
     {
         try
