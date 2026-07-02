@@ -6265,31 +6265,33 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var totalSize = tracks.Sum(t => t.FileSize ?? 0);
         var summary = $"{count:N0} {(count == 1 ? "song" : "songs")} · {FormatPlaylistDuration(totalDuration)} · {FormatHelper.FormatFileSize(totalSize)}";
 
-        // One cover per distinct album, up to four, for the 2×2 mosaic.
-        var artItems = tracks
-            .Where(t => t.HasAlbumArt == true && !string.IsNullOrEmpty(t.FilePath))
-            .GroupBy(t => t.Album ?? t.Id, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
-            .Take(4)
-            .ToList();
-
+        // ONE TILE PER SONG - the first four tracks in playlist order, each showing its OWN album
+        // art or a no-art placeholder (null) when it has none. Duplicates are intentional: two
+        // songs from the same album give two identical tiles. Cells past the song count stay null,
+        // so a short playlist pads with placeholders.
+        var first4 = tracks.Take(4).ToList();
         var covers = await Task.Run(() =>
         {
-            var loaded = new List<Bitmap>(4);
-            foreach (var t in artItems)
+            var loaded = new List<Bitmap?>(4);
+            foreach (var t in first4)
             {
-                try
+                Bitmap? bmp = null;
+                if (t.HasAlbumArt == true && !string.IsNullOrEmpty(t.FilePath))
                 {
-                    var bytes = ExtractAlbumArtBytes(t.FilePath!);
-                    if (bytes is { Length: > 0 } && BitmapFromBytes(bytes) is { } bmp)
+                    try
                     {
-                        loaded.Add(bmp);
+                        var bytes = ExtractAlbumArtBytes(t.FilePath!);
+                        if (bytes is { Length: > 0 })
+                        {
+                            bmp = BitmapFromBytes(bytes);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Debug(ex, "Playlist header cover load failed for {Path}", t.FilePath);
                     }
                 }
-                catch (Exception ex)
-                {
-                    _log.Debug(ex, "Playlist header cover load failed for {Path}", t.FilePath);
-                }
+                loaded.Add(bmp);   // null → the tile renders the no-art placeholder
             }
             return loaded;
         });
@@ -6300,24 +6302,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // 2-3 distinct covers: repeat them cyclically to fill the 2×2 (Fox's call - dup reads better
-        // than empty cells). A SINGLE cover is left alone: the header shows it as one full square
-        // (see PlaylistHeaderInfo.IsSingleCover), not a 2×2 of four shrunken copies of itself.
-        var mosaic = covers;
-        if (covers.Count is > 1 and < 4)
-        {
-            mosaic = Enumerable.Range(0, 4).Select(i => covers[i % covers.Count]).ToList();
-        }
-
         CurrentPlaylistHeader = new PlaylistHeaderInfo
         {
             Name = name,
             SourceLabel = source,
             Summary = summary,
-            Cover1 = mosaic.ElementAtOrDefault(0),
-            Cover2 = mosaic.ElementAtOrDefault(1),
-            Cover3 = mosaic.ElementAtOrDefault(2),
-            Cover4 = mosaic.ElementAtOrDefault(3),
+            Cover1 = covers.ElementAtOrDefault(0),
+            Cover2 = covers.ElementAtOrDefault(1),
+            Cover3 = covers.ElementAtOrDefault(2),
+            Cover4 = covers.ElementAtOrDefault(3),
         };
     }
 

@@ -19,23 +19,15 @@ public sealed class PlaylistHeaderInfo
     /// <summary>Preformatted "12 songs · 48:21 · 312 MB".</summary>
     public required string Summary { get; init; }
 
-    // Up to four covers for the mosaic. Null tiles fall back to the generic glyph.
+    // One tile per song (first four). A null tile renders the no-art placeholder square; the VM
+    // sets these per-song, so a song without art - or a cell past the song count - is null.
     public Bitmap? Cover1 { get; init; }
     public Bitmap? Cover2 { get; init; }
     public Bitmap? Cover3 { get; init; }
     public Bitmap? Cover4 { get; init; }
 
-    /// <summary>True when at least one cover was found (drives the mosaic vs. fallback glyph).</summary>
+    /// <summary>True when at least one tile has art (drives the mosaic vs. the single-glyph fallback).</summary>
     public bool HasAnyCover => Cover1 is not null || Cover2 is not null || Cover3 is not null || Cover4 is not null;
-
-    /// <summary>
-    /// Exactly one cover - shown as a single full-size square, not a 2×2 of four shrunken copies.
-    /// (2-3 distinct covers are cycle-filled to four by the VM, so Cover2 is set in those cases.)
-    /// </summary>
-    public bool IsSingleCover => Cover1 is not null && Cover2 is null;
-
-    /// <summary>The 2×2 mosaic shows only when there are multiple covers to arrange.</summary>
-    public bool HasMosaic => HasAnyCover && !IsSingleCover;
 
     /// <summary>
     /// False when <see cref="SourceLabel"/> only repeats <see cref="Name"/> (e.g. the Favorites
