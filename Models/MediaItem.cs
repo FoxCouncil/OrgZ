@@ -177,6 +177,7 @@ public partial class MediaItem : ObservableObject
         ".MP3" => "MPEG audio file",
         ".FLAC" => "FLAC audio file",
         ".M4A" => "AAC audio file",
+        ".M4B" => "AAC audiobook file",
         ".AAC" => "AAC audio file",
         ".OGG" => "OGG Vorbis file",
         ".WAV" => "WAV audio file",

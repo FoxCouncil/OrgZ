@@ -66,6 +66,10 @@ public class ArchiveItemMetadataFields
 
     [JsonConverter(typeof(StringOrFirstElementConverter))]
     public string? Description { get; set; }
+
+    /// <summary>The source text's publication year where the item carries one ("1902").</summary>
+    [JsonConverter(typeof(StringOrFirstElementConverter))]
+    public string? Year { get; set; }
 }
 
 public class ArchiveItemResponse
