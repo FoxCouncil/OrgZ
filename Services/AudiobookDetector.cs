@@ -46,6 +46,30 @@ public static class AudiobookDetector
     }
 
     /// <summary>
+    /// The BOOK folder a managed file belongs to - the {Title} directory in the canonical
+    /// .audiobooks/{Author}/{Title}/ layout (deeper nesting still scopes to {Title}). Null when
+    /// the path isn't under .audiobooks, or sits too shallow to have a book folder (directly in
+    /// .audiobooks or in an author folder) - those delete as single files, not folders.
+    /// </summary>
+    internal static string? BookFolderFor(string filePath)
+    {
+        // Ancestor directories below .audiobooks, deepest first: {A}/{T}/file → [T, A].
+        var levels = new List<string>();
+        var dir = Path.GetDirectoryName(filePath);
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (string.Equals(Path.GetFileName(dir), AudiobooksFolderName, StringComparison.OrdinalIgnoreCase))
+            {
+                // The book folder is the second level below .audiobooks ({Author} is the first).
+                return levels.Count >= 2 ? levels[^2] : null;
+            }
+            levels.Add(dir);
+            dir = Path.GetDirectoryName(dir);
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Whether an open file's tags identify it as an audiobook: the iTunes stik atom (what iTunes
     /// sets on a "Media Kind: Audiobook" .m4a) or a genre containing "audiobook".
     /// </summary>

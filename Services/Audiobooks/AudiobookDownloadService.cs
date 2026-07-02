@@ -224,6 +224,42 @@ public sealed class AudiobookDownloadService
     internal static long ParseSize(string? size)
         => long.TryParse(size, out var bytes) && bytes > 0 ? bytes : 0;
 
+    /// <summary>
+    /// Deletes an audiobook from disk given ANY of its files: inside the canonical
+    /// .audiobooks/{Author}/{Title}/ layout the whole book folder goes (all chapters/parts, plus
+    /// the author folder when that leaves it empty); anywhere else exactly the one file goes.
+    /// Returns the deleted audio-file paths so the caller can drop the matching library rows.
+    /// Callers own the confirmation dialog - this just executes.
+    /// </summary>
+    public static List<string> DeleteFromDisk(string filePath)
+    {
+        var deleted = new List<string>();
+        var bookDir = AudiobookDetector.BookFolderFor(filePath);
+        if (bookDir is not null && Directory.Exists(bookDir))
+        {
+            deleted.AddRange(Directory.EnumerateFiles(bookDir, "*.*", SearchOption.AllDirectories).Where(FileScanner.IsSupportedExtension));
+            Directory.Delete(bookDir, recursive: true);
+
+            // Prune the {Author} level when this was its last book - but never .audiobooks itself.
+            var authorDir = Path.GetDirectoryName(bookDir);
+            if (authorDir is not null
+                && !string.Equals(Path.GetFileName(authorDir), AudiobookDetector.AudiobooksFolderName, StringComparison.OrdinalIgnoreCase)
+                && Directory.Exists(authorDir)
+                && !Directory.EnumerateFileSystemEntries(authorDir).Any())
+            {
+                Directory.Delete(authorDir);
+            }
+            _log.Information("Deleted audiobook folder {Dir} ({Count} audio file(s))", bookDir, deleted.Count);
+        }
+        else if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+            deleted.Add(filePath);
+            _log.Information("Deleted audiobook file {Path}", filePath);
+        }
+        return deleted;
+    }
+
     private static async Task<byte[]?> FetchCoverAsync(AudiobookListing book, IReadOnlyList<ArchiveItemFile> files, CancellationToken ct)
     {
         try

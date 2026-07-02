@@ -9,6 +9,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using LibVLCSharp.Shared;
+using OrgZ.Services.Audiobooks;
 using System.Net.Http;
 using Serilog;
 
@@ -3689,9 +3690,64 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// The file is never touched. The item is also removed from any playlists it belongs to.
     /// Shows a restore-capable "Ignored" view in the sidebar (if enabled in Settings).
     /// </summary>
+    /// <summary>
+    /// Deletes an audiobook from disk, with confirmation. A book in the managed
+    /// .audiobooks/{Author}/{Title}/ layout deletes as a whole - every chapter/part file, however
+    /// many rows it spans - because that's the unit the user thinks in; a loose audiobook file
+    /// anywhere else deletes alone. The store's Downloaded state reads from disk, so the book
+    /// flips back to Download on its next detail open.
+    /// </summary>
+    internal async Task DeleteAudiobookFromDiskAsync(MediaItem item)
+    {
+        if (item.Kind != MediaKind.Audiobook || string.IsNullOrEmpty(item.FilePath))
+        {
+            return;
+        }
+
+        var bookDir = AudiobookDetector.BookFolderFor(item.FilePath);
+        var bookName = !string.IsNullOrWhiteSpace(item.Album) ? item.Album : (item.Title ?? item.FileName ?? "this audiobook");
+        var fileCount = bookDir is not null && Directory.Exists(bookDir)
+            ? Directory.EnumerateFiles(bookDir, "*.*", SearchOption.AllDirectories).Count(FileScanner.IsSupportedExtension)
+            : 1;
+
+        var dialog = new Views.ConfirmDialog(
+            "Delete Audiobook",
+            $"Delete “{bookName}” from your library?\n\nThis permanently deletes {fileCount} file(s) from disk. It cannot be undone.",
+            "Delete");
+        if (!await dialog.ShowDialog<bool>(_window))
+        {
+            return;
+        }
+
+        List<string> deleted;
+        try
+        {
+            deleted = AudiobookDownloadService.DeleteFromDisk(item.FilePath);
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Audiobook delete failed for {Path}", item.FilePath);
+            UpdateMainStatus($"Couldn't delete {bookName} — {ex.Message}");
+            return;
+        }
+
+        // Drop the matching rows immediately (the folder watcher would also catch up, but the
+        // grid shouldn't show ghost rows for however long that takes) and their cache entries.
+        var deletedPaths = new HashSet<string>(deleted, StringComparer.OrdinalIgnoreCase);
+        var removedItems = _allItems.Where(i => IsLocalLibraryFile(i) && deletedPaths.Contains(i.FilePath!)).ToList();
+        foreach (var removed in removedItems)
+        {
+            _allItems.Remove(removed);
+        }
+        await Task.Run(() => MediaCache.RemoveLibraryFiles(removedItems.Select(i => i.Id)));
+        RefreshAllPlaylistConfigs();
+        ApplyFilter();
+        UpdateMainStatus($"Deleted {bookName} — {deleted.Count} file(s) removed.");
+    }
+
     internal async Task RemoveFromLibraryAsync(MediaItem item)
     {
-        if (item.Kind != MediaKind.Music)
+        if (item.Kind is not (MediaKind.Music or MediaKind.Audiobook))
         {
             return;
         }

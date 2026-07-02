@@ -195,6 +195,97 @@ public class AudiobookDownloadServiceTests
         }
     }
 
+    // ===== Deletion - a managed book deletes as a whole, a loose file deletes alone =====
+
+    [Theory]
+    [InlineData(@"C:\Music\.audiobooks\Author\Book\01.mp3", @"C:\Music\.audiobooks\Author\Book")]
+    [InlineData(@"C:\Music\.audiobooks\Author\Book\Disc 1\01.mp3", @"C:\Music\.audiobooks\Author\Book")]   // deeper nesting still scopes to the book
+    [InlineData(@"C:\Music\.audiobooks\Author\loose.m4b", null)]   // too shallow - file-scope delete
+    [InlineData(@"C:\Music\.audiobooks\loose.m4b", null)]
+    [InlineData(@"C:\Music\Rush\Signals\01.mp3", null)]            // not managed at all
+    public void Book_folder_scope_resolves_the_title_directory(string path, string? expected)
+    {
+        Assert.Equal(expected, AudiobookDetector.BookFolderFor(path));
+    }
+
+    [Fact]
+    public void Deleting_a_managed_book_removes_its_folder_and_prunes_an_emptied_author()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "orgz-abdel-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var bookDir = Path.Combine(root, ".audiobooks", "Sun Tzu", "The Art of War");
+            Directory.CreateDirectory(bookDir);
+            File.WriteAllBytes(Path.Combine(bookDir, "part1.m4b"), new byte[8]);
+            File.WriteAllBytes(Path.Combine(bookDir, "part2.m4b"), new byte[8]);
+            File.WriteAllBytes(Path.Combine(bookDir, "cover.jpg"), new byte[8]);   // not audio - deleted with the folder, not reported
+
+            var deleted = AudiobookDownloadService.DeleteFromDisk(Path.Combine(bookDir, "part2.m4b"));
+
+            Assert.Equal(2, deleted.Count);   // the audio files, for row cleanup
+            Assert.All(deleted, p => Assert.EndsWith(".m4b", p));
+            Assert.False(Directory.Exists(bookDir));
+            Assert.False(Directory.Exists(Path.Combine(root, ".audiobooks", "Sun Tzu")));   // author emptied → pruned
+            Assert.True(Directory.Exists(Path.Combine(root, ".audiobooks")));               // the root never goes
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Deleting_one_book_leaves_the_authors_other_books_alone()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "orgz-abdel2-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var authorDir = Path.Combine(root, ".audiobooks", "Mark Twain");
+            var sawyer = Path.Combine(authorDir, "Tom Sawyer");
+            var finn = Path.Combine(authorDir, "Huckleberry Finn");
+            Directory.CreateDirectory(sawyer);
+            Directory.CreateDirectory(finn);
+            File.WriteAllBytes(Path.Combine(sawyer, "book.m4b"), new byte[8]);
+            File.WriteAllBytes(Path.Combine(finn, "book.m4b"), new byte[8]);
+
+            AudiobookDownloadService.DeleteFromDisk(Path.Combine(sawyer, "book.m4b"));
+
+            Assert.False(Directory.Exists(sawyer));
+            Assert.True(File.Exists(Path.Combine(finn, "book.m4b")));   // the sibling book survives
+            Assert.True(Directory.Exists(authorDir));                    // author still has a book → kept
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Deleting_an_unmanaged_file_removes_exactly_that_file()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "orgz-abdel3-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var dir = Path.Combine(root, "Library", "Books");
+            Directory.CreateDirectory(dir);
+            var target = Path.Combine(dir, "book.m4b");
+            var neighbor = Path.Combine(dir, "other.m4b");
+            File.WriteAllBytes(target, new byte[8]);
+            File.WriteAllBytes(neighbor, new byte[8]);
+
+            var deleted = AudiobookDownloadService.DeleteFromDisk(target);
+
+            Assert.Equal([target], deleted);
+            Assert.False(File.Exists(target));
+            Assert.True(File.Exists(neighbor));
+            Assert.True(Directory.Exists(dir));   // no folder-level deletion outside .audiobooks
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
     // ===== Cover picking - the real cover file beats the image-service thumb =====
 
     [Fact]

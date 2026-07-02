@@ -135,6 +135,7 @@ public static class ListViewConfigs
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
             new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
+            new ContextMenuItemDef { Header = "Delete from Disk…", CommandName = "DeleteAudiobook" },
         ];
     }
 
