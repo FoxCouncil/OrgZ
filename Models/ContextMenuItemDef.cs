@@ -20,4 +20,10 @@ public record ContextMenuItemDef
     /// Marker: when set, the view will populate this submenu with rating choices (No Rating, 1-5 stars).
     /// </summary>
     public bool IsRatingMarker { get; init; }
+
+    /// <summary>
+    /// Marker: when set, the view populates this submenu (lazily, on open) with one entry per
+    /// connected device that can accept the selected item's kind - "Sync > (Device Name)".
+    /// </summary>
+    public bool IsSyncToDeviceMarker { get; init; }
 }

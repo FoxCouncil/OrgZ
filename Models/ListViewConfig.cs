@@ -132,6 +132,7 @@ public static class ListViewConfigs
                 Header = "Add to Playlist",
                 IsAddToPlaylistMarker = true,
             },
+            new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
             // For audiobooks, removing from the library IS deleting from disk - the store can
@@ -586,6 +587,7 @@ public static class ListViewConfigs
                 Header = "Add to Playlist",
                 IsAddToPlaylistMarker = true,
             },
+            new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Burn to CD…", CommandName = "BurnToCd" },
             new ContextMenuItemDef { IsSeparator = true },
@@ -623,6 +625,7 @@ public static class ListViewConfigs
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Remove from Playlist", CommandName = "RemoveFromPlaylist" },
             new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
+            new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
         ];
     }
