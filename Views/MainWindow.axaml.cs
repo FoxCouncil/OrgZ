@@ -1090,6 +1090,8 @@ public partial class MainWindow : Window
 
             if (def.IsAddToPlaylistMarker)
             {
+                // Rebuild on open - playlists load async after startup, but this menu is built once.
+                menuItem.SubmenuOpened += (_, _) => PopulateAddToPlaylistMenu(menuItem);
                 PopulateAddToPlaylistMenu(menuItem);
             }
             else if (def.IsRatingMarker)
@@ -1175,32 +1177,32 @@ public partial class MainWindow : Window
 
     private void PopulateAddToPlaylistMenu(Avalonia.Controls.MenuItem parent)
     {
-        var playlists = _viewModel.PlaylistItems
-            .Where(p => p.PlaylistId.HasValue)
-            .ToList();
+        // Rebuild every time: playlists load asynchronously after startup, and the grid's context
+        // menu is built once and reused - populating only at build time is why this listed nothing.
+        parent.Items.Clear();
 
-        if (playlists.Count == 0)
-        {
-            parent.Items.Add(new Avalonia.Controls.MenuItem
-            {
-                Header = "(No playlists yet)",
-                IsEnabled = false,
-            });
-            return;
-        }
+        // Favorites is a pseudo-playlist and lives at the top; adding here never un-favorites.
+        var favorites = new Avalonia.Controls.MenuItem { Header = "Favorites" };
+        favorites.Click += (_, _) => _viewModel.AddToFavorites(_viewModel.SelectedItem);
+        parent.Items.Add(favorites);
 
-        foreach (var p in playlists)
+        var playlists = _viewModel.PlaylistItems.Where(p => p.PlaylistId.HasValue).ToList();
+        if (playlists.Count > 0)
         {
-            var playlistId = p.PlaylistId!.Value;
-            var item = new Avalonia.Controls.MenuItem { Header = p.Name };
-            item.Click += (_, _) =>
+            parent.Items.Add(new Separator());
+            foreach (var p in playlists)
             {
-                if (_viewModel.SelectedItem != null)
+                var playlistId = p.PlaylistId!.Value;
+                var item = new Avalonia.Controls.MenuItem { Header = p.Name };
+                item.Click += (_, _) =>
                 {
-                    _viewModel.AddTrackToPlaylist(playlistId, _viewModel.SelectedItem);
-                }
-            };
-            parent.Items.Add(item);
+                    if (_viewModel.SelectedItem != null)
+                    {
+                        _viewModel.AddTrackToPlaylist(playlistId, _viewModel.SelectedItem);
+                    }
+                };
+                parent.Items.Add(item);
+            }
         }
     }
 
