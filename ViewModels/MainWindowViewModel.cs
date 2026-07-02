@@ -3044,6 +3044,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Adds an item to Favorites (idempotent - never un-favorites). Favorites is a pseudo-playlist,
+    /// so it lives in the "Add to Playlist >" submenu; the ADD semantic there must not toggle.
+    /// </summary>
+    internal void AddToFavorites(MediaItem? item)
+    {
+        if (item is null || item.IsFavorite)
+        {
+            return;
+        }
+        item.IsFavorite = true;
+        MediaCache.SetFavorite(item.Id, true);
+        if (SelectedSidebarItem?.IsFavorites == true)
+        {
+            ApplyFilter();
+        }
+    }
+
     [RelayCommand]
     internal void AddUserStation(string? input)
     {

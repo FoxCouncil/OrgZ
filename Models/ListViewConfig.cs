@@ -120,7 +120,6 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
             new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
             new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
             new ContextMenuItemDef
             {
@@ -135,7 +134,7 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
-            // For audiobooks, removing from the library IS deleting from disk - the store can
+            // Audiobooks: removing from the library IS deleting from disk - the store can
             // always re-download a book, so there is no soft-ignore middle state to manage.
             new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
         ];
@@ -575,7 +574,6 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
             new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
             new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
             new ContextMenuItemDef
             {
@@ -624,7 +622,7 @@ public static class ListViewConfigs
             new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Remove from Playlist", CommandName = "RemoveFromPlaylist" },
-            new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
+            new ContextMenuItemDef { Header = "Add to Playlist", IsAddToPlaylistMarker = true },
             new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
             new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
         ];
