@@ -11,12 +11,6 @@ covered by argument/layout tests only. Wanted: an end-to-end burn against a rewr
 image-backed virtual recorder if one proves workable) validating the full transcode → layout →
 burn → verify chain, plus the no-media / not-blank / not-writable pre-flight paths on real drives.
 
-### Audiobooks
-The sidebar entry exists, disabled. The whole vertical: library-side audiobook detection and views,
-device sync (media_type 8 write is already in the DB layer; `SupportsAudiobooks` currently just
-aliases podcasts), chapters/resume where formats carry them, and its own conformance rows. Ends
-with the disabled entry becoming a real view.
-
 ### Collapsible device rows in the sidebar
 Each connected iPod becomes a collapsible parent (expander chevron) over its sub-items - Music,
 Podcasts, Audiobooks, Playlists - so multiple connected devices don't flood the DEVICES section.
@@ -50,6 +44,9 @@ them against metal:
 - hash58 known-answer vector captured from a real Classic (boot test)
 - Nano 5G CDB user-playlist form (research pending - playlists live in SQLite only until iTunes
   accepts a user-playlist mhyp in the CDB)
+- Audiobooks land in the on-device Audiobooks menu (media_type 8 on Binary, media_kind 8 on
+  Nano 5G) with the firmware honoring the remember-position flag - the conformance suite proves
+  the writes; the menus need metal
 
 ## Release
 - Velopack must bundle flac + lame + ffmpeg on Windows before release (rip + burn + iPod transcode
@@ -65,5 +62,10 @@ them against metal:
 - Empty states for empty device nodes (blank grid → a quiet explanatory line)
 - Group-header count wording ("2 Items" → "2 episodes" / "50 stations") wants a custom header
   template - cheap once shared media grid v1 lands
+- The Ignored view has no producer (ignore-on-remove retired when Remove from Library became a
+  real delete) - an explicit Hide gesture, or fold the view
+- Audiobook chapter atoms (m4b chapters) aren't parsed for in-app display - the book-detail
+  Chapters card lists the file parts; on-device chapters work natively either way
+- Libro.fm token persistence off-Windows (per-session sign-in until a cross-platform keychain)
 - `AreRowGroupsInitiallyCollapsed` (Avalonia PR #242): adopt when shipped, delete the
   collapse-seeding machinery
