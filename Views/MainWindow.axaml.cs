@@ -1185,7 +1185,9 @@ public partial class MainWindow : Window
         foreach (var device in targets)
         {
             var dev = device;   // capture
-            var entry = new Avalonia.Controls.MenuItem { Header = dev.SidebarLabel };
+            // Grey out a device the track is already on - the same "already there" cue the
+            // Add-to-Playlist submenu gives for the current playlist.
+            var entry = new Avalonia.Controls.MenuItem { Header = dev.SidebarLabel, IsEnabled = !_viewModel.IsItemAlreadyOnDevice(item, dev) };
             entry.Click += async (_, _) =>
             {
                 if (_viewModel.SelectedItem is { } sel)
@@ -1203,8 +1205,12 @@ public partial class MainWindow : Window
         // menu is built once and reused - populating only at build time is why this listed nothing.
         parent.Items.Clear();
 
+        // The playlist/Favorites you're currently VIEWING is greyed out - a track there is already
+        // in it, so "add" is a no-op. (SelectedSidebarItem is the active view.)
+        var current = _viewModel.SelectedSidebarItem;
+
         // Favorites is a pseudo-playlist and lives at the top; adding here never un-favorites.
-        var favorites = new Avalonia.Controls.MenuItem { Header = "Favorites" };
+        var favorites = new Avalonia.Controls.MenuItem { Header = "Favorites", IsEnabled = current?.IsFavorites != true };
         favorites.Click += (_, _) => _viewModel.AddToFavorites(_viewModel.SelectedItem);
         parent.Items.Add(favorites);
 
@@ -1215,7 +1221,7 @@ public partial class MainWindow : Window
             foreach (var p in playlists)
             {
                 var playlistId = p.PlaylistId!.Value;
-                var item = new Avalonia.Controls.MenuItem { Header = p.Name };
+                var item = new Avalonia.Controls.MenuItem { Header = p.Name, IsEnabled = current?.PlaylistId != playlistId };
                 item.Click += (_, _) =>
                 {
                     if (_viewModel.SelectedItem != null)
