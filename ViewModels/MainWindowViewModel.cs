@@ -4567,12 +4567,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         };
 
         var duration = TimeSpan.FromTicks(FilteredItems.Where(i => i.Duration.HasValue).Sum(i => i.Duration!.Value.Ticks));
+        var fileSize = FilteredItems.Sum(i => i.FileSize ?? 0L);
 
         UI(() =>
         {
             StatusBar.ItemCount = count;
             StatusBar.ItemLabel = label;
             StatusBar.ItemDuration = duration;
+            StatusBar.ItemFileSize = fileSize;
         });
     }
 
