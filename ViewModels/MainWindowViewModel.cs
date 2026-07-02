@@ -3732,6 +3732,52 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// File > Export Library - writes the whole local music library out as a playlist file the user
+    /// names (format from the chosen extension). Was a disabled placeholder; PlaylistExporter already
+    /// does the work, so it's a real feature now. Audiobooks/podcasts/device/CD tracks are excluded -
+    /// this is the music library, matching the Music view.
+    /// </summary>
+    [RelayCommand]
+    internal async Task ExportLibrary()
+    {
+        var tracks = _allItems
+            .Where(i => i.Kind == MediaKind.Music && i.Source == null && !string.IsNullOrEmpty(i.FilePath))
+            .ToList();
+        if (tracks.Count == 0)
+        {
+            UpdateMainStatus("Your library has no music to export.");
+            return;
+        }
+
+        var file = await _window.StorageProvider.SaveFilePickerAsync(new Avalonia.Platform.Storage.FilePickerSaveOptions
+        {
+            Title = "Export Library",
+            SuggestedFileName = "OrgZ Library.m3u8",
+            FileTypeChoices =
+            [
+                new Avalonia.Platform.Storage.FilePickerFileType("M3U8") { Patterns = ["*.m3u8"] },
+                new Avalonia.Platform.Storage.FilePickerFileType("PLS") { Patterns = ["*.pls"] },
+                new Avalonia.Platform.Storage.FilePickerFileType("XSPF") { Patterns = ["*.xspf"] },
+            ],
+        });
+        if (file is null)
+        {
+            return;
+        }
+
+        var path = file.Path.LocalPath;
+        switch (Path.GetExtension(path).ToLowerInvariant())
+        {
+            case ".pls": PlaylistExporter.ExportPLS(path, "OrgZ Library", tracks); break;
+            case ".xspf": PlaylistExporter.ExportXSPF(path, "OrgZ Library", tracks); break;
+            default: PlaylistExporter.ExportM3U8(path, "OrgZ Library", tracks); break;
+        }
+
+        _log.Information("Exported library: {Count} tracks -> {Path}", tracks.Count, path);
+        UpdateMainStatus($"Exported {tracks.Count} tracks to {Path.GetFileName(path)}.");
+    }
+
     [RelayCommand]
     internal async Task DeletePlaylist(SidebarItem? item)
     {

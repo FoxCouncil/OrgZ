@@ -25,7 +25,7 @@
 					<NativeMenuItem Header="Change Library Folder..." Command="{Binding ChangeLibraryFolderCommand}" />
 					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Import Playlist..." Command="{Binding ImportPlaylistCommand}" />
-					<NativeMenuItem Header="Export Library..." IsEnabled="False" />
+					<NativeMenuItem Header="Export Library..." Command="{Binding ExportLibraryCommand}" />
 					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Settings..." Command="{Binding ShowSettingsCommand}" />
 					<NativeMenuItemSeparator />
