@@ -125,7 +125,6 @@ public partial class MainWindow : Window
             ["RemoveFromPlaylist"] = ContextMenu_RemoveFromPlaylist,
             ["ShowInExplorer"] = ContextMenu_ShowInExplorer,
             ["RemoveFromLibrary"] = ContextMenu_RemoveFromLibrary,
-            ["DeleteAudiobook"] = ContextMenu_DeleteAudiobook,
             ["RemoveFromDevice"] = ContextMenu_RemoveFromDevice,
             ["RestoreFromIgnored"] = ContextMenu_RestoreFromIgnored,
             ["RipTrack"] = async (s, e) => await _viewModel.RipSelectedCdTrackAsync(),
@@ -1209,14 +1208,6 @@ public partial class MainWindow : Window
         if (_viewModel.SelectedItem != null)
         {
             await _viewModel.RemoveFromLibraryAsync(_viewModel.SelectedItem);
-        }
-    }
-
-    private async void ContextMenu_DeleteAudiobook(object? sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem != null)
-        {
-            await _viewModel.DeleteAudiobookFromDiskAsync(_viewModel.SelectedItem);
         }
     }
 
