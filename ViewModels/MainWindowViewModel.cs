@@ -6300,15 +6300,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Fewer than four distinct covers: repeat them cyclically to fill the 2×2 (Fox's call -
+        // duplicating the art reads better than empty cells; one album fills all four).
+        var mosaic = covers;
+        if (covers.Count is > 0 and < 4)
+        {
+            mosaic = Enumerable.Range(0, 4).Select(i => covers[i % covers.Count]).ToList();
+        }
+
         CurrentPlaylistHeader = new PlaylistHeaderInfo
         {
             Name = name,
             SourceLabel = source,
             Summary = summary,
-            Cover1 = covers.ElementAtOrDefault(0),
-            Cover2 = covers.ElementAtOrDefault(1),
-            Cover3 = covers.ElementAtOrDefault(2),
-            Cover4 = covers.ElementAtOrDefault(3),
+            Cover1 = mosaic.ElementAtOrDefault(0),
+            Cover2 = mosaic.ElementAtOrDefault(1),
+            Cover3 = mosaic.ElementAtOrDefault(2),
+            Cover4 = mosaic.ElementAtOrDefault(3),
         };
     }
 
