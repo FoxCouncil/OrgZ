@@ -3711,8 +3711,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             : 1;
 
         var dialog = new Views.ConfirmDialog(
-            "Delete Audiobook",
-            $"Delete “{bookName}” from your library?\n\nThis permanently deletes {fileCount} file(s) from disk. It cannot be undone.",
+            "Remove from Library",
+            $"Remove “{bookName}” from your library?\n\nThis permanently deletes {fileCount} file(s) from disk. It cannot be undone.",
             "Delete");
         if (!await dialog.ShowDialog<bool>(_window))
         {
@@ -3745,33 +3745,53 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdateMainStatus($"Deleted {bookName} — {deleted.Count} file(s) removed.");
     }
 
+    /// <summary>
+    /// Removes a local library file for good: confirm, delete from disk, drop the rows. One
+    /// gesture, one meaning across every kind (Fox's spec) - an audiobook scopes to its whole
+    /// book folder, music to the single file. Only local library files route through here;
+    /// device tracks have Remove from iPod and CD tracks never carry the command. The old
+    /// ignore-based soft remove is retired (the Ignored view still shows and restores anything
+    /// ignored before the change).
+    /// </summary>
     internal async Task RemoveFromLibraryAsync(MediaItem item)
     {
-        if (item.Kind is not (MediaKind.Music or MediaKind.Audiobook))
+        if (!IsLocalLibraryFile(item))
         {
+            return;
+        }
+
+        if (item.Kind == MediaKind.Audiobook)
+        {
+            await DeleteAudiobookFromDiskAsync(item);
             return;
         }
 
         var title = !string.IsNullOrWhiteSpace(item.Title) ? item.Title : item.FileName ?? "this track";
         var dialog = new Views.ConfirmDialog(
             "Remove from Library",
-            $"Remove \"{title}\" from your library?\n\nThe file will not be deleted. You can restore it later from the Ignored view.",
-            "Remove");
-
-        var ok = await dialog.ShowDialog<bool>(_window);
-        if (!ok)
+            $"Remove “{title}” from your library?\n\nThis permanently deletes the file from disk. It cannot be undone.",
+            "Delete");
+        if (!await dialog.ShowDialog<bool>(_window))
         {
             return;
         }
 
-        MediaCache.IgnoreMedia(item.Id);
-        item.IsIgnored = true;
+        try
+        {
+            File.Delete(item.FilePath!);
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Library file delete failed for {Path}", item.FilePath);
+            UpdateMainStatus($"Couldn't delete {title} — {ex.Message}");
+            return;
+        }
 
-        // If the item was in any playlists, those playlist configs now have stale trackIds.
-        // Rebuild them so playlist views stay accurate.
+        _allItems.Remove(item);
+        await Task.Run(() => MediaCache.RemoveLibraryFiles([item.Id]));
         RefreshAllPlaylistConfigs();
-
         ApplyFilter();
+        UpdateMainStatus($"Deleted {title}.");
     }
 
     /// <summary>

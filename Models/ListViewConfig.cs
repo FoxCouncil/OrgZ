@@ -134,8 +134,9 @@ public static class ListViewConfigs
             },
             new ContextMenuItemDef { IsSeparator = true },
             new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
+            // For audiobooks, removing from the library IS deleting from disk - the store can
+            // always re-download a book, so there is no soft-ignore middle state to manage.
             new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
-            new ContextMenuItemDef { Header = "Delete from Disk…", CommandName = "DeleteAudiobook" },
         ];
     }
 
