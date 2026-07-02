@@ -87,12 +87,11 @@ public partial class AudiobooksViewModel : ObservableObject
     [ObservableProperty]
     private bool _isStoreLoading;
 
-    [ObservableProperty]
-    private string _storeSearchText = string.Empty;
-
     /// <summary>Search results replace the landing sections while a search is active.</summary>
     [ObservableProperty]
     private bool _isSearchActive;
+
+    private CancellationTokenSource? _searchCts;
 
     /// <summary>Loads the landing sections once per session; the client's disk cache keeps it warm.</summary>
     public async Task LoadStoreAsync()
@@ -126,13 +125,41 @@ public partial class AudiobooksViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private async Task SearchAsync()
+    /// <summary>
+    /// Driven by the global header search box (see <c>MainWindowViewModel</c>) - the composite
+    /// has ONE search: the same text filters the library grid through the normal pipeline and,
+    /// debounced here, searches the store. Clearing the box restores the landing sections.
+    /// </summary>
+    internal void ApplyHeaderSearch(string? text)
     {
-        var query = StoreSearchText.Trim();
-        if (query.Length == 0)
+        var q = text?.Trim() ?? "";
+
+        // Supersede any in-flight / pending search.
+        _searchCts?.Cancel();
+
+        if (q.Length == 0)
         {
             IsSearchActive = false;
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        _ = DebouncedSearchAsync(q, cts.Token);
+    }
+
+    private async Task DebouncedSearchAsync(string query, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(400, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (ct.IsCancellationRequested)
+        {
             return;
         }
 
@@ -140,6 +167,10 @@ public partial class AudiobooksViewModel : ObservableObject
         try
         {
             var results = await ArchiveOrgClient.SearchAsync(query, rows: 24);
+            if (ct.IsCancellationRequested)
+            {
+                return;   // a newer keystroke superseded this query while it was in flight
+            }
             SearchResults.Clear();
             foreach (var b in results)
             {
@@ -152,15 +183,6 @@ public partial class AudiobooksViewModel : ObservableObject
         finally
         {
             IsStoreLoading = false;
-        }
-    }
-
-    partial void OnStoreSearchTextChanged(string value)
-    {
-        // Clearing the box restores the landing sections without needing another search.
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            IsSearchActive = false;
         }
     }
 
