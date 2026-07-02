@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Radio station curation workbench. Browses Radio Browser / SHOUTcast / arbitrary
+       Icecast servers, merges duplicate streams into one station with bitrate/format
+       variants, probes stream health, and exports the shipped Assets/stations.json.
+       The working set lives in tools/station-curator/curated.json - that file is the
+       source of truth for the bundled station list. NOT part of the app build
+       (OrgZ.csproj excludes tools/**); build/run this project on its own. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OrgZ.StationCurator</RootNamespace>
+    <AssemblyName>StationCurator</AssemblyName>
+    <!-- The referenced OrgZ app is WinExe; silence the "exe referencing exe" notice. -->
+    <NoWarn>$(NoWarn);NETSDK1086</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\OrgZ.csproj" />
+  </ItemGroup>
+
+  <!-- Packages OrgZ already references are pinned again here because analyzers, source
+       generators, and build targets (Avalonia XAML compiler, MVVM Toolkit generators,
+       LibVLC native deployment) do not flow through a ProjectReference. -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.0">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="LibVLCSharp" Version="3.9.4" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="System.Collections.ObjectModel" />
+    <Using Include="CommunityToolkit.Mvvm.ComponentModel" />
+    <Using Include="CommunityToolkit.Mvvm.Input" />
+  </ItemGroup>
+
+</Project>

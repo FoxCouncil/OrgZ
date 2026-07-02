@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "stations": [
+    {
+      "id": "rb:97f4c63b-35b9-47ef-8a0e-883c51df96ad",
+      "name": "Hawa",
+      "genreId": 15,
+      "country": "Nigeria",
+      "countryCode": "NG",
+      "homepage": "https://hawa.com.ng/",
+      "logoUrl": "https://hawa.com.ng/logo.png",
+      "description": "acid house,ambient,breakcore,chillwave,dark ambient,darkwave,downtempo,drone,drum and bass,dubstep,ebm,electro,electronic music,experimental,footwork,future funk,gabber,glitch,hauntology,idm,indie rock,industrial music,jungle,library music,lo-fi hip hop,mallsoft,microsound,minimal techno,netlabel,noise music,phonk,plunderphonics,post-rock,psytrance,shoegaze,synthwave,techno,trip hop,uk garage,vaporwave,witch house",
+      "notes": null,
+      "preferredStreamId": null,
+      "streams": [
+        {
+          "id": "59a428edc759",
+          "url": "https://hawa.com.ng/stream",
+          "format": "mp3",
+          "bitrate": 0,
+          "source": "radio-browser",
+          "sourceId": "97f4c63b-35b9-47ef-8a0e-883c51df96ad",
+          "probeStatus": "dead",
+          "probeDetail": "A task was canceled.",
+          "probeFormat": null,
+          "probeBitrate": null,
+          "resolvedUrl": null,
+          "probedAtUtc": "2026-07-02T05:32:39.5964628+00:00",
+          "geoRisk": false
+        }
+      ]
+    },
+    {
+      "id": "rb:d71c5650-1792-4de3-8ce3-32fad008c669",
+      "name": "Esoterica Radio S5",
+      "genreId": 28,
+      "country": "Bosnia And Herzegovina",
+      "countryCode": "BA",
+      "homepage": "https://esoterica.live/",
+      "logoUrl": "https://esoterica.live/images/favicon.ico",
+      "description": "darksynth,electro industrial darkwave ebm futurepop synthpop goth,electronic dance music,electronic rock,rock,synthwave",
+      "notes": null,
+      "preferredStreamId": null,
+      "streams": [
+        {
+          "id": "4c37591217a9",
+          "url": "https://esoterica.servemp3.com:444/listen/synthwave_electronicrock/radio.mp3",
+          "format": "mp3",
+          "bitrate": 192,
+          "source": "radio-browser",
+          "sourceId": "d71c5650-1792-4de3-8ce3-32fad008c669",
+          "probeStatus": "ok",
+          "probeDetail": "Synthwave_ElectronicRock",
+          "probeFormat": "mp3",
+          "probeBitrate": 192,
+          "resolvedUrl": "https://esoterica.servemp3.com:444/listen/synthwave_electronicrock/radio.mp3",
+          "probedAtUtc": "2026-07-02T05:32:25.2093003+00:00",
+          "geoRisk": false
+        }
+      ]
+    },
+    {
+      "id": "rb:12e458f2-cf9b-426a-8d18-7cb07c75b07c",
+      "name": "Nightride FM",
+      "genreId": 28,
+      "country": "Germany",
+      "countryCode": "DE",
+      "homepage": "https://nightride.fm/",
+      "logoUrl": "https://nightride.fm/thumbnail.png",
+      "description": "outrun,retrowave,synthwave",
+      "notes": null,
+      "preferredStreamId": null,
+      "streams": [
+        {
+          "id": "359d7b96b4e9",
+          "url": "https://stream.nightride.fm/nightride.mp3",
+          "format": "mp3",
+          "bitrate": 320,
+          "source": "radio-browser",
+          "sourceId": "12e458f2-cf9b-426a-8d18-7cb07c75b07c",
+          "probeStatus": "ok",
+          "probeDetail": "Radio 019e214d-ac7c-7f2b-a13e-3642deb90104",
+          "probeFormat": "mp3",
+          "probeBitrate": 320,
+          "resolvedUrl": "https://stream.nightride.fm/nightride.mp3",
+          "probedAtUtc": "2026-07-02T05:32:24.8465616+00:00",
+          "geoRisk": false
+        }
+      ]
+    },
+    {
+      "id": "rb:65479d00-dd6e-494e-93b0-a8607b846d12",
+      "name": "Nightride FM - Datawave",
+      "genreId": 28,
+      "country": "Germany",
+      "countryCode": "DE",
+      "homepage": "https://nightride.fm/",
+      "logoUrl": "https://nightride.fm/thumbnail.png",
+      "description": "glitchy synthwave,idm,retro computing",
+      "notes": null,
+      "preferredStreamId": null,
+      "streams": [
+        {
+          "id": "153e51827745",
+          "url": "https://stream.nightride.fm/datawave.mp3",
+          "format": "mp3",
+          "bitrate": 320,
+          "source": "radio-browser",
+          "sourceId": "65479d00-dd6e-494e-93b0-a8607b846d12",
+          "probeStatus": "ok",
+          "probeDetail": "Radio 019e214d-aa63-74b1-9f3f-320a05dbb4f8",
+          "probeFormat": "mp3",
+          "probeBitrate": 320,
+          "resolvedUrl": "https://stream.nightride.fm/datawave.mp3",
+          "probedAtUtc": "2026-07-02T05:32:25.5964721+00:00",
+          "geoRisk": false
+        }
+      ]
+    }
+  ]
+}
