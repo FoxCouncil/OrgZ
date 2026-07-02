@@ -101,6 +101,22 @@ public static class ListViewConfigs
         _configs.Remove(key);
     }
 
+    /// <summary>
+    /// Removes a view config together with its whole sub-view family ("{key}:Podcast",
+    /// "{key}:Playlist:{id}", ...). Device teardown uses this so a different iPod arriving at the same
+    /// mount path can't inherit the departed device's per-kind / per-playlist configs. Boundary-aware:
+    /// "Device:/media/ipod" leaves "Device:/media/ipod-red"'s family alone.
+    /// </summary>
+    public static void RemoveWithSubViews(string key)
+    {
+        _configs.Remove(key);
+        var prefix = $"{key}:";
+        foreach (var sub in _configs.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            _configs.Remove(sub);
+        }
+    }
+
     public static ListViewConfig BuildDeviceConfig(string mountPath)
     {
         var source = $"device:{mountPath}";
