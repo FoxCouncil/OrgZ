@@ -91,19 +91,19 @@
             </Grid>
         </controls:MediaHeaderBar.Body>
 
-        <!-- Actions: Sync (dropdown) + Eject. The dangerous Erase lives in the sidebar
-             right-click menu (Settings > Erase), never as a header button. -->
+        <!-- Actions: Sync + Eject. One Sync button - it runs the device's saved plan, or opens the
+             settings dialog on first sync (same gesture as the sidebar right-click > Sync). The
+             dangerous Erase lives in the sidebar right-click menu (Settings > Erase), never here. -->
         <controls:MediaHeaderBar.Actions>
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Name="SyncButton" Padding="10,6" Cursor="Hand"
+                <Button Padding="10,6" Cursor="Hand"
                         ToolTip.Tip="Sync content to this iPod"
-                        Click="SyncButton_Click"
-                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).CanSyncPodcasts, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).SyncSelectedDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).CanSyncToDevice, RelativeSource={RelativeSource AncestorType=Window}}"
                         IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsBusy, RelativeSource={RelativeSource AncestorType=Window}}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <i:Icon Value="fa-solid fa-arrows-rotate" FontSize="13" VerticalAlignment="Center" />
                         <TextBlock Text="Sync" VerticalAlignment="Center" />
-                        <i:Icon Value="fa-solid fa-caret-down" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
                 <Button Padding="10,6" Cursor="Hand"

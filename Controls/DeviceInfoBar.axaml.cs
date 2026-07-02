@@ -21,27 +21,6 @@ public partial class DeviceInfoBar : UserControl
     }
 
     /// <summary>
-    /// Opens the Sync menu for the iPod - the device-level entry point for pushing content. Music
-    /// and playlists sync from their own views; this menu covers the device-scoped batch syncs
-    /// (podcasts today, extensible). Built in code-behind so the menu commands resolve against the
-    /// window's view model without popup binding gymnastics.
-    /// </summary>
-    private void SyncButton_Click(object? sender, RoutedEventArgs e)
-    {
-        if (TopLevel.GetTopLevel(this)?.DataContext is not MainWindowViewModel vm || sender is not Control target)
-        {
-            return;
-        }
-
-        var podcasts = new MenuItem { Header = "Podcasts" };
-        podcasts.Click += (_, _) => vm.SyncPodcastsToIPodCommand.Execute(null);
-
-        var flyout = new MenuFlyout();
-        flyout.Items.Add(podcasts);
-        flyout.ShowAt(target);
-    }
-
-    /// <summary>
     /// Toggles the Model row between the libgpod-decoded iPod identity and the raw
     /// hardware model string from WMI (surfaces drive-adapter mods like "iFlash").
     /// Does nothing when we don't have a hardware string to switch to.

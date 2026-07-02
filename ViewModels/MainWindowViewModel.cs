@@ -182,7 +182,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod), nameof(CanSyncPodcasts))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod), nameof(CanSyncPodcasts), nameof(CanSyncToDevice))]
     private SidebarItem? _selectedSidebarItem;
 
     // Whether a recorder (writable optical drive) is present. Refreshed by
@@ -5658,20 +5658,194 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Syncs downloaded podcasts to the iPod currently shown in the device info bar.</summary>
-    [RelayCommand]
-    private async Task SyncPodcastsToIPodAsync()
+    /// <summary>Whether the shown device can take ANY sync - the header Sync button's gate.</summary>
+    public bool CanSyncToDevice
     {
-        var dev = DeviceForSidebarItem(SelectedSidebarItem);
+        get
+        {
+            var dev = DeviceForSidebarItem(SelectedSidebarItem);
+            if (dev is null)
+            {
+                return false;
+            }
+            var ipod = IPodDevice.For(dev);
+            return ipod.SupportsPodcasts || ipod.SupportsAudiobooks || ipod.SupportsPlaylists;
+        }
+    }
+
+    /// <summary>Header Sync button: the unified sync for the device shown in the info bar.</summary>
+    [RelayCommand]
+    private async Task SyncSelectedDevice() => await SyncDeviceAsync(SelectedSidebarItem);
+
+    /// <summary>
+    /// The one Sync gesture (device right-click > Sync). First run - or any device with no saved
+    /// plan - opens the settings dialog; after that, runs the saved plan straight. Passing
+    /// <paramref name="forceSettings"/> always opens the dialog (the "Sync Settings..." entry).
+    /// </summary>
+    internal async Task SyncDeviceAsync(SidebarItem? item, bool forceSettings = false)
+    {
+        var dev = DeviceForSidebarItem(item);
         if (dev is null)
         {
             return;
         }
 
+        var plan = SyncPlanStore.Load(dev);
+        if (plan is null || forceSettings)
+        {
+            plan = await EditSyncPlanAsync(dev);
+            if (plan is null)
+            {
+                return;   // cancelled
+            }
+        }
+
+        await RunSyncPlanAsync(dev, plan);
+    }
+
+    /// <summary>Opens the sync-settings dialog for a device, persisting the result on Save. Null on cancel.</summary>
+    private async Task<SyncPlan?> EditSyncPlanAsync(ConnectedDevice dev)
+    {
         var ipod = IPodDevice.For(dev);
-        if (ipod.SupportsPodcasts)
+        var playlists = await Task.Run(() => MediaCache.LoadAllPlaylists().Select(p => (p.Id, p.Name)).ToList());
+        var current = SyncPlanStore.Load(dev) ?? new SyncPlan();
+
+        var dialog = new Views.SyncSettingsDialog(
+            dev.Name, ipod.SupportsPodcasts, ipod.SupportsAudiobooks, ipod.SupportsPlaylists, playlists, current);
+        var result = await dialog.ShowDialog<SyncPlan?>(_window);
+        if (result is null)
+        {
+            return null;
+        }
+
+        SyncPlanStore.Save(dev, result);
+        return result;
+    }
+
+    /// <summary>
+    /// Runs a device's whole saved plan under ONE batch scope, so a Nano 5G regenerates its
+    /// compressed CDB a single time across podcasts + audiobooks + every playlist, not once each.
+    /// Each component honors the tier's own capability claim, so a stale plan can't push a kind the
+    /// device can't carry.
+    /// </summary>
+    private async Task RunSyncPlanAsync(ConnectedDevice dev, SyncPlan plan)
+    {
+        if (!plan.SyncsAnything)
+        {
+            UpdateMainStatus($"Nothing selected to sync to {dev.Name} — open Sync Settings to choose.");
+            return;
+        }
+
+        var ipod = IPodDevice.For(dev);
+        using var batch = ipod.BeginBatchWrite();
+
+        if (plan.Podcasts && ipod.SupportsPodcasts)
         {
             await SyncPodcastsToDeviceAsync(dev, ipod);
+        }
+
+        if (plan.Audiobooks && ipod.SupportsAudiobooks)
+        {
+            await SyncAudiobooksToDeviceAsync(dev, ipod);
+        }
+
+        if (plan.Favorites && ipod.SupportsPlaylists)
+        {
+            var favorites = _allItems
+                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
+                .ToList();
+            if (favorites.Count > 0)
+            {
+                await SyncPlaylistToDeviceAsync("Favorites", favorites, dev);
+            }
+        }
+
+        if (plan.PlaylistIds.Count > 0 && ipod.SupportsPlaylists)
+        {
+            var nameById = await Task.Run(() => MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id, p => p.Name));
+            foreach (var pid in plan.PlaylistIds)
+            {
+                var tracks = await Task.Run(() => GetPlaylistMediaItems(pid));
+                if (tracks.Count > 0)
+                {
+                    await SyncPlaylistToDeviceAsync(nameById.GetValueOrDefault(pid, "Playlist"), tracks, dev);
+                }
+            }
+        }
+
+        UpdateMainStatus($"Sync to {dev.Name} complete.");
+    }
+
+    /// <summary>
+    /// Syncs the library's audiobooks to a device as AUDIOBOOKS. Each import auto-detects the kind
+    /// (media_type/media_kind 8) inside the importer; already-present books are skipped by
+    /// artist+title match. No playlist - books stand on their own in the device's Audiobooks menu.
+    /// </summary>
+    private async Task SyncAudiobooksToDeviceAsync(ConnectedDevice dev, IPodDevice ipod)
+    {
+        var books = _allItems
+            .Where(i => IsLocalLibraryFile(i) && i.Kind == MediaKind.Audiobook)
+            .ToList();
+        if (books.Count == 0)
+        {
+            UpdateMainStatus("No audiobooks in your library to sync.");
+            return;
+        }
+
+        var ffmpeg = ResolveFfmpeg();
+        if (dev.DeviceType == DeviceType.StockIPod && ffmpeg is null)
+        {
+            UpdateMainStatus("ffmpeg wasn't found — needed to import audiobooks onto the iPod.");
+            return;
+        }
+
+        var deviceSource = $"device:{dev.MountPath}";
+        var present = _allItems
+            .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
+            .Select(i => NormalizeMatchKey(i.Artist, i.Title))
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        BeginLcdBusy($"Syncing audiobooks to {dev.Name}");
+        int added = 0, skipped = 0, failed = 0;
+        try
+        {
+            for (int i = 0; i < books.Count; i++)
+            {
+                var b = books[i];
+                if (present.Contains(NormalizeMatchKey(b.Artist, b.Title)))
+                {
+                    skipped++;
+                    continue;
+                }
+                if (string.IsNullOrEmpty(b.FilePath) || !File.Exists(b.FilePath))
+                {
+                    failed++;
+                    continue;
+                }
+                try
+                {
+                    SetLcdBusy($"Adding “{b.Title}” ({i + 1}/{books.Count})", (double)i / books.Count);
+                    var deviceItem = await ipod.AddTrackAsync(b, ffmpeg ?? "ffmpeg");
+                    _allItems.Add(deviceItem);
+                    added++;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Audiobook sync: failed to add {Book} to {Device}", b.FilePath, dev.MountPath);
+                    failed++;
+                }
+            }
+
+            IPodArtworkReader.Invalidate(dev.MountPath);
+            dev.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
+            ApplyFilter();
+            _log.Information("Synced audiobooks to {Device}: added={Added} skipped={Skipped} failed={Failed}", dev.MountPath, added, skipped, failed);
+            UpdateMainStatus($"Synced audiobooks to {dev.Name} — {added} new, {skipped} already there.");
+        }
+        finally
+        {
+            EndLcdBusy();
         }
     }
 
