@@ -683,6 +683,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             Podcasts.ApplyHeaderSearch(value);
         }
+
+        // The Audiobooks composite has ONE search - this box. ApplyFilter above already filtered
+        // the library grid through the normal pipeline; the same text also feeds the store's
+        // debounced archive.org search, so the grid and the store react together.
+        if (!_suppressSearchPersist && ListViewConfigs.Get(SelectedSidebarItem?.ViewConfigKey)?.Host == ViewHost.AudiobooksPanel && Audiobooks is not null)
+        {
+            Audiobooks.ApplyHeaderSearch(value);
+        }
     }
 
     [RelayCommand]
