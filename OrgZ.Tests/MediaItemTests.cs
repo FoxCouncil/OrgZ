@@ -111,25 +111,6 @@ public class MediaItemTests
         Assert.Equal("", zeroItem.BitrateLabel);
     }
 
-    // -- NormalizedGenre --
-
-    [Theory]
-    [InlineData("rock", "Classic Rock")]
-    [InlineData("classic rock,oldies", "Classic Rock")]
-    [InlineData("indie,alternative", "Alt/Modern Rock")]
-    [InlineData("death metal", "Hard Rock / Metal")]
-    [InlineData("christian rock", "Religious")]
-    [InlineData("pop,top 40", "Top 40/Pop")]
-    [InlineData("80s,new wave", "70s/80s Pop")]
-    [InlineData(null, "Other")]
-    [InlineData("", "Other")]
-    [InlineData("klingon opera ceremonial", "Classical")] // opera matches
-    public void NormalizedGenre_MapsProviderTagsToCanonical(string? tags, string expected)
-    {
-        var item = new MediaItem { Id = "x", Kind = MediaKind.Radio, Tags = tags };
-        Assert.Equal(expected, item.NormalizedGenre);
-    }
-
     // -- FormatIssues --
 
     [Fact]

@@ -3072,12 +3072,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         string name;
         string url;
+        string genre = string.Empty;
 
-        var parts = input.Split('|', 2);
-        if (parts.Length == 2)
+        var parts = input.Split('|', 3);
+        if (parts.Length >= 2)
         {
             name = parts[0].Trim();
             url = parts[1].Trim();
+            if (parts.Length == 3)
+            {
+                genre = parts[2].Trim();
+            }
         }
         else
         {
@@ -3090,6 +3095,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // The genre is whatever the user picked in the dialog - no fuzzy
+        // normalization in the app; curation-time mapping lives in the tool.
+        var genreEnum = RadioGenres.FromDisplayName(genre);
+
         var station = new MediaItem
         {
             Id = $"user:{Guid.NewGuid()}",
@@ -3097,11 +3106,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Source = "user",
             Title = name,
             StreamUrl = url,
+            Tags = genreEnum == RadioGenre.Unknown ? null : genreEnum.DisplayName(),
         };
 
         MediaCache.UpsertRadioStations([station]);
         _allItems.Add(station);
-        ApplyFilter();
+
+        // Rebuild (not just re-filter) so a genre new to the dataset shows up
+        // in the Genre dropdown immediately.
+        RebuildRadioFilterOptions();
     }
 
     private void RebuildRadioFilterOptions()
@@ -3129,8 +3142,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         Genres.Clear();
         Genres.Add("All");
-        // Genre dropdown lists the 26 RadioGenre display names that actually
-        // appear in the current dataset, in canonical (alphabetical-by-id) order.
+        // Genre dropdown lists the RadioGenre display names that actually
+        // appear in the current dataset, in canonical taxonomy order.
         var activeGenres = radioItems
             .Where(s => !string.IsNullOrWhiteSpace(s.Tags))
             .Select(s => s.Tags!)

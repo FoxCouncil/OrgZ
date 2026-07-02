@@ -32,7 +32,13 @@ public partial class RadioFilterPanel : UserControl
         }
 
         var nameBox = new TextBox { Watermark = "Station Name", Margin = new Avalonia.Thickness(0, 0, 0, 8) };
-        var urlBox = new TextBox { Watermark = "Stream URL (http://...)" };
+        var urlBox = new TextBox { Watermark = "Stream URL (http://...)", Margin = new Avalonia.Thickness(0, 0, 0, 8) };
+        var genreBox = new ComboBox
+        {
+            PlaceholderText = "Genre",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+            ItemsSource = RadioGenres.All.Select(g => g.DisplayName()).ToList(),
+        };
 
         var dialog = new Window
         {
@@ -50,6 +56,7 @@ public partial class RadioFilterPanel : UserControl
                     new TextBlock { Text = "Add a custom radio station:", Margin = new Avalonia.Thickness(0, 0, 0, 12) },
                     nameBox,
                     urlBox,
+                    genreBox,
                     new StackPanel
                     {
                         Orientation = Avalonia.Layout.Orientation.Horizontal,
@@ -80,10 +87,11 @@ public partial class RadioFilterPanel : UserControl
                         {
                             var name = nameBox.Text?.Trim() ?? string.Empty;
                             var url = urlBox.Text?.Trim() ?? string.Empty;
+                            var genre = genreBox.SelectedItem as string ?? string.Empty;
 
                             if (!string.IsNullOrEmpty(url))
                             {
-                                result = string.IsNullOrEmpty(name) ? url : $"{name}|{url}";
+                                result = $"{(string.IsNullOrEmpty(name) ? url : name)}|{url}|{genre}";
                             }
                         }
 

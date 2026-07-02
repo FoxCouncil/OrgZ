@@ -3,37 +3,49 @@
 namespace OrgZ.Services;
 
 /// <summary>
-/// Maps provider-specific radio genre tags (Radio Browser, user-added, etc.) into a
-/// canonical iTunes-style taxonomy. The canonical set is fixed and language-neutral;
-/// raw tags are matched case-insensitively via substring against an ordered rule list
-/// where the most specific rules appear first.
+/// Maps provider-specific radio genre tags (Radio Browser, SHOUTcast, Icecast) into the
+/// canonical OrgZ radio taxonomy - the same 29 display names as <see cref="Models.RadioGenre"/>,
+/// plus "Other" for anything unmatched. Raw tags are matched case-insensitively via an ordered
+/// rule list where the most specific rules appear first.
+///
+/// The app itself never normalizes at runtime: bundled stations ship with a curated genreId and
+/// user-added streams get an explicit genre picker. This class exists for CURATION time - the
+/// tools/station-curator import path uses it to suggest a genre for each directory row.
 /// </summary>
 public static class GenreNormalizer
 {
-    // -- Canonical genre buckets (iTunes 2000s radio tuner style) --
+    // -- Canonical genre buckets. Every value except Other mirrors a RadioGenre display name. --
 
-    public const string FiftiesSixtiesPop  = "50s/60s Pop";
-    public const string SeventiesEightiesPop = "70s/80s Pop";
-    public const string AltModernRock      = "Alt/Modern Rock";
-    public const string Ambient            = "Ambient";
-    public const string Americana          = "Americana";
-    public const string Blues              = "Blues";
-    public const string ClassicRock        = "Classic Rock";
-    public const string Classical          = "Classical";
-    public const string Country            = "Country";
-    public const string Eclectic           = "Eclectic";
-    public const string Electronica        = "Electronica";
-    public const string HardRockMetal      = "Hard Rock / Metal";
-    public const string International      = "International";
-    public const string Jazz               = "Jazz";
-    public const string Public             = "Public";
-    public const string ReggaeIsland       = "Reggae/Island";
-    public const string Religious          = "Religious";
-    public const string Sports             = "Sports";
-    public const string TalkSpokenWord     = "Talk/Spoken Word";
-    public const string Top40Pop           = "Top 40/Pop";
-    public const string Urban              = "Urban";
-    public const string Other              = "Other";
+    public const string Fifties         = "50s";
+    public const string Sixties         = "60s";
+    public const string Seventies       = "70s";
+    public const string Eighties        = "80s";
+    public const string Nineties        = "90s";
+    public const string TwoThousands    = "2000s";
+    public const string AlternativeRock = "Alternative Rock";
+    public const string AmbientChillout = "Ambient/Chillout";
+    public const string Bluegrass       = "Bluegrass";
+    public const string Blues           = "Blues";
+    public const string Classical       = "Classical";
+    public const string Comedy          = "Comedy";
+    public const string Country         = "Country";
+    public const string DiscoFunk       = "Disco/Funk";
+    public const string ElectronicDance = "Electronic/Dance";
+    public const string HipHopRap       = "Hip-Hop/Rap";
+    public const string Indie           = "Indie";
+    public const string Jazz            = "Jazz";
+    public const string Latin           = "Latin";
+    public const string LoFi            = "Lo-Fi";
+    public const string Metal           = "Metal";
+    public const string MotownSoul      = "Motown/Soul";
+    public const string NewsTalkRadio   = "News/Talk Radio";
+    public const string Punk            = "Punk";
+    public const string Reggae          = "Reggae";
+    public const string Religious       = "Religious";
+    public const string SportsTalk      = "Sports Talk";
+    public const string Synthwave       = "Synthwave";
+    public const string World           = "World";
+    public const string Other           = "Other";
 
     /// <summary>
     /// All canonical buckets, in the order they should appear in UI lists.
@@ -41,38 +53,47 @@ public static class GenreNormalizer
     /// </summary>
     public static readonly IReadOnlyList<string> AllCanonical =
     [
-        FiftiesSixtiesPop,
-        SeventiesEightiesPop,
-        AltModernRock,
-        Ambient,
-        Americana,
+        Fifties,
+        Sixties,
+        Seventies,
+        Eighties,
+        Nineties,
+        TwoThousands,
+        AlternativeRock,
+        AmbientChillout,
+        Bluegrass,
         Blues,
-        ClassicRock,
         Classical,
+        Comedy,
         Country,
-        Eclectic,
-        Electronica,
-        HardRockMetal,
-        International,
+        DiscoFunk,
+        ElectronicDance,
+        HipHopRap,
+        Indie,
         Jazz,
-        Public,
-        ReggaeIsland,
+        Latin,
+        LoFi,
+        Metal,
+        MotownSoul,
+        NewsTalkRadio,
+        Punk,
+        Reggae,
         Religious,
-        Sports,
-        TalkSpokenWord,
-        Top40Pop,
-        Urban,
+        SportsTalk,
+        Synthwave,
+        World,
         Other,
     ];
 
     /// <summary>
     /// Ordered match rules. Each rule: if the lowercased raw string contains the keyword
-    /// (as a substring), the canonical bucket is returned. Order is load-bearing: more
-    /// specific rules must come first so "christian rock" → Religious (not Rock).
+    /// (as a substring for multi-word needles, whole-word for single-word ones), the canonical
+    /// bucket is returned. Order is load-bearing: more specific rules must come first so
+    /// "christian rock" → Religious (not a rock bucket) and "sports talk" → Sports Talk (not News/Talk).
     /// </summary>
     private static readonly (string Needle, string Canonical)[] Rules =
     [
-        // -- Religious (must come before Rock/Pop so "christian rock" → Religious) --
+        // -- Religious (must come before rock/talk so "christian rock" → Religious) --
         ("christian",       Religious),
         ("gospel",          Religious),
         ("religious",       Religious),
@@ -83,140 +104,191 @@ public static class GenreNormalizer
         ("sermon",          Religious),
         ("bible",           Religious),
 
-        // -- Public radio (before Talk so "npr" isn't just generic talk) --
-        ("npr",             Public),
-        ("public radio",    Public),
-        ("pbs",             Public),
+        // -- Comedy (before Talk so "comedy talk" → Comedy) --
+        ("comedy",          Comedy),
+        ("humor",           Comedy),
+        ("humour",          Comedy),
+        ("stand-up",        Comedy),
+        ("standup",         Comedy),
 
-        // -- Talk / Spoken Word (before Pop so "pop culture talk" → Talk) --
-        ("talk",            TalkSpokenWord),
-        ("news",            TalkSpokenWord),
-        ("spoken",          TalkSpokenWord),
-        ("politics",        TalkSpokenWord),
-        ("audiobook",       TalkSpokenWord),
-        ("podcast",         TalkSpokenWord),
-        ("comedy",          TalkSpokenWord),
-        ("humor",           TalkSpokenWord),
+        // -- Sports Talk (before Talk so "sports talk" isn't generic talk) --
+        ("sports",          SportsTalk),
+        ("sport",           SportsTalk),
+        ("football",        SportsTalk),
+        ("soccer",          SportsTalk),
+        ("baseball",        SportsTalk),
+        ("basketball",      SportsTalk),
+        ("hockey",          SportsTalk),
+        ("nfl",             SportsTalk),
+        ("nba",             SportsTalk),
+        ("mlb",             SportsTalk),
+        ("nhl",             SportsTalk),
 
-        // -- Sports --
-        ("sports",          Sports),
-        ("football",        Sports),
-        ("soccer",          Sports),
-        ("baseball",        Sports),
-        ("basketball",      Sports),
-        ("hockey",          Sports),
-        ("nfl",             Sports),
-        ("nba",             Sports),
-        ("mlb",             Sports),
+        // -- News / Talk Radio --
+        ("npr",             NewsTalkRadio),
+        ("public radio",    NewsTalkRadio),
+        ("pbs",             NewsTalkRadio),
+        ("talk",            NewsTalkRadio),
+        ("news",            NewsTalkRadio),
+        ("spoken",          NewsTalkRadio),
+        ("politics",        NewsTalkRadio),
+        ("audiobook",       NewsTalkRadio),
+        ("podcast",         NewsTalkRadio),
+        ("current affairs", NewsTalkRadio),
 
-        // -- Hard Rock / Metal (before "rock") --
-        ("death metal",     HardRockMetal),
-        ("black metal",     HardRockMetal),
-        ("heavy metal",     HardRockMetal),
-        ("thrash",          HardRockMetal),
-        ("power metal",     HardRockMetal),
-        ("metal",           HardRockMetal),
-        ("hard rock",       HardRockMetal),
+        // -- Synthwave (before 80s and before the Electronic "synth" catch) --
+        ("synthwave",       Synthwave),
+        ("retrowave",       Synthwave),
+        ("outrun",          Synthwave),
+        ("vaporwave",       Synthwave),
+        ("darksynth",       Synthwave),
 
-        // -- Alt/Modern Rock (before "rock") --
-        ("alternative",     AltModernRock),
-        ("alt rock",        AltModernRock),
-        ("alt-rock",        AltModernRock),
-        ("modern rock",     AltModernRock),
-        ("indie rock",      AltModernRock),
-        ("indie pop",       AltModernRock),
-        ("indie",           AltModernRock),
-        ("grunge",          AltModernRock),
-        ("post-rock",       AltModernRock),
-        ("post-punk",       AltModernRock),
-        ("pop punk",        AltModernRock),
-        ("punk",            AltModernRock),
-        ("emo",             AltModernRock),
-        ("shoegaze",        AltModernRock),
+        // -- Lo-Fi (before Ambient so "lofi chill" → Lo-Fi) --
+        ("lo-fi",           LoFi),
+        ("lofi",            LoFi),
+        ("lo fi",           LoFi),
+        ("chillhop",        LoFi),
+        ("study beats",     LoFi),
 
-        // -- Classic Rock (before generic "rock" - before Top 40/Pop too) --
-        ("classic rock",    ClassicRock),
-        ("album rock",      ClassicRock),
-        ("prog rock",       ClassicRock),
-        ("progressive rock", ClassicRock),
-        ("southern rock",   ClassicRock),
+        // -- Metal (before "rock") --
+        ("death metal",     Metal),
+        ("black metal",     Metal),
+        ("heavy metal",     Metal),
+        ("thrash",          Metal),
+        ("power metal",     Metal),
+        ("metalcore",       Metal),
+        ("doom",            Metal),
+        ("metal",           Metal),
+        ("hard rock",       Metal),
 
-        // -- Decades (era buckets) --
-        ("50s",             FiftiesSixtiesPop),
-        ("fifties",         FiftiesSixtiesPop),
-        ("60s",             FiftiesSixtiesPop),
-        ("sixties",         FiftiesSixtiesPop),
-        ("doo-wop",         FiftiesSixtiesPop),
-        ("doowop",          FiftiesSixtiesPop),
-        ("oldies",          FiftiesSixtiesPop),
-        ("70s",             SeventiesEightiesPop),
-        ("seventies",       SeventiesEightiesPop),
-        ("80s",             SeventiesEightiesPop),
-        ("eighties",        SeventiesEightiesPop),
-        ("new wave",        SeventiesEightiesPop),
-        ("synthpop",        SeventiesEightiesPop),
-        ("synth-pop",       SeventiesEightiesPop),
-        ("disco",           SeventiesEightiesPop),
+        // -- Alternative Rock (post-punk predates the Punk rules so it lands here) --
+        ("post-punk",       AlternativeRock),
+        ("post punk",       AlternativeRock),
+        ("alternative",     AlternativeRock),
+        ("alt rock",        AlternativeRock),
+        ("alt-rock",        AlternativeRock),
+        ("modern rock",     AlternativeRock),
+        ("grunge",          AlternativeRock),
+        ("post-rock",       AlternativeRock),
+        ("shoegaze",        AlternativeRock),
 
-        // -- Urban (hip-hop, r&b, soul) --
-        ("hip-hop",         Urban),
-        ("hip hop",         Urban),
-        ("hiphop",          Urban),
-        ("rap",             Urban),
-        ("r&b",             Urban),
-        ("rnb",             Urban),
-        ("rhythm and blues", Urban),
-        ("soul",            Urban),
-        ("funk",            Urban),
-        ("urban",           Urban),
-        ("trap",            Urban),
-        ("motown",          Urban),
+        // -- Punk (before Indie/Reggae so "pop punk" → Punk and "ska punk" → Punk) --
+        ("pop punk",        Punk),
+        ("punk",            Punk),
+        ("hardcore",        Punk),
+        ("emo",             Punk),
 
-        // -- Ambient --
-        ("ambient",         Ambient),
-        ("chillout",        Ambient),
-        ("chill out",       Ambient),
-        ("chill-out",       Ambient),
-        ("chill",           Ambient),
-        ("lounge",          Ambient),
-        ("downtempo",       Ambient),
-        ("new age",         Ambient),
-        ("meditation",      Ambient),
-        ("relax",           Ambient),
+        // -- Indie --
+        ("indie rock",      Indie),
+        ("indie pop",       Indie),
+        ("indie",           Indie),
+        ("college",         Indie),
 
-        // -- Electronica (before Dance catch-all) --
-        ("electronica",     Electronica),
-        ("electronic",      Electronica),
-        ("edm",             Electronica),
-        ("techno",          Electronica),
-        ("trance",          Electronica),
-        ("house",           Electronica),
-        ("drum and bass",   Electronica),
-        ("drum & bass",     Electronica),
-        ("dnb",             Electronica),
-        ("dubstep",         Electronica),
-        ("breakbeat",       Electronica),
-        ("idm",             Electronica),
-        ("synth",           Electronica),
-        ("dance",           Electronica),
-        ("club",            Electronica),
+        // -- Decades (era buckets; "classic rock" family lands in the 70s) --
+        ("50s",             Fifties),
+        ("1950s",           Fifties),
+        ("fifties",         Fifties),
+        ("doo-wop",         Fifties),
+        ("doowop",          Fifties),
+        ("rockabilly",      Fifties),
+        ("60s",             Sixties),
+        ("1960s",           Sixties),
+        ("sixties",         Sixties),
+        ("oldies",          Sixties),
+        ("british invasion", Sixties),
+        ("classic rock",    Seventies),
+        ("album rock",      Seventies),
+        ("prog rock",       Seventies),
+        ("progressive rock", Seventies),
+        ("southern rock",   Seventies),
+        ("yacht rock",      Seventies),
+        ("70s",             Seventies),
+        ("1970s",           Seventies),
+        ("seventies",       Seventies),
+        ("80s",             Eighties),
+        ("1980s",           Eighties),
+        ("eighties",        Eighties),
+        ("new wave",        Eighties),
+        ("synthpop",        Eighties),
+        ("synth-pop",       Eighties),
+        ("90s",             Nineties),
+        ("1990s",           Nineties),
+        ("nineties",        Nineties),
+        ("britpop",         Nineties),
+        ("2000s",           TwoThousands),
+        ("00s",             TwoThousands),
+        ("noughties",       TwoThousands),
 
-        // -- Country --
+        // -- Motown / Soul (before Disco/Funk so "soul funk" → Motown/Soul) --
+        ("motown",          MotownSoul),
+        ("soul",            MotownSoul),
+        ("r&b",             MotownSoul),
+        ("rnb",             MotownSoul),
+        ("rhythm and blues", MotownSoul),
+
+        // -- Disco / Funk --
+        ("disco",           DiscoFunk),
+        ("funk",            DiscoFunk),
+        ("funky",           DiscoFunk),
+        ("boogie",          DiscoFunk),
+
+        // -- Hip-Hop / Rap --
+        ("hip-hop",         HipHopRap),
+        ("hip hop",         HipHopRap),
+        ("hiphop",          HipHopRap),
+        ("rap",             HipHopRap),
+        ("trap",            HipHopRap),
+        ("urban",           HipHopRap),
+        ("grime",           HipHopRap),
+
+        // -- Ambient / Chillout --
+        ("ambient",         AmbientChillout),
+        ("chillout",        AmbientChillout),
+        ("chill out",       AmbientChillout),
+        ("chill-out",       AmbientChillout),
+        ("chillwave",       AmbientChillout),
+        ("chill",           AmbientChillout),
+        ("lounge",          AmbientChillout),
+        ("downtempo",       AmbientChillout),
+        ("new age",         AmbientChillout),
+        ("meditation",      AmbientChillout),
+        ("relax",           AmbientChillout),
+        ("drone",           AmbientChillout),
+
+        // -- Electronic / Dance --
+        ("electronica",     ElectronicDance),
+        ("electronic",      ElectronicDance),
+        ("edm",             ElectronicDance),
+        ("techno",          ElectronicDance),
+        ("trance",          ElectronicDance),
+        ("house",           ElectronicDance),
+        ("drum and bass",   ElectronicDance),
+        ("drum & bass",     ElectronicDance),
+        ("dnb",             ElectronicDance),
+        ("jungle",          ElectronicDance),
+        ("dubstep",         ElectronicDance),
+        ("breakbeat",       ElectronicDance),
+        ("idm",             ElectronicDance),
+        ("eurodance",       ElectronicDance),
+        ("hardstyle",       ElectronicDance),
+        ("synth",           ElectronicDance),
+        ("dance",           ElectronicDance),
+        ("club",            ElectronicDance),
+
+        // -- Bluegrass (before Country so "bluegrass country" → Bluegrass) --
+        ("bluegrass",       Bluegrass),
+        ("appalachian",     Bluegrass),
+
+        // -- Country (folk/americana fold in here - closest bucket in the taxonomy) --
         ("country",         Country),
         ("western",         Country),
-        ("outlaw country",  Country),
         ("honky tonk",      Country),
-
-        // -- Americana (folk, bluegrass, roots) --
-        ("americana",       Americana),
-        ("bluegrass",       Americana),
-        ("folk rock",       Americana),
-        ("folk",            Americana),
-        ("acoustic",        Americana),
-        ("singer-songwriter", Americana),
-        ("singer songwriter", Americana),
-        ("roots",           Americana),
-        ("appalachian",     Americana),
+        ("honky-tonk",      Country),
+        ("americana",       Country),
+        ("folk",            Country),
+        ("singer-songwriter", Country),
+        ("singer songwriter", Country),
+        ("acoustic",        Country),
 
         // -- Jazz (before "blues" so "blues jazz" → Jazz first) --
         ("smooth jazz",     Jazz),
@@ -242,79 +314,72 @@ public static class GenreNormalizer
         ("orchestral",      Classical),
         ("chamber",         Classical),
 
-        // -- Reggae/Island (before International so "reggae" isn't "world music") --
-        ("reggae",          ReggaeIsland),
-        ("dub",             ReggaeIsland),
-        ("ska",             ReggaeIsland),
-        ("dancehall",       ReggaeIsland),
-        ("rocksteady",      ReggaeIsland),
-        ("ragga",           ReggaeIsland),
-        ("island",          ReggaeIsland),
-        ("tropical",        ReggaeIsland),
-        ("calypso",         ReggaeIsland),
+        // -- Reggae --
+        ("reggae",          Reggae),
+        ("dub",             Reggae),
+        ("ska",             Reggae),
+        ("dancehall",       Reggae),
+        ("rocksteady",      Reggae),
+        ("ragga",           Reggae),
+        ("calypso",         Reggae),
 
-        // -- International --
-        ("latin",           International),
-        ("salsa",           International),
-        ("bachata",         International),
-        ("merengue",        International),
-        ("cumbia",          International),
-        ("reggaeton",       International),
-        ("flamenco",        International),
-        ("tango",           International),
-        ("mariachi",        International),
-        ("world music",     International),
-        ("world",           International),
-        ("african",         International),
-        ("afrobeat",        International),
-        ("afro",            International),
-        ("asian",           International),
-        ("indian",          International),
-        ("bollywood",       International),
-        ("arabic",          International),
-        ("middle east",     International),
-        ("celtic",          International),
-        ("irish",           International),
-        ("scottish",        International),
-        ("j-pop",           International),
-        ("k-pop",           International),
-        ("c-pop",           International),
-        ("french",          International),
-        ("german",          International),
-        ("italian",         International),
-        ("spanish",         International),
-        ("portuguese",      International),
-        ("brazilian",       International),
-        ("russian",         International),
-        ("polish",          International),
-        ("greek",           International),
-        ("turkish",         International),
-        ("japanese",        International),
-        ("korean",          International),
-        ("chinese",         International),
-        ("mandarin",        International),
-        ("cantonese",       International),
-        ("ethnic",          International),
-        ("traditional",     International),
+        // -- Latin (before World so Latin America doesn't drown in "international") --
+        ("latin",           Latin),
+        ("salsa",           Latin),
+        ("bachata",         Latin),
+        ("merengue",        Latin),
+        ("cumbia",          Latin),
+        ("reggaeton",       Latin),
+        ("flamenco",        Latin),
+        ("tango",           Latin),
+        ("mariachi",        Latin),
+        ("bossa nova",      Latin),
+        ("bossa",           Latin),
+        ("tejano",          Latin),
+        ("brazilian",       Latin),
+        ("spanish",         Latin),
 
-        // -- Top 40 / Pop --
-        ("top 40",          Top40Pop),
-        ("top40",           Top40Pop),
-        ("adult contemporary", Top40Pop),
-        ("hot ac",          Top40Pop),
-        ("chart",           Top40Pop),
-        ("hits",            Top40Pop),
-        ("pop",             Top40Pop),
-        ("contemporary",    Top40Pop),
+        // -- World --
+        ("world music",     World),
+        ("world",           World),
+        ("african",         World),
+        ("afrobeat",        World),
+        ("afro",            World),
+        ("asian",           World),
+        ("indian",          World),
+        ("bollywood",       World),
+        ("arabic",          World),
+        ("middle east",     World),
+        ("celtic",          World),
+        ("irish",           World),
+        ("scottish",        World),
+        ("j-pop",           World),
+        ("jpop",            World),
+        ("k-pop",           World),
+        ("kpop",            World),
+        ("c-pop",           World),
+        ("french",          World),
+        ("german",          World),
+        ("italian",         World),
+        ("portuguese",      World),
+        ("russian",         World),
+        ("polish",          World),
+        ("greek",           World),
+        ("turkish",         World),
+        ("japanese",        World),
+        ("korean",          World),
+        ("chinese",         World),
+        ("mandarin",        World),
+        ("cantonese",       World),
+        ("ethnic",          World),
+        ("traditional",     World),
 
-        // -- Eclectic (explicit "mixed" marker) --
-        ("eclectic",        Eclectic),
-        ("variety",         Eclectic),
-        ("various",         Eclectic),
-        ("mixed",           Eclectic),
+        // -- Rock (fallback - anything still containing "rock" reads as modern rock radio) --
+        ("rock",            AlternativeRock),
 
-        // -- Rock (fallback - anything still containing "rock") --
-        ("rock",            ClassicRock),
+        // Deliberately unmapped: "pop", "top 40", "hits", "adult contemporary", "eclectic",
+        // "variety" - the taxonomy has no pop/chart bucket, so those fall through to Other
+        // and get bucketed by hand during curation.
     ];
 
     /// <summary>
@@ -383,7 +448,7 @@ public static class GenreNormalizer
             return Other;
         }
 
-        // Radio Browser uses commas; some sources use "/" or "&"
+        // Radio Browser uses commas; some sources use "/" or "|"
         var parts = tags.Split([',', '/', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         foreach (var part in parts)

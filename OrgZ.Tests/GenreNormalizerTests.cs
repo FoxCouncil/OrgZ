@@ -1,5 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using OrgZ.Models;
+
 namespace OrgZ.Tests;
 
 public class GenreNormalizerTests
@@ -7,21 +9,25 @@ public class GenreNormalizerTests
     // -- Single-tag Normalize --
 
     [Theory]
-    [InlineData("rock", "Classic Rock")]
-    [InlineData("Rock", "Classic Rock")]
-    [InlineData("ROCK", "Classic Rock")]
-    [InlineData("classic rock", "Classic Rock")]
-    [InlineData("alternative", "Alt/Modern Rock")]
-    [InlineData("indie rock", "Alt/Modern Rock")]
-    [InlineData("punk", "Alt/Modern Rock")]
-    [InlineData("grunge", "Alt/Modern Rock")]
-    [InlineData("heavy metal", "Hard Rock / Metal")]
-    [InlineData("death metal", "Hard Rock / Metal")]
-    [InlineData("hard rock", "Hard Rock / Metal")]
-    [InlineData("pop", "Top 40/Pop")]
-    [InlineData("top 40", "Top 40/Pop")]
-    [InlineData("hits", "Top 40/Pop")]
-    public void Normalize_RockAndPopFamilies(string input, string expected)
+    [InlineData("rock", "Alternative Rock")]
+    [InlineData("Rock", "Alternative Rock")]
+    [InlineData("ROCK", "Alternative Rock")]
+    [InlineData("alternative", "Alternative Rock")]
+    [InlineData("grunge", "Alternative Rock")]
+    [InlineData("shoegaze", "Alternative Rock")]
+    [InlineData("post-punk", "Alternative Rock")]
+    [InlineData("punk", "Punk")]
+    [InlineData("pop punk", "Punk")]
+    [InlineData("hardcore", "Punk")]
+    [InlineData("emo", "Punk")]
+    [InlineData("indie", "Indie")]
+    [InlineData("indie rock", "Indie")]
+    [InlineData("college", "Indie")]
+    [InlineData("heavy metal", "Metal")]
+    [InlineData("death metal", "Metal")]
+    [InlineData("hard rock", "Metal")]
+    [InlineData("metalcore", "Metal")]
+    public void Normalize_RockFamilies(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
     }
@@ -41,73 +47,92 @@ public class GenreNormalizerTests
     }
 
     [Theory]
-    [InlineData("hip hop", "Urban")]
-    [InlineData("hip-hop", "Urban")]
-    [InlineData("rap", "Urban")]
-    [InlineData("r&b", "Urban")]
-    [InlineData("soul", "Urban")]
-    [InlineData("funk", "Urban")]
-    public void Normalize_UrbanFamily(string input, string expected)
+    [InlineData("hip hop", "Hip-Hop/Rap")]
+    [InlineData("hip-hop", "Hip-Hop/Rap")]
+    [InlineData("rap", "Hip-Hop/Rap")]
+    [InlineData("trap", "Hip-Hop/Rap")]
+    [InlineData("urban", "Hip-Hop/Rap")]
+    [InlineData("r&b", "Motown/Soul")]
+    [InlineData("soul", "Motown/Soul")]
+    [InlineData("motown", "Motown/Soul")]
+    [InlineData("funk", "Disco/Funk")]
+    [InlineData("disco", "Disco/Funk")]
+    public void Normalize_UrbanSoulFunkFamilies(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
     }
 
     [Theory]
-    [InlineData("electronica", "Electronica")]
-    [InlineData("techno", "Electronica")]
-    [InlineData("house", "Electronica")]
-    [InlineData("dance", "Electronica")]
-    [InlineData("edm", "Electronica")]
-    [InlineData("ambient", "Ambient")]
-    [InlineData("chillout", "Ambient")]
-    [InlineData("lounge", "Ambient")]
-    public void Normalize_ElectronicAndAmbient(string input, string expected)
+    [InlineData("electronica", "Electronic/Dance")]
+    [InlineData("techno", "Electronic/Dance")]
+    [InlineData("house", "Electronic/Dance")]
+    [InlineData("dance", "Electronic/Dance")]
+    [InlineData("edm", "Electronic/Dance")]
+    [InlineData("drum and bass", "Electronic/Dance")]
+    [InlineData("ambient", "Ambient/Chillout")]
+    [InlineData("chillout", "Ambient/Chillout")]
+    [InlineData("lounge", "Ambient/Chillout")]
+    [InlineData("downtempo", "Ambient/Chillout")]
+    [InlineData("lo-fi", "Lo-Fi")]
+    [InlineData("lofi", "Lo-Fi")]
+    [InlineData("chillhop", "Lo-Fi")]
+    [InlineData("synthwave", "Synthwave")]
+    [InlineData("retrowave", "Synthwave")]
+    [InlineData("vaporwave", "Synthwave")]
+    public void Normalize_ElectronicAmbientLoFiSynthwave(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
     }
 
     [Theory]
     [InlineData("country", "Country")]
-    [InlineData("bluegrass", "Americana")]
-    [InlineData("folk", "Americana")]
-    [InlineData("singer-songwriter", "Americana")]
-    public void Normalize_CountryAndAmericana(string input, string expected)
+    [InlineData("folk", "Country")]
+    [InlineData("americana", "Country")]
+    [InlineData("singer-songwriter", "Country")]
+    [InlineData("bluegrass", "Bluegrass")]
+    [InlineData("appalachian", "Bluegrass")]
+    public void Normalize_CountryAndBluegrass(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
     }
 
     [Theory]
-    [InlineData("reggae", "Reggae/Island")]
-    [InlineData("dub", "Reggae/Island")]
-    [InlineData("ska", "Reggae/Island")]
-    [InlineData("dancehall", "Reggae/Island")]
-    [InlineData("island", "Reggae/Island")]
-    public void Normalize_ReggaeAndIsland(string input, string expected)
+    [InlineData("reggae", "Reggae")]
+    [InlineData("dub", "Reggae")]
+    [InlineData("ska", "Reggae")]
+    [InlineData("dancehall", "Reggae")]
+    public void Normalize_Reggae(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
     }
 
     [Theory]
-    [InlineData("latin", "International")]
-    [InlineData("salsa", "International")]
-    [InlineData("k-pop", "International")]
-    [InlineData("bollywood", "International")]
-    [InlineData("celtic", "International")]
-    [InlineData("arabic", "International")]
-    public void Normalize_International(string input, string expected)
+    [InlineData("latin", "Latin")]
+    [InlineData("salsa", "Latin")]
+    [InlineData("reggaeton", "Latin")]
+    [InlineData("bossa nova", "Latin")]
+    [InlineData("brazilian", "Latin")]
+    [InlineData("k-pop", "World")]
+    [InlineData("bollywood", "World")]
+    [InlineData("celtic", "World")]
+    [InlineData("arabic", "World")]
+    [InlineData("world", "World")]
+    public void Normalize_LatinAndWorld(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
     }
 
     [Theory]
-    [InlineData("news", "Talk/Spoken Word")]
-    [InlineData("talk", "Talk/Spoken Word")]
-    [InlineData("comedy", "Talk/Spoken Word")]
-    [InlineData("audiobook", "Talk/Spoken Word")]
-    [InlineData("npr", "Public")]
-    [InlineData("public radio", "Public")]
-    [InlineData("sports", "Sports")]
-    [InlineData("nfl", "Sports")]
+    [InlineData("news", "News/Talk Radio")]
+    [InlineData("talk", "News/Talk Radio")]
+    [InlineData("npr", "News/Talk Radio")]
+    [InlineData("public radio", "News/Talk Radio")]
+    [InlineData("audiobook", "News/Talk Radio")]
+    [InlineData("comedy", "Comedy")]
+    [InlineData("stand-up", "Comedy")]
+    [InlineData("sports", "Sports Talk")]
+    [InlineData("nfl", "Sports Talk")]
+    [InlineData("hockey", "Sports Talk")]
     public void Normalize_SpokenWordCategories(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
@@ -123,14 +148,25 @@ public class GenreNormalizerTests
     }
 
     [Theory]
-    [InlineData("50s", "50s/60s Pop")]
-    [InlineData("60s", "50s/60s Pop")]
-    [InlineData("doo-wop", "50s/60s Pop")]
-    [InlineData("oldies", "50s/60s Pop")]
-    [InlineData("70s", "70s/80s Pop")]
-    [InlineData("80s", "70s/80s Pop")]
-    [InlineData("new wave", "70s/80s Pop")]
-    [InlineData("disco", "70s/80s Pop")]
+    [InlineData("50s", "50s")]
+    [InlineData("1950s", "50s")]
+    [InlineData("doo-wop", "50s")]
+    [InlineData("rockabilly", "50s")]
+    [InlineData("60s", "60s")]
+    [InlineData("1960s", "60s")]
+    [InlineData("oldies", "60s")]
+    [InlineData("70s", "70s")]
+    [InlineData("classic rock", "70s")]
+    [InlineData("prog rock", "70s")]
+    [InlineData("80s", "80s")]
+    [InlineData("1980s", "80s")]
+    [InlineData("new wave", "80s")]
+    [InlineData("synthpop", "80s")]
+    [InlineData("synth-pop", "80s")]
+    [InlineData("90s", "90s")]
+    [InlineData("britpop", "90s")]
+    [InlineData("2000s", "2000s")]
+    [InlineData("00s", "2000s")]
     public void Normalize_DecadeBuckets(string input, string expected)
     {
         Assert.Equal(expected, GenreNormalizer.Normalize(input));
@@ -147,28 +183,62 @@ public class GenreNormalizerTests
     [Fact]
     public void Normalize_HardRock_PrefersMetalOverRock()
     {
-        Assert.Equal("Hard Rock / Metal", GenreNormalizer.Normalize("hard rock"));
+        Assert.Equal("Metal", GenreNormalizer.Normalize("hard rock"));
     }
 
     [Fact]
-    public void Normalize_IndieRock_PrefersAltOverRock()
+    public void Normalize_SportsTalk_PrefersSportsOverTalk()
     {
-        Assert.Equal("Alt/Modern Rock", GenreNormalizer.Normalize("indie rock"));
+        Assert.Equal("Sports Talk", GenreNormalizer.Normalize("sports talk"));
     }
 
     [Fact]
-    public void Normalize_ClassicRock_WinsBeforeGenericRock()
+    public void Normalize_ComedyTalk_PrefersComedyOverTalk()
     {
-        Assert.Equal("Classic Rock", GenreNormalizer.Normalize("classic rock"));
+        Assert.Equal("Comedy", GenreNormalizer.Normalize("comedy talk"));
     }
 
     [Fact]
-    public void Normalize_PopRock_PopWinsDueToRuleOrder()
+    public void Normalize_SynthwaveBeatsElectronicSynthCatchAll()
     {
-        // "pop rock" contains both "pop" and "rock" as whole words. "pop" appears earlier
-        // in the rule table than the catch-all "rock", so Top 40/Pop wins. Documented
-        // behavior - pop-rock stations tend to be chart/radio-friendly.
-        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("pop rock"));
+        Assert.Equal("Synthwave", GenreNormalizer.Normalize("synthwave"));
+        Assert.Equal("Electronic/Dance", GenreNormalizer.Normalize("synth"));
+        Assert.Equal("80s", GenreNormalizer.Normalize("synth-pop"));
+    }
+
+    [Fact]
+    public void Normalize_LoFiBeatsAmbientChill()
+    {
+        Assert.Equal("Lo-Fi", GenreNormalizer.Normalize("lofi chill"));
+    }
+
+    [Fact]
+    public void Normalize_SkaPunk_PunkWinsDueToRuleOrder()
+    {
+        Assert.Equal("Punk", GenreNormalizer.Normalize("ska punk"));
+    }
+
+    [Fact]
+    public void Normalize_DubstepIsElectronicNotReggaeDub()
+    {
+        Assert.Equal("Electronic/Dance", GenreNormalizer.Normalize("dubstep"));
+    }
+
+    [Fact]
+    public void Normalize_ReggaetonIsLatinNotReggae()
+    {
+        Assert.Equal("Latin", GenreNormalizer.Normalize("reggaeton"));
+    }
+
+    [Fact]
+    public void Normalize_PopAndChartTagsAreDeliberatelyOther()
+    {
+        // The taxonomy has no pop/chart bucket - these need a human call during curation.
+        Assert.Equal("Other", GenreNormalizer.Normalize("pop"));
+        Assert.Equal("Other", GenreNormalizer.Normalize("top 40"));
+        Assert.Equal("Other", GenreNormalizer.Normalize("hits"));
+        Assert.Equal("Other", GenreNormalizer.Normalize("adult contemporary"));
+        Assert.Equal("Other", GenreNormalizer.Normalize("eclectic"));
     }
 
     [Fact]
@@ -189,7 +259,7 @@ public class GenreNormalizerTests
     [Fact]
     public void ExtractPrimaryGenre_CommaSeparated_ReturnsFirstMatch()
     {
-        Assert.Equal("Classic Rock", GenreNormalizer.ExtractPrimaryGenre("rock,indie,alternative"));
+        Assert.Equal("Alternative Rock", GenreNormalizer.ExtractPrimaryGenre("rock,indie,alternative"));
     }
 
     [Fact]
@@ -202,7 +272,7 @@ public class GenreNormalizerTests
     public void ExtractPrimaryGenre_SlashSeparated_TakesFirstMatch()
     {
         // Split on '/' gives ["Electronic", "Dance", "Pop"]. "Electronic" matches first.
-        Assert.Equal("Electronica", GenreNormalizer.ExtractPrimaryGenre("Electronic/Dance/Pop"));
+        Assert.Equal("Electronic/Dance", GenreNormalizer.ExtractPrimaryGenre("Electronic/Dance/Pop"));
     }
 
     [Fact]
@@ -224,15 +294,25 @@ public class GenreNormalizerTests
         Assert.Equal("Jazz", GenreNormalizer.ExtractPrimaryGenre("  jazz  "));
     }
 
+    [Fact]
+    public void ExtractPrimaryGenre_RoundTripsEveryCanonicalDisplayName()
+    {
+        // Bundled stations carry Tags = RadioGenre display name; the normalizer must map
+        // each display name back onto itself so NormalizedGenre agrees with the taxonomy.
+        foreach (var genre in RadioGenres.All)
+        {
+            var name = genre.DisplayName();
+            Assert.Equal(name, GenreNormalizer.ExtractPrimaryGenre(name));
+        }
+    }
+
     // -- Canonical list coverage --
 
     [Fact]
-    public void AllCanonical_ContainsExpectedBuckets()
+    public void AllCanonical_MirrorsRadioGenreTaxonomyPlusOther()
     {
-        Assert.Contains("50s/60s Pop", GenreNormalizer.AllCanonical);
-        Assert.Contains("Classic Rock", GenreNormalizer.AllCanonical);
-        Assert.Contains("Jazz", GenreNormalizer.AllCanonical);
-        Assert.Contains("Other", GenreNormalizer.AllCanonical);
+        var expected = RadioGenres.All.Select(g => g.DisplayName()).Append("Other").ToList();
+        Assert.Equal(expected, GenreNormalizer.AllCanonical);
     }
 
     [Fact]
@@ -260,12 +340,12 @@ public class GenreNormalizerTests
         {
             "christian", "gospel", "npr", "public radio", "talk", "news", "comedy",
             "sports", "nfl", "death metal", "metal", "hard rock", "alternative", "indie",
-            "punk", "emo", "classic rock", "prog rock", "50s", "60s", "70s", "80s",
-            "disco", "hip-hop", "rap", "r&b", "soul", "funk", "ambient", "chillout",
+            "punk", "emo", "classic rock", "prog rock", "50s", "60s", "70s", "80s", "90s",
+            "2000s", "disco", "hip-hop", "rap", "r&b", "soul", "funk", "ambient", "chillout",
             "lounge", "electronic", "techno", "house", "dance", "country", "bluegrass",
             "folk", "acoustic", "jazz", "blues", "classical", "opera", "reggae", "ska",
-            "latin", "salsa", "k-pop", "world", "top 40", "pop", "hits", "eclectic",
-            "variety", "rock", "completely unknown tag"
+            "latin", "salsa", "k-pop", "world", "synthwave", "lofi", "top 40", "pop",
+            "hits", "eclectic", "variety", "rock", "completely unknown tag"
         };
 
         foreach (var input in testInputs)
