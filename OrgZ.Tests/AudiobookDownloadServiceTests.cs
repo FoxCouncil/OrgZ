@@ -147,6 +147,52 @@ public class AudiobookDownloadServiceTests
         }
     }
 
+    [Fact]
+    public void State_ignores_a_folder_of_only_nonaudio_files()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "orgz-abst-" + Guid.NewGuid().ToString("N"));
+        var book = Book();
+        try
+        {
+            var dir = AudiobookDownloadService.TargetDirectoryFor(root, book);
+            Directory.CreateDirectory(dir);
+            File.WriteAllBytes(Path.Combine(dir, "cover.jpg"), new byte[16]);
+            File.WriteAllText(Path.Combine(dir, "reader.txt"), "notes");
+
+            // Cover art and notes alone are not a download - GetState only counts audio.
+            Assert.Equal(AudiobookDownloadState.NotDownloaded, AudiobookDownloadService.Instance.GetState(book, root));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void A_downloaded_book_reads_as_not_downloaded_once_its_files_are_deleted()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "orgz-abst-" + Guid.NewGuid().ToString("N"));
+        var book = Book();
+        try
+        {
+            var dir = AudiobookDownloadService.TargetDirectoryFor(root, book);
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, "book.m4b");
+            File.WriteAllBytes(file, new byte[16]);
+            Assert.Equal(AudiobookDownloadState.Downloaded, AudiobookDownloadService.Instance.GetState(book, root));
+
+            // Deleting the managed book takes the whole folder; state falls back to NotDownloaded.
+            // (The acquisition record that will OUTLIVE this delete lands in the next commit - this
+            // test pins the disk-layer half of that contract: no file, no download.)
+            AudiobookDownloadService.DeleteFromDisk(file);
+            Assert.Equal(AudiobookDownloadState.NotDownloaded, AudiobookDownloadService.Instance.GetState(book, root));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
+    }
+
     // ===== The catalog-metadata stamp =====
 
     private static readonly ArchiveItemMetadataFields Meta = new()
