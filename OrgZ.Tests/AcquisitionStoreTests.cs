@@ -132,4 +132,53 @@ public class AcquisitionStoreTests : IDisposable
         Assert.True(got.IsUserProvided);
         Assert.Null(got.SourceRefJson);
     }
+
+    [Fact]
+    public void EnsureCreated_is_idempotent_and_preserves_existing_rows()
+    {
+        AcquisitionStore.Acquire(Book("keep", "Keep Me"));
+        AcquisitionStore.EnsureCreated();   // a second schema pass must neither throw nor wipe data
+        Assert.Equal("Keep Me", AcquisitionStore.Get(AcquiredMediaKind.Audiobook, "keep")!.Title);
+    }
+
+    [Fact]
+    public void Release_of_a_row_that_isnt_there_is_a_safe_no_op()
+    {
+        AcquisitionStore.Release(AcquiredMediaKind.Audiobook, "ghost");   // must not throw
+        Assert.False(AcquisitionStore.IsAcquired(AcquiredMediaKind.Audiobook, "ghost"));
+    }
+
+    [Fact]
+    public void GetAll_is_empty_when_nothing_acquired()
+    {
+        Assert.Empty(AcquisitionStore.GetAll(AcquiredMediaKind.Podcast));
+        Assert.Empty(AcquisitionStore.GetAll(AcquiredMediaKind.Audiobook));
+    }
+
+    [Fact]
+    public void A_minimal_record_round_trips_with_null_optionals()
+    {
+        AcquisitionStore.Acquire(new AcquiredMedia { Kind = AcquiredMediaKind.Audiobook, SourceKey = "bare" });
+        var got = AcquisitionStore.Get(AcquiredMediaKind.Audiobook, "bare")!;
+        Assert.Null(got.Title);
+        Assert.Null(got.Creator);
+        Assert.Null(got.ImageUrl);
+        Assert.Null(got.HomepageUrl);
+        Assert.Null(got.SourceRefJson);
+        Assert.False(got.IsUserProvided);
+    }
+
+    [Fact]
+    public void Re_acquiring_a_user_file_from_a_store_flips_it_to_source_backed()
+    {
+        // You dropped a book in yourself, then later got the same title from a store: the record
+        // must gain a re-fetch source and stop being user-provided (so re-download becomes offerable).
+        AcquisitionStore.Acquire(Book("dual", "Dual", userProvided: true));
+        Assert.True(AcquisitionStore.Get(AcquiredMediaKind.Audiobook, "dual")!.IsUserProvided);
+
+        AcquisitionStore.Acquire(Book("dual", "Dual", userProvided: false));
+        var got = AcquisitionStore.Get(AcquiredMediaKind.Audiobook, "dual")!;
+        Assert.False(got.IsUserProvided);
+        Assert.NotNull(got.SourceRefJson);
+    }
 }
