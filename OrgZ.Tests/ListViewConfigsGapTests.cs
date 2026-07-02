@@ -127,10 +127,11 @@ public class ListViewConfigsGapTests
     }
 
     [Fact]
-    public void BuildDevicePlaylistsConfig_BaseFilter_rejects_everything_for_now()
+    public void BuildDevicePlaylistsConfig_is_a_navigation_container_whose_grid_shows_no_tracks()
     {
-        // The Playlists child is a placeholder until iTunesDB MHYP / M3U scanning is wired
-        // up - the filter returns false for every item so the grid renders empty.
+        // THE SPEC: the Playlists node routes to its first playlist child on click; its own grid
+        // only ever renders when a device has zero playlists, where empty is the correct answer.
+        // No track may leak into it. (A playlist master LIST view is a separate roadmap item.)
         var cfg = ListViewConfigs.BuildDevicePlaylistsConfig(@"L:\");
         var anything = Music("t1", title: "Anything");
         Assert.False(cfg.BaseFilter(anything));

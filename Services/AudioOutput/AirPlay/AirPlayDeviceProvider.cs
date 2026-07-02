@@ -84,7 +84,11 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 DisplayName = kvp.Value,
                 ProviderId = Id,
                 ProviderName = ProviderName,
-                IsAvailable = true,
+                // Discovery works; STREAMING doesn't yet (CreateSink returns the placeholder that
+                // drops all samples). Unavailable keeps the picker honest - the device shows,
+                // disabled, instead of being a placebo that silently kills audio. Flip when RAOP
+                // streaming lands (see roadmap).
+                IsAvailable = false,
             });
         }
 
