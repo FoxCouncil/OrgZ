@@ -106,7 +106,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private MediaItem? CurrentPlayingItem => _playbackContext?.CurrentItem;
 
-    private MediaItem? CurrentMusicItem => CurrentPlayingItem?.Kind == MediaKind.Music ? CurrentPlayingItem : null;
+    /// <summary>
+    /// The playing item when it's a local FILE (any kind PlayMusicItem handles - music, audiobook,
+    /// a local podcast file); null for radio/CD/podcast streams. Gating this on Music alone left a
+    /// playing audiobook showing "Unknown Title / Unknown Artist" on the LCD while the grid knew
+    /// better, and kept the play button from restarting one.
+    /// </summary>
+    private MediaItem? CurrentFileItem => CurrentPlayingItem?.Kind is MediaKind.Music or MediaKind.Audiobook or MediaKind.Podcast ? CurrentPlayingItem : null;
 
     private MediaItem? CurrentStation => CurrentPlayingItem?.Kind == MediaKind.Radio ? CurrentPlayingItem : null;
 
@@ -1610,9 +1616,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
             ApplyPendingDuration();
 
-            CurrentTrackLine1 = CurrentMusicItem?.Title ?? "Unknown Title";
-            var artist = CurrentMusicItem?.Artist ?? "Unknown Artist";
-            var album = CurrentMusicItem?.Album;
+            CurrentTrackLine1 = CurrentFileItem?.Title ?? "Unknown Title";
+            var artist = CurrentFileItem?.Artist ?? "Unknown Artist";
+            var album = CurrentFileItem?.Album;
             CurrentTrackLine2 = string.IsNullOrWhiteSpace(album) ? artist : $"{artist} \u2014 {album}";
         });
 
@@ -1770,7 +1776,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // Paused or stopped with a track still loaded - resume / restart it.
             if (_player.State == LibVLCSharp.Shared.VLCState.Paused
                 || _currentPodcastStream != null
-                || CurrentMusicItem != null
+                || CurrentFileItem != null
                 || CurrentPlayingItem != null)
             {
                 Play();
