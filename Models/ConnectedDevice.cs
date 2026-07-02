@@ -397,6 +397,44 @@ public partial class ConnectedDevice : ObservableObject
     }
 
     /// <summary>
+    /// Recomputes the capacity-bar buckets from a device track set - podcasts get their own
+    /// segment, every other kind counts as audio. The ONE owner of that partition: call sites
+    /// hand over the tracks and never spell the Kind rule themselves.
+    /// </summary>
+    public void SetSpaceFrom(IEnumerable<MediaItem> deviceTracks)
+    {
+        long audio = 0, podcast = 0;
+        foreach (var t in deviceTracks)
+        {
+            if (t.Kind == MediaKind.Podcast)
+            {
+                podcast += t.FileSize ?? 0;
+            }
+            else
+            {
+                audio += t.FileSize ?? 0;
+            }
+        }
+        AudioSpace = audio;
+        PodcastSpace = podcast;
+        RefreshSpace();
+    }
+
+    /// <summary>Incremental adjustment to the same partition for one item (delta may be negative).</summary>
+    public void AdjustSpaceFor(MediaItem track, long deltaBytes)
+    {
+        if (track.Kind == MediaKind.Podcast)
+        {
+            PodcastSpace += deltaBytes;
+        }
+        else
+        {
+            AudioSpace += deltaBytes;
+        }
+        RefreshSpace();
+    }
+
+    /// <summary>
     /// Playlists discovered on the device during the scan. For stock iPods this comes
     /// from iTunesDB MHYP/MHIP chunks; for Rockbox from <c>Playlists/*.m3u</c> files.
     /// Populated on the UI thread at the end of the scan - view models subscribe to

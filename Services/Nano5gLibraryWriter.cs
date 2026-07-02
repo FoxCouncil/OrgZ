@@ -53,21 +53,27 @@ public sealed class Nano5gLibraryWriter
         _fireWireGuid = fireWireGuid;
     }
 
-    // While > 0, mutations skip their per-call RegenerateCdb - a full library re-read + CDB
-    // recompress/re-sign - and the enclosing batch scope runs it ONCE on dispose. Not thread-safe by
-    // design: device writes are serialized by the UI.
-    private int _cdbDeferDepth;
+    // Open-batch depth PER LIBRARY PATH: while > 0, mutations on that library skip their per-call
+    // RegenerateCdb - a full library re-read + CDB recompress/re-sign - and the batch scope runs it
+    // ONCE on dispose. Keyed by itlp path (not per writer instance) because batch flows like the
+    // VM's playlist sync construct a fresh writer per track through the importer; every instance
+    // over the same library must participate. Concurrent map only so parallel TESTS over different
+    // temp libraries don't collide - real device writes are UI-serialized.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _cdbDeferDepth = new(StringComparer.OrdinalIgnoreCase);
+
+    private string DeferKey => Path.GetFullPath(_itlpDir);
 
     /// <summary>
     /// Defers the (expensive, whole-library) CDB regeneration across a batch of mutations on this
-    /// writer: per-call <see cref="RegenerateCdb"/> is skipped while the returned scope is alive, and
-    /// disposing it regenerates once - so a batch of N inserts costs one rebuild instead of N. The
-    /// dispose runs even when the batch partially fails, keeping the CDB consistent with whatever
-    /// the SQLite stack actually holds.
+    /// library: per-call <see cref="RegenerateCdb"/> is skipped while the returned scope is alive -
+    /// including calls from OTHER writer instances over the same itlp - and disposing it
+    /// regenerates once, so a batch of N inserts costs one rebuild instead of N. The dispose runs
+    /// even when the batch partially fails, keeping the CDB consistent with whatever the SQLite
+    /// stack actually holds.
     /// </summary>
     public IDisposable BeginCdbBatch()
     {
-        _cdbDeferDepth++;
+        _cdbDeferDepth.AddOrUpdate(DeferKey, 1, static (_, depth) => depth + 1);
         return new CdbBatchScope(this);
     }
 
@@ -82,8 +88,11 @@ public sealed class Nano5gLibraryWriter
                 return;
             }
             _disposed = true;
-            if (--writer._cdbDeferDepth == 0)
+            var key = writer.DeferKey;
+            int depth = _cdbDeferDepth.AddOrUpdate(key, 0, static (_, d) => d - 1);
+            if (depth <= 0)
             {
+                _cdbDeferDepth.TryRemove(key, out _);
                 writer.RegenerateCdb();
             }
         }
@@ -91,7 +100,7 @@ public sealed class Nano5gLibraryWriter
 
     private void RegenerateCdbUnlessDeferred()
     {
-        if (_cdbDeferDepth == 0)
+        if (!_cdbDeferDepth.TryGetValue(DeferKey, out var depth) || depth <= 0)
         {
             RegenerateCdb();
         }
