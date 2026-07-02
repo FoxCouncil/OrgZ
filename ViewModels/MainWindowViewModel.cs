@@ -3347,16 +3347,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _allItems.Remove(track);
             if (track.FileSize is { } removedSize && removedSize > 0)
             {
-                // Podcasts live in their own space bucket; everything else counts as audio.
-                if (track.Kind == MediaKind.Podcast)
-                {
-                    dev.PodcastSpace -= removedSize;
-                }
-                else
-                {
-                    dev.AudioSpace -= removedSize;
-                }
-                dev.RefreshSpace();
+                dev.AdjustSpaceFor(track, -removedSize);
             }
             IPodArtworkReader.Invalidate(dev.MountPath);
             ApplyFilter();
@@ -3412,8 +3403,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             IPodArtworkReader.Invalidate(dev.MountPath);
             if (imported.FileSize is { } sz && sz > 0)
             {
-                dev.AudioSpace += sz;
-                dev.RefreshSpace();
+                dev.AdjustSpaceFor(imported, sz);
             }
             ApplyFilter();
 
@@ -5345,6 +5335,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var ipod = IPodDevice.For(device);
+        // One batch scope around the whole sync: tiers with deferrable per-write work (the Nano 5G's
+        // full-CDB regeneration) rebuild once at the end instead of once per track.
+        using var batch = ipod.BeginBatchWrite();
         var deviceSource = $"device:{device.MountPath}";
         var deviceByAT = _allItems
             .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
@@ -5400,8 +5393,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             IPodArtworkReader.Invalidate(device.MountPath);
             var pl = new DevicePlaylist { Name = name, Key = SanitizeFileName(name), TrackIds = playlistItems.Select(x => x.Id).ToList() };
             PublishDevicePlaylists(device, device.Playlists.Where(e => e.Key != pl.Key).Append(pl).ToList());
-            device.AudioSpace = _allItems.Where(i => i.Source == deviceSource && i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
-            device.RefreshSpace();
+            device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
             ApplyFilter();
 
             _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total}", name, device.MountPath, matched, added, failed, playlistItems.Count);
@@ -5611,9 +5603,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _allItems.RemoveAll(i => i.Source == source);
         _allItems.AddRange(library.Tracks);
 
-        device.AudioSpace = library.Tracks.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
-        device.PodcastSpace = library.Tracks.Where(i => i.Kind == MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
-        device.RefreshSpace();
+        device.SetSpaceFrom(library.Tracks);
 
         ApplyFilter();
     }
@@ -5812,6 +5802,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 Dispatcher.UIThread.Post(() =>
                 {
                     _allItems.AddRange(batch);
+                    // Approximate progressive fill while the scan streams; SetSpaceFrom below is the authority.
                     audioBytes += batch.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
                     device.AudioSpace = audioBytes;
                     if (SelectedSidebarItem == sidebarItem)
@@ -5828,9 +5819,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             sw.Stop();
             var afterCount = _allItems.Count;
-            device.AudioSpace = library.Tracks.Where(i => i.Kind != MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
-            device.PodcastSpace = library.Tracks.Where(i => i.Kind == MediaKind.Podcast).Sum(i => i.FileSize ?? 0);
-            device.RefreshSpace();
+            device.SetSpaceFrom(library.Tracks);
 
             _log.Information("Device scan complete: MountPath={MountPath} Tracks={Tracks} ScanMs={ScanMs} _allItems {Before}->{After}", device.MountPath, library.Tracks.Count, sw.ElapsedMilliseconds, beforeCount, afterCount);
 
@@ -5975,9 +5964,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // iPod stays mounted and selected. (FAT32 quick-removal flushes the wipe on close.)
         _allItems.RemoveAll(i => i.Source == $"device:{dev.MountPath}");
         PublishDevicePlaylists(dev, Array.Empty<DevicePlaylist>());
-        dev.AudioSpace = 0;
-        dev.PodcastSpace = 0;
-        dev.RefreshSpace();
+        dev.SetSpaceFrom([]);
         ApplyFilter();
         UpdateMainStatus($"Erased {dev.Name} — {removed} file(s) removed. The library is now empty.");
     }

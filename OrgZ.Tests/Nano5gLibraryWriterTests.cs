@@ -116,7 +116,10 @@ public class Nano5gLibraryWriterTests
             using (writer.BeginCdbBatch())
             {
                 writer.AddTrack(Track(1));
-                writer.AddTrack(Track(2));
+                // The defer is per-LIBRARY, not per-instance: a fresh writer over the same itlp (the
+                // shape the VM's playlist sync takes - one importer-created writer per track) must
+                // participate in the open batch too.
+                new Nano5gLibraryWriter(itlp).AddTrack(Track(2));
 
                 // Both SQLite inserts landed, but the CDB rebuild is deferred - nothing written yet.
                 Assert.False(File.Exists(cdbPath));

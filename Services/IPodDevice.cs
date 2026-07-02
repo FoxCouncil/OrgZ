@@ -84,6 +84,14 @@ public abstract class IPodDevice
     public virtual Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => throw new NotImplementedException($"ReadLibrary is not implemented for {GetType().Name} ({Generation ?? "?"}).");
 
+    /// <summary>
+    /// Opens a batch scope around a run of consecutive writes, letting a tier defer expensive
+    /// per-operation work until the scope closes - the Nano 5G defers its full-CDB regeneration so
+    /// an M-track sync rebuilds once instead of M times. Null when the tier has nothing to defer.
+    /// Always dispose: disposal performs the deferred work, even after a partial failure.
+    /// </summary>
+    public virtual IDisposable? BeginBatchWrite() => null;
+
     // ── factory ──────────────────────────────────────────────────────────────
     /// <summary>Resolves the right device tier for a connected device (its model + checksum).</summary>
     public static IPodDevice For(ConnectedDevice device) => device.DeviceType switch
@@ -308,6 +316,9 @@ public sealed class Nano5gIPod : IPodDevice
             onBatch?.Invoke(items);
             return new DeviceLibrary(items, playlists);
         }, ct);
+
+    public override IDisposable? BeginBatchWrite()
+        => new Nano5gLibraryWriter(Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp"), Device.FireWireGuid).BeginCdbBatch();
 }
 
 /// <summary>Pre-Nano-5G stock iPods (no checksum or Hash58): the binary iTunesDB.</summary>
