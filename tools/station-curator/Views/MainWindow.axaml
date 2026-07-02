@@ -1,0 +1,207 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:img="clr-namespace:OrgZ.Converters;assembly=OrgZ"
+        x:Class="OrgZ.StationCurator.Views.MainWindow"
+        x:CompileBindings="False"
+        Title="OrgZ Station Curator"
+        Width="1600" Height="940"
+        MinWidth="1200" MinHeight="720"
+        WindowStartupLocation="CenterScreen">
+
+	<Window.Styles>
+		<Style Selector="TextBlock.label">
+			<Setter Property="VerticalAlignment" Value="Center" />
+			<Setter Property="Margin" Value="8,0,4,0" />
+			<Setter Property="Opacity" Value="0.7" />
+		</Style>
+		<Style Selector="DataGrid">
+			<Setter Property="GridLinesVisibility" Value="Horizontal" />
+			<Setter Property="IsReadOnly" Value="True" />
+			<Setter Property="CanUserResizeColumns" Value="True" />
+		</Style>
+		<Style Selector="WrapPanel > TextBox, WrapPanel > ComboBox, WrapPanel > Button">
+			<Setter Property="Margin" Value="0,2,6,2" />
+			<Setter Property="VerticalAlignment" Value="Center" />
+		</Style>
+	</Window.Styles>
+
+	<DockPanel>
+
+		<!-- Toolbar -->
+		<Border DockPanel.Dock="Top" Padding="8,6" Background="#22000000">
+			<DockPanel>
+				<StackPanel Orientation="Horizontal" Spacing="6">
+					<Button Content="Save" Command="{Binding SaveStoreCommand}" />
+					<Button Content="Export stations.json" Command="{Binding ExportStationsCommand}" />
+					<Button Content="Probe All" Command="{Binding ProbeAllCommand}" />
+				</StackPanel>
+				<StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+					<TextBlock Text="{Binding StoreSummary}" VerticalAlignment="Center" Opacity="0.7" />
+				</StackPanel>
+				<StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+					<TextBlock Text="{Binding NowPlaying}" VerticalAlignment="Center" FontWeight="Bold" />
+					<Button Content="Stop" Command="{Binding StopPlaybackCommand}" IsVisible="{Binding NowPlaying, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+				</StackPanel>
+			</DockPanel>
+		</Border>
+
+		<!-- Status bar -->
+		<Border DockPanel.Dock="Bottom" Padding="8,4" Background="#22000000">
+			<DockPanel>
+				<ProgressBar DockPanel.Dock="Right" Width="120" IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+				<TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" />
+			</DockPanel>
+		</Border>
+
+		<Grid ColumnDefinitions="5*,4,6*">
+
+			<!-- ============ Sources ============ -->
+			<DockPanel Grid.Column="0" Margin="8,8,0,8">
+
+				<TabControl DockPanel.Dock="Top" SelectedIndex="{Binding SourceTabIndex}">
+					<TabItem Header="Radio Browser">
+						<WrapPanel Margin="0,4">
+							<TextBlock Classes="label" Text="Name" />
+							<TextBox x:Name="RbNameBox" Width="130" Text="{Binding RbName}" />
+							<TextBlock Classes="label" Text="Tag" />
+							<TextBox x:Name="RbTagBox" Width="120" Text="{Binding RbTag}" />
+							<TextBlock Classes="label" Text="Country" />
+							<TextBox Width="110" Text="{Binding RbCountry}" />
+							<TextBlock Classes="label" Text="Order" />
+							<ComboBox ItemsSource="{Binding RbOrders}" SelectedItem="{Binding RbOrder}" />
+							<ComboBox ItemsSource="{Binding RbLimits}" SelectedItem="{Binding RbLimit}" />
+							<Button x:Name="RbSearchButton" Content="Search" Command="{Binding SearchRadioBrowserCommand}" />
+						</WrapPanel>
+					</TabItem>
+					<TabItem Header="SHOUTcast">
+						<WrapPanel Margin="0,4">
+							<Button Content="Top Stations" Command="{Binding ShoutcastTopCommand}" />
+							<TextBlock Classes="label" Text="Genre" />
+							<TextBox Width="140" Text="{Binding ScGenre}" />
+							<Button Content="Browse" Command="{Binding ShoutcastGenreCommand}" />
+							<TextBlock Classes="label" Text="Search" />
+							<TextBox Width="160" Text="{Binding ScQuery}" />
+							<Button Content="Go" Command="{Binding ShoutcastSearchCommand}" />
+						</WrapPanel>
+					</TabItem>
+					<TabItem Header="Icecast">
+						<WrapPanel Margin="0,4">
+							<TextBlock Classes="label" Text="Server" />
+							<TextBox Width="320" Text="{Binding IcecastUrl}" />
+							<Button Content="Fetch Mounts" Command="{Binding FetchIcecastCommand}" />
+						</WrapPanel>
+					</TabItem>
+				</TabControl>
+
+				<StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+					<TextBlock Classes="label" Text="Genre" />
+					<ComboBox Width="170" ItemsSource="{Binding ImportGenreChoices}" SelectedItem="{Binding ImportGenre}" />
+					<Button Content="Import Selected" Command="{Binding ImportSelectedCommand}" />
+					<Button Content="Preview" Command="{Binding PreviewSourceCommand}" />
+					<Button Content="Show in Curated" Command="{Binding JumpToCuratedCommand}" />
+				</StackPanel>
+
+				<DataGrid x:Name="SourceGrid"
+				          ItemsSource="{Binding SourceResults}"
+				          SelectedItem="{Binding SelectedSource}"
+				          SelectionMode="Extended">
+					<DataGrid.Columns>
+						<DataGridTextColumn Header="" Binding="{Binding CuratedMark}" Width="Auto" />
+						<DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+						<DataGridTextColumn Header="Tags" Binding="{Binding Tags}" Width="*" />
+						<DataGridTextColumn Header="Suggested" Binding="{Binding SuggestedGenreName}" Width="Auto" />
+						<DataGridTextColumn Header="Fmt" Binding="{Binding Format}" Width="Auto" />
+						<DataGridTextColumn Header="kbps" Binding="{Binding Bitrate}" Width="Auto" />
+						<DataGridTextColumn Header="CC" Binding="{Binding CountryCode}" Width="Auto" />
+						<DataGridTextColumn Header="Pop" Binding="{Binding Popularity}" Width="Auto" />
+					</DataGrid.Columns>
+				</DataGrid>
+			</DockPanel>
+
+			<GridSplitter Grid.Column="1" Background="#33000000" ResizeDirection="Columns" />
+
+			<!-- ============ Curated ============ -->
+			<DockPanel Grid.Column="2" Margin="0,8,8,8">
+
+				<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+					<TextBlock Classes="label" Text="Genre" />
+					<ComboBox Width="160" ItemsSource="{Binding CuratedFilterChoices}" SelectedItem="{Binding CuratedFilterGenre}" />
+					<TextBlock Classes="label" Text="Search" />
+					<TextBox Width="180" Text="{Binding CuratedSearch}" />
+					<Button Content="Remove Station" Command="{Binding RemoveStationCommand}" />
+					<Button Content="Probe Station" Command="{Binding ProbeStationCommand}" />
+				</StackPanel>
+
+				<!-- Detail / variants -->
+				<Border DockPanel.Dock="Bottom" Margin="0,6,0,0" Padding="8" Background="#16000000"
+				        IsVisible="{Binding SelectedCurated, Converter={x:Static ObjectConverters.IsNotNull}}">
+					<Grid ColumnDefinitions="Auto,12,*" RowDefinitions="Auto,8,Auto">
+
+						<Image Grid.Column="0" Grid.Row="0" Width="96" Height="96" Stretch="Uniform"
+						       VerticalAlignment="Top"
+						       img:RemoteImage.Url="{Binding SelectedCurated.LogoUrl}" />
+
+						<Grid Grid.Column="2" Grid.Row="0"
+						      ColumnDefinitions="Auto,6,2*,16,Auto,6,*,16,Auto,6,Auto"
+						      RowDefinitions="Auto,6,Auto,6,Auto">
+							<TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Name" />
+							<TextBox Grid.Row="0" Grid.Column="2" Text="{Binding SelectedCurated.Name}" />
+							<TextBlock Grid.Row="0" Grid.Column="4" Classes="label" Text="Genre" />
+							<ComboBox Grid.Row="0" Grid.Column="6" ItemsSource="{Binding DetailGenreChoices}" SelectedItem="{Binding SelectedCuratedGenreName}" />
+							<TextBlock Grid.Row="0" Grid.Column="8" Classes="label" Text="Country" />
+							<StackPanel Grid.Row="0" Grid.Column="10" Orientation="Horizontal" Spacing="4">
+								<TextBox Width="130" Text="{Binding SelectedCurated.Country}" />
+								<TextBox Width="44" Text="{Binding SelectedCurated.CountryCode}" />
+							</StackPanel>
+
+							<TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Home" />
+							<TextBox Grid.Row="2" Grid.Column="2" Text="{Binding SelectedCurated.Homepage}" />
+							<TextBlock Grid.Row="2" Grid.Column="4" Classes="label" Text="Logo" />
+							<TextBox Grid.Row="2" Grid.Column="6" Grid.ColumnSpan="5" Text="{Binding SelectedCurated.LogoUrl}" />
+
+							<TextBlock Grid.Row="4" Grid.Column="0" Classes="label" Text="Notes" />
+							<TextBox Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="9" Text="{Binding SelectedCurated.Notes}" />
+						</Grid>
+
+						<DockPanel Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="2">
+							<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
+								<Button Content="Play" Command="{Binding PlayVariantCommand}" />
+								<Button Content="Probe" Command="{Binding ProbeVariantCommand}" />
+								<Button Content="Prefer" Command="{Binding SetPreferredVariantCommand}" />
+								<Button Content="Remove Stream" Command="{Binding RemoveVariantCommand}" />
+							</StackPanel>
+							<DataGrid ItemsSource="{Binding Variants}"
+							          SelectedItem="{Binding SelectedVariant}"
+							          MaxHeight="170">
+								<DataGrid.Columns>
+									<DataGridTextColumn Header="" Binding="{Binding PreferredMark}" Width="Auto" />
+									<DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="3*" />
+									<DataGridTextColumn Header="Fmt" Binding="{Binding EffectiveFormat}" Width="Auto" />
+									<DataGridTextColumn Header="kbps" Binding="{Binding EffectiveBitrate}" Width="Auto" />
+									<DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="Auto" />
+									<DataGridTextColumn Header="Probe" Binding="{Binding ProbeLabel}" Width="Auto" />
+									<DataGridTextColumn Header="Geo" Binding="{Binding GeoLabel}" Width="Auto" />
+									<DataGridTextColumn Header="Detail" Binding="{Binding ProbeDetail}" Width="*" />
+								</DataGrid.Columns>
+							</DataGrid>
+						</DockPanel>
+					</Grid>
+				</Border>
+
+				<DataGrid x:Name="CuratedGrid"
+				          ItemsSource="{Binding CuratedRows}"
+				          SelectedItem="{Binding SelectedCurated}">
+					<DataGrid.Columns>
+						<DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
+						<DataGridTextColumn Header="Genre" Binding="{Binding GenreName}" Width="Auto" />
+						<DataGridTextColumn Header="CC" Binding="{Binding CountryCode}" Width="Auto" />
+						<DataGridTextColumn Header="Streams" Binding="{Binding StreamCount}" Width="Auto" />
+						<DataGridTextColumn Header="Best" Binding="{Binding BestBitrate}" Width="Auto" />
+						<DataGridTextColumn Header="Probe" Binding="{Binding ProbeSummary}" Width="Auto" />
+						<DataGridTextColumn Header="Geo" Binding="{Binding GeoLabel}" Width="Auto" />
+					</DataGrid.Columns>
+				</DataGrid>
+			</DockPanel>
+		</Grid>
+	</DockPanel>
+</Window>
