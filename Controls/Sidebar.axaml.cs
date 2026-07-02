@@ -83,6 +83,18 @@ public partial class Sidebar : UserControl
         // CD audio uses the fixed "CdAudio" key. Branch the menu accordingly.
         if (sb.ViewConfigKey?.StartsWith("Device:") == true)
         {
+            // One Sync gesture: "Sync" runs the saved plan (or opens settings on first sync);
+            // "Sync Settings..." always opens the panel. Both replace the old header podcast dropdown.
+            var sync = new Avalonia.Controls.MenuItem { Header = "Sync" };
+            sync.Click += async (_, _) => await vm.SyncDeviceAsync(sb);
+            menu.Items.Add(sync);
+
+            var syncSettings = new Avalonia.Controls.MenuItem { Header = "Sync Settings…" };
+            syncSettings.Click += async (_, _) => await vm.SyncDeviceAsync(sb, forceSettings: true);
+            menu.Items.Add(syncSettings);
+
+            menu.Items.Add(new Avalonia.Controls.Separator());
+
             var refresh = new Avalonia.Controls.MenuItem { Header = "Refresh Device Info" };
             refresh.Click += (_, _) => vm.RefreshDeviceInfo(sb);
             menu.Items.Add(refresh);
