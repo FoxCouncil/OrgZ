@@ -135,6 +135,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // once audio starts), and a throttle on how often we persist the live position.
     private long? _pendingResumeMs;
     private long _lastPodcastSaveMs;
+    // Audiobook resume rides the same _pendingResumeMs; its own save throttle.
+    private long _lastAudiobookSaveMs;
 
     private int NewPlaybackEpoch() => ++_playbackEpoch;
 
@@ -1347,6 +1349,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _player.EndReached += (s, e) => UI(() =>
         {
+            // A finished audiobook starts from the top next time - clear its resume point (the
+            // throttle only gets within ~5s of the end; this is the authoritative reset).
+            if (CurrentPlayingItem is { Kind: MediaKind.Audiobook, Source: null } finishedBook)
+            {
+                finishedBook.LastPositionMs = 0;
+                var finishedId = finishedBook.Id;
+                _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(finishedId, 0));
+            }
+
             if (CurrentStation != null)
             {
                 ClearPlayback();
@@ -1418,6 +1429,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 var len = _player.Length;
                 var completed = len > 0 && posMs >= len - 15000;
                 _ = Task.Run(() => Services.Podcast.PodcastCache.UpdateListenPosition(episodeId, posMs, completed));
+            }
+
+            // Audiobook resume position, same ~5s throttle (Math.Abs also catches seeks). Within
+            // the last 15s counts as finished - the resume point resets so the next play starts
+            // from the top instead of the credits.
+            if (CurrentPlayingItem is { Kind: MediaKind.Audiobook, Source: null } book && e.Time > 0 && Math.Abs(e.Time - _lastAudiobookSaveMs) >= 5000)
+            {
+                _lastAudiobookSaveMs = e.Time;
+                var len = _player.Length;
+                var pos = len > 0 && e.Time >= len - 15000 ? 0 : e.Time;
+                book.LastPositionMs = pos;
+                var bookId = book.Id;
+                _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(bookId, pos));
             }
 
             // Push pivots to macOS Now Playing: the very first TimeChanged (so
@@ -2042,7 +2066,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         switch (item.Kind)
         {
+            // Local audiobooks (and any local podcast file) are files like music - without these
+            // cases the auto-advance path (EndReached → MoveNext) silently dropped them.
             case MediaKind.Music:
+            case MediaKind.Podcast:
+            case MediaKind.Audiobook:
             {
                 ExecutePlayMusic(item);
                 break;
@@ -2341,6 +2369,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Local file - opens instantly, so skip the barber pole.
         NewPlaybackEpoch();
         BeginPlayback(showLoading: false);
+
+        // Audiobooks resume where they left off - same applied-once-audio-starts machinery as
+        // podcast resume. Skip a barely-started position (re-seeking to 0:04 is noise, not resume).
+        if (file.Kind == MediaKind.Audiobook && file.Source == null && file.LastPositionMs > 10_000)
+        {
+            _pendingResumeMs = file.LastPositionMs;
+        }
+        _lastAudiobookSaveMs = 0;
+
         _ = _player.Play(_currentMedia);
         DeferDispose(previousMedia, previousHandler);
 

@@ -276,6 +276,7 @@ public static class MediaCache
             "UseStopTime INTEGER NOT NULL DEFAULT 0",
             "IsIgnored INTEGER NOT NULL DEFAULT 0",
             "DiscId TEXT",
+            "LastPositionMs INTEGER NOT NULL DEFAULT 0",
         };
 
         foreach (var col in columns)
@@ -356,6 +357,22 @@ public static class MediaCache
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
         ExecuteUpsertMedia(connection, item);
+    }
+
+    /// <summary>
+    /// Persists an audiobook's live playback position - the resume point. Owned SOLELY by the
+    /// playback throttle: the general upsert never touches this column, so a re-analysis writing
+    /// a fresh item can't clobber a live position with zero.
+    /// </summary>
+    public static void UpdatePlaybackPosition(string id, long positionMs)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Media SET LastPositionMs = @Pos WHERE Id = @Id";
+        cmd.Parameters.AddWithValue("@Pos", positionMs);
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -750,6 +767,7 @@ public static class MediaCache
 
         item.UseStartTime = (GetNullableInt(reader, "UseStartTime") ?? 0) != 0;
         item.UseStopTime = (GetNullableInt(reader, "UseStopTime") ?? 0) != 0;
+        item.LastPositionMs = GetNullableLong(reader, "LastPositionMs") ?? 0;
 
         // A cached local file (music or audiobook) was analyzed before it was saved - mark it so
         // the scan's delta logic doesn't re-run TagLib on unchanged files.
