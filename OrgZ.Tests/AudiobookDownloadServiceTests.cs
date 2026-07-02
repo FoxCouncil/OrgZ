@@ -129,7 +129,7 @@ public class AudiobookDownloadServiceTests
     {
         Title = "The Book",
         Creator = "Jane Author",
-        Description = "<i>A story.</i><br />Second line.",
+        Description = "Recording of The Book. Read by A Narrator.<br /><i>A story.</i><br />Second line.",
         Year = "1902",
     };
 
@@ -148,12 +148,13 @@ public class AudiobookDownloadServiceTests
 
             using var file = TagLib.File.Create(wav);
             Assert.Equal("Jane Author", file.Tag.FirstPerformer);
+            Assert.Equal("A Narrator", file.Tag.FirstComposer);   // Narrator column, parsed from "Read by ..."
             Assert.Equal("The Book", file.Tag.Album);
             Assert.Equal("The Book — Part 2", file.Tag.Title);   // multi-file sets number their parts
             Assert.Equal(2u, file.Tag.Track);
             Assert.Equal(12u, file.Tag.TrackCount);
             Assert.Equal(1902u, file.Tag.Year);
-            Assert.Equal("A story.\nSecond line.", file.Tag.Comment);   // HTML-stripped description
+            Assert.Equal("Recording of The Book. Read by A Narrator.\nA story.\nSecond line.", file.Tag.Comment);   // HTML-stripped description
             Assert.True(AudiobookDetector.TagsSayAudiobook(file));
             Assert.Single(file.Tag.Pictures);
         }

@@ -489,6 +489,13 @@ public sealed class AudiobookDownloadService
                 }
             }
 
+            // Narrator → Composer (the Audiobooks view's Narrator column). archive.org has no
+            // structured narrator field; the reader lives in the "Read by ..." description line.
+            if (string.IsNullOrWhiteSpace(tag.FirstComposer) && ArchiveOrgClient.ExtractNarrator(meta?.Description) is { } narrator)
+            {
+                tag.Composers = [narrator];
+            }
+
             tag.Track = (uint)trackNumber;
             tag.TrackCount = (uint)trackCount;
 
