@@ -169,6 +169,34 @@ public static class ArchiveOrgClient
         return text.Trim();
     }
 
+    /// <summary>
+    /// The narrator, pulled from a LibriVox description's "Read [in {language}] by {Name}" line -
+    /// archive.org exposes no structured narrator field (creator is the AUTHOR), so the description
+    /// is the only source. Returns null when the pattern isn't present (multi-reader collaboratives
+    /// often say "Read by various readers", which we treat as unknown). Runs on the RAW HTML - the
+    /// &lt;br/&gt; that ends the line is the terminator.
+    /// </summary>
+    internal static string? ExtractNarrator(string? descriptionHtml)
+    {
+        if (string.IsNullOrWhiteSpace(descriptionHtml))
+        {
+            return null;
+        }
+        var match = System.Text.RegularExpressions.Regex.Match(
+            descriptionHtml, @"Read\s+(?:in\s+\w+\s+)?by\s+([^<.\r\n]+)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return null;
+        }
+        var name = System.Net.WebUtility.HtmlDecode(match.Groups[1].Value).Trim().TrimEnd(',', ';');
+        if (name.Length == 0 || name.Contains("various", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        return name;
+    }
+
     /// <summary>Test seam: the exact deserialization the live path uses, runnable on fixtures.</summary>
     internal static T? ParseJson<T>(string json) where T : class
         => JsonSerializer.Deserialize<T>(json, JsonOpts);

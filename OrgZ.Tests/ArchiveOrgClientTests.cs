@@ -54,6 +54,28 @@ public class ArchiveOrgClientTests
         Assert.False(string.IsNullOrWhiteSpace(item.Metadata?.Description));
     }
 
+    // ===== Narrator - parsed from the description, since archive.org has no field for it =====
+
+    [Fact]
+    public void Narrator_comes_from_the_real_items_read_by_line()
+    {
+        var item = ArchiveOrgClient.ParseJson<ArchiveItemResponse>(Fixture("archiveorg_metadata_item.json"))!;
+        // "Read in English by David Clarke<br />..."
+        Assert.Equal("David Clarke", ArchiveOrgClient.ExtractNarrator(item.Metadata!.Description));
+    }
+
+    [Theory]
+    [InlineData("Recording of X. Read by Moira Fogarty.", "Moira Fogarty")]
+    [InlineData("Read in English by David Clarke<br /><br />Summary…", "David Clarke")]
+    [InlineData("Read by John Doe, Jane Smith<br/>", "John Doe, Jane Smith")]
+    [InlineData("Read by various readers", null)]        // collaborative - no single narrator
+    [InlineData("No reader credit at all here.", null)]
+    [InlineData(null, null)]
+    public void Narrator_extraction_covers_the_libri_vox_shapes(string? description, string? expected)
+    {
+        Assert.Equal(expected, ArchiveOrgClient.ExtractNarrator(description));
+    }
+
     [Fact]
     public void Download_picker_prefers_the_real_items_chaptered_m4bs()
     {
