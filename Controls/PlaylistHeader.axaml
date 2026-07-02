@@ -13,7 +13,9 @@
     <!-- ArtSize 84 matches the CD album-art tile so the headers line up. -->
     <controls:MediaHeaderBar ArtSize="84">
 
-        <!-- 2×2 album-art mosaic; falls back to a music glyph when the playlist has no art. -->
+        <!-- 2×2 album-art mosaic; falls back to a single music glyph when the playlist has NO art at
+             all. Each cell layers the cover over a no-art placeholder square, so a playlist with
+             fewer than four covers fills its empty cells with placeholders rather than blank gaps. -->
         <controls:MediaHeaderBar.Art>
             <Panel>
                 <i:Icon Value="fa-solid fa-music" FontSize="34"
@@ -22,10 +24,34 @@
                         IsVisible="{Binding !HasAnyCover}" />
                 <Grid ColumnDefinitions="*,*" RowDefinitions="*,*"
                       IsVisible="{Binding HasAnyCover}">
-                    <Image Grid.Row="0" Grid.Column="0" Source="{Binding Cover1}" Stretch="UniformToFill" />
-                    <Image Grid.Row="0" Grid.Column="1" Source="{Binding Cover2}" Stretch="UniformToFill" />
-                    <Image Grid.Row="1" Grid.Column="0" Source="{Binding Cover3}" Stretch="UniformToFill" />
-                    <Image Grid.Row="1" Grid.Column="1" Source="{Binding Cover4}" Stretch="UniformToFill" />
+                    <Panel Grid.Row="0" Grid.Column="0">
+                        <Border Background="{StaticResource OrgZReadonlyBackgroundBrush}">
+                            <i:Icon Value="fa-solid fa-music" FontSize="14" Opacity="0.3"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Image Source="{Binding Cover1}" Stretch="UniformToFill" />
+                    </Panel>
+                    <Panel Grid.Row="0" Grid.Column="1">
+                        <Border Background="{StaticResource OrgZReadonlyBackgroundBrush}">
+                            <i:Icon Value="fa-solid fa-music" FontSize="14" Opacity="0.3"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Image Source="{Binding Cover2}" Stretch="UniformToFill" />
+                    </Panel>
+                    <Panel Grid.Row="1" Grid.Column="0">
+                        <Border Background="{StaticResource OrgZReadonlyBackgroundBrush}">
+                            <i:Icon Value="fa-solid fa-music" FontSize="14" Opacity="0.3"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Image Source="{Binding Cover3}" Stretch="UniformToFill" />
+                    </Panel>
+                    <Panel Grid.Row="1" Grid.Column="1">
+                        <Border Background="{StaticResource OrgZReadonlyBackgroundBrush}">
+                            <i:Icon Value="fa-solid fa-music" FontSize="14" Opacity="0.3"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Image Source="{Binding Cover4}" Stretch="UniformToFill" />
+                    </Panel>
                 </Grid>
             </Panel>
         </controls:MediaHeaderBar.Art>
