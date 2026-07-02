@@ -579,11 +579,11 @@ public sealed class ShuffleIPod : IPodDevice
 
     /// <summary>3G/4G Shuffles use the newer little-endian "bdhs" iTunesSD; 1G/2G the classic format.</summary>
     private bool UsesBdhs => Generation is not null && (Generation.Contains("3G") || Generation.Contains("4G"));
-    private List<ShuffleSdTrack> ReadSd() => UsesBdhs ? ShuffleBdhsWriter.Read(ITunesDir) : ReadSd();
+    private List<ShuffleSdTrack> ReadSd() => UsesBdhs ? ShuffleBdhsWriter.Read(ITunesDir) : ShuffleSdWriter.Read(ITunesDir);
     private void WriteSd(IReadOnlyList<ShuffleSdTrack> list)
     {
         if (UsesBdhs) { ShuffleBdhsWriter.Write(ITunesDir, list); }
-        else { WriteSd(list); }
+        else { ShuffleSdWriter.Write(ITunesDir, list); }
     }
 
     public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
