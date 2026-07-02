@@ -250,6 +250,7 @@ public partial class AudiobooksViewModel : ObservableObject
         {
             return;
         }
+        AudiobookLibrary.RecordLibroAcquisition(book);
         LibroStatusText = $"Downloading {book.Title}…";
         await AudiobookDownloadService.Instance.EnqueueLibroAsync(book, _libroToken, App.FolderPath);
     }
@@ -385,6 +386,9 @@ public partial class AudiobooksViewModel : ObservableObject
         {
             return;
         }
+        // Acquiring is remembered independently of the bytes: the record persists even if the
+        // download is interrupted or the file is later deleted, so the book can be re-downloaded.
+        AudiobookLibrary.RecordArchiveAcquisition(book);
         DownloadState = AudiobookDownloadState.InProgress;
         DownloadProgressPercent = 0;
         DownloadProgressText = "Starting…";
