@@ -266,4 +266,78 @@ public class ListViewConfigTests
         };
         Assert.True(config.SearchFilter(item, "Lossy"));
     }
+
+    // -- Audiobooks view --
+
+    private static MediaItem Audiobook(string id, string? source = null) => new()
+    {
+        Id = id,
+        Kind = MediaKind.Audiobook,
+        Title = "The Fall of Hyperion",
+        Artist = "Dan Simmons",
+        Album = "Hyperion Cantos",
+        Composer = "Victor Bevine",
+        FileName = "hyperion.m4b",
+        Source = source,
+    };
+
+    [Fact]
+    public void AudiobooksConfig_is_registered()
+    {
+        Assert.NotNull(ListViewConfigs.Get("Audiobooks"));
+    }
+
+    [Fact]
+    public void AudiobooksConfig_BaseFilter_accepts_local_audiobooks_only()
+    {
+        var cfg = ListViewConfigs.Get("Audiobooks")!;
+
+        Assert.True(cfg.BaseFilter(Audiobook("b1")));
+        Assert.False(cfg.BaseFilter(Music("m1")));                            // music stays in Music
+        Assert.False(cfg.BaseFilter(Audiobook("b2", source: @"device:E:\"))); // an iPod's audiobooks belong to its device node
+        Assert.False(cfg.BaseFilter(Audiobook("b3", source: "cdda")));
+    }
+
+    [Fact]
+    public void AudiobooksConfig_SearchFilter_matches_title_author_book_narrator_filename()
+    {
+        var cfg = ListViewConfigs.Get("Audiobooks")!;
+        var book = Audiobook("b1");
+
+        Assert.True(cfg.SearchFilter(book, "Fall of"));
+        Assert.True(cfg.SearchFilter(book, "simmons"));    // author, case-insensitive
+        Assert.True(cfg.SearchFilter(book, "Cantos"));     // book/series
+        Assert.True(cfg.SearchFilter(book, "Bevine"));     // narrator
+        Assert.True(cfg.SearchFilter(book, "hyperion.m4b"));
+        Assert.False(cfg.SearchFilter(book, "Rothfuss"));
+    }
+
+    [Fact]
+    public void AudiobooksConfig_columns_speak_audiobook_and_duration_carries_hours()
+    {
+        var cfg = ListViewConfigs.Get("Audiobooks")!;
+        var headers = cfg.Columns.Select(c => c.Header).ToList();
+
+        // Audiobook vocabulary over the same tag fields (Artist=Author, Album=Book, Composer=Narrator)
+        Assert.Contains("Author", headers);
+        Assert.Contains("Book", headers);
+        Assert.Contains("Narrator", headers);
+        Assert.DoesNotContain("Artist", headers);
+        Assert.DoesNotContain("Album", headers);
+
+        // Books run hours - the Music view's m:ss format would drop the hours place.
+        var duration = cfg.Columns.Single(c => c.Header == "Duration");
+        Assert.Equal("h\\:mm\\:ss", duration.StringFormat);
+    }
+
+    [Fact]
+    public void AudiobooksConfig_context_menu_has_no_cd_burn()
+    {
+        var cfg = ListViewConfigs.Get("Audiobooks")!;
+        var headers = cfg.ContextMenuItems.Select(m => m.Header).ToList();
+
+        Assert.Contains("Play", headers);
+        Assert.Contains("Remove from Library", headers);
+        Assert.DoesNotContain(headers, h => h?.Contains("Burn") == true);   // no audio-CD story for a 10-hour book
+    }
 }

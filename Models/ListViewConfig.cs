@@ -63,7 +63,77 @@ public static class ListViewConfigs
         ["BadFormat"] = BuildBadFormatConfig(),
         ["CdAudio"] = BuildCdAudioConfig(),
         ["Podcasts"] = BuildPodcastsConfig(),
+        ["Audiobooks"] = BuildAudiobooksConfig(),
     };
+
+    private static ListViewConfig BuildAudiobooksConfig()
+    {
+        return new ListViewConfig
+        {
+            Key = "Audiobooks",
+            Columns =
+            [
+                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
+                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1.5 },
+                // Audiobook vocabulary over the same tag fields: Artist carries the author, Album
+                // the book (load-bearing for chapter-per-file MP3 rips), Composer the narrator -
+                // the iTunes tagging convention .m4b files follow.
+                new ColumnDef { Header = "Author", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Book", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Narrator", BindingPath = "Composer", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                // Books run hours, so the duration format carries the hours place the Music view drops.
+                new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 90, StringFormat = "h\\:mm\\:ss" },
+                new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
+                // Default-hidden - toggle via the column-header right-click menu.
+                new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
+                new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
+                new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110, CanUserSort = false },
+            ],
+            // Local library audiobooks only - a connected iPod's audiobooks belong to its own
+            // device Audiobooks node, the same partition the Music view keeps.
+            BaseFilter = item => item.Kind == MediaKind.Audiobook
+                                 && item.Source != "cdda"
+                                 && (item.Source == null || !item.Source.StartsWith("device:", StringComparison.Ordinal)),
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Composer?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildAudiobookContextMenu(),
+        };
+    }
+
+    /// <summary>The Music menu minus "Burn to CD..." - a multi-hour book has no audio-CD story.</summary>
+    private static List<ContextMenuItemDef> BuildAudiobookContextMenu()
+    {
+        return
+        [
+            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
+            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
+            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
+            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
+            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
+            new ContextMenuItemDef
+            {
+                Header = "Rating",
+                IsRatingMarker = true,
+            },
+            new ContextMenuItemDef
+            {
+                Header = "Add to Playlist",
+                IsAddToPlaylistMarker = true,
+            },
+            new ContextMenuItemDef { IsSeparator = true },
+            new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
+            new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
+        ];
+    }
 
     private static ListViewConfig BuildPodcastsConfig()
     {
