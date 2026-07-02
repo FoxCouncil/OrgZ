@@ -234,7 +234,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         LibraryItems.Add(new() { Name = "Music",      Icon = "fa-solid fa-music",           Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Music, ViewConfigKey = "Music" });
         LibraryItems.Add(new() { Name = "Radio",      Icon = "fa-solid fa-tower-broadcast", Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Radio, ViewConfigKey = "Radio" });
         LibraryItems.Add(new() { Name = "Podcasts",   Icon = "fa-solid fa-podcast",         Category = "LIBRARY", IsEnabled = true,  Kind = MediaKind.Podcast, ViewConfigKey = "Podcasts" });
-        LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = false });
+        // No Kind on purpose: the footer uses the generic item-count stats (the Music footer's
+        // song totals don't fit books), keyed by the "Audiobooks" label mapping.
+        LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = true,  ViewConfigKey = "Audiobooks" });
 
         if (Settings.Get("OrgZ.ShowIgnored", true))
         {
@@ -4310,6 +4312,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             "Ignored" => "ignored",
             "BadFormat" => "issues",
             "CdAudio" => "tracks",
+            "Audiobooks" => "audiobooks",
             _ when viewKey.StartsWith("Playlist:") => "tracks",
             _ when viewKey.StartsWith("Device:") => "tracks",
             _ => "items"
