@@ -12,6 +12,9 @@ public enum AudiobooksView
     BookDetail,
 }
 
+/// <summary>One purchased Libro.fm book tile: the book plus whether it's already on the shelf.</summary>
+public sealed record LibroBookRow(LibroBook Book, bool IsDownloaded);
+
 /// <summary>One chapter (or m4b part) row in the book-detail file list.</summary>
 public sealed record AudiobookChapterRow(int Number, string Name, string Duration);
 
@@ -126,6 +129,129 @@ public partial class AudiobooksViewModel : ObservableObject
         {
             IsStoreLoading = false;
         }
+
+        await TryRestoreLibroSessionAsync();
+    }
+
+    // ── Libro.fm - the login store (the user's own DRM-free purchases) ─────────
+
+    public ObservableCollection<LibroBookRow> LibroBooks { get; } = [];
+
+    [ObservableProperty]
+    private bool _isLibroLoggedIn;
+
+    [ObservableProperty]
+    private string _libroUsername = string.Empty;
+
+    [ObservableProperty]
+    private string _libroPassword = string.Empty;
+
+    [ObservableProperty]
+    private string? _libroStatusText;
+
+    [ObservableProperty]
+    private bool _isLibroBusy;
+
+    private string? _libroToken;
+
+    private async Task TryRestoreLibroSessionAsync()
+    {
+        var token = LibroFmSession.LoadToken();
+        if (token is null)
+        {
+            LibroUsername = LibroFmSession.Username ?? string.Empty;
+            return;
+        }
+        _libroToken = token;
+        await LoadLibroLibraryAsync();
+    }
+
+    [RelayCommand]
+    private async Task SignInToLibroAsync()
+    {
+        var username = LibroUsername.Trim();
+        if (username.Length == 0 || LibroPassword.Length == 0)
+        {
+            return;
+        }
+
+        IsLibroBusy = true;
+        LibroStatusText = null;
+        try
+        {
+            var token = await LibroFmClient.LoginAsync(username, LibroPassword);
+            if (token is null)
+            {
+                LibroStatusText = "Sign-in failed — check the email and password.";
+                return;
+            }
+            _libroToken = token;
+            LibroPassword = string.Empty;   // never kept beyond the login call
+            LibroFmSession.Save(token, username);
+            await LoadLibroLibraryAsync();
+        }
+        finally
+        {
+            IsLibroBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void SignOutOfLibro()
+    {
+        _libroToken = null;
+        LibroFmSession.Clear();
+        LibroBooks.Clear();
+        IsLibroLoggedIn = false;
+        LibroStatusText = null;
+    }
+
+    private async Task LoadLibroLibraryAsync()
+    {
+        if (_libroToken is null)
+        {
+            return;
+        }
+        IsLibroBusy = true;
+        try
+        {
+            var books = await LibroFmClient.GetLibraryAsync(_libroToken);
+            if (books is null)
+            {
+                // Expired/refused token - back to the sign-in form rather than an empty shelf.
+                SignOutOfLibro();
+                LibroStatusText = "Session expired — sign in again.";
+                return;
+            }
+            IsLibroLoggedIn = true;
+            RefreshLibroRows(books);
+            _log.Information("Libro.fm library loaded: {Count} purchase(s)", books.Count);
+        }
+        finally
+        {
+            IsLibroBusy = false;
+        }
+    }
+
+    private void RefreshLibroRows(IReadOnlyList<LibroBook>? books = null)
+    {
+        var source = books ?? LibroBooks.Select(r => r.Book).ToList();
+        LibroBooks.Clear();
+        foreach (var book in source)
+        {
+            var state = AudiobookDownloadService.Instance.GetState(AudiobookDownloadService.ListingFor(book), App.FolderPath);
+            LibroBooks.Add(new LibroBookRow(book, state == AudiobookDownloadState.Downloaded));
+        }
+    }
+
+    public async Task DownloadLibroBookAsync(LibroBook book)
+    {
+        if (_libroToken is null || string.IsNullOrWhiteSpace(App.FolderPath))
+        {
+            return;
+        }
+        LibroStatusText = $"Downloading {book.Title}…";
+        await AudiobookDownloadService.Instance.EnqueueLibroAsync(book, _libroToken, App.FolderPath);
     }
 
     /// <summary>
@@ -268,12 +394,18 @@ public partial class AudiobooksViewModel : ObservableObject
 
     private void OnDownloadProgress(AudiobookDownloadProgress p)
     {
-        if (p.Identifier != SelectedBook?.Identifier)
-        {
-            return;
-        }
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            if (p.Identifier.StartsWith("libro:", StringComparison.Ordinal))
+            {
+                var pct = p.Total > 0 ? $" — {100.0 * p.Received / p.Total:0}%" : $" — {p.Received / (1024.0 * 1024):0} MB";
+                LibroStatusText = $"Downloading {p.Title}{pct}";
+                return;
+            }
+            if (p.Identifier != SelectedBook?.Identifier)
+            {
+                return;
+            }
             DownloadProgressPercent = p.Total > 0 ? 100.0 * p.Received / p.Total : 0;
             DownloadProgressText = p.FileCount > 1
                 ? $"File {p.FileIndex} of {p.FileCount} — {DownloadProgressPercent:0}%"
@@ -285,13 +417,18 @@ public partial class AudiobooksViewModel : ObservableObject
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            if (book.Identifier == SelectedBook?.Identifier)
+            if (book.Identifier.StartsWith("libro:", StringComparison.Ordinal))
+            {
+                LibroStatusText = null;
+                RefreshLibroRows();   // the tile flips to its gold check
+            }
+            else if (book.Identifier == SelectedBook?.Identifier)
             {
                 DownloadState = AudiobookDownloadState.Downloaded;
                 DownloadProgressText = null;
             }
             // The files live inside the watched library folder; a delta scan folds them into
-            // _allItems as audiobooks (the m4b by container, tagged MP3s by genre promotion),
+            // _allItems as audiobooks (the m4b by container, .audiobooks by location),
             // which is exactly what fills the grid under the store.
             _ = _main?.ScanAndAnalyzeLibraryAsync();
         });
@@ -301,6 +438,11 @@ public partial class AudiobooksViewModel : ObservableObject
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
+            if (identifier.StartsWith("libro:", StringComparison.Ordinal))
+            {
+                LibroStatusText = ex is OperationCanceledException ? null : ex.Message;
+                return;
+            }
             if (identifier == SelectedBook?.Identifier)
             {
                 DownloadState = AudiobookDownloadState.NotDownloaded;

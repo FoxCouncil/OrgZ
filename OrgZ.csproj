@@ -67,6 +67,7 @@
 		<PackageReference Include="Velopack" Version="0.0.1298" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" Condition="'$(IsWindowsBuild)' == 'true'" />
 		<PackageReference Include="System.Management" Version="9.0.1" Condition="'$(IsWindowsBuild)' == 'true'" />
+		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.1" />
 	</ItemGroup>
 
 	<ItemGroup>
