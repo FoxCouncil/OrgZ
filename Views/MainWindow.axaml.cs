@@ -81,6 +81,14 @@ public partial class MainWindow : Window
         GroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
         PodcastGroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
         AudiobooksDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
+
+        // Right-click SELECTS the row under the cursor before its context menu opens - Avalonia's
+        // DataGrid only selects on the left button, so without this every context action (Add to
+        // Playlist, Rating, Sync, ...) targeted whatever was last left-clicked, or nothing.
+        foreach (var grid in new[] { MainDataGrid, GroupedDataGrid, PodcastGroupedDataGrid, AudiobooksDataGrid })
+        {
+            grid.AddHandler(InputElement.PointerPressedEvent, DataGrid_RightClickSelectRow, RoutingStrategies.Tunnel);
+        }
         MainDataGrid.ColumnReordered += DataGrid_ColumnReordered;
         GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
         PodcastGroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
@@ -939,6 +947,20 @@ public partial class MainWindow : Window
             var source = target.GetVisualDescendants().OfType<InputElement>().FirstOrDefault() ?? target;
             source.RaiseEvent(new ContextRequestedEventArgs { RoutedEvent = InputElement.ContextRequestedEvent, Source = source });
             e.Handled = true;
+        }
+    }
+
+    private void DataGrid_RightClickSelectRow(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(null).Properties.IsRightButtonPressed)
+        {
+            return;
+        }
+        // A row, not a header (the header right-click owns the column menu). Select the item under
+        // the cursor so the context menu that's about to open acts on THIS row.
+        if ((e.Source as Visual)?.FindAncestorOfType<DataGridRow>()?.DataContext is MediaItem item)
+        {
+            _viewModel.SelectedItem = item;
         }
     }
 
