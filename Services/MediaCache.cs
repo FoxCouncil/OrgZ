@@ -277,6 +277,7 @@ public static class MediaCache
             "IsIgnored INTEGER NOT NULL DEFAULT 0",
             "DiscId TEXT",
             "LastPositionMs INTEGER NOT NULL DEFAULT 0",
+            "ReplayGainTrackGain REAL",
         };
 
         foreach (var col in columns)
@@ -371,6 +372,22 @@ public static class MediaCache
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "UPDATE Media SET LastPositionMs = @Pos WHERE Id = @Id";
         cmd.Parameters.AddWithValue("@Pos", positionMs);
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Caches a track's computed ReplayGain (dB) after the background pass tags the file - so the
+    /// cache row agrees with the file's new tag without a re-scan. Owned by the analysis pass, like
+    /// the playback position above.
+    /// </summary>
+    public static void UpdateReplayGain(string id, double gainDb)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Media SET ReplayGainTrackGain = @Gain WHERE Id = @Id";
+        cmd.Parameters.AddWithValue("@Gain", gainDb);
         cmd.Parameters.AddWithValue("@Id", id);
         cmd.ExecuteNonQuery();
     }
@@ -541,7 +558,7 @@ public static class MediaCache
                  Year, Track, TotalTracks, Disc, TotalDiscs, DiscId,
                  HasAlbumArt, FileNameMatchesHeaders, MimeType,
                  Genre, Composer, Comment, BPM, AudioBitrate, SampleRate, AudioChannels,
-                 EncoderSettings, CodecDescription,
+                 EncoderSettings, CodecDescription, ReplayGainTrackGain,
                  Issues,
                  StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
                  Country, CountryCode, Tags, Codec, Bitrate,
@@ -554,7 +571,7 @@ public static class MediaCache
                  @Year, @Track, @TotalTracks, @Disc, @TotalDiscs, @DiscId,
                  @HasAlbumArt, @FileNameMatchesHeaders, @MimeType,
                  @Genre, @Composer, @Comment, @BPM, @AudioBitrate, @SampleRate, @AudioChannels,
-                 @EncoderSettings, @CodecDescription,
+                 @EncoderSettings, @CodecDescription, @ReplayGainTrackGain,
                  @Issues,
                  @StreamUrl, @Source, @SourceId, @HomepageUrl, @FaviconUrl,
                  @Country, @CountryCode, @Tags, @Codec, @Bitrate,
@@ -589,6 +606,7 @@ public static class MediaCache
                 AudioChannels = excluded.AudioChannels,
                 EncoderSettings = excluded.EncoderSettings,
                 CodecDescription = excluded.CodecDescription,
+                ReplayGainTrackGain = excluded.ReplayGainTrackGain,
                 Issues = excluded.Issues,
                 StreamUrl = excluded.StreamUrl,
                 Source = excluded.Source,
@@ -647,6 +665,7 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@AudioChannels", item.AudioChannels.HasValue ? (object)item.AudioChannels.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@EncoderSettings", (object?)item.EncoderSettings ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@CodecDescription", (object?)item.CodecDescription ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@ReplayGainTrackGain", item.ReplayGainTrackGainDb.HasValue ? (object)item.ReplayGainTrackGainDb.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@Issues", item.Issues.Count > 0 ? JsonSerializer.Serialize(item.Issues) : DBNull.Value);
 
         cmd.Parameters.AddWithValue("@StreamUrl", (object?)item.StreamUrl ?? DBNull.Value);
@@ -738,6 +757,8 @@ public static class MediaCache
         item.AudioChannels = GetNullableInt(reader, "AudioChannels");
         item.EncoderSettings = GetNullableString(reader, "EncoderSettings");
         item.CodecDescription = GetNullableString(reader, "CodecDescription");
+        var rgOrd = reader.GetOrdinal("ReplayGainTrackGain");
+        item.ReplayGainTrackGainDb = reader.IsDBNull(rgOrd) ? null : reader.GetDouble(rgOrd);
 
         var issuesOrd = reader.GetOrdinal("Issues");
         if (!reader.IsDBNull(issuesOrd))

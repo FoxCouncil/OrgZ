@@ -38,6 +38,10 @@ public class AudioFileAnalyzer
             item.SampleRate = file.Properties.AudioSampleRate;
             item.AudioChannels = file.Properties.AudioChannels;
 
+            // ReplayGain track gain (TagLib returns NaN when the file carries none). Playback reads
+            // this to decide precise-tag vs real-time normalization.
+            item.ReplayGainTrackGainDb = double.IsNaN(file.Tag.ReplayGainTrackGain) ? null : file.Tag.ReplayGainTrackGain;
+
             // Codec description from the file's codec info (e.g. "MPEG Audio Version 1 Layer 3")
             item.CodecDescription = file.Properties.Codecs?
                 .OfType<TagLib.IAudioCodec>()
