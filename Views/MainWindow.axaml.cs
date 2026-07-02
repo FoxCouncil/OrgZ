@@ -1096,6 +1096,13 @@ public partial class MainWindow : Window
             {
                 PopulateRatingMenu(menuItem);
             }
+            else if (def.IsSyncToDeviceMarker)
+            {
+                // Devices hot-plug, so rebuild the list every time the submenu opens rather than
+                // at menu-build time (the grid's context menu is built once and reused).
+                menuItem.SubmenuOpened += (_, _) => PopulateSyncToDeviceMenu(menuItem);
+                PopulateSyncToDeviceMenu(menuItem);   // seed it so the arrow/placeholder shows immediately
+            }
             else if (def.Children is { Count: > 0 })
             {
                 BuildMenuItems(menuItem.Items, def.Children);
@@ -1133,6 +1140,36 @@ public partial class MainWindow : Window
                 }
             };
             parent.Items.Add(item);
+        }
+    }
+
+    private void PopulateSyncToDeviceMenu(Avalonia.Controls.MenuItem parent)
+    {
+        parent.Items.Clear();
+
+        var item = _viewModel.SelectedItem;
+        var targets = item is null
+            ? []
+            : _viewModel.ConnectedDevicesSnapshot().Where(d => _viewModel.CanSyncItemToDevice(item, d)).ToList();
+
+        if (targets.Count == 0)
+        {
+            parent.Items.Add(new Avalonia.Controls.MenuItem { Header = "(No compatible devices)", IsEnabled = false });
+            return;
+        }
+
+        foreach (var device in targets)
+        {
+            var dev = device;   // capture
+            var entry = new Avalonia.Controls.MenuItem { Header = dev.SidebarLabel };
+            entry.Click += async (_, _) =>
+            {
+                if (_viewModel.SelectedItem is { } sel)
+                {
+                    await _viewModel.SyncItemToDeviceAsync(sel, dev);
+                }
+            };
+            parent.Items.Add(entry);
         }
     }
 

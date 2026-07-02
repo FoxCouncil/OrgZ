@@ -3476,6 +3476,77 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return item.Kind != MediaKind.Audiobook || IPodDevice.For(dev).SupportsAudiobooks;
     }
 
+    /// <summary>
+    /// Whether the media right-click > Sync submenu should offer <paramref name="device"/> for
+    /// <paramref name="item"/>: a local music/audiobook file (not one already on a device) whose
+    /// tier can write it - any playlist-capable tier for music, an audiobook-capable tier for books.
+    /// </summary>
+    internal bool CanSyncItemToDevice(MediaItem item, ConnectedDevice device)
+    {
+        if (item.Kind is not (MediaKind.Music or MediaKind.Audiobook)
+            || string.IsNullOrEmpty(item.FilePath)
+            || item.Source?.StartsWith("device:", StringComparison.Ordinal) == true)
+        {
+            return false;
+        }
+        var ipod = IPodDevice.For(device);
+        return item.Kind == MediaKind.Audiobook ? ipod.SupportsAudiobooks : ipod.SupportsPlaylists;
+    }
+
+    /// <summary>
+    /// Media right-click > Sync > (device): imports one track onto the device through its tier
+    /// backend (media_type auto-detected for audiobooks). Skips a track already there by
+    /// artist+title, and never creates a playlist - the single item just joins the device library.
+    /// </summary>
+    internal async Task SyncItemToDeviceAsync(MediaItem item, ConnectedDevice device)
+    {
+        if (!CanSyncItemToDevice(item, device) || !File.Exists(item.FilePath!))
+        {
+            return;
+        }
+
+        var ffmpeg = ResolveFfmpeg();
+        if (device.DeviceType == DeviceType.StockIPod && ffmpeg is null)
+        {
+            UpdateMainStatus("ffmpeg wasn't found — needed to transcode for the iPod.");
+            return;
+        }
+
+        var deviceSource = $"device:{device.MountPath}";
+        var already = _allItems
+            .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
+            .Select(i => NormalizeMatchKey(i.Artist, i.Title))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (already.Contains(NormalizeMatchKey(item.Artist, item.Title)))
+        {
+            UpdateMainStatus($"“{item.Title}” is already on {device.Name}.");
+            return;
+        }
+
+        var ipod = IPodDevice.For(device);
+        using var batch = ipod.BeginBatchWrite();
+        BeginLcdBusy($"Syncing to {device.Name}");
+        try
+        {
+            var deviceItem = await ipod.AddTrackAsync(item, ffmpeg ?? "ffmpeg");
+            _allItems.Add(deviceItem);
+            IPodArtworkReader.Invalidate(device.MountPath);
+            device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
+            ApplyFilter();
+            _log.Information("Synced “{Title}” to {Device}", item.Title, device.MountPath);
+            UpdateMainStatus($"Synced “{item.Title}” to {device.Name}.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Failed to sync {Track} to {Device}", item.FilePath, device.MountPath);
+            UpdateMainStatus($"Couldn't sync “{item.Title}” to {device.Name} — {ex.Message}");
+        }
+        finally
+        {
+            EndLcdBusy();
+        }
+    }
+
     /// <summary>Right-click "Remove from iPod": deletes the item - any media kind - from the connected
     /// device via the per-tier backend (Nano 5G SQLite, binary iTunesDB, or Rockbox filesystem): its
     /// database rows and its audio file, then drops it from the live list. Reports loudly when a tier
