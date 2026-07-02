@@ -53,13 +53,16 @@ internal static class AudioOutputFlyoutHelper
             Margin = new Thickness(0, 1, 0, 1),
         };
 
-        var check = new CheckBox { IsChecked = active, VerticalAlignment = VerticalAlignment.Center };
+        // Unavailable devices (e.g. AirPlay until streaming lands) render disabled with a suffix -
+        // visible so the user knows they exist, unselectable so they can't silently eat the audio.
+        var check = new CheckBox { IsChecked = active, VerticalAlignment = VerticalAlignment.Center, IsEnabled = device.IsAvailable };
         Grid.SetColumn(check, 0);
         grid.Children.Add(check);
 
         var label = new TextBlock
         {
-            Text = device.DisplayName,
+            Text = device.IsAvailable ? device.DisplayName : $"{device.DisplayName} — coming soon",
+            Opacity = device.IsAvailable ? 1.0 : 0.5,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(6, 0, 6, 0),
             FontSize = 11,

@@ -209,7 +209,6 @@ public static class ListViewConfigs
     /// </summary>
     public static ListViewConfig BuildDevicePlaylistsConfig(string mountPath)
     {
-        var source = $"device:{mountPath}";
         var key = $"Device:{mountPath}:Playlists";
 
         return new ListViewConfig
@@ -221,9 +220,11 @@ public static class ListViewConfigs
                 new() { Header = "Tracks", BindingPath = "TotalTracks", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 80 },
                 new() { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, StringFormat = "h\\:mm\\:ss" },
             ],
-            // Device-playlists surface doesn't exist yet - keep the filter intentionally
-            // restrictive so nothing leaks in from the tracks view. When playlist reading
-            // is wired up, switch to matching Kind=Playlist or a dedicated marker.
+            // THE SPEC, not a stub: this node is a pure navigation container. Clicking it routes to
+            // its first playlist child (Sidebar.axaml.cs), so its own grid renders only when the
+            // device genuinely has zero playlists - where an empty grid is the correct answer. The
+            // filter therefore rejects everything by design; a playlist master LIST view (rows =
+            // playlists, not tracks) is a separate roadmap item and would need its own row type.
             BaseFilter = _ => false,
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
@@ -267,7 +268,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110 },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110, CanUserSort = false },
             ],
             BaseFilter = item => idSet.Contains(item.Id),
             SearchFilter = (item, search) =>
@@ -297,7 +298,7 @@ public static class ListViewConfigs
         new ColumnDef { Header = "Plays", BindingPath = "PlayCount", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, IsDefaultVisible = false },
         new ColumnDef { Header = "Extension", BindingPath = "Extension", IsDefaultVisible = false },
         new ColumnDef { Header = "Has Album Art", BindingPath = "HasAlbumArt", Type = ColumnType.CheckBox, IsDefaultVisible = false },
-        new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110 },
+        new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110, CanUserSort = false },
     ];
 
     private static ListViewConfig BuildMusicConfig()
@@ -460,7 +461,7 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100 },
+                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, CanUserSort = false },
             ],
             BaseFilter = item => item.IsFavorite,
             SearchFilter = (item, search) =>

@@ -890,9 +890,9 @@ public sealed class Nano5gLibraryWriter
 
     private static long NewRandomPid(SqliteConnection c, string table)
     {
+        Span<byte> b = stackalloc byte[8];
         while (true)
         {
-            Span<byte> b = stackalloc byte[8];
             RandomNumberGenerator.Fill(b);
             long pid = BitConverter.ToInt64(b);
             if (pid == 0) { continue; }

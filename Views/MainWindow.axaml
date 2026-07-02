@@ -114,6 +114,11 @@
 		<Style Selector="DataGrid.mediaGrid DataGridCell TextBlock">
 			<Setter Property="VerticalAlignment" Value="Center" />
 		</Style>
+		<!-- Group headers read "70's (50 Items)" / "DEADLOCK... (2 Items)" - the grouping property's
+		     name ("Tags:", "Album:") is plumbing, not information. -->
+		<Style Selector="DataGrid.mediaGrid DataGridRowGroupHeader">
+			<Setter Property="IsPropertyNameVisible" Value="False" />
+		</Style>
 	</Window.Styles>
 
 	<DockPanel>
