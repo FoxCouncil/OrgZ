@@ -75,6 +75,63 @@ public class Nano5gLibraryWriterTests
     }
 
     [Fact]
+    public void BeginCdbBatch_defers_the_CDB_rebuild_until_dispose()
+    {
+        var src = FixtureDir();
+        if (src is null) { return; } // device fixture absent
+
+        // Real on-device layout (...\iPod_Control\iTunes\iTunes Library.itlp) so the regenerated
+        // iTunesCDB + zeroed legacy iTunesDB land inside the temp root, where we can observe them.
+        var root = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
+        var iTunesDir = Path.Combine(root, "iPod_Control", "iTunes");
+        var itlp = Path.Combine(iTunesDir, "iTunes Library.itlp");
+        Directory.CreateDirectory(itlp);
+        try
+        {
+            foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
+            {
+                File.Copy(Path.Combine(src, f), Path.Combine(itlp, f));
+            }
+
+            var cdbPath = Path.Combine(iTunesDir, "iTunesCDB");
+            var writer = new Nano5gLibraryWriter(itlp);
+
+            static Nano5gLibraryWriter.TrackInsert Track(int n) => new(
+                Title: $"OrgZ Batch Track {n}", Artist: "OrgZ Batch Artist", Album: "OrgZ Batch Album",
+                AlbumArtist: null, Genre: "Eurobeat", DurationMs: 200_000 + n, TrackNumber: n, DiscNumber: 1,
+                Year: 2026, AudioFormat: 301, BitRate: 256, SampleRate: 44100, Channels: 2,
+                FileSize: 5_000_000 + n, LocationRelative: $"F00/BAT{n}.mp3", ExtensionFourCc: 0x4D503320, KindString: "MPEG audio file");
+
+            using (writer.BeginCdbBatch())
+            {
+                writer.AddTrack(Track(1));
+                writer.AddTrack(Track(2));
+
+                // Both SQLite inserts landed, but the CDB rebuild is deferred - nothing written yet.
+                Assert.False(File.Exists(cdbPath));
+            }
+
+            // Disposing the scope runs the ONE regeneration: a non-empty signed CDB plus the zeroed
+            // legacy iTunesDB the firmware requires next to it, reflecting both tracks.
+            Assert.True(File.Exists(cdbPath));
+            Assert.True(new FileInfo(cdbPath).Length > 0);
+            var legacyDb = Path.Combine(iTunesDir, "iTunesDB");
+            Assert.True(File.Exists(legacyDb));
+            Assert.Equal(0, new FileInfo(legacyDb).Length);
+
+            // Un-scoped mutations regenerate immediately again (the defer depth fully unwound).
+            var cdbAfterBatch = File.ReadAllBytes(cdbPath);
+            writer.AddTrack(Track(3));
+            Assert.False(cdbAfterBatch.AsSpan().SequenceEqual(File.ReadAllBytes(cdbPath)));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AddTrack_then_RemoveTrack_returns_to_baseline()
     {
         var src = FixtureDir();

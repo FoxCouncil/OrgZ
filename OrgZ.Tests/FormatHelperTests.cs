@@ -107,4 +107,39 @@ public class FormatHelperTests
         Assert.Contains("(", formatted);
         Assert.Contains("h ago", formatted);   // 2h ago bucket
     }
+
+    // ===== FormatDurationCompact - per-track display, hours segment only at ≥ 1h =====
+
+    [Theory]
+    [InlineData(187,  "3:07")]
+    [InlineData(3599, "59:59")]     // last second before the hours segment appears
+    [InlineData(3600, "1:00:00")]   // exactly one hour
+    [InlineData(5400, "1:30:00")]
+    public void FormatDurationCompact_switches_to_hours_at_one_hour(int totalSeconds, string expected)
+    {
+        Assert.Equal(expected, FormatHelper.FormatDurationCompact(totalSeconds));
+    }
+
+    [Fact]
+    public void FormatDurationCompact_overloads_agree()
+    {
+        Assert.Equal(FormatHelper.FormatDurationCompact(187), FormatHelper.FormatDurationCompact(187_000L));
+        Assert.Equal(FormatHelper.FormatDurationCompact(187), FormatHelper.FormatDurationCompact(TimeSpan.FromSeconds(187)));
+    }
+
+    // ===== FormatDurationLong - summed-list totals, hours absorb whole days =====
+
+    [Theory]
+    [InlineData(0,      "0:00")]
+    [InlineData(7,      "0:07")]
+    [InlineData(187,    "3:07")]
+    [InlineData(3599,   "59:59")]
+    [InlineData(3600,   "1:00:00")]
+    [InlineData(3723,   "1:02:03")]
+    [InlineData(86400,  "24:00:00")]    // exactly one day - stays in hours, no wrap to 0:00:00
+    [InlineData(181391, "50:23:11")]    // 2d 2h 23m 11s - the shape a big playlist total takes
+    public void FormatDurationLong_absorbs_days_into_hours(int totalSeconds, string expected)
+    {
+        Assert.Equal(expected, FormatHelper.FormatDurationLong(TimeSpan.FromSeconds(totalSeconds)));
+    }
 }
