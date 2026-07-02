@@ -283,33 +283,204 @@ public class ConnectedDeviceTests
         Assert.Equal(expected, d.TotalSpaceLabel);
     }
 
-    // ===== HasGenerationImage / GenerationImage slug detection =====
+    // ===== Generation art resolution =====
+    // The resolution rules (exact generation+colour → generation-only → first colour of that
+    // generation) run against an injected catalogue, so the DECISION LOGIC is exercised without a
+    // running Avalonia platform (AssetLoader needs one - headless it degrades to "no art"). A second
+    // set below validates against the art files actually shipped in Assets/Devices.
 
-    [Theory]
-    [InlineData("Video 5.5G",  true)]
-    [InlineData("Video 5G",    true)]
-    [InlineData("Photo",       true)]
-    [InlineData("Mini 1G",     true)]
-    [InlineData("Classic 6G",  true)]
-    [InlineData("Nano 7G",     true)]
-    [InlineData("Shuffle 4G",  true)]
-    public void HasGenerationImage_true_for_known_generations(string generation, bool expected)
+    /// <summary>Scopes an injected art catalogue to one test; disposal restores the real loader.</summary>
+    private sealed class FakeArtCatalog : IDisposable
+    {
+        public FakeArtCatalog(params string[] names)
+        {
+            var set = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            ConnectedDevice.ArtCatalogOverride = () => set;
+        }
+
+        public void Dispose()
+        {
+            ConnectedDevice.ArtCatalogOverride = null;
+        }
+    }
+
+    private static ConnectedDevice Dev(string? generation, string? color = null)
     {
         var d = MakeDevice();
         d.IpodGeneration = generation;
-        Assert.Equal(expected, d.HasGenerationImage);
+        d.Color = color;
+        return d;
+    }
+
+    [Fact]
+    public void Art_exact_generation_plus_colour_wins_over_generation_only()
+    {
+        using var _ = new FakeArtCatalog("ipod_nano_5g", "ipod_nano_5g_red");
+        Assert.Equal("ipod_nano_5g_red", Dev("Nano 5G", "Red").ResolveImageSlug());
+    }
+
+    [Fact]
+    public void Art_falls_back_to_generation_only_when_colour_not_shipped()
+    {
+        using var _ = new FakeArtCatalog("ipod_nano_5g", "ipod_nano_5g_red");
+        Assert.Equal("ipod_nano_5g", Dev("Nano 5G", "Chartreuse").ResolveImageSlug());
+        Assert.Equal("ipod_nano_5g", Dev("Nano 5G").ResolveImageSlug());   // no colour decoded at all
+    }
+
+    [Fact]
+    public void Art_falls_back_to_first_colour_alphabetically_when_no_generation_only_art()
+    {
+        using var _ = new FakeArtCatalog("ipod_mini_1g_silver", "ipod_mini_1g_gold", "ipod_mini_1g_blue");
+        Assert.Equal("ipod_mini_1g_blue", Dev("Mini 1G").ResolveImageSlug());
+        Assert.Equal("ipod_mini_1g_blue", Dev("Mini 1G", "Chartreuse").ResolveImageSlug());
+    }
+
+    [Fact]
+    public void Art_normalizes_periods_spaces_and_case_in_generation_and_colour()
+    {
+        using var _ = new FakeArtCatalog("ipod_video_5_5g_u2", "ipod_nano_2g_product_red");
+        Assert.Equal("ipod_video_5_5g_u2", Dev("Video 5.5G", "U2").ResolveImageSlug());
+        Assert.Equal("ipod_video_5_5g_u2", Dev("VIDEO 5.5G", "u2").ResolveImageSlug());
+        Assert.Equal("ipod_video_5_5g_u2", Dev("video 5.5g", "U2").ResolveImageSlug());
+        Assert.Equal("ipod_nano_2g_product_red", Dev("Nano 2G", "Product Red").ResolveImageSlug());
+
+        // A double space produces a double-underscore slug - deliberately NOT fuzzy-matched.
+        Assert.Null(Dev("Video  5.5G", "U2").ResolveImageSlug());
+        Assert.False(Dev("Video  5.5G", "U2").HasGenerationImage);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
+    [InlineData("   ")]
     [InlineData("Bogus 99G")]
-    [InlineData("Touch 1G")]    // not in the KnownGenerationImages set yet
-    public void HasGenerationImage_false_for_unknown_or_empty(string? generation)
+    public void Art_null_for_unknown_or_empty_generation(string? generation)
     {
-        var d = MakeDevice();
-        d.IpodGeneration = generation;
+        using var _ = new FakeArtCatalog("ipod_nano_5g", "ipod_nano_5g_red");
+        Assert.Null(Dev(generation, "Red").ResolveImageSlug());
+        Assert.False(Dev(generation, "Red").HasGenerationImage);
+    }
+
+    [Fact]
+    public void Art_resolution_reacts_to_colour_and_generation_changes()
+    {
+        using var _ = new FakeArtCatalog("ipod_nano_5g_red", "ipod_nano_5g_blue", "ipod_mini_2g_pink");
+        var d = Dev("Nano 5G", "Red");
+        Assert.Equal("ipod_nano_5g_red", d.ResolveImageSlug());
+
+        // The memoized result must invalidate when its inputs change...
+        d.Color = "Blue";
+        Assert.Equal("ipod_nano_5g_blue", d.ResolveImageSlug());
+        d.IpodGeneration = "Mini 2G";
+        Assert.Equal("ipod_mini_2g_pink", d.ResolveImageSlug());
+
+        // ...and the bound art properties must be notified so the info bar re-reads them.
+        var notified = new List<string?>();
+        d.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+        d.Color = "Red";
+        Assert.Contains(nameof(ConnectedDevice.GenerationImage), notified);
+        Assert.Contains(nameof(ConnectedDevice.HasGenerationImage), notified);
+    }
+
+    [Fact]
+    public void Art_degrades_to_none_without_an_Avalonia_platform()
+    {
+        // No override → the real loader path, which has no Avalonia platform under the test runner.
+        // It must degrade to "no art" (empty catalogue), never throw.
+        var d = Dev("Nano 5G", "Red");
         Assert.False(d.HasGenerationImage);
+        Assert.Null(d.GenerationImage);
+    }
+
+    // ===== Generation art - the SHIPPED asset set =====
+    // These run the same resolution against the real files in Assets/Devices (walked up from the
+    // test bin), pinning both the catalogue contents and the rules working together.
+
+    private static IReadOnlySet<string>? ShippedArt()
+    {
+        var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Assets", "Devices"));
+        if (!Directory.Exists(dir))
+        {
+            return null;   // running outside the repo layout - skip, same pattern as the fixture-gated tests
+        }
+        return Directory.EnumerateFiles(dir, "*.png")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(n => n is not null && !n.Contains("@2x", StringComparison.Ordinal))
+            .Select(n => n!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("Nano 5G",    "Red",    "ipod_nano_5g_red")]      // exact generation+colour
+    [InlineData("Mini 1G",    "Gold",   "ipod_mini_1g_gold")]
+    [InlineData("Shuffle 2G", "Mint",   "ipod_shuffle_2g_mint")]
+    [InlineData("Photo",      null,     "ipod_photo")]            // generation-only art
+    [InlineData("Photo",      "Black",  "ipod_photo")]            // colour not shipped → generation
+    [InlineData("Video 5.5G", null,     "ipod_video_5_5g_black")] // no generation-only → first colour
+    [InlineData("Classic 6G", "Gold",   "ipod_classic_6g_black")]
+    [InlineData("Shuffle 4G", null,     "ipod_shuffle_4g_blue")]
+    public void Shipped_art_resolves_known_generations(string generation, string? color, string expectedSlug)
+    {
+        var shipped = ShippedArt();
+        if (shipped is null) { return; }
+
+        ConnectedDevice.ArtCatalogOverride = () => shipped;
+        try
+        {
+            Assert.Equal(expectedSlug, Dev(generation, color).ResolveImageSlug());
+            Assert.True(Dev(generation, color).HasGenerationImage);
+        }
+        finally
+        {
+            ConnectedDevice.ArtCatalogOverride = null;
+        }
+    }
+
+    [Theory]
+    [InlineData("Bogus 99G")]
+    [InlineData("Touch 1G")]   // no on-disk database → no art shipped
+    [InlineData("Nano 7G")]    // art not shipped yet - flip to a resolving case when it lands
+    public void Shipped_art_has_nothing_for_unsupported_generations(string generation)
+    {
+        var shipped = ShippedArt();
+        if (shipped is null) { return; }
+
+        ConnectedDevice.ArtCatalogOverride = () => shipped;
+        try
+        {
+            Assert.False(Dev(generation).HasGenerationImage);
+        }
+        finally
+        {
+            ConnectedDevice.ArtCatalogOverride = null;
+        }
+    }
+
+    [Fact]
+    public void Shipped_art_every_1x_has_a_2x_partner_and_matches_the_manifest()
+    {
+        var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Assets", "Devices"));
+        if (!Directory.Exists(dir)) { return; }
+
+        var all = Directory.EnumerateFiles(dir, "*.png").Select(f => Path.GetFileNameWithoutExtension(f)!).ToHashSet(StringComparer.Ordinal);
+        var oneX = all.Where(n => !n.Contains("@2x", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
+
+        // Retina pairing: every base asset ships a matching @2x (and no orphaned @2x).
+        foreach (var n in oneX)
+        {
+            Assert.Contains($"{n}@2x", all);
+        }
+        Assert.Equal(all.Count, oneX.Count * 2);
+
+        // The manifest is the attribution ledger - it must list exactly the shipped 1x set.
+        var manifestPath = Path.Combine(dir, "_manifest.csv");
+        Assert.True(File.Exists(manifestPath), "Assets/Devices/_manifest.csv missing");
+        var manifest = File.ReadAllLines(manifestPath)
+            .Skip(1)   // header
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Select(l => l.Split(',')[0].Trim())
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(oneX.OrderBy(n => n, StringComparer.Ordinal), manifest.OrderBy(n => n, StringComparer.Ordinal));
     }
 
     // ===== IsReadOnly - by device type =====
@@ -418,19 +589,6 @@ public class ConnectedDeviceTests
         Assert.Equal(100.0, d.AudioPercent);
         Assert.Equal(0.0,   d.FreePercent);
         Assert.Equal(0.0,   d.OtherPercent);
-    }
-
-    // ===== HasGenerationImage - slug normalization for periods and case =====
-
-    [Theory]
-    [InlineData("VIDEO 5.5G",  true)]    // case-insensitive normalization
-    [InlineData("video 5.5g",  true)]
-    [InlineData("Video  5.5G", false)]   // double space breaks the slug
-    public void HasGenerationImage_handles_case_but_not_extra_spaces(string generation, bool expected)
-    {
-        var d = MakeDevice();
-        d.IpodGeneration = generation;
-        Assert.Equal(expected, d.HasGenerationImage);
     }
 
     // ===== Persistence date fields - round-trip through plain setters =====

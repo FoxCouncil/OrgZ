@@ -180,7 +180,7 @@ public partial class ConnectedDevice : ObservableObject
     private (string? Gen, string? Color, string? Slug) _resolvedSlug;
     private bool _slugResolved;
 
-    private string? ResolveImageSlug()
+    internal string? ResolveImageSlug()
     {
         if (_slugResolved && _resolvedSlug.Gen == IpodGeneration && _resolvedSlug.Color == Color)
         {
@@ -223,26 +223,46 @@ public partial class ConnectedDevice : ObservableObject
         return FirstColourFor(gen);
     }
 
-    private static bool AssetExists(string baseName)
-        => AssetLoader.Exists(new Uri($"{DeviceAssetBase}{baseName}.png"));
+    // ── Device art catalogue ──────────────────────────────────────────────
+    // Every 1x art base name under Assets/Devices, enumerated ONCE (the set is fixed at build) and
+    // shared by the exact-name probe and the colour-fallback scan. AssetLoader needs a running
+    // Avalonia platform - headless contexts (unit tests, the XAML previewer) get an empty set
+    // instead of a throw, and tests inject their own catalogue via <see cref="ArtCatalogOverride"/>
+    // to exercise the resolution rules deterministically.
+    private static readonly Lazy<IReadOnlySet<string>> _artCatalog = new(LoadArtCatalog);
+
+    /// <summary>Test hook: replaces the asset catalogue art resolution reads. Set BEFORE the device
+    /// resolves (results are memoized per instance); reset to null when done.</summary>
+    internal static Func<IReadOnlySet<string>>? ArtCatalogOverride;
+
+    private static IReadOnlySet<string> ArtCatalog => ArtCatalogOverride?.Invoke() ?? _artCatalog.Value;
+
+    private static IReadOnlySet<string> LoadArtCatalog()
+    {
+        try
+        {
+            return AssetLoader.GetAssets(new Uri(DeviceAssetBase), null)
+                .Select(u => Path.GetFileNameWithoutExtension(u.AbsolutePath))
+                .Where(n => n.StartsWith("ipod_", StringComparison.OrdinalIgnoreCase) && !n.Contains("@2x", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new HashSet<string>();   // no Avalonia platform (tests / previewer) → no art
+        }
+    }
+
+    private static bool AssetExists(string baseName) => ArtCatalog.Contains(baseName);
 
     /// <summary>First (alphabetical) 1x colour variant for a generation - a sensible default when the
     /// device's exact colour isn't in the art set.</summary>
     private static string? FirstColourFor(string gen)
     {
-        try
-        {
-            var prefix = gen + "_";
-            return AssetLoader.GetAssets(new Uri(DeviceAssetBase), null)
-                .Select(u => Path.GetFileNameWithoutExtension(u.AbsolutePath))
-                .Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !n.Contains("@2x", StringComparison.Ordinal))
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
-        }
-        catch
-        {
-            return null;
-        }
+        var prefix = gen + "_";
+        return ArtCatalog
+            .Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 
     public string ModelDisplay => string.IsNullOrWhiteSpace(Model) ? "\u2014" : Model;
