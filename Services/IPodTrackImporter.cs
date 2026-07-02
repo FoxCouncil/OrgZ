@@ -71,8 +71,12 @@ public static class IPodTrackImporter
         // Read length/sample-rate from the SOURCE: TagLib reports these reliably for
         // FLAC, whereas the freshly-muxed ALAC output sometimes reads back as 0. The
         // values are codec-invariant for a lossless->lossless transcode anyway.
+        // Audiobook-ness is detected here too (container/location, then tags), so every
+        // import path - drag-drop, playlist sync, send-to-device - lands a library
+        // audiobook as an iPod audiobook without any caller having to say so.
         string? title = null, artist = null, album = null, genre = null;
         int year = 0, trackNo = 0, srcLengthMs = 0, srcSampleRate = 0;
+        bool isAudiobook = AudiobookDetector.KindForPath(sourceFile) == MediaKind.Audiobook;
         try
         {
             using var tf = TagLib.File.Create(sourceFile);
@@ -84,6 +88,7 @@ public static class IPodTrackImporter
             trackNo = (int)tf.Tag.Track;
             srcLengthMs   = (int)tf.Properties.Duration.TotalMilliseconds;
             srcSampleRate = tf.Properties.AudioSampleRate;
+            isAudiobook  |= AudiobookDetector.TagsSayAudiobook(tf);
         }
         catch (Exception ex)
         {
@@ -96,7 +101,7 @@ public static class IPodTrackImporter
         if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash72)
         {
             return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath, generation, fireWireGuid,
-                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, ct);
+                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, isAudiobook, ct);
         }
 
         // --- produce an iPod-compatible file ---
@@ -188,6 +193,7 @@ public static class IPodTrackImporter
                 Dbid         = dbid,
                 HasArtwork   = hasArt,
                 ArtworkSize  = artSize,
+                IsAudiobook  = isAudiobook,
             });
 
             var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
@@ -586,7 +592,7 @@ public static class IPodTrackImporter
     private static async Task<IPodImportResult> ImportToNano5gAsync(
         string mountPath, string sourceFile, string ffmpegPath, string? generation, string? fireWireGuid,
         string? title, string? artist, string? album, string? genre,
-        int year, int trackNo, int srcLengthMs, int srcSampleRate, CancellationToken ct)
+        int year, int trackNo, int srcLengthMs, int srcSampleRate, bool isAudiobook, CancellationToken ct)
     {
         // The Nano 5G plays MP3 and MP4-container AAC/ALAC. Pass those through; transcode anything
         // else (FLAC/WAV/AIFF) to ALAC so it stays lossless - never down to MP3.
@@ -660,7 +666,8 @@ public static class IPodTrackImporter
                 FileSize: fileSize,
                 LocationRelative: $"{folder}/{fileName}",
                 ExtensionFourCc: extFourCc,
-                KindString: kindString));
+                KindString: kindString,
+                IsAudiobook: isAudiobook));
 
             // Album art: same ArtworkDB/.ithmb subsystem as the binary path; link it from SQLite via
             // artwork_cache_id -> ArtworkDB image id (Library.itdb isn't checksummed, so no cbk re-sign).

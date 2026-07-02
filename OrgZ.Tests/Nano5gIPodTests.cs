@@ -42,6 +42,15 @@ public class Nano5gIPodTests
                 ExtensionFourCc: 0x4D503320, KindString: "MPEG audio file"));
             File.WriteAllBytes(Path.Combine(musicF00, "IFACE.mp3"), new byte[1_000]);
 
+            // And an AUDIOBOOK - the Nano's NATIVE shape (media_kind=8, is_song=0), which its own
+            // Audiobooks menu filters on, not a book mislabeled as a song.
+            writer.AddTrack(new Nano5gLibraryWriter.TrackInsert(
+                Title: "Iface Book", Artist: "Iface Author", Album: "Iface Book", AlbumArtist: null, Genre: "Audiobook",
+                DurationMs: 3_600_000, TrackNumber: 1, DiscNumber: 1, Year: 2026, AudioFormat: 502, BitRate: 64,
+                SampleRate: 44100, Channels: 2, FileSize: 2_000, LocationRelative: "F00/BOOK.m4a",
+                ExtensionFourCc: 0x4D344120, KindString: "MPEG-4 audio file", IsAudiobook: true));
+            File.WriteAllBytes(Path.Combine(musicF00, "BOOK.m4a"), new byte[2_000]);
+
             var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, Name = "Nano 5G" };
             var ipod = new Nano5gIPod(device);
 
@@ -49,6 +58,15 @@ public class Nano5gIPodTests
             var lib = await ipod.ReadLibraryAsync();
             var item = lib.Tracks.Single(t => t.Title == "Iface Track");
             Assert.EndsWith(Path.Combine("F00", "IFACE.mp3"), item.FilePath);
+            Assert.Equal(MediaKind.Music, item.Kind);
+
+            // The audiobook row round-trips as its native kind, and the SQLite shape matches iTunes'.
+            var bookItem = lib.Tracks.Single(t => t.Title == "Iface Book");
+            Assert.Equal(MediaKind.Audiobook, bookItem.Kind);
+            using (var c = OpenRo(Path.Combine(itlp, "Library.itdb")))
+            {
+                Assert.Equal(1, Count(c, "item", "title='Iface Book' AND media_kind=8 AND is_song=0"));
+            }
 
             // ── CREATE PLAYLIST: an ordinary, visible container referencing the read-back item ─────────
             await ipod.CreatePlaylistAsync("Iface PL", [item]);
