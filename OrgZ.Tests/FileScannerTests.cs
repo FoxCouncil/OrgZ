@@ -202,4 +202,48 @@ public class FileScannerTests : IDisposable
         var items = await FileScanner.ScanDirectoryAsync(_tempDir);
         Assert.Empty(items);
     }
+
+    // ===== dot-folder skip: only .podcasts is managed; dotted albums are NOT hidden =====
+
+    [Fact]
+    public async Task ScanDirectoryAsync_scans_albums_whose_name_starts_with_a_dot()
+    {
+        // Regression: the old blanket "any folder starting with '.' is hidden" rule dropped
+        // real albums like these. They must be scanned like any other folder.
+        Touch(Path.Combine("...Baby One More Time", "track.mp3"));
+        Touch(Path.Combine("...And Justice for All", "one.flac"));
+
+        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+
+        Assert.Equal(2, items.Count);
+        Assert.Contains(items, i => i.FileName == "track.mp3");
+        Assert.Contains(items, i => i.FileName == "one.flac");
+    }
+
+    [Fact]
+    public async Task ScanDirectoryAsync_skips_dot_podcasts_downloads()
+    {
+        Touch("real-track.mp3");
+        Touch(Path.Combine(".podcasts", "feed-123", "episode.mp3"));
+
+        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+
+        Assert.Single(items);
+        Assert.Equal("real-track.mp3", items[0].FileName);
+    }
+
+    [Fact]
+    public async Task ScanDirectoryAsync_walks_dot_audiobooks_and_other_dotted_folders()
+    {
+        // .audiobooks is library content; .tools is a user's own dotted folder. Neither is
+        // OrgZ-managed scratch, so both are walked (unlike .podcasts).
+        Touch(Path.Combine(".audiobooks", "Some Author", "book.m4b"));
+        Touch(Path.Combine(".tools", "stashed.mp3"));
+
+        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+
+        Assert.Equal(2, items.Count);
+        Assert.Contains(items, i => i.FileName == "book.m4b");
+        Assert.Contains(items, i => i.FileName == "stashed.mp3");
+    }
 }
