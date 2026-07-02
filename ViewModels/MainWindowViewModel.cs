@@ -2344,6 +2344,53 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         media.AddOption($":audio-visual={name}");
     }
 
+    /// <summary>
+    /// iTunes "Sound Check": when enabled, level playback loudness across tracks. Combined model -
+    /// if the file already carries a ReplayGain tag, VLC applies that precise, one-time-computed
+    /// value (audio-replay-gain-mode=track); if not, VLC normalizes naturally in real time
+    /// (normvol) AND a one-shot background pass measures + tags the file so next play is precise.
+    /// Radio streams (no MediaItem) always take the normvol path. Set per-media, so it takes effect
+    /// from the next track; the filter runs before OrgZ's audio tap, leaving the VU meter and sink
+    /// volume untouched.
+    /// </summary>
+    private void ApplyAudioNormalization(Media media, MediaItem? item)
+    {
+        if (!Settings.Get("OrgZ.NormalizeVolume", false))
+        {
+            return;
+        }
+
+        if (item?.HasReplayGain == true)
+        {
+            media.AddOption(":audio-replay-gain-mode=track");
+            // Boosting a quiet track toward the reference could push its peaks past 0 dBFS -
+            // peak protection caps the gain so a loud transient can't clip.
+            media.AddOption(":audio-replay-gain-peak-protection");
+            return;
+        }
+
+        // No precomputed gain: normalize live now, and tag this file in the background so it gets
+        // the precise value for next time. Only worth doing for a real local file.
+        media.AddOption(":audio-filter=normvol");
+        media.AddOption(":norm-max-level=2.0");
+
+        if (item is { FilePath: { } path } && item.Kind is MediaKind.Music or MediaKind.Audiobook && File.Exists(path) && ResolveFfmpeg() is { } ffmpeg)
+        {
+            _ = Task.Run(async () =>
+            {
+                var gain = await ReplayGainService.ComputeAndTagAsync(path, ffmpeg);
+                if (gain is { } g)
+                {
+                    UI(() =>
+                    {
+                        item.ReplayGainTrackGainDb = g;
+                        _ = Task.Run(() => MediaCache.UpdateReplayGain(item.Id, g));
+                    });
+                }
+            });
+        }
+    }
+
     private void ExecutePlayMusic(MediaItem file)
     {
         SelectedItem = file;
@@ -2371,6 +2418,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentMediaMetaHandler = null;
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
         ApplyVisualizerOption(_currentMedia);
+        ApplyAudioNormalization(_currentMedia, file);
 
         // Local file - opens instantly, so skip the barber pole.
         NewPlaybackEpoch();
@@ -2427,6 +2475,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var previousHandler = _currentMediaMetaHandler;
 
             _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
+            ApplyAudioNormalization(_currentMedia, null);   // radio: real-time normvol, no tag to precompute
 
             // Radio streams over flaky uplinks need more headroom than libvlc's 1s
             // default network buffer. Without this, the smallest server-side jitter
@@ -2790,6 +2839,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     _currentMedia = isLocal
                         ? new Media(_vlc, source, FromType.FromPath)
                         : new Media(_vlc, source, FromType.FromLocation);
+                    ApplyAudioNormalization(_currentMedia, null);   // podcast episode: real-time normvol
 
                     if (!isLocal)
                     {

@@ -62,6 +62,7 @@ public partial class SettingsDialog : Window
         ShuffleAlbumRadio.IsChecked = shuffleMode == "Album";
 
         AutoAdvanceCheck.IsChecked = Settings.Get("OrgZ.AutoAdvance", true);
+        NormalizeVolumeCheck.IsChecked = Settings.Get("OrgZ.NormalizeVolume", false);
 
         // Playback → Mini-Player
         var miniMode = MainWindowViewModel.LoadMiniPlayerMode();
@@ -429,6 +430,7 @@ public partial class SettingsDialog : Window
 
         Settings.Set("OrgZ.ShuffleMode", ShuffleAlbumRadio.IsChecked == true ? "Album" : "Song");
         Settings.Set("OrgZ.AutoAdvance", AutoAdvanceCheck.IsChecked == true);
+        Settings.Set("OrgZ.NormalizeVolume", NormalizeVolumeCheck.IsChecked == true);
 
         // Burning
         Settings.Set("OrgZ.Burn.AudioGapSeconds", (BurnAudioGapCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "0" ? 0 : 2);

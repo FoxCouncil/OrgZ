@@ -164,6 +164,16 @@ public partial class MediaItem : ObservableObject
 
     public string? CodecDescription { get; set; }
 
+    /// <summary>
+    /// ReplayGain track gain (dB) read from the file's tags, or null when the file carries none.
+    /// When present, playback lets VLC apply it (the precise, one-time-computed "Sound Check"
+    /// value); when null and normalization is on, VLC's real-time normvol handles it and a
+    /// background pass computes + tags the value so next time it's precise.
+    /// </summary>
+    public double? ReplayGainTrackGainDb { get; set; }
+
+    public bool HasReplayGain => ReplayGainTrackGainDb.HasValue;
+
     public string ChannelsLabel => AudioChannels switch
     {
         1 => "Mono",

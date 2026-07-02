@@ -89,6 +89,9 @@
 
 						<CheckBox x:Name="AutoAdvanceCheck" Content="Auto-advance to next track" IsChecked="True" />
 
+						<CheckBox x:Name="NormalizeVolumeCheck" Content="Normalize volume (Sound Check)"
+						          ToolTip.Tip="Levels loudness across tracks so quiet and loud songs play at a similar volume. Applies from the next track." />
+
 						<!-- Mini-Player Mode -->
 						<StackPanel Spacing="4">
 							<TextBlock Text="Mini-player switches from the Window menu (Alt+Shift+M):" FontSize="11" Opacity="0.7" />
