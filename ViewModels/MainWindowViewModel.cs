@@ -4236,6 +4236,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         MediaCache.EnsureCreated();
         Services.Podcast.PodcastCache.EnsureCreated();
+        Services.Media.AcquisitionStore.EnsureCreated();
 
         // One-time cleanup: drop any leftover radio rows from the old runtime
         // sync sources. The new world keeps bundled stations in memory only;
