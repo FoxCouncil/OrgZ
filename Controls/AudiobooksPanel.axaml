@@ -1,0 +1,238 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="https://github.com/projektanker/icons.avalonia"
+             xmlns:vm="using:OrgZ.ViewModels"
+             xmlns:models="using:OrgZ.Models"
+             xmlns:img="clr-namespace:OrgZ.Converters"
+             xmlns:controls="using:OrgZ.Controls"
+             mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="500"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             x:Class="OrgZ.Controls.AudiobooksPanel"
+             Background="{StaticResource OrgZAudiobookSurfaceBrush}"
+             x:CompileBindings="False">
+	<Design.DataContext>
+		<vm:AudiobooksViewModel />
+	</Design.DataContext>
+
+	<UserControl.Resources>
+		<!-- The audiobooks vertical is GOLDEN - music is blue, podcasts are purple. These are the
+		     podcast carousel colors hue-rotated to gold and scoped to this panel: the embedded
+		     PodcastsCard resolves its OrgZCarousel* keys through the logical tree, so the same
+		     card chrome renders golden here without touching the podcasts surface. -->
+		<Color x:Key="OrgZAudiobookSurface">#291F0D</Color>
+		<Color x:Key="OrgZAccentGold">#FFC94D</Color>
+		<Color x:Key="OrgZCarouselOuter">#66501F</Color>
+		<Color x:Key="OrgZCarouselButton">#D6A63F</Color>
+		<Color x:Key="OrgZCarouselSurface">#000000</Color>
+		<Color x:Key="OrgZCarouselHeader">#453818</Color>
+		<Color x:Key="OrgZCarouselHeaderHighlight">#726035</Color>
+		<Color x:Key="OrgZCarouselDivider">#5C4F2F</Color>
+		<Color x:Key="OrgZCarouselDotActive">#E0D6B8</Color>
+		<Color x:Key="OrgZCarouselDotInactive">#807148</Color>
+
+		<SolidColorBrush x:Key="OrgZAudiobookSurfaceBrush" Color="{StaticResource OrgZAudiobookSurface}" />
+		<SolidColorBrush x:Key="OrgZAccentGoldBrush" Color="{StaticResource OrgZAccentGold}" />
+		<SolidColorBrush x:Key="OrgZCarouselOuterBrush" Color="{StaticResource OrgZCarouselOuter}" />
+		<SolidColorBrush x:Key="OrgZCarouselButtonBrush" Color="{StaticResource OrgZCarouselButton}" />
+		<SolidColorBrush x:Key="OrgZCarouselSurfaceBrush" Color="{StaticResource OrgZCarouselSurface}" />
+		<SolidColorBrush x:Key="OrgZCarouselHeaderBrush" Color="{StaticResource OrgZCarouselHeader}" />
+		<SolidColorBrush x:Key="OrgZCarouselDividerBrush" Color="{StaticResource OrgZCarouselDivider}" />
+		<LinearGradientBrush x:Key="OrgZCarouselHeaderShineBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+			<GradientStop Offset="0" Color="{StaticResource OrgZCarouselHeaderHighlight}" />
+			<GradientStop Offset="1" Color="{StaticResource OrgZCarouselHeader}" />
+		</LinearGradientBrush>
+	</UserControl.Resources>
+
+	<UserControl.Styles>
+		<StyleInclude Source="avares://OrgZ/Controls/PodcastStyles.axaml" />
+	</UserControl.Styles>
+
+	<DockPanel LastChildFill="True">
+		<!-- Back bar - only while a book detail is open. -->
+		<Border DockPanel.Dock="Top"
+		        Background="{StaticResource OrgZSurfaceDarkBrush}"
+		        BorderBrush="{StaticResource OrgZCarouselDividerBrush}"
+		        BorderThickness="0,0,0,1"
+		        IsVisible="{Binding ShowBackButton}"
+		        Height="40">
+			<Button Command="{Binding GoBackCommand}"
+			        HorizontalAlignment="Left" VerticalAlignment="Center"
+			        Margin="10,0" Padding="12,5" Cursor="Hand">
+				<StackPanel Orientation="Horizontal" Spacing="6">
+					<i:Icon Value="fa-solid fa-chevron-left" FontSize="12" VerticalAlignment="Center" />
+					<TextBlock Text="Back" FontSize="12" VerticalAlignment="Center" />
+				</StackPanel>
+			</Button>
+		</Border>
+
+		<Grid>
+			<!-- ==================== Book detail ==================== -->
+			<ScrollViewer IsVisible="{Binding IsBookDetail}"
+			              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+				<Grid ColumnDefinitions="220,*" ColumnSpacing="20" Margin="16">
+					<StackPanel Grid.Column="0" Spacing="10">
+						<Border Classes="tileArt" Height="220">
+							<Image img:RemoteImage.Url="{Binding SelectedBook.CoverUrl}" Stretch="UniformToFill" />
+						</Border>
+						<StackPanel Spacing="2">
+							<TextBlock Text="{Binding SelectedBook.Runtime}" FontSize="12" Foreground="{StaticResource OrgZSubtitleTextBrush}" HorizontalAlignment="Center" />
+							<TextBlock Text="{Binding SelectedBook.Downloads, StringFormat='{}{0:N0} downloads'}" FontSize="11" Foreground="{StaticResource OrgZMutedTextBrush}" HorizontalAlignment="Center" />
+						</StackPanel>
+					</StackPanel>
+
+					<StackPanel Grid.Column="1" Spacing="10">
+						<TextBlock Text="{Binding SelectedBook.Title}" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" Foreground="{StaticResource OrgZTextForegroundBrush}" />
+						<TextBlock Text="{Binding SelectedBook.Creator}" FontSize="14" Foreground="{StaticResource OrgZAccentGoldBrush}" />
+						<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBookLoading}" Height="4" />
+						<TextBlock Text="{Binding BookDescription}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource OrgZSubtitleTextBrush}" />
+
+						<controls:PodcastsCard Title="Chapters" IsVisible="{Binding !!BookChapters.Count}">
+							<controls:PodcastsCard.BodyContent>
+								<ItemsControl ItemsSource="{Binding BookChapters}" Padding="0,4,0,4">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate DataType="vm:AudiobookChapterRow">
+											<Grid ColumnDefinitions="34,*,Auto" Margin="14,3">
+												<TextBlock Grid.Column="0" Text="{Binding Number}" FontSize="12" Foreground="{StaticResource OrgZMutedTextBrush}" />
+												<TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
+												<TextBlock Grid.Column="2" Text="{Binding Duration}" FontSize="12" Foreground="{StaticResource OrgZMutedTextBrush}" />
+											</Grid>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</controls:PodcastsCard.BodyContent>
+						</controls:PodcastsCard>
+					</StackPanel>
+				</Grid>
+			</ScrollViewer>
+
+			<!-- ==================== Store landing ==================== -->
+			<ScrollViewer IsVisible="{Binding IsStore}"
+			              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+				<StackPanel Margin="16,12,16,16" Spacing="12">
+					<!-- Store search - separate from the header search, which filters the library grid below. -->
+					<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+						<TextBox Grid.Column="0" Text="{Binding StoreSearchText, Mode=TwoWay}" FontSize="12">
+							<TextBox.KeyBindings>
+								<KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
+							</TextBox.KeyBindings>
+						</TextBox>
+						<Button Grid.Column="1" Command="{Binding SearchCommand}" Padding="14,6" Cursor="Hand"
+						        Background="{StaticResource OrgZCarouselButtonBrush}" Foreground="#1A1405">
+							<StackPanel Orientation="Horizontal" Spacing="6">
+								<i:Icon Value="fa-solid fa-magnifying-glass" FontSize="12" VerticalAlignment="Center" />
+								<TextBlock Text="Search" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+							</StackPanel>
+						</Button>
+					</Grid>
+
+					<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsStoreLoading}" Height="4" />
+
+					<!-- Search results replace the landing sections while a search is active. -->
+					<controls:PodcastsCard Title="Results" IsVisible="{Binding IsSearchActive}">
+						<controls:PodcastsCard.BodyContent>
+							<ItemsControl ItemsSource="{Binding SearchResults}" Margin="8">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<UniformGrid Columns="6" />
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate DataType="models:AudiobookListing">
+										<Button Classes="podcastTile" Click="BookTile_Click" Tag="{Binding}">
+											<StackPanel Spacing="4">
+												<Border Classes="tileArt" Height="110">
+													<Image img:RemoteImage.Url="{Binding CoverUrl}" Stretch="UniformToFill" />
+												</Border>
+												<TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
+												<TextBlock Text="{Binding Creator}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
+											</StackPanel>
+										</Button>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</controls:PodcastsCard.BodyContent>
+					</controls:PodcastsCard>
+
+					<StackPanel Spacing="12" IsVisible="{Binding !IsSearchActive}">
+						<!-- Featured hero strip - the collection's three most-downloaded books. -->
+						<ItemsControl ItemsSource="{Binding Featured}">
+							<ItemsControl.ItemsPanel>
+								<ItemsPanelTemplate>
+									<UniformGrid Columns="3" />
+								</ItemsPanelTemplate>
+							</ItemsControl.ItemsPanel>
+							<ItemsControl.ItemTemplate>
+								<DataTemplate DataType="models:AudiobookListing">
+									<Button Classes="podcastTile" Click="BookTile_Click" Tag="{Binding}" Margin="6,0,6,6">
+										<Border Classes="tileArt" Height="160">
+											<Grid>
+												<Image img:RemoteImage.Url="{Binding CoverUrl}" Stretch="UniformToFill" />
+												<Border VerticalAlignment="Bottom" Background="{StaticResource OrgZHeroOverlayBrush}" Padding="10,6">
+													<StackPanel>
+														<TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="14" Foreground="{StaticResource OrgZTextForegroundBrush}" TextTrimming="CharacterEllipsis" />
+														<TextBlock Text="{Binding Creator}" FontSize="11" Foreground="{StaticResource OrgZSubtitleTextBrush}" TextTrimming="CharacterEllipsis" />
+													</StackPanel>
+												</Border>
+											</Grid>
+										</Border>
+									</Button>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+
+						<controls:PodcastsCard Title="Popular">
+							<controls:PodcastsCard.BodyContent>
+								<ItemsControl ItemsSource="{Binding Popular}" Margin="8">
+									<ItemsControl.ItemsPanel>
+										<ItemsPanelTemplate>
+											<UniformGrid Columns="6" />
+										</ItemsPanelTemplate>
+									</ItemsControl.ItemsPanel>
+									<ItemsControl.ItemTemplate>
+										<DataTemplate DataType="models:AudiobookListing">
+											<Button Classes="podcastTile" Click="BookTile_Click" Tag="{Binding}">
+												<StackPanel Spacing="4">
+													<Border Classes="tileArt" Height="110">
+														<Image img:RemoteImage.Url="{Binding CoverUrl}" Stretch="UniformToFill" />
+													</Border>
+													<TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
+													<TextBlock Text="{Binding Creator}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
+												</StackPanel>
+											</Button>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</controls:PodcastsCard.BodyContent>
+						</controls:PodcastsCard>
+
+						<controls:PodcastsCard Title="New on LibriVox">
+							<controls:PodcastsCard.BodyContent>
+								<ItemsControl ItemsSource="{Binding Recent}" Margin="8">
+									<ItemsControl.ItemsPanel>
+										<ItemsPanelTemplate>
+											<UniformGrid Columns="6" />
+										</ItemsPanelTemplate>
+									</ItemsControl.ItemsPanel>
+									<ItemsControl.ItemTemplate>
+										<DataTemplate DataType="models:AudiobookListing">
+											<Button Classes="podcastTile" Click="BookTile_Click" Tag="{Binding}">
+												<StackPanel Spacing="4">
+													<Border Classes="tileArt" Height="110">
+														<Image img:RemoteImage.Url="{Binding CoverUrl}" Stretch="UniformToFill" />
+													</Border>
+													<TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
+													<TextBlock Text="{Binding Creator}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
+												</StackPanel>
+											</Button>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</controls:PodcastsCard.BodyContent>
+						</controls:PodcastsCard>
+					</StackPanel>
+				</StackPanel>
+			</ScrollViewer>
+		</Grid>
+	</DockPanel>
+</UserControl>

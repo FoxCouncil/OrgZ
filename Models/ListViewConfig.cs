@@ -21,6 +21,8 @@ public enum ViewHost
     PodcastGroupedGrid,
     /// <summary>The Podcasts panel UserControl - no DataGrid at all.</summary>
     PodcastsPanel,
+    /// <summary>The Audiobooks composite: the golden store panel over the library audiobooks grid.</summary>
+    AudiobooksPanel,
 }
 
 public record ListViewConfig
@@ -102,6 +104,7 @@ public static class ListViewConfigs
                 (item.Composer?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildAudiobookContextMenu(),
+            Host = ViewHost.AudiobooksPanel,
         };
     }
 
