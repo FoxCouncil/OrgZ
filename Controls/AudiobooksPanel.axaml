@@ -150,7 +150,7 @@
 				<!-- Landing sections when not searching. -->
 				<ScrollViewer Grid.Row="1" IsVisible="{Binding !IsSearchActive}"
 				              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-					<StackPanel Margin="16,8,16,16" Spacing="12">
+					<StackPanel Margin="16,0,16,16" Spacing="12">
 						<!-- Featured hero strip - the collection's three most-downloaded books. -->
 						<ItemsControl ItemsSource="{Binding Featured}">
 							<ItemsControl.ItemsPanel>
@@ -176,6 +176,40 @@
 								</DataTemplate>
 							</ItemsControl.ItemTemplate>
 						</ItemsControl>
+
+						<!-- Your Books - a picture list of your books (like the podcasts "Subscribed" card);
+						     "Show All" opens the full DataGrid. Click a book to play (or download) it. -->
+						<controls:PodcastsCard Title="Your Books" IsVisible="{Binding HasOwnedBooks}">
+							<controls:PodcastsCard.HeaderContent>
+								<Button Command="{Binding ShowOwnedCommand}" Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" VerticalAlignment="Center">
+									<TextBlock Text="Show All" FontSize="12" Foreground="{StaticResource OrgZCarouselTextBrush}" />
+								</Button>
+							</controls:PodcastsCard.HeaderContent>
+							<controls:PodcastsCard.BodyContent>
+								<ItemsControl ItemsSource="{Binding OwnedPreview}" Padding="0,4,0,4">
+									<ItemsControl.ItemTemplate>
+										<DataTemplate DataType="models:OwnedBook">
+											<Button Click="OwnedBook_Click" Tag="{Binding}" Background="Transparent" BorderThickness="0" Padding="10,5" Cursor="Hand" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+												<Grid ColumnDefinitions="Auto,*,Auto">
+													<Border Grid.Column="0" Width="34" Height="34" CornerRadius="5" ClipToBounds="True" Margin="0,0,10,0" Background="{StaticResource OrgZCarouselSurfaceBrush}">
+														<Grid>
+															<i:Icon Value="fa-solid fa-book-open" FontSize="14" Foreground="{StaticResource OrgZMutedTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5" />
+															<Image img:RemoteImage.Url="{Binding RemoteCoverUrl}" Stretch="UniformToFill" />
+														</Grid>
+													</Border>
+													<StackPanel Grid.Column="1" VerticalAlignment="Center">
+														<TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+														<TextBlock Text="{Binding Author}" FontSize="11" Foreground="{StaticResource OrgZMutedTextBrush}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+													</StackPanel>
+													<i:Icon Grid.Column="2" Value="fa-solid fa-circle-check" FontSize="13" Foreground="{StaticResource OrgZAccentGoldBrush}" VerticalAlignment="Center" Margin="8,0,4,0" IsVisible="{Binding IsDownloaded}" />
+													<i:Icon Grid.Column="2" Value="fa-solid fa-cloud-arrow-down" FontSize="13" Foreground="{StaticResource OrgZMutedTextBrush}" VerticalAlignment="Center" Margin="8,0,4,0" IsVisible="{Binding CanReDownload}" />
+												</Grid>
+											</Button>
+										</DataTemplate>
+									</ItemsControl.ItemTemplate>
+								</ItemsControl>
+							</controls:PodcastsCard.BodyContent>
+						</controls:PodcastsCard>
 
 						<controls:PodcastsCard Title="Popular">
 							<controls:PodcastsCard.BodyContent>
@@ -287,6 +321,31 @@
 						</controls:PodcastsCard>
 					</StackPanel>
 				</ScrollViewer>
+			</Grid>
+
+			<!-- ==================== Owned (Show All): the full flat DataGrid of every book ==================== -->
+			<Grid IsVisible="{Binding IsOwned}">
+				<DataGrid ItemsSource="{Binding OwnedBooks}" SelectedItem="{Binding SelectedOwnedBook, Mode=TwoWay}"
+				          DoubleTapped="OwnedBook_DoubleTapped"
+				          AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+				          CanUserSortColumns="False" GridLinesVisibility="Horizontal" HeadersVisibility="Column"
+				          Background="Transparent" Margin="16">
+					<DataGrid.ContextMenu>
+						<ContextMenu>
+							<MenuItem Header="Play" Command="{Binding PlayOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
+							<MenuItem Header="Re-download" Command="{Binding ReDownloadOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
+							<Separator />
+							<MenuItem Header="Remove" Command="{Binding RemoveOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
+						</ContextMenu>
+					</DataGrid.ContextMenu>
+					<DataGrid.Columns>
+						<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
+						<DataGridTextColumn Header="Author" Binding="{Binding Author}" Width="220" />
+						<DataGridTextColumn Header="Chapters" Binding="{Binding ChaptersLabel}" Width="90" />
+						<DataGridTextColumn Header="Length" Binding="{Binding DurationLabel}" Width="110" />
+						<DataGridTextColumn Header="Status" Binding="{Binding StatusLabel}" Width="140" />
+					</DataGrid.Columns>
+				</DataGrid>
 			</Grid>
 		</Grid>
 	</DockPanel>

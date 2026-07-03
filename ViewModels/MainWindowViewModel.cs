@@ -234,34 +234,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public AudiobooksViewModel Audiobooks { get; private set; } = null!;
 
-    /// <summary>
-    /// The owned-books shelf - one card per BOOK (not per file), rebuilt from the audiobook library
-    /// plus the acquisition records. What the Audiobooks view's card wall binds to.
-    /// </summary>
-    public ObservableCollection<OwnedBook> OwnedBooks { get; } = [];
-
-    public bool HasOwnedBooks => OwnedBooks.Count > 0;
-
-    /// <summary>
-    /// Rebuilds <see cref="OwnedBooks"/> from the current audiobook items and acquisition records:
-    /// downloaded books collapse their chapters into one card, acquired-but-missing books appear as
-    /// re-downloadable ghosts. Cheap enough to run inline after a scan / on entering the view.
-    /// </summary>
-    internal void RefreshOwnedBooks()
-    {
-        var items = _allItems.Where(i => i.Kind == MediaKind.Audiobook);
-        var shelf = Services.Audiobooks.AudiobookLibrary.AssembleOwned(App.FolderPath, items);
-
-        OwnedBooks.Clear();
-        foreach (var book in shelf)
-        {
-            OwnedBooks.Add(book);
-        }
-        OnPropertyChanged(nameof(HasOwnedBooks));
-    }
+    /// <summary>The audiobook library items (downloaded books' chapter files) the owned-books shelf is built from.</summary>
+    internal IEnumerable<MediaItem> AudiobookItems => _allItems.Where(i => i.Kind == MediaKind.Audiobook);
 
     /// <summary>Plays a whole book - its chapter files queued in order, starting at the first.</summary>
-    [RelayCommand]
     internal void PlayBook(OwnedBook? book)
     {
         if (book is null || book.Chapters.Count == 0)
@@ -277,38 +253,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ExecutePlayMusic(first);
     }
 
-    /// <summary>Re-fetches an acquired book whose download is gone, via the source its record remembers.</summary>
-    [RelayCommand]
-    internal async Task ReDownloadBook(OwnedBook? book)
-    {
-        if (book?.SourceKey is not { } key || string.IsNullOrWhiteSpace(App.FolderPath))
-        {
-            return;
-        }
-
-        var acq = Services.Media.AcquisitionStore.Get(Models.AcquiredMediaKind.Audiobook, key);
-        if (acq is null)
-        {
-            return;
-        }
-
-        switch (Services.Audiobooks.AudiobookLibrary.SourceOf(acq))
-        {
-            case ("archive", _):
-            {
-                await Services.Audiobooks.AudiobookDownloadService.Instance.EnqueueAsync(Services.Audiobooks.AudiobookLibrary.ListingFrom(acq), App.FolderPath);
-                break;
-            }
-            case ("libro", var isbn):
-            {
-                await Audiobooks.ReDownloadLibroAsync(isbn, acq.Title, acq.Creator);
-                break;
-            }
-        }
-    }
-
     /// <summary>Removes a book everywhere: its files from disk, its library rows, and its acquisition record.</summary>
-    [RelayCommand]
     internal async Task DeleteOwnedBook(OwnedBook? book)
     {
         if (book is null)
@@ -334,7 +279,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         ApplyFilter();
-        RefreshOwnedBooks();
+        Audiobooks.RefreshOwned();
         UpdateData();
     }
 
@@ -4494,7 +4439,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // records whose files are gone. Store downloads are left as re-downloadable records here.
         var audiobookFiles = diskFiles.Where(f => f.Kind == MediaKind.Audiobook).Select(f => f.Id).ToList();
         await Task.Run(() => Services.Audiobooks.AudiobookLibrary.ReconcileUserFiles(App.FolderPath, audiobookFiles));
-        RefreshOwnedBooks();
+        Audiobooks.RefreshOwned();
 
         UpdateData();
     }
