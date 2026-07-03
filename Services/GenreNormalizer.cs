@@ -4,7 +4,7 @@ namespace OrgZ.Services;
 
 /// <summary>
 /// Maps provider-specific radio genre tags (Radio Browser, SHOUTcast, Icecast) into the
-/// canonical OrgZ radio taxonomy - the same 29 display names as <see cref="Models.RadioGenre"/>,
+/// canonical OrgZ radio taxonomy - the same display names as <see cref="Models.RadioGenre"/>,
 /// plus "Other" for anything unmatched. Raw tags are matched case-insensitively via an ordered
 /// rule list where the most specific rules appear first.
 ///
@@ -39,6 +39,7 @@ public static class GenreNormalizer
     public const string Metal           = "Metal";
     public const string MotownSoul      = "Motown/Soul";
     public const string NewsTalkRadio   = "News/Talk Radio";
+    public const string Oldies          = "Oldies";
     public const string Punk            = "Punk";
     public const string Reggae          = "Reggae";
     public const string Religious       = "Religious";
@@ -76,6 +77,7 @@ public static class GenreNormalizer
         Metal,
         MotownSoul,
         NewsTalkRadio,
+        Oldies,
         Punk,
         Reggae,
         Religious,
@@ -194,7 +196,7 @@ public static class GenreNormalizer
         ("60s",             Sixties),
         ("1960s",           Sixties),
         ("sixties",         Sixties),
-        ("oldies",          Sixties),
+        ("oldies",          Oldies),
         ("british invasion", Sixties),
         ("classic rock",    Seventies),
         ("album rock",      Seventies),

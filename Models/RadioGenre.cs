@@ -41,6 +41,7 @@ public enum RadioGenre
     SportsTalk      = 27,
     Synthwave       = 28,
     World           = 29,
+    Oldies          = 30,
 }
 
 public static class RadioGenres
@@ -70,6 +71,7 @@ public static class RadioGenres
         { RadioGenre.Metal,           "Metal" },
         { RadioGenre.MotownSoul,      "Motown/Soul" },
         { RadioGenre.NewsTalkRadio,   "News/Talk Radio" },
+        { RadioGenre.Oldies,          "Oldies" },
         { RadioGenre.Punk,            "Punk" },
         { RadioGenre.Reggae,          "Reggae" },
         { RadioGenre.Religious,       "Religious" },
