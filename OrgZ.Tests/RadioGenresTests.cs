@@ -38,7 +38,7 @@ public class RadioGenresTests
     public void All_lists_every_named_genre_once_and_excludes_Unknown()
     {
         var all = RadioGenres.All.ToList();
-        Assert.Equal(29, all.Count);
+        Assert.Equal(30, all.Count);
         Assert.DoesNotContain(RadioGenre.Unknown, all);
         Assert.Equal(all.Count, all.Distinct().Count());
         Assert.All(all, g => Assert.NotEqual("", g.DisplayName()));
