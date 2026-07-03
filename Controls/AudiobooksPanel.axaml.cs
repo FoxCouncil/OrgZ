@@ -63,4 +63,11 @@ public partial class AudiobooksPanel : UserControl
             _ = vm.DownloadLibroBookAsync(row.Book);
         }
     }
+
+    private void LibroRegister_Click(object? sender, RoutedEventArgs e)
+    {
+        // Checkout / sign-up has no API and stays on libro.fm - open it in the browser.
+        // (Swap in an Awin affiliate membership link here once approved.)
+        OrgZ.Helpers.HtmlInlinesBuilder.OpenUrl("https://libro.fm/signup");
+    }
 }
