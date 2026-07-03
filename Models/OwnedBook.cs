@@ -39,4 +39,19 @@ public sealed class OwnedBook
 
     /// <summary>The local file whose embedded art the card prefers (first chapter); null when not downloaded.</summary>
     public string? CoverPath => Chapters.Count > 0 ? Chapters[0].FilePath : null;
+
+    // -- Grid display columns --
+
+    /// <summary>Chapter count for the grid, or an em dash when nothing is downloaded.</summary>
+    public string ChaptersLabel => ChapterCount > 0 ? ChapterCount.ToString() : "—";
+
+    /// <summary>Total runtime as h:mm:ss (or m:ss under an hour); em dash when not downloaded.</summary>
+    public string DurationLabel => TotalDuration > TimeSpan.Zero
+        ? (TotalDuration.TotalHours >= 1
+            ? $"{(int)TotalDuration.TotalHours}:{TotalDuration.Minutes:D2}:{TotalDuration.Seconds:D2}"
+            : $"{TotalDuration.Minutes}:{TotalDuration.Seconds:D2}")
+        : "—";
+
+    /// <summary>Downloaded / not-downloaded state for the grid's status column.</summary>
+    public string StatusLabel => IsDownloaded ? "Downloaded" : "Not downloaded";
 }

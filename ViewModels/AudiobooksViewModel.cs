@@ -10,6 +10,7 @@ public enum AudiobooksView
 {
     Store,
     BookDetail,
+    Owned,
 }
 
 /// <summary>One purchased Libro.fm book tile: the book plus whether it's already on the shelf.</summary>
@@ -70,11 +71,12 @@ public partial class AudiobooksViewModel : ObservableObject
     // ── view state ─────────────────────────────────────────────────────────────
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsBookDetail), nameof(ShowBackButton))]
+    [NotifyPropertyChangedFor(nameof(IsStore), nameof(IsBookDetail), nameof(IsOwned), nameof(ShowBackButton))]
     private AudiobooksView _currentView = AudiobooksView.Store;
 
     public bool IsStore => CurrentView == AudiobooksView.Store;
     public bool IsBookDetail => CurrentView == AudiobooksView.BookDetail;
+    public bool IsOwned => CurrentView == AudiobooksView.Owned;
     public bool ShowBackButton => CurrentView != AudiobooksView.Store;
 
     [RelayCommand]
@@ -83,21 +85,102 @@ public partial class AudiobooksViewModel : ObservableObject
         CurrentView = AudiobooksView.Store;
     }
 
-    // ── owned ⇄ store toggle ────────────────────────────────────────────────────
-    // The page opens on YOUR books (the card wall). "Browse Store" reveals the LibriVox/Libro
-    // store (and its results grid); searching implies browsing, so it flips here too.
+    // ── your books: a picture list on the store page (like podcast "Subscribed"), with "Show All" ──
+    // → the full owned view, which is a flat DataGrid of every book.
 
+    /// <summary>Every book you have - one entry per BOOK. The full-view DataGrid binds this.</summary>
+    public ObservableCollection<OwnedBook> OwnedBooks { get; } = [];
+
+    public bool HasOwnedBooks => OwnedBooks.Count > 0;
+
+    /// <summary>The store-page preview: the first handful of books, shown as a picture list.</summary>
+    public IEnumerable<OwnedBook> OwnedPreview => OwnedBooks.Take(8);
+
+    /// <summary>The owned-books grid's selected row - the context menu acts on it.</summary>
     [ObservableProperty]
-    private bool _showingStore;
+    private OwnedBook? _selectedOwnedBook;
 
-    [RelayCommand]
-    private void BrowseStore() => ShowingStore = true;
-
+    /// <summary>"Show All" from the store-page picture list → the full owned-books DataGrid view.</summary>
     [RelayCommand]
     private void ShowOwned()
     {
-        ShowingStore = false;
-        CurrentView = AudiobooksView.Store;   // leave any open book detail so returning shows the store landing
+        CurrentView = AudiobooksView.Owned;
+    }
+
+    /// <summary>Clicking a book in the picture list: play it if it's downloaded, else fetch it.</summary>
+    internal void ActivateOwnedBook(OwnedBook? book)
+    {
+        if (book is null)
+        {
+            return;
+        }
+        if (book.IsDownloaded)
+        {
+            _main?.PlayBook(book);
+        }
+        else if (book.CanReDownload)
+        {
+            _ = ReDownloadOwnedBookCommand.ExecuteAsync(book);
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="OwnedBooks"/> from the library's audiobook files plus the acquisition
+    /// records: downloaded books collapse their chapters into one card, acquired-but-missing books
+    /// appear as re-downloadable ghosts. Driven by MainWindow after a scan / on entering the view.
+    /// </summary>
+    internal void RefreshOwned()
+    {
+        var shelf = AudiobookLibrary.AssembleOwned(App.FolderPath, _main?.AudiobookItems ?? []);
+        OwnedBooks.Clear();
+        foreach (var book in shelf)
+        {
+            OwnedBooks.Add(book);
+        }
+        OnPropertyChanged(nameof(HasOwnedBooks));
+        OnPropertyChanged(nameof(OwnedPreview));
+    }
+
+    [RelayCommand]
+    private void PlayOwnedBook(OwnedBook? book) => _main?.PlayBook(book);
+
+    [RelayCommand]
+    private async Task RemoveOwnedBook(OwnedBook? book)
+    {
+        if (_main is not null && book is not null)
+        {
+            await _main.DeleteOwnedBook(book);
+        }
+    }
+
+    /// <summary>Re-fetches an acquired book whose download is gone, via the source its record remembers.</summary>
+    [RelayCommand]
+    private async Task ReDownloadOwnedBook(OwnedBook? book)
+    {
+        if (book?.SourceKey is not { } key || string.IsNullOrWhiteSpace(App.FolderPath))
+        {
+            return;
+        }
+
+        var acq = Services.Media.AcquisitionStore.Get(AcquiredMediaKind.Audiobook, key);
+        if (acq is null)
+        {
+            return;
+        }
+
+        switch (AudiobookLibrary.SourceOf(acq))
+        {
+            case ("archive", _):
+            {
+                await AudiobookDownloadService.Instance.EnqueueAsync(AudiobookLibrary.ListingFrom(acq), App.FolderPath);
+                break;
+            }
+            case ("libro", var isbn):
+            {
+                await ReDownloadLibroAsync(isbn, acq.Title, acq.Creator);
+                break;
+            }
+        }
     }
 
     // ── store landing ──────────────────────────────────────────────────────────
@@ -280,7 +363,6 @@ public partial class AudiobooksViewModel : ObservableObject
     {
         if (_libroToken is null)
         {
-            ShowingStore = true;
             LibroStatusText = "Sign in to Libro.fm to re-download this book.";
             return;
         }
@@ -311,8 +393,6 @@ public partial class AudiobooksViewModel : ObservableObject
             IsSearchActive = false;
             return;
         }
-
-        ShowingStore = true;   // a search is a store browse - reveal it if the user was on their shelf
 
         var cts = new CancellationTokenSource();
         _searchCts = cts;

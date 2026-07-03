@@ -37,6 +37,24 @@ public partial class AudiobooksPanel : UserControl
         }
     }
 
+    private void OwnedBook_Click(object? sender, RoutedEventArgs e)
+    {
+        // A row in the store-page picture list: clicking it plays or downloads the book.
+        if (Vm is { } vm && (sender as Control)?.Tag is OwnedBook book)
+        {
+            vm.ActivateOwnedBook(book);
+        }
+    }
+
+    private void OwnedBook_DoubleTapped(object? sender, TappedEventArgs e)
+    {
+        // A row in the full-view DataGrid: same gesture - play or download.
+        if (Vm is { } vm && (sender as DataGrid)?.SelectedItem is OwnedBook book)
+        {
+            vm.ActivateOwnedBook(book);
+        }
+    }
+
     private void LibroBook_Click(object? sender, RoutedEventArgs e)
     {
         // A purchased tile IS its download gesture; an already-downloaded one has nothing to do.

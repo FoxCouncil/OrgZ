@@ -433,8 +433,8 @@ public partial class MainWindow : Window
 
         if (isAudiobooks)
         {
-            // Owned books are a card wall (not a DataGrid); the store loads behind the Browse toggle.
-            _viewModel.RefreshOwnedBooks();
+            // The store IS the page (like Podcasts); your owned books show as a section on it.
+            _viewModel.Audiobooks.RefreshOwned();
             _ = _viewModel.Audiobooks.LoadStoreAsync();
             return;
         }
