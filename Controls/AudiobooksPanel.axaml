@@ -127,43 +127,30 @@
 				</Grid>
 			</ScrollViewer>
 
-			<!-- ==================== Store landing ==================== -->
-			<ScrollViewer IsVisible="{Binding IsStore}"
-			              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-				<!-- Flush with the top like the podcasts store (iTunes-style), no top gap. -->
-				<StackPanel Margin="16,0,16,16" Spacing="12">
-					<!-- No search box here on purpose: the global header search drives the whole
-					     composite - it filters the library grid through the normal pipeline AND
-					     runs the (debounced) store search that fills the Results card below. -->
-					<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsStoreLoading}" Height="4" />
+			<!-- ==================== Store ==================== -->
+			<!-- The header search drives this: it fills SearchResults, which show in the store's
+			     DataGrid; with no search, the landing tiles browse the catalogue. -->
+			<Grid IsVisible="{Binding IsStore}" RowDefinitions="Auto,*">
+				<ProgressBar Grid.Row="0" IsIndeterminate="True" IsVisible="{Binding IsStoreLoading}" Height="4" />
 
-					<!-- Search results replace the landing sections while a search is active. -->
-					<controls:PodcastsCard Title="Results" IsVisible="{Binding IsSearchActive}">
-						<controls:PodcastsCard.BodyContent>
-							<ItemsControl ItemsSource="{Binding SearchResults}" Margin="8">
-								<ItemsControl.ItemsPanel>
-									<ItemsPanelTemplate>
-										<UniformGrid Columns="6" />
-									</ItemsPanelTemplate>
-								</ItemsControl.ItemsPanel>
-								<ItemsControl.ItemTemplate>
-									<DataTemplate DataType="models:AudiobookListing">
-										<Button Classes="podcastTile" Click="BookTile_Click" Tag="{Binding}">
-											<StackPanel Spacing="4">
-												<Border Classes="tileArt" Height="110">
-													<Image img:RemoteImage.Url="{Binding CoverUrl}" Stretch="UniformToFill" />
-												</Border>
-												<TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
-												<TextBlock Text="{Binding Creator}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
-											</StackPanel>
-										</Button>
-									</DataTemplate>
-								</ItemsControl.ItemTemplate>
-							</ItemsControl>
-						</controls:PodcastsCard.BodyContent>
-					</controls:PodcastsCard>
+				<!-- Search results as the store's DataGrid - double-tap a row to open the book. -->
+				<DataGrid Grid.Row="1" IsVisible="{Binding IsSearchActive}"
+				          ItemsSource="{Binding SearchResults}" DoubleTapped="StoreResult_DoubleTapped"
+				          AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+				          CanUserSortColumns="True" GridLinesVisibility="Horizontal" HeadersVisibility="Column"
+				          Background="Transparent" Margin="16,8,16,16">
+					<DataGrid.Columns>
+						<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
+						<DataGridTextColumn Header="Author" Binding="{Binding Creator}" Width="220" />
+						<DataGridTextColumn Header="Runtime" Binding="{Binding Runtime}" Width="120" />
+						<DataGridTextColumn Header="Downloads" Binding="{Binding Downloads, StringFormat='{}{0:N0}'}" Width="120" />
+					</DataGrid.Columns>
+				</DataGrid>
 
-					<StackPanel Spacing="12" IsVisible="{Binding !IsSearchActive}">
+				<!-- Landing sections when not searching. -->
+				<ScrollViewer Grid.Row="1" IsVisible="{Binding !IsSearchActive}"
+				              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+					<StackPanel Margin="16,8,16,16" Spacing="12">
 						<!-- Featured hero strip - the collection's three most-downloaded books. -->
 						<ItemsControl ItemsSource="{Binding Featured}">
 							<ItemsControl.ItemsPanel>
@@ -299,8 +286,8 @@
 							</controls:PodcastsCard.BodyContent>
 						</controls:PodcastsCard>
 					</StackPanel>
-				</StackPanel>
-			</ScrollViewer>
+				</ScrollViewer>
+			</Grid>
 		</Grid>
 	</DockPanel>
 </UserControl>

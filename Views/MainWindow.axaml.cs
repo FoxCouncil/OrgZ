@@ -35,9 +35,6 @@ public partial class MainWindow : Window
     // Grouped grids whose columns have been built. Each is built exactly once - rebuilding after a
     // grouped DataGridCollectionView was bound triggers the Avalonia spacer column bug.
     private readonly HashSet<DataGrid> _initializedGroupedGrids = new();
-    // The Audiobooks composite's library grid builds its columns once too - it's the Audiobooks
-    // view's only column consumer, so the shared MainDataGrid rebuild path never touches it.
-    private bool _initializedAudiobooksGrid;
     // Whichever grouped grid is currently driving the view (GroupedDataGrid for Radio,
     // PodcastGroupedDataGrid for a device Podcasts view). The row-group collapse/expand machinery
     // operates on this rather than a hard-coded grid, since only one grouped view is active at a time.
@@ -80,19 +77,17 @@ public partial class MainWindow : Window
         MainDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
         GroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
         PodcastGroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
-        AudiobooksDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
 
         // Right-click SELECTS the row under the cursor before its context menu opens - Avalonia's
         // DataGrid only selects on the left button, so without this every context action (Add to
         // Playlist, Rating, Sync, ...) targeted whatever was last left-clicked, or nothing.
-        foreach (var grid in new[] { MainDataGrid, GroupedDataGrid, PodcastGroupedDataGrid, AudiobooksDataGrid })
+        foreach (var grid in new[] { MainDataGrid, GroupedDataGrid, PodcastGroupedDataGrid })
         {
             grid.AddHandler(InputElement.PointerPressedEvent, DataGrid_RightClickSelectRow, RoutingStrategies.Tunnel);
         }
         MainDataGrid.ColumnReordered += DataGrid_ColumnReordered;
         GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
         PodcastGroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
-        AudiobooksDataGrid.ColumnReordered += DataGrid_ColumnReordered;
 
         // Keyboard context-menu key (Apps / Shift+F10) opens the focused element's context menu by
         // re-dispatching ContextRequested - standard a11y, and it lets right-click menus be driven and
@@ -438,15 +433,8 @@ public partial class MainWindow : Window
 
         if (isAudiobooks)
         {
-            // The composite's library grid is the Audiobooks view's only column consumer, so its
-            // columns build exactly once (same discipline as the grouped grids) - the shared
-            // MainDataGrid rebuild path below never touches it.
-            if (_initializedAudiobooksGrid == false)
-            {
-                _initializedAudiobooksGrid = true;
-                BuildColumnsOn(AudiobooksDataGrid, config.Columns);
-                BuildContextMenuOn(AudiobooksDataGrid, config.ContextMenuItems);
-            }
+            // Owned books are a card wall (not a DataGrid); the store loads behind the Browse toggle.
+            _viewModel.RefreshOwnedBooks();
             _ = _viewModel.Audiobooks.LoadStoreAsync();
             return;
         }

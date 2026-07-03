@@ -374,28 +374,110 @@
 							     subscriptions / feed-detail navigation. -->
 							<controls:PodcastsPanel x:Name="PodcastsPanel" DataContext="{Binding Podcasts}" IsVisible="False" />
 
-							<!-- Audiobooks composite: the golden store panel over the library audiobooks
-							     grid - unlike Podcasts, the grid stays visible under the store. The grid
-							     rides the normal FilteredItems pipeline (window DataContext), so header
-							     search, selection, playback, and the context menu behave like every
-							     other library view; only the store panel binds the Audiobooks VM. -->
-							<Grid x:Name="AudiobooksHost" RowDefinitions="3*,2*" IsVisible="False">
-								<controls:AudiobooksPanel Grid.Row="0" DataContext="{Binding Audiobooks}" />
-								<DataGrid x:Name="AudiobooksDataGrid" Grid.Row="1"
-									Classes="mediaGrid"
-									DoubleTapped="DataGrid_DoubleTapped"
-									SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-									ItemsSource="{Binding FilteredItemsView}"
-									GridLinesVisibility="All"
-									IsReadOnly="True"
-									AutoGenerateColumns="False"
-									CanUserSortColumns="True"
-									SelectionMode="Single"
-									Background="{DynamicResource SystemAltHighColor}"
-									HorizontalScrollBarVisibility="Auto"
-									VerticalScrollBarVisibility="Auto">
-									<DataGrid.Columns />
-								</DataGrid>
+							<!-- Audiobooks composite (golden): opens on YOUR books as a card wall - one card
+							     per BOOK, not per file. "Browse Store" flips to the LibriVox/Libro store
+							     (whose search results are a DataGrid). Owned cards bind the window VM's
+							     OwnedBooks; the store binds the Audiobooks VM. -->
+							<Grid x:Name="AudiobooksHost" IsVisible="False" Background="#291F0D">
+								<Grid.Resources>
+									<SolidColorBrush x:Key="BookGold" Color="#FFC94D" />
+									<SolidColorBrush x:Key="BookGoldButton" Color="#D6A63F" />
+									<SolidColorBrush x:Key="BookCardBg" Color="#000000" />
+									<SolidColorBrush x:Key="BookBar" Color="#1E1708" />
+									<SolidColorBrush x:Key="BookDivider" Color="#5C4F2F" />
+									<SolidColorBrush x:Key="BookText" Color="#E8DEC4" />
+									<SolidColorBrush x:Key="BookMuted" Color="#9A8B62" />
+								</Grid.Resources>
+
+								<!-- ===== OWNED: the card wall (the page opens here) ===== -->
+								<DockPanel IsVisible="{Binding !Audiobooks.ShowingStore}">
+									<Border DockPanel.Dock="Top" Background="{StaticResource BookBar}" BorderBrush="{StaticResource BookDivider}" BorderThickness="0,0,0,1" Height="46">
+										<Grid Margin="16,0">
+											<TextBlock Text="My Books" VerticalAlignment="Center" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource BookGold}" />
+											<Button Command="{Binding Audiobooks.BrowseStoreCommand}" HorizontalAlignment="Right" VerticalAlignment="Center" Padding="13,6" Cursor="Hand" Background="{StaticResource BookGoldButton}" Foreground="#1A1405">
+												<StackPanel Orientation="Horizontal" Spacing="7">
+													<i:Icon Value="fa-solid fa-store" FontSize="12" VerticalAlignment="Center" />
+													<TextBlock Text="Browse Store" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+												</StackPanel>
+											</Button>
+										</Grid>
+									</Border>
+
+									<ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+										<ItemsControl ItemsSource="{Binding OwnedBooks}" Margin="12">
+											<ItemsControl.ItemsPanel>
+												<ItemsPanelTemplate>
+													<WrapPanel />
+												</ItemsPanelTemplate>
+											</ItemsControl.ItemsPanel>
+											<ItemsControl.ItemTemplate>
+												<DataTemplate>
+													<Border Width="150" Margin="7" Background="{StaticResource BookCardBg}" CornerRadius="5" Padding="0,0,0,8"
+													        Tag="{Binding $parent[ItemsControl].DataContext}">
+														<Border.ContextMenu>
+															<ContextMenu>
+																<MenuItem Header="Play" IsVisible="{Binding IsDownloaded}"
+																          Command="{Binding PlacementTarget.Tag.PlayBookCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+																<MenuItem Header="Re-download" IsVisible="{Binding CanReDownload}"
+																          Command="{Binding PlacementTarget.Tag.ReDownloadBookCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+																<Separator />
+																<MenuItem Header="Remove"
+																          Command="{Binding PlacementTarget.Tag.DeleteOwnedBookCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+															</ContextMenu>
+														</Border.ContextMenu>
+														<StackPanel Spacing="6">
+															<Border Height="150" CornerRadius="5,5,0,0" ClipToBounds="True" Background="#1A1405">
+																<Grid>
+																	<i:Icon Value="fa-solid fa-book-open" FontSize="34" Foreground="{StaticResource BookMuted}" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.5" />
+																	<Image converters:RemoteImage.Url="{Binding RemoteCoverUrl}" Stretch="UniformToFill" />
+																	<Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,6,6,0" Background="#CC000000" CornerRadius="10" Width="20" Height="20" IsVisible="{Binding IsDownloaded}">
+																		<i:Icon Value="fa-solid fa-circle-check" FontSize="13" Foreground="{StaticResource BookGold}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+																	</Border>
+																	<Border VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,6,6,0" Background="#CC000000" CornerRadius="10" Width="20" Height="20" IsVisible="{Binding CanReDownload}">
+																		<i:Icon Value="fa-solid fa-cloud-arrow-down" FontSize="12" Foreground="{StaticResource BookMuted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+																	</Border>
+																</Grid>
+															</Border>
+															<StackPanel Margin="8,0" Spacing="1">
+																<TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BookText}" TextTrimming="CharacterEllipsis" MaxLines="2" TextWrapping="Wrap" />
+																<TextBlock Text="{Binding Author}" FontSize="11" Foreground="{StaticResource BookMuted}" TextTrimming="CharacterEllipsis" />
+															</StackPanel>
+															<Button Margin="8,2,8,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Cursor="Hand"
+															        IsVisible="{Binding IsDownloaded}" Background="{StaticResource BookGoldButton}" Foreground="#1A1405"
+															        Command="{Binding $parent[ItemsControl].DataContext.PlayBookCommand}" CommandParameter="{Binding}">
+																<StackPanel Orientation="Horizontal" Spacing="6">
+																	<i:Icon Value="fa-solid fa-play" FontSize="10" VerticalAlignment="Center" />
+																	<TextBlock Text="Play" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+																</StackPanel>
+															</Button>
+															<Button Margin="8,2,8,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Cursor="Hand"
+															        IsVisible="{Binding CanReDownload}" Background="Transparent" BorderBrush="{StaticResource BookGoldButton}" BorderThickness="1" Foreground="{StaticResource BookGold}"
+															        Command="{Binding $parent[ItemsControl].DataContext.ReDownloadBookCommand}" CommandParameter="{Binding}">
+																<StackPanel Orientation="Horizontal" Spacing="6">
+																	<i:Icon Value="fa-solid fa-cloud-arrow-down" FontSize="10" VerticalAlignment="Center" />
+																	<TextBlock Text="Download" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+																</StackPanel>
+															</Button>
+														</StackPanel>
+													</Border>
+												</DataTemplate>
+											</ItemsControl.ItemTemplate>
+										</ItemsControl>
+									</ScrollViewer>
+								</DockPanel>
+
+								<!-- ===== STORE: behind Browse Store, with a way back ===== -->
+								<DockPanel IsVisible="{Binding Audiobooks.ShowingStore}">
+									<Border DockPanel.Dock="Top" Background="{StaticResource BookBar}" BorderBrush="{StaticResource BookDivider}" BorderThickness="0,0,0,1" Height="46">
+										<Button Command="{Binding Audiobooks.ShowOwnedCommand}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="12,0" Padding="12,6" Cursor="Hand" Background="Transparent" Foreground="{StaticResource BookGold}">
+											<StackPanel Orientation="Horizontal" Spacing="7">
+												<i:Icon Value="fa-solid fa-chevron-left" FontSize="12" VerticalAlignment="Center" />
+												<TextBlock Text="My Books" FontSize="13" VerticalAlignment="Center" />
+											</StackPanel>
+										</Button>
+									</Border>
+									<controls:AudiobooksPanel DataContext="{Binding Audiobooks}" />
+								</DockPanel>
 							</Grid>
 
 							<!-- Separate DataGrid for grouped views (Radio) - never shares column state with MainDataGrid.

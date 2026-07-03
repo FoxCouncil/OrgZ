@@ -83,6 +83,23 @@ public partial class AudiobooksViewModel : ObservableObject
         CurrentView = AudiobooksView.Store;
     }
 
+    // ── owned ⇄ store toggle ────────────────────────────────────────────────────
+    // The page opens on YOUR books (the card wall). "Browse Store" reveals the LibriVox/Libro
+    // store (and its results grid); searching implies browsing, so it flips here too.
+
+    [ObservableProperty]
+    private bool _showingStore;
+
+    [RelayCommand]
+    private void BrowseStore() => ShowingStore = true;
+
+    [RelayCommand]
+    private void ShowOwned()
+    {
+        ShowingStore = false;
+        CurrentView = AudiobooksView.Store;   // leave any open book detail so returning shows the store landing
+    }
+
     // ── store landing ──────────────────────────────────────────────────────────
 
     public ObservableCollection<AudiobookListing> Featured { get; } = [];
@@ -256,6 +273,28 @@ public partial class AudiobooksViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Re-fetches a previously-acquired Libro.fm book from its record. Libro re-download needs a live
+    /// session (the token isn't stored), so this reveals the store and asks for sign-in when absent.
+    /// </summary>
+    internal async Task ReDownloadLibroAsync(string isbn, string? title, string? creator)
+    {
+        if (_libroToken is null)
+        {
+            ShowingStore = true;
+            LibroStatusText = "Sign in to Libro.fm to re-download this book.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(App.FolderPath))
+        {
+            return;
+        }
+
+        var book = new LibroBook { Isbn = isbn, Title = title, Authors = string.IsNullOrWhiteSpace(creator) ? [] : [creator!] };
+        LibroStatusText = $"Downloading {title}…";
+        await AudiobookDownloadService.Instance.EnqueueLibroAsync(book, _libroToken, App.FolderPath);
+    }
+
+    /// <summary>
     /// Driven by the global header search box (see <c>MainWindowViewModel</c>) - the composite
     /// has ONE search: the same text filters the library grid through the normal pipeline and,
     /// debounced here, searches the store. Clearing the box restores the landing sections.
@@ -272,6 +311,8 @@ public partial class AudiobooksViewModel : ObservableObject
             IsSearchActive = false;
             return;
         }
+
+        ShowingStore = true;   // a search is a store browse - reveal it if the user was on their shelf
 
         var cts = new CancellationTokenSource();
         _searchCts = cts;
