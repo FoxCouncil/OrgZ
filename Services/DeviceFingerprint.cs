@@ -549,10 +549,21 @@ public static class DeviceFingerprint
             device.AppleFirmwareVersion = $"iPod OS {buildId}";
         }
 
-        // Fallback serial: FirewireGuid is unique per device
-        if (string.IsNullOrWhiteSpace(device.Serial) && fields.TryGetValue("FirewireGuid", out var guid) && !string.IsNullOrWhiteSpace(guid))
+        // The FireWire GUID: hash58's key input, and a unique-per-device fallback serial. Route it to
+        // device.FireWireGuid (normalized through the same OUI extractor the WMI path uses) - SysInfo /
+        // SysInfoExtended is the ONLY GUID source off-Windows, and without this hash58 writes threw
+        // "needs FireWireGuid" on Linux even though the GUID was sitting right here.
+        if (fields.TryGetValue("FirewireGuid", out var guid) && !string.IsNullOrWhiteSpace(guid))
         {
-            device.Serial = guid;
+            var normalized = ExtractAppleFireWireGuid(guid) ?? guid.Replace("0x", "", StringComparison.OrdinalIgnoreCase).Trim();
+            if (string.IsNullOrWhiteSpace(device.FireWireGuid))
+            {
+                device.FireWireGuid = normalized;
+            }
+            if (string.IsNullOrWhiteSpace(device.Serial))
+            {
+                device.Serial = normalized;
+            }
         }
     }
 
