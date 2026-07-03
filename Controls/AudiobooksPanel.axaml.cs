@@ -66,8 +66,8 @@ public partial class AudiobooksPanel : UserControl
 
     private void LibroRegister_Click(object? sender, RoutedEventArgs e)
     {
-        // Checkout / sign-up has no API and stays on libro.fm - open it in the browser.
-        // (Swap in an Awin affiliate membership link here once approved.)
-        OrgZ.Helpers.HtmlInlinesBuilder.OpenUrl("https://libro.fm/users/new");
+        // Checkout / sign-up has no API and stays on libro.fm - open it in the browser, tagged
+        // with our version so Libro can attribute signups. (Swap in an Awin affiliate link once approved.)
+        OrgZ.Helpers.HtmlInlinesBuilder.OpenUrl($"https://libro.fm/users/new?utm_source=orgz-app-v{App.Version}");
     }
 }
