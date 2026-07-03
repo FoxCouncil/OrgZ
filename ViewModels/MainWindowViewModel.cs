@@ -6137,14 +6137,34 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             (i.Kind == MediaKind.Music || i.Kind == MediaKind.Audiobook || (i.Kind == MediaKind.Podcast && !plan.Podcasts)));
         var toRemove = MirrorRemovals(prune, keep);
 
-        if (toRemove.Count == 0)
+        // Orphaned playlists: device playlists the plan no longer names. Favorites (when selected) and
+        // the Podcasts container are protected here; the master/Library list is protected by the tier.
+        var keepNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Podcasts" };
+        if (plan.Favorites)
+        {
+            keepNames.Add("Favorites");
+        }
+        if (plan.PlaylistIds.Count > 0)
+        {
+            var nameById = await Task.Run(() => MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id, p => p.Name));
+            foreach (var pid in plan.PlaylistIds)
+            {
+                if (nameById.TryGetValue(pid, out var n)) { keepNames.Add(n); }
+            }
+        }
+        var orphanPlaylists = dev.Playlists.Where(p => !keepNames.Contains(p.Name)).ToList();
+
+        if (toRemove.Count == 0 && orphanPlaylists.Count == 0)
         {
             return;
         }
 
+        var parts = new List<string>();
+        if (toRemove.Count > 0)       { parts.Add($"{toRemove.Count} track(s)"); }
+        if (orphanPlaylists.Count > 0) { parts.Add($"{orphanPlaylists.Count} playlist(s)"); }
         var confirm = new Views.ConfirmDialog(
             "Auto-sync",
-            $"Remove {toRemove.Count} track(s) from {dev.Name} that are no longer selected?",
+            $"Remove {string.Join(" and ", parts)} from {dev.Name} that are no longer selected?",
             "Remove");
         if (!await confirm.ShowDialog<bool>(_window))
         {
@@ -6165,12 +6185,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _log.Warning(ex, "Mirror sync: failed to remove {Track} from {Device}", item.Title, dev.MountPath);
             }
         }
+        foreach (var pl in orphanPlaylists)
+        {
+            try
+            {
+                await ipod.RemovePlaylistAsync(pl.Name);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Mirror sync: failed to remove playlist {Name} from {Device}", pl.Name, dev.MountPath);
+            }
+        }
 
-        if (removed > 0)
+        if (removed > 0 || orphanPlaylists.Count > 0)
         {
             dev.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
+            if (orphanPlaylists.Count > 0)
+            {
+                PublishDevicePlaylists(dev, dev.Playlists.Where(p => keepNames.Contains(p.Name)).ToList());
+            }
             ApplyFilter();
-            _log.Information("Mirror sync removed {Count} deselected track(s) from {Device}", removed, dev.MountPath);
+            _log.Information("Mirror sync removed {Tracks} track(s) and {Playlists} playlist(s) from {Device}", removed, orphanPlaylists.Count, dev.MountPath);
         }
     }
 

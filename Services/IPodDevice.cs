@@ -82,6 +82,13 @@ public abstract class IPodDevice
         => throw new NotImplementedException($"CreatePlaylist is not implemented for {GetType().Name} ({Generation ?? "?"}).");
 
     /// <summary>
+    /// Removes a device playlist by name - mirror-sync pruning of an orphaned playlist. Best-effort
+    /// and idempotent: the base is a no-op, so a tier that can't (or needn't) prune simply skips
+    /// rather than throwing.
+    /// </summary>
+    public virtual Task RemovePlaylistAsync(string name, CancellationToken ct = default) => Task.CompletedTask;
+
+    /// <summary>
     /// Reads the device's whole library - tracks (any media kind) + playlists - from its authoritative
     /// store (SQLite .itlp, binary iTunesDB, or a filesystem walk). <paramref name="onBatch"/>, when set,
     /// receives tracks incrementally so a slow scan fills the UI as it runs.
@@ -414,6 +421,21 @@ public sealed class BinaryIPod : IPodDevice
             }
         }, ct);
 
+    public override Task RemovePlaylistAsync(string name, CancellationToken ct = default)
+        => Task.Run(() =>
+        {
+            var dbPath = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunesDB");
+            if (!File.Exists(dbPath))
+            {
+                return;
+            }
+            // Reuse the proven drop-by-name (the same call the idempotent playlist re-sync makes), then
+            // the standard commit discipline - checksum, one-time backup, atomic swap. Masters are safe.
+            var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+            ITunesDbWriter.RemovePlaylistsByName(doc, name);
+            IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+        }, ct);
+
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() =>
         {
@@ -565,6 +587,16 @@ public sealed class RockboxIPod : IPodDevice
                 sb.AppendLine("/" + Path.GetRelativePath(MountPath, t.FilePath).Replace('\\', '/'));
             }
             await File.WriteAllTextAsync(target, sb.ToString(), ct);
+        }, ct);
+
+    public override Task RemovePlaylistAsync(string name, CancellationToken ct = default)
+        => Task.Run(() =>
+        {
+            var target = Path.Combine(MountPath, "Playlists", Sanitize(name) + ".m3u8");
+            if (File.Exists(target))
+            {
+                File.Delete(target);
+            }
         }, ct);
 
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)

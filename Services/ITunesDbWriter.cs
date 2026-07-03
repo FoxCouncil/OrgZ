@@ -445,8 +445,9 @@ public static class ITunesDbWriter
     }
 
     /// <summary>Removes every non-master playlist whose name MHOD equals <paramref name="name"/>
-    /// from both playlist datasets, so a re-sync replaces rather than duplicates.</summary>
-    private static void RemovePlaylistsByName(ITunesDbDocument doc, string name)
+    /// from both playlist datasets, so a re-sync replaces rather than duplicates - and a mirror sync
+    /// can prune an orphaned playlist. The master/Library list is always left intact.</summary>
+    public static void RemovePlaylistsByName(ITunesDbDocument doc, string name)
     {
         foreach (var mhsd in doc.Root.Children.Where(c => c.Magic == "mhsd"
                      && (c.ReadHeaderInt32(12) == 2 || c.ReadHeaderInt32(12) == 3)))
