@@ -6077,20 +6077,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// The auto-sync (mirror) removal pass: makes the device MATCH the plan by removing device music
-    /// that's no longer selected. The keep-set is every track the plan puts on the device - Favorites
-    /// plus each selected playlist - keyed by artist+title. Device music (Source=device, Kind=Music)
-    /// not in that set is removed, after a confirmation, since it can't be undone short of re-syncing.
-    /// Untagged tracks (no match key) and podcasts/audiobooks are left alone. Runs inside the caller's
-    /// batch scope, so a Nano 5G regenerates its CDB once for the whole add+remove pass.
+    /// The auto-sync (mirror) removal pass: makes the device MATCH the plan by pruning what's no
+    /// longer selected. The keep-set is everything the plan puts on the device - Favorites, each
+    /// selected playlist, and (when selected) the library's audiobooks - keyed by artist+title.
+    /// Device music and audiobooks not in it are removed, plus all device podcasts when podcasts are
+    /// deselected. Untagged tracks (no match key) are always left alone. Removal is confirmed first
+    /// (it can't be undone short of re-syncing) and runs inside the caller's batch scope, so a Nano 5G
+    /// regenerates its CDB once for the whole add+remove pass.
     /// </summary>
     /// <summary>
-    /// The device-music entries a mirror sync should remove: those whose artist+title match key is
-    /// NOT in the keep-set. Untagged tracks (empty key) are never removed - we can't prove they were
-    /// deselected. Pure and testable; callers pass the already-filtered device music.
+    /// The device entries a mirror sync should remove: those whose artist+title match key is NOT in
+    /// the keep-set. Untagged tracks (empty key) are never removed - we can't prove they were
+    /// deselected. Pure and testable; callers pass the already-kind-filtered device tracks.
     /// </summary>
-    internal static List<MediaItem> MirrorRemovals(IEnumerable<MediaItem> deviceMusic, HashSet<string> keep)
-        => deviceMusic.Where(i =>
+    internal static List<MediaItem> MirrorRemovals(IEnumerable<MediaItem> deviceTracks, HashSet<string> keep)
+        => deviceTracks.Where(i =>
         {
             var k = NormalizeMatchKey(i.Artist, i.Title);
             return !string.IsNullOrEmpty(k) && !keep.Contains(k);
@@ -6119,10 +6120,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 Note(t);
             }
         }
+        if (plan.Audiobooks)
+        {
+            foreach (var a in _allItems.Where(i => IsLocalLibraryFile(i) && i.Kind == MediaKind.Audiobook))
+            {
+                Note(a);
+            }
+        }
 
+        // What the mirror prunes: always music + audiobooks (keep-sets come from the library), and
+        // podcasts only when they're deselected entirely - pruning stale episodes WHILE subscribed
+        // needs the downloaded-episode enumeration and is a follow-up.
         var deviceSource = $"device:{dev.MountPath}";
-        var deviceMusic = _allItems.Where(i => i.Source == deviceSource && i.Kind == MediaKind.Music);
-        var toRemove = MirrorRemovals(deviceMusic, keep);
+        var prune = _allItems.Where(i =>
+            i.Source == deviceSource &&
+            (i.Kind == MediaKind.Music || i.Kind == MediaKind.Audiobook || (i.Kind == MediaKind.Podcast && !plan.Podcasts)));
+        var toRemove = MirrorRemovals(prune, keep);
 
         if (toRemove.Count == 0)
         {
