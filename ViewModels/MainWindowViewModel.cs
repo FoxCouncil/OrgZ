@@ -6051,7 +6051,99 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
+        // Auto-sync (mirror): make the device match the plan by pruning music that's no longer
+        // selected. Runs last, inside the same batch, so removals join the single CDB regen.
+        if (plan.Automatic)
+        {
+            await MirrorRemoveAsync(dev, ipod, plan);
+        }
+
         UpdateMainStatus($"Sync to {dev.Name} complete.");
+    }
+
+    /// <summary>
+    /// The auto-sync (mirror) removal pass: makes the device MATCH the plan by removing device music
+    /// that's no longer selected. The keep-set is every track the plan puts on the device - Favorites
+    /// plus each selected playlist - keyed by artist+title. Device music (Source=device, Kind=Music)
+    /// not in that set is removed, after a confirmation, since it can't be undone short of re-syncing.
+    /// Untagged tracks (no match key) and podcasts/audiobooks are left alone. Runs inside the caller's
+    /// batch scope, so a Nano 5G regenerates its CDB once for the whole add+remove pass.
+    /// </summary>
+    /// <summary>
+    /// The device-music entries a mirror sync should remove: those whose artist+title match key is
+    /// NOT in the keep-set. Untagged tracks (empty key) are never removed - we can't prove they were
+    /// deselected. Pure and testable; callers pass the already-filtered device music.
+    /// </summary>
+    internal static List<MediaItem> MirrorRemovals(IEnumerable<MediaItem> deviceMusic, HashSet<string> keep)
+        => deviceMusic.Where(i =>
+        {
+            var k = NormalizeMatchKey(i.Artist, i.Title);
+            return !string.IsNullOrEmpty(k) && !keep.Contains(k);
+        }).ToList();
+
+    private async Task MirrorRemoveAsync(ConnectedDevice dev, IPodDevice ipod, SyncPlan plan)
+    {
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Note(MediaItem t)
+        {
+            var k = NormalizeMatchKey(t.Artist, t.Title);
+            if (!string.IsNullOrEmpty(k)) { keep.Add(k); }
+        }
+
+        if (plan.Favorites)
+        {
+            foreach (var f in _allItems.Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath)))
+            {
+                Note(f);
+            }
+        }
+        foreach (var pid in plan.PlaylistIds)
+        {
+            foreach (var t in await Task.Run(() => GetPlaylistMediaItems(pid)))
+            {
+                Note(t);
+            }
+        }
+
+        var deviceSource = $"device:{dev.MountPath}";
+        var deviceMusic = _allItems.Where(i => i.Source == deviceSource && i.Kind == MediaKind.Music);
+        var toRemove = MirrorRemovals(deviceMusic, keep);
+
+        if (toRemove.Count == 0)
+        {
+            return;
+        }
+
+        var confirm = new Views.ConfirmDialog(
+            "Auto-sync",
+            $"Remove {toRemove.Count} track(s) from {dev.Name} that are no longer selected?",
+            "Remove");
+        if (!await confirm.ShowDialog<bool>(_window))
+        {
+            return;   // kept - this sync stays additive
+        }
+
+        int removed = 0;
+        foreach (var item in toRemove)
+        {
+            try
+            {
+                await ipod.RemoveTrackAsync(item);
+                _allItems.Remove(item);
+                removed++;
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Mirror sync: failed to remove {Track} from {Device}", item.Title, dev.MountPath);
+            }
+        }
+
+        if (removed > 0)
+        {
+            dev.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
+            ApplyFilter();
+            _log.Information("Mirror sync removed {Count} deselected track(s) from {Device}", removed, dev.MountPath);
+        }
     }
 
     /// <summary>
