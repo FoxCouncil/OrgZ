@@ -14,10 +14,43 @@
 			<Setter Property="Margin" Value="8,0,4,0" />
 			<Setter Property="Opacity" Value="0.7" />
 		</Style>
+		<Style Selector="TextBlock.sectionHeader">
+			<Setter Property="FontSize" Value="11" />
+			<Setter Property="FontWeight" Value="SemiBold" />
+			<Setter Property="Opacity" Value="0.55" />
+			<Setter Property="LetterSpacing" Value="2" />
+			<Setter Property="Margin" Value="2,0,0,8" />
+		</Style>
+		<Style Selector="Border.card">
+			<Setter Property="Background" Value="#12FFFFFF" />
+			<Setter Property="BorderBrush" Value="#28FFFFFF" />
+			<Setter Property="BorderThickness" Value="1" />
+			<Setter Property="CornerRadius" Value="6" />
+			<Setter Property="Padding" Value="10" />
+		</Style>
+		<Style Selector="Border.inset">
+			<Setter Property="Background" Value="#30000000" />
+			<Setter Property="BorderBrush" Value="#20FFFFFF" />
+			<Setter Property="BorderThickness" Value="1" />
+			<Setter Property="CornerRadius" Value="6" />
+			<Setter Property="Padding" Value="10" />
+		</Style>
 		<Style Selector="DataGrid">
 			<Setter Property="GridLinesVisibility" Value="Horizontal" />
 			<Setter Property="IsReadOnly" Value="True" />
 			<Setter Property="CanUserResizeColumns" Value="True" />
+		</Style>
+		<!-- Same as the main app's grouped views: headers read "Synthwave (12 Items)" - the
+		     grouping property's name ("GenreName:") is plumbing, not information. -->
+		<Style Selector="DataGridRowGroupHeader">
+			<Setter Property="IsPropertyNameVisible" Value="False" />
+			<Setter Property="IsItemCountVisible" Value="True" />
+		</Style>
+		<!-- Genre headers are separators, not toggles: the chevron is the only tap target that
+		     collapses a group, so hiding it makes headers inert. The code-behind re-expands
+		     anything that still finds a way to fold (keyboard arrows on a focused header). -->
+		<Style Selector="DataGridRowGroupHeader /template/ ToggleButton#PART_ExpanderButton">
+			<Setter Property="IsVisible" Value="False" />
 		</Style>
 		<Style Selector="WrapPanel > TextBox, WrapPanel > ComboBox, WrapPanel > Button">
 			<Setter Property="Margin" Value="0,2,6,2" />
@@ -39,8 +72,9 @@
 					<TextBlock Text="{Binding StoreSummary}" VerticalAlignment="Center" Opacity="0.7" />
 				</StackPanel>
 				<StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+					<Button Content="Play" Command="{Binding PlayCommand}" />
+					<Button Content="Stop" Command="{Binding StopPlaybackCommand}" />
 					<TextBlock Text="{Binding NowPlaying}" VerticalAlignment="Center" FontWeight="Bold" />
-					<Button Content="Stop" Command="{Binding StopPlaybackCommand}" IsVisible="{Binding NowPlaying, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 				</StackPanel>
 			</DockPanel>
 		</Border>
@@ -53,10 +87,12 @@
 			</DockPanel>
 		</Border>
 
-		<Grid ColumnDefinitions="5*,4,6*">
+		<Grid ColumnDefinitions="5*,8,6*" Margin="8">
 
 			<!-- ============ Sources ============ -->
-			<DockPanel Grid.Column="0" Margin="8,8,0,8">
+			<Border Grid.Column="0" Classes="card">
+			<DockPanel>
+				<TextBlock DockPanel.Dock="Top" Classes="sectionHeader" Text="SOURCES" />
 
 				<TabControl DockPanel.Dock="Top" SelectedIndex="{Binding SourceTabIndex}">
 					<TabItem Header="Radio Browser">
@@ -97,9 +133,49 @@
 					<TextBlock Classes="label" Text="Genre" />
 					<ComboBox Width="170" ItemsSource="{Binding ImportGenreChoices}" SelectedItem="{Binding ImportGenre}" />
 					<Button Content="Import Selected" Command="{Binding ImportSelectedCommand}" />
-					<Button Content="Preview" Command="{Binding PreviewSourceCommand}" />
 					<Button Content="Show in Curated" Command="{Binding JumpToCuratedCommand}" />
 				</StackPanel>
+
+				<!-- Source detail / pre-import probe -->
+				<Border DockPanel.Dock="Bottom" Classes="inset" Margin="0,10,0,0"
+				        IsVisible="{Binding SelectedSource, Converter={x:Static ObjectConverters.IsNotNull}}">
+					<DockPanel>
+					<TextBlock DockPanel.Dock="Top" Classes="sectionHeader" Text="SOURCE" />
+					<Grid ColumnDefinitions="Auto,12,*" RowDefinitions="Auto,8,Auto">
+
+						<Image Grid.Column="0" Grid.Row="0" Width="96" Height="96" Stretch="Uniform"
+						       VerticalAlignment="Top"
+						       img:RemoteImage.Url="{Binding SelectedSource.LogoUrl}" />
+
+						<Grid Grid.Column="2" Grid.Row="0"
+						      ColumnDefinitions="Auto,6,2*,16,Auto,6,*"
+						      RowDefinitions="Auto,6,Auto,6,Auto">
+							<TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Name" />
+							<TextBlock Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding SelectedSource.Name}" />
+							<TextBlock Grid.Row="0" Grid.Column="4" Classes="label" Text="Country" />
+							<StackPanel Grid.Row="0" Grid.Column="6" Orientation="Horizontal" Spacing="6">
+								<TextBlock VerticalAlignment="Center" Text="{Binding SelectedSource.Country}" />
+								<TextBlock VerticalAlignment="Center" Opacity="0.7" Text="{Binding SelectedSource.CountryCode}" />
+							</StackPanel>
+
+							<TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Tags" />
+							<TextBlock Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding SelectedSource.Tags}" />
+
+							<TextBlock Grid.Row="4" Grid.Column="0" Classes="label" Text="URL" />
+							<SelectableTextBlock Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="{Binding SelectedSource.StreamUrl}" />
+						</Grid>
+
+						<DockPanel Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="2">
+							<Button DockPanel.Dock="Left" Content="Probe" Command="{Binding ProbeSourceCommand}" />
+							<StackPanel Margin="8,0,0,0" VerticalAlignment="Center">
+								<TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding SourceProbeSummary}" />
+								<TextBlock Opacity="0.8" TextTrimming="CharacterEllipsis" Text="{Binding SourceProbeStats}"
+								           IsVisible="{Binding SourceProbeStats, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+							</StackPanel>
+						</DockPanel>
+					</Grid>
+					</DockPanel>
+				</Border>
 
 				<DataGrid x:Name="SourceGrid"
 				          ItemsSource="{Binding SourceResults}"
@@ -112,16 +188,28 @@
 						<DataGridTextColumn Header="Suggested" Binding="{Binding SuggestedGenreName}" Width="Auto" />
 						<DataGridTextColumn Header="Fmt" Binding="{Binding Format}" Width="Auto" />
 						<DataGridTextColumn Header="kbps" Binding="{Binding Bitrate}" Width="Auto" />
-						<DataGridTextColumn Header="CC" Binding="{Binding CountryCode}" Width="Auto" />
+						<DataGridTemplateColumn Header="Country" Width="60">
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<Image Width="24" Height="16" Stretch="Uniform"
+									       HorizontalAlignment="Center" VerticalAlignment="Center"
+									       Source="{Binding CountryCode, Converter={x:Static img:CountryCodeToFlagConverter.Instance}}"
+									       ToolTip.Tip="{Binding Country}" />
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
 						<DataGridTextColumn Header="Pop" Binding="{Binding Popularity}" Width="Auto" />
 					</DataGrid.Columns>
 				</DataGrid>
 			</DockPanel>
+			</Border>
 
-			<GridSplitter Grid.Column="1" Background="#33000000" ResizeDirection="Columns" />
+			<GridSplitter Grid.Column="1" Background="Transparent" ResizeDirection="Columns" />
 
 			<!-- ============ Curated ============ -->
-			<DockPanel Grid.Column="2" Margin="0,8,8,8">
+			<Border Grid.Column="2" Classes="card">
+			<DockPanel>
+				<TextBlock DockPanel.Dock="Top" Classes="sectionHeader" Text="CURATED" />
 
 				<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
 					<TextBlock Classes="label" Text="Genre" />
@@ -133,8 +221,10 @@
 				</StackPanel>
 
 				<!-- Detail / variants -->
-				<Border DockPanel.Dock="Bottom" Margin="0,6,0,0" Padding="8" Background="#16000000"
+				<Border DockPanel.Dock="Bottom" Classes="inset" Margin="0,10,0,0"
 				        IsVisible="{Binding SelectedCurated, Converter={x:Static ObjectConverters.IsNotNull}}">
+					<DockPanel>
+					<TextBlock DockPanel.Dock="Top" Classes="sectionHeader" Text="STATION" />
 					<Grid ColumnDefinitions="Auto,12,*" RowDefinitions="Auto,8,Auto">
 
 						<Image Grid.Column="0" Grid.Row="0" Width="96" Height="96" Stretch="Uniform"
@@ -165,7 +255,6 @@
 
 						<DockPanel Grid.Column="0" Grid.ColumnSpan="3" Grid.Row="2">
 							<StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
-								<Button Content="Play" Command="{Binding PlayVariantCommand}" />
 								<Button Content="Probe" Command="{Binding ProbeVariantCommand}" />
 								<Button Content="Prefer" Command="{Binding SetPreferredVariantCommand}" />
 								<Button Content="Remove Stream" Command="{Binding RemoveVariantCommand}" />
@@ -175,9 +264,12 @@
 							          MaxHeight="170">
 								<DataGrid.Columns>
 									<DataGridTextColumn Header="" Binding="{Binding PreferredMark}" Width="Auto" />
-									<DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="3*" />
+									<DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="2*" />
 									<DataGridTextColumn Header="Fmt" Binding="{Binding EffectiveFormat}" Width="Auto" />
 									<DataGridTextColumn Header="kbps" Binding="{Binding EffectiveBitrate}" Width="Auto" />
+									<DataGridTextColumn Header="Hops" Binding="{Binding HopsLabel}" Width="Auto" />
+									<DataGridTextColumn Header="Meta" Binding="{Binding MetadataLabel}" Width="Auto" />
+									<DataGridTextColumn Header="Match" Binding="{Binding MatchLabel}" Width="Auto" />
 									<DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="Auto" />
 									<DataGridTextColumn Header="Probe" Binding="{Binding ProbeLabel}" Width="Auto" />
 									<DataGridTextColumn Header="Geo" Binding="{Binding GeoLabel}" Width="Auto" />
@@ -186,22 +278,35 @@
 							</DataGrid>
 						</DockPanel>
 					</Grid>
+					</DockPanel>
 				</Border>
 
 				<DataGrid x:Name="CuratedGrid"
-				          ItemsSource="{Binding CuratedRows}"
+				          ItemsSource="{Binding CuratedView}"
 				          SelectedItem="{Binding SelectedCurated}">
 					<DataGrid.Columns>
 						<DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" />
-						<DataGridTextColumn Header="Genre" Binding="{Binding GenreName}" Width="Auto" />
-						<DataGridTextColumn Header="CC" Binding="{Binding CountryCode}" Width="Auto" />
+						<DataGridTemplateColumn Header="Country" Width="60">
+							<DataGridTemplateColumn.CellTemplate>
+								<DataTemplate>
+									<Image Width="24" Height="16" Stretch="Uniform"
+									       HorizontalAlignment="Center" VerticalAlignment="Center"
+									       Source="{Binding CountryCode, Converter={x:Static img:CountryCodeToFlagConverter.Instance}}"
+									       ToolTip.Tip="{Binding Country}" />
+								</DataTemplate>
+							</DataGridTemplateColumn.CellTemplate>
+						</DataGridTemplateColumn>
 						<DataGridTextColumn Header="Streams" Binding="{Binding StreamCount}" Width="Auto" />
+						<DataGridTextColumn Header="Codec" Binding="{Binding BestFormat}" Width="Auto" />
 						<DataGridTextColumn Header="Best" Binding="{Binding BestBitrate}" Width="Auto" />
+						<DataGridTextColumn Header="Meta" Binding="{Binding MetaLabel}" Width="Auto" />
+						<DataGridTextColumn Header="Icon" Binding="{Binding IconLabel}" Width="Auto" />
 						<DataGridTextColumn Header="Probe" Binding="{Binding ProbeSummary}" Width="Auto" />
 						<DataGridTextColumn Header="Geo" Binding="{Binding GeoLabel}" Width="Auto" />
 					</DataGrid.Columns>
 				</DataGrid>
 			</DockPanel>
+			</Border>
 		</Grid>
 	</DockPanel>
 </Window>

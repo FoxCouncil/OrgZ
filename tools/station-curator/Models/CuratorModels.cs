@@ -46,6 +46,16 @@ public sealed class CuratedStation : INotifyPropertyChanged
     [JsonIgnore] public int StreamCount => Streams.Count;
     [JsonIgnore] public int BestBitrate => Streams.Count == 0 ? 0 : Streams.Max(s => Math.Max(s.Bitrate, s.ProbeBitrate ?? 0));
 
+    /// <summary>The codec the export would ship - the best variant's effective format, uppercased like the main app's Codec badge.</summary>
+    [JsonIgnore] public string BestFormat
+    {
+        get
+        {
+            var format = BestVariant()?.EffectiveFormat;
+            return string.IsNullOrEmpty(format) ? "—" : format!.ToUpperInvariant();
+        }
+    }
+
     [JsonIgnore] public string ProbeSummary
     {
         get
@@ -68,7 +78,21 @@ public sealed class CuratedStation : INotifyPropertyChanged
     }
 
     [JsonIgnore] public bool AnyGeoRisk => Streams.Any(s => s.GeoRisk);
-    [JsonIgnore] public string GeoLabel => AnyGeoRisk ? "⚠" : "";
+
+    [JsonIgnore] public string GeoLabel
+    {
+        get
+        {
+            var code = BestVariant()?.ServerCountryCode ?? "";
+            return AnyGeoRisk ? (code.Length > 0 ? $"{code} ⚠" : "⚠") : code.Length > 0 ? code : "—";
+        }
+    }
+
+    /// <summary>✓ when the variant the export would ship supports in-stream metadata.</summary>
+    [JsonIgnore] public string MetaLabel => BestVariant()?.HasMetadata == true ? "✓" : "—";
+
+    /// <summary>✓ when the station has a logo to show.</summary>
+    [JsonIgnore] public string IconLabel => string.IsNullOrEmpty(LogoUrl) ? "—" : "✓";
 
     /// <summary>
     /// The variant export ships: the explicit preference when set, otherwise probe-ok first,
@@ -94,7 +118,9 @@ public sealed class CuratedStation : INotifyPropertyChanged
             .OrderBy(s => s.ProbeStatus switch { ProbeStatus.Ok => 0, null or ProbeStatus.Untested => 1, ProbeStatus.Geo => 2, _ => 3 })
             .ThenBy(s => s.EffectiveFormat == "hls" ? 1 : 0)
             .ThenByDescending(s => s.ProbeBitrate ?? s.Bitrate)
+            .ThenByDescending(s => s.HasMetadata)
             .ThenBy(s => s.EffectiveFormat switch { "aac" => 0, "mp3" => 1, "ogg" => 2, "flac" => 3, _ => 4 })
+            .ThenBy(s => s.ProbeRedirects ?? 9)
             .First();
     }
 }
@@ -132,15 +158,65 @@ public sealed class StreamVariant : INotifyPropertyChanged
     [JsonPropertyName("resolvedUrl")] public string? ResolvedUrl { get; set; }
     [JsonPropertyName("probedAtUtc")] public DateTimeOffset? ProbedAtUtc { get; set; }
     [JsonPropertyName("geoRisk")] public bool GeoRisk { get; set; }
+    [JsonPropertyName("probeRedirects")] public int? ProbeRedirects { get; set; }
+    [JsonPropertyName("probeMetaint")] public int? ProbeMetaint { get; set; }
+    [JsonPropertyName("probeTitle")] public string? ProbeTitle { get; set; }
+    [JsonPropertyName("probeMeasuredFormat")] public string? ProbeMeasuredFormat { get; set; }
+    [JsonPropertyName("probeMeasuredBitrate")] public int? ProbeMeasuredBitrate { get; set; }
+    [JsonPropertyName("serverIp")] public string? ServerIp { get; set; }
+    [JsonPropertyName("serverCountry")] public string? ServerCountry { get; set; }
+    [JsonPropertyName("serverCountryCode")] public string? ServerCountryCode { get; set; }
 
     /// <summary>Set by the view model when the variant list is rebuilt: ★ explicit preference, • computed best.</summary>
     [JsonIgnore] public string PreferredMark { get; set; } = "";
 
-    [JsonIgnore] public string EffectiveFormat => string.IsNullOrEmpty(ProbeFormat) ? Format : ProbeFormat!;
-    [JsonIgnore] public int EffectiveBitrate => ProbeBitrate ?? Bitrate;
+    // Measured (frame-parsed) values outrank server claims, which outrank directory data.
+    [JsonIgnore] public string EffectiveFormat => !string.IsNullOrEmpty(ProbeMeasuredFormat) ? ProbeMeasuredFormat! : string.IsNullOrEmpty(ProbeFormat) ? Format : ProbeFormat!;
+    [JsonIgnore] public int EffectiveBitrate => ProbeMeasuredBitrate ?? ProbeBitrate ?? Bitrate;
     [JsonIgnore] public string ProbeLabel => ProbeStatus ?? "untested";
-    [JsonIgnore] public string GeoLabel => GeoRisk ? "⚠" : "";
     [JsonIgnore] public string PlayUrl => string.IsNullOrEmpty(ResolvedUrl) ? Url : ResolvedUrl!;
+
+    [JsonIgnore] public bool HasMetadata => ProbeMetaint is > 0;
+    [JsonIgnore] public string HopsLabel => ProbeRedirects?.ToString() ?? "—";
+    [JsonIgnore] public string MetadataLabel => ProbeMetaint is int m and > 0 ? $"icy {m}" : ProbedAtUtc == null ? "—" : "none";
+
+    [JsonIgnore] public string GeoLabel
+    {
+        get
+        {
+            var code = ServerCountryCode ?? "";
+            return GeoRisk ? (code.Length > 0 ? $"{code} ⚠" : "⚠") : code.Length > 0 ? code : "—";
+        }
+    }
+
+    /// <summary>Measured codec/bitrate vs what the directory/server advertised: ✓ agrees, ≠ lies, - nothing to compare yet.</summary>
+    [JsonIgnore] public string MatchLabel
+    {
+        get
+        {
+            if (ProbedAtUtc == null)
+            {
+                return "—";
+            }
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(ProbeMeasuredFormat) && !string.IsNullOrEmpty(Format) && !Format.Equals(ProbeMeasuredFormat, StringComparison.OrdinalIgnoreCase))
+            {
+                parts.Add($"{Format}→{ProbeMeasuredFormat}");
+            }
+            var advertised = Bitrate > 0 ? Bitrate : ProbeBitrate ?? 0;
+            if (ProbeMeasuredBitrate is int measured && advertised > 0 && Math.Abs(measured - advertised) > 16)
+            {
+                parts.Add($"{advertised}→{measured}k");
+            }
+            if (parts.Count > 0)
+            {
+                return "≠ " + string.Join(", ", parts);
+            }
+            var comparable = (!string.IsNullOrEmpty(ProbeMeasuredFormat) && !string.IsNullOrEmpty(Format)) || (ProbeMeasuredBitrate != null && advertised > 0);
+            return comparable ? "✓" : "—";
+        }
+    }
 }
 
 /// <summary>A station row as one of the directories reports it, before curation.</summary>
