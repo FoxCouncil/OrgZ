@@ -11,9 +11,9 @@ public static class Web
 
     public static readonly HttpClient Http = Create(TimeSpan.FromSeconds(20));
 
-    public static HttpClient Create(TimeSpan timeout)
+    public static HttpClient Create(TimeSpan timeout, bool allowRedirects = true)
     {
-        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true, MaxAutomaticRedirections = 10 })
+        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = allowRedirects, MaxAutomaticRedirections = 10 })
         {
             Timeout = timeout,
         };

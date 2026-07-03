@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using Avalonia.Collections;
 using Avalonia.Threading;
 using OrgZ.Models;
 using OrgZ.StationCurator.Models;
@@ -47,6 +48,16 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _icecastUrl = "";
     [ObservableProperty] private SourceStation? _selectedSource;
     [ObservableProperty] private string _importGenre = "Auto";
+
+    // Pre-import probe readout for the SOURCE pane; cleared whenever the selection moves.
+    [ObservableProperty] private string _sourceProbeSummary = "";
+    [ObservableProperty] private string _sourceProbeStats = "";
+
+    partial void OnSelectedSourceChanged(SourceStation? value)
+    {
+        SourceProbeSummary = "";
+        SourceProbeStats = "";
+    }
 
     public ObservableCollection<SourceStation> SourceResults { get; } = [];
 
@@ -128,18 +139,12 @@ public partial class MainViewModel : ObservableObject
         {
             foreach (var src in rows)
             {
-                var url = src.StreamUrl;
-                if (string.IsNullOrEmpty(url) && src.Source == "shoutcast" && src.SourceId != null)
-                {
-                    StatusMessage = $"Resolving {src.Name}…";
-                    url = await ShoutcastClient.ResolveStreamUrlAsync(src.SourceId, CancellationToken.None) ?? "";
-                }
+                var url = await ResolveSourceUrlAsync(src);
                 if (string.IsNullOrEmpty(url))
                 {
                     unresolved++;
                     continue;
                 }
-                src.StreamUrl = url;
 
                 var variant = new StreamVariant
                 {
@@ -217,8 +222,18 @@ public partial class MainViewModel : ObservableObject
 
     // -- Curated pane --
 
-    public ObservableCollection<CuratedStation> CuratedRows { get; } = [];
     public ObservableCollection<StreamVariant> Variants { get; } = [];
+
+    /// <summary>Raised by "Show in Curated" so the view can expand the target's genre group and scroll the row into view.</summary>
+    public event Action<CuratedStation>? CuratedRevealRequested;
+
+    /// <summary>
+    /// Grid-bound view of the curated list, grouped by genre the same way the main app's radio
+    /// view is - DataGridCollectionView + a path group description gives Avalonia's collapsible
+    /// row-group headers. Rebuilt by <see cref="RefreshCuratedView"/> on every filter/store change.
+    /// </summary>
+    [ObservableProperty] private DataGridCollectionView? _curatedView;
+    private List<CuratedStation> _curatedList = [];
 
     [ObservableProperty] private CuratedStation? _selectedCurated;
     [ObservableProperty] private StreamVariant? _selectedVariant;
@@ -238,6 +253,9 @@ public partial class MainViewModel : ObservableObject
                 SelectedCurated.GenreId = (int)RadioGenres.FromDisplayName(value);
                 SelectedCurated.NotifyChanged();
                 OnPropertyChanged();
+                // Regroup so the station physically moves under its new genre header now,
+                // not on whatever refresh happens to come next.
+                RefreshCuratedView();
             }
         }
     }
@@ -253,6 +271,10 @@ public partial class MainViewModel : ObservableObject
 
     private void RebuildVariants()
     {
+        // Clearing the collection makes the grid reset its selection (nulling SelectedVariant
+        // through the binding) - remember it and re-select the same variant after the rebuild.
+        var keepId = SelectedVariant?.Id;
+
         Variants.Clear();
         if (SelectedCurated == null)
         {
@@ -264,6 +286,11 @@ public partial class MainViewModel : ObservableObject
             v.PreferredMark = v.Id == SelectedCurated.PreferredStreamId ? "★" : v == best ? "•" : "";
             v.NotifyChanged();
             Variants.Add(v);
+        }
+
+        if (keepId != null)
+        {
+            SelectedVariant = Variants.FirstOrDefault(v => v.Id == keepId);
         }
     }
 
@@ -289,20 +316,22 @@ public partial class MainViewModel : ObservableObject
                 (s.Description?.Contains(CuratedSearch, StringComparison.OrdinalIgnoreCase) ?? false));
         }
 
-        CuratedRows.Clear();
-        foreach (var s in rows.OrderBy(s => s.GenreId == 0 ? int.MaxValue : s.GenreId).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            CuratedRows.Add(s);
-        }
+        // No SortDescriptions on the view: the list is pre-sorted by taxonomy id (unassigned
+        // last), and DataGridCollectionView's insertion-order fallback keeps the genre groups
+        // in that order instead of re-sorting the headers alphabetically.
+        _curatedList = rows.OrderBy(s => s.GenreId == 0 ? int.MaxValue : s.GenreId).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var view = new DataGridCollectionView(_curatedList);
+        view.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(CuratedStation.GenreName)));
+        CuratedView = view;
 
-        SelectedCurated = keepId == null ? null : CuratedRows.FirstOrDefault(s => s.Id == keepId);
+        SelectedCurated = keepId == null ? null : _curatedList.FirstOrDefault(s => s.Id == keepId);
         UpdateStoreSummary();
     }
 
     private void UpdateStoreSummary()
     {
         var streams = _db.Stations.Sum(s => s.Streams.Count);
-        var shipping = _db.Stations.Count(s => s.GenreId is >= 1 and <= 29 && s.BestVariant() != null);
+        var shipping = _db.Stations.Count(s => s.GenreId != 0 && RadioGenres.DisplayName(s.GenreId).Length > 0 && s.BestVariant() != null);
         StoreSummary = $"{_db.Stations.Count} stations · {streams} streams · {shipping} shippable";
     }
 
@@ -365,13 +394,7 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = "Select a source row first";
             return;
         }
-        var url = src.StreamUrl;
-        if (string.IsNullOrEmpty(url) && src.Source == "shoutcast" && src.SourceId != null)
-        {
-            StatusMessage = $"Resolving {src.Name}…";
-            url = await ShoutcastClient.ResolveStreamUrlAsync(src.SourceId, CancellationToken.None) ?? "";
-            src.StreamUrl = url;
-        }
+        var url = await ResolveSourceUrlAsync(src);
         if (string.IsNullOrEmpty(url))
         {
             StatusMessage = $"No stream URL for {src.Name}";
@@ -380,7 +403,39 @@ public partial class MainViewModel : ObservableObject
         StartPlayback(src.Name, url);
     }
 
+    /// <summary>SHOUTcast directory rows carry no direct URL until their tunein id is resolved; everyone else already has one.</summary>
+    private async Task<string> ResolveSourceUrlAsync(SourceStation src)
+    {
+        var url = src.StreamUrl;
+        if (string.IsNullOrEmpty(url) && src.Source == "shoutcast" && src.SourceId != null)
+        {
+            StatusMessage = $"Resolving {src.Name}…";
+            url = await ShoutcastClient.ResolveStreamUrlAsync(src.SourceId, CancellationToken.None) ?? "";
+            src.StreamUrl = url;
+        }
+        return url;
+    }
+
+    /// <summary>
+    /// The toolbar transport's Play - routes to whatever is selected: a curated station
+    /// (its selected variant, else its best), otherwise the highlighted source row.
+    /// </summary>
     [RelayCommand]
+    private async Task PlayAsync()
+    {
+        if (SelectedCurated == null && SelectedSource == null)
+        {
+            StatusMessage = "Select a station or source row first";
+            return;
+        }
+        if (SelectedCurated != null)
+        {
+            PlayVariant();
+            return;
+        }
+        await PreviewSourceAsync();
+    }
+
     private void PlayVariant()
     {
         if (!PlayerReady())
@@ -482,22 +537,89 @@ public partial class MainViewModel : ObservableObject
 
     // -- Probing --
 
+    /// <summary>Pre-import probe for the SOURCE pane - same prober, results land in the pane labels instead of the store.</summary>
     [RelayCommand]
-    private async Task ProbeVariantAsync()
+    private async Task ProbeSourceAsync()
     {
-        if (SelectedCurated == null || SelectedVariant == null)
+        var src = SelectedSource;
+        if (src == null)
         {
             return;
         }
         IsBusy = true;
         try
         {
-            StatusMessage = $"Probing {SelectedVariant.Url}…";
-            ApplyProbe(SelectedVariant, await StreamProber.ProbeAsync(SelectedVariant.Url, CancellationToken.None));
+            SourceProbeSummary = "probing…";
+            SourceProbeStats = "";
+            var url = await ResolveSourceUrlAsync(src);
+            if (string.IsNullOrEmpty(url))
+            {
+                SourceProbeSummary = "no stream URL";
+                return;
+            }
+            var outcome = await StreamProber.ProbeAsync(url, CancellationToken.None);
+            if (SelectedSource != src)
+            {
+                return; // Selection moved on while the probe ran; don't stamp the wrong row's pane.
+            }
+            SourceProbeSummary = $"{outcome.Status} — {outcome.Detail}";
+            SourceProbeStats = FormatSourceProbeStats(src, outcome);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string FormatSourceProbeStats(SourceStation src, ProbeOutcome outcome)
+    {
+        var parts = new List<string>();
+        var format = outcome.MeasuredFormat ?? outcome.Format;
+        var kbps = outcome.MeasuredBitrate ?? outcome.Bitrate;
+        if (!string.IsNullOrEmpty(format))
+        {
+            parts.Add(kbps is int k and > 0 ? $"{format} {k}k" : format!);
+        }
+        parts.Add($"{outcome.Redirects} hops");
+        parts.Add(outcome.MetaInt is int m ? $"icy {m}" : "no metadata");
+        if (!string.IsNullOrEmpty(outcome.MeasuredFormat) && !string.IsNullOrEmpty(src.Format) && !src.Format.Equals(outcome.MeasuredFormat, StringComparison.OrdinalIgnoreCase))
+        {
+            parts.Add($"≠ {src.Format}→{outcome.MeasuredFormat}");
+        }
+        if (outcome.MeasuredBitrate is int measured && src.Bitrate > 0 && Math.Abs(measured - src.Bitrate) > 16)
+        {
+            parts.Add($"≠ {src.Bitrate}→{measured}k");
+        }
+        if (outcome.ServerCountryCode != null)
+        {
+            parts.Add(outcome.GeoSuspect ? $"{outcome.ServerCountryCode} ⚠" : outcome.ServerCountryCode);
+        }
+        else if (outcome.GeoSuspect)
+        {
+            parts.Add("⚠");
+        }
+        return string.Join(" · ", parts);
+    }
+
+    [RelayCommand]
+    private async Task ProbeVariantAsync()
+    {
+        // Work off a captured reference: RebuildVariants clears the variants collection, which
+        // makes the grid drop its selection and push null back into SelectedVariant mid-method.
+        var variant = SelectedVariant;
+        if (SelectedCurated == null || variant == null)
+        {
+            return;
+        }
+        IsBusy = true;
+        try
+        {
+            StatusMessage = $"Probing {variant.Url}…";
+            ApplyProbe(variant, await StreamProber.ProbeAsync(variant.Url, CancellationToken.None));
             SaveStore();
             RebuildVariants();
             RefreshCuratedGridCells();
-            StatusMessage = $"Probe: {SelectedVariant.ProbeStatus} — {SelectedVariant.ProbeDetail}";
+            StatusMessage = $"Probe: {variant.ProbeStatus} — {variant.ProbeDetail}";
         }
         finally
         {
@@ -580,6 +702,14 @@ public partial class MainViewModel : ObservableObject
         variant.ResolvedUrl = outcome.ResolvedUrl;
         variant.ProbedAtUtc = DateTimeOffset.UtcNow;
         variant.GeoRisk = outcome.GeoSuspect;
+        variant.ProbeRedirects = outcome.Redirects;
+        variant.ProbeMetaint = outcome.MetaInt;
+        variant.ProbeTitle = outcome.StreamTitle;
+        variant.ProbeMeasuredFormat = outcome.MeasuredFormat;
+        variant.ProbeMeasuredBitrate = outcome.MeasuredBitrate;
+        variant.ServerIp = outcome.ServerIp;
+        variant.ServerCountry = outcome.ServerCountry;
+        variant.ServerCountryCode = outcome.ServerCountryCode;
         variant.NotifyChanged();
     }
 
@@ -629,5 +759,6 @@ public partial class MainViewModel : ObservableObject
         CuratedSearch = "";
         RefreshCuratedView();
         SelectedCurated = match;
+        CuratedRevealRequested?.Invoke(match);
     }
 }

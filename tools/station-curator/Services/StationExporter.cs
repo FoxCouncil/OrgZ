@@ -8,7 +8,7 @@ namespace OrgZ.StationCurator.Services;
 
 /// <summary>
 /// Writes Assets/stations.json in the exact shape BundledStationsService consumes: one
-/// stream per station (each station's best variant), full 29-genre taxonomy, sorted by
+/// stream per station (each station's best variant), the full genre taxonomy, sorted by
 /// genre then name. Stations without a genre assignment are not shipped.
 /// </summary>
 public static class StationExporter
@@ -23,7 +23,7 @@ public static class StationExporter
 
         foreach (var station in db.Stations.OrderBy(s => s.GenreId).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
         {
-            if (station.GenreId is < 1 or > 29)
+            if (station.GenreId == 0 || RadioGenres.DisplayName(station.GenreId).Length == 0)
             {
                 skippedUnassigned++;
                 continue;
