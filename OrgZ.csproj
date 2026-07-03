@@ -60,6 +60,8 @@
 		<PackageReference Include="Optris.Icons.Avalonia.FontAwesome" Version="12.0.4" />
 		<PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.7" />
 		<PackageReference Include="Serilog" Version="4.2.0" />
+		<!-- SVG rasterization for station logos / remote artwork; Avalonia can't decode SVG natively. -->
+		<PackageReference Include="Svg.Skia" Version="3.2.1" />
 		<PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
 		<PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0" />
 		<PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />

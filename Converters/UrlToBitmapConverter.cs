@@ -148,14 +148,16 @@ public static class RemoteImage
                 {
                     using var resp = await _http.GetAsync(key);
                     resp.EnsureSuccessStatusCode();
-                    using var stream = await resp.Content.ReadAsStreamAsync();
-                    using var mem = new MemoryStream();
-                    await stream.CopyToAsync(mem);
-                    mem.Position = 0;
-                    // DecodeToWidth resamples at decode time, so a 3000x3000
-                    // JPEG never materializes as a 36MB raw bitmap -- skia
-                    // streams it straight to the target width.
-                    var bmp = Bitmap.DecodeToWidth(mem, DecodeTargetWidth);
+                    var bytes = await resp.Content.ReadAsByteArrayAsync();
+                    // ImageDecoder resamples rasters at decode time (a 3000x3000 JPEG never
+                    // materializes at full size) and rasterizes SVG logos, which Avalonia's
+                    // own decoder can't touch.
+                    var bmp = Helpers.ImageDecoder.Decode(bytes, DecodeTargetWidth);
+                    if (bmp == null)
+                    {
+                        _cache[key] = null;
+                        return null;
+                    }
                     // Persist the downscaled bitmap (PNG) so the next launch
                     // skips both the HTTP fetch AND the heavyweight re-decode.
                     try { bmp.Save(diskPath); } catch { }

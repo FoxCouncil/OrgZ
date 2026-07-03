@@ -4850,7 +4850,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var bytes = await _faviconHttp.GetByteArrayAsync(url);
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _faviconHttp.GetByteArrayAsync(url));
             var bitmap = BitmapFromBytes(bytes);
             if (bitmap == null) return;
             UI(() =>
@@ -4879,7 +4879,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var bytes = await _faviconHttp.GetByteArrayAsync(url);
+            // SVG station logos become PNG bytes here, so the bitmap decode below AND the
+            // OS now-playing surfaces (SMTC/macOS) all receive something they can render.
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _faviconHttp.GetByteArrayAsync(url));
             var bitmap = BitmapFromBytes(bytes);
             if (bitmap != null)
             {
@@ -4982,8 +4984,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var stream = new MemoryStream(bytes);
-            return new Bitmap(stream);
+            var decoded = Helpers.ImageDecoder.Decode(bytes);
+            if (decoded != null)
+            {
+                return decoded;
+            }
         }
         catch { }
 

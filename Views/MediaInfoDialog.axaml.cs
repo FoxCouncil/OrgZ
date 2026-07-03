@@ -183,10 +183,10 @@ public partial class MediaInfoDialog : Window
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
             var bytes = await http.GetByteArrayAsync(url);
 
-            using var stream = new MemoryStream(bytes);
-            var bmp = Bitmap.DecodeToWidth(stream, 200);
+            // Handles SVG station logos too - Avalonia's own decoder is raster-only.
+            var bmp = Helpers.ImageDecoder.Decode(bytes, 200);
 
-            if (SummaryArt is not null)
+            if (bmp is not null && SummaryArt is not null)
             {
                 SummaryArt.Source = bmp;
             }
