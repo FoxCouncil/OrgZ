@@ -177,6 +177,8 @@
 							</ItemsControl.ItemTemplate>
 						</ItemsControl>
 
+						<Grid ColumnDefinitions="290,*" ColumnSpacing="20" Margin="0,8,0,0">
+							<StackPanel Grid.Column="0" Spacing="12">
 						<!-- Your Books - a picture list of your books (like the podcasts "Subscribed" card);
 						     "Show All" opens the full DataGrid. Click a book to play (or download) it. -->
 						<controls:PodcastsCard Title="Your Books" IsVisible="{Binding HasOwnedBooks}">
@@ -211,6 +213,72 @@
 							</controls:PodcastsCard.BodyContent>
 						</controls:PodcastsCard>
 
+						<!-- Libro.fm - the login store: the user's own DRM-free purchases. Checkout has
+						     no API and stays on libro.fm; this signs in, lists purchases, downloads. -->
+						<controls:PodcastsCard Title="Libro.fm">
+							<controls:PodcastsCard.HeaderContent>
+								<Button Command="{Binding SignOutOfLibroCommand}" IsVisible="{Binding IsLibroLoggedIn}"
+								        Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" VerticalAlignment="Center">
+									<TextBlock Text="Sign Out" FontSize="12" Foreground="{StaticResource OrgZCarouselTextBrush}" />
+								</Button>
+							</controls:PodcastsCard.HeaderContent>
+							<controls:PodcastsCard.BodyContent>
+								<StackPanel Margin="14,10" Spacing="8">
+									<StackPanel Spacing="6" IsVisible="{Binding !IsLibroLoggedIn}">
+										<TextBox Text="{Binding LibroUsername, Mode=TwoWay}" PlaceholderText="Email" FontSize="12" />
+										<TextBox Text="{Binding LibroPassword, Mode=TwoWay}" PasswordChar="●" PlaceholderText="Password" FontSize="12">
+											<TextBox.KeyBindings>
+												<KeyBinding Gesture="Enter" Command="{Binding SignInToLibroCommand}" />
+											</TextBox.KeyBindings>
+										</TextBox>
+										<Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+											<Button Grid.Column="0" Command="{Binding SignInToLibroCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,5" Cursor="Hand"
+											        Background="{StaticResource OrgZCarouselButtonBrush}" Foreground="#1A1405">
+												<TextBlock Text="Sign In" FontSize="11" FontWeight="SemiBold" />
+											</Button>
+											<Button Grid.Column="1" Click="LibroRegister_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,5" Cursor="Hand"
+											        Background="Transparent" BorderBrush="{StaticResource OrgZCarouselButtonBrush}" BorderThickness="1" Foreground="{StaticResource OrgZAccentGoldBrush}">
+												<TextBlock Text="Register" FontSize="11" FontWeight="SemiBold" />
+											</Button>
+										</Grid>
+									</StackPanel>
+
+									<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLibroBusy}" Height="4" />
+
+									<ItemsControl ItemsSource="{Binding LibroBooks}" IsVisible="{Binding IsLibroLoggedIn}">
+										<ItemsControl.ItemsPanel>
+											<ItemsPanelTemplate>
+												<UniformGrid Columns="6" />
+											</ItemsPanelTemplate>
+										</ItemsControl.ItemsPanel>
+										<ItemsControl.ItemTemplate>
+											<DataTemplate DataType="vm:LibroBookRow">
+												<Button Classes="podcastTile" Click="LibroBook_Click" Tag="{Binding}">
+													<StackPanel Spacing="4">
+														<Border Classes="tileArt" Height="110">
+															<Grid>
+																<Image img:RemoteImage.Url="{Binding Book.CoverUrl}" Stretch="UniformToFill" />
+																<i:Icon Value="fa-solid fa-circle-check" FontSize="18"
+																        Foreground="{StaticResource OrgZAccentGoldBrush}"
+																        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0"
+																        IsVisible="{Binding IsDownloaded}" />
+															</Grid>
+														</Border>
+														<TextBlock Text="{Binding Book.Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
+														<TextBlock Text="{Binding Book.AuthorDisplay}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
+													</StackPanel>
+												</Button>
+											</DataTemplate>
+										</ItemsControl.ItemTemplate>
+									</ItemsControl>
+
+									<TextBlock Text="{Binding LibroStatusText}" FontSize="11" Foreground="{StaticResource OrgZAccentGoldBrush}"
+									           IsVisible="{Binding LibroStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
+								</StackPanel>
+							</controls:PodcastsCard.BodyContent>
+						</controls:PodcastsCard>
+							</StackPanel>
+							<StackPanel Grid.Column="1" Spacing="12">
 						<controls:PodcastsCard Title="Popular">
 							<controls:PodcastsCard.BodyContent>
 								<ItemsControl ItemsSource="{Binding Popular}" Margin="8">
@@ -260,92 +328,36 @@
 								</ItemsControl>
 							</controls:PodcastsCard.BodyContent>
 						</controls:PodcastsCard>
-
-						<!-- Libro.fm - the login store: the user's own DRM-free purchases. Checkout has
-						     no API and stays on libro.fm; this signs in, lists purchases, downloads. -->
-						<controls:PodcastsCard Title="Libro.fm">
-							<controls:PodcastsCard.HeaderContent>
-								<Button Command="{Binding SignOutOfLibroCommand}" IsVisible="{Binding IsLibroLoggedIn}"
-								        Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" VerticalAlignment="Center">
-									<TextBlock Text="Sign Out" FontSize="12" Foreground="{StaticResource OrgZCarouselTextBrush}" />
-								</Button>
-							</controls:PodcastsCard.HeaderContent>
-							<controls:PodcastsCard.BodyContent>
-								<StackPanel Margin="14,10" Spacing="8">
-									<Grid ColumnDefinitions="*,*,Auto" ColumnSpacing="8" IsVisible="{Binding !IsLibroLoggedIn}">
-										<TextBox Grid.Column="0" Text="{Binding LibroUsername, Mode=TwoWay}" PlaceholderText="Email" FontSize="12" />
-										<TextBox Grid.Column="1" Text="{Binding LibroPassword, Mode=TwoWay}" PasswordChar="●" PlaceholderText="Password" FontSize="12">
-											<TextBox.KeyBindings>
-												<KeyBinding Gesture="Enter" Command="{Binding SignInToLibroCommand}" />
-											</TextBox.KeyBindings>
-										</TextBox>
-										<Button Grid.Column="2" Command="{Binding SignInToLibroCommand}" Padding="14,6" Cursor="Hand"
-										        Background="{StaticResource OrgZCarouselButtonBrush}" Foreground="#1A1405">
-											<TextBlock Text="Sign In" FontSize="12" FontWeight="SemiBold" />
-										</Button>
-									</Grid>
-
-									<ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLibroBusy}" Height="4" />
-
-									<ItemsControl ItemsSource="{Binding LibroBooks}" IsVisible="{Binding IsLibroLoggedIn}">
-										<ItemsControl.ItemsPanel>
-											<ItemsPanelTemplate>
-												<UniformGrid Columns="6" />
-											</ItemsPanelTemplate>
-										</ItemsControl.ItemsPanel>
-										<ItemsControl.ItemTemplate>
-											<DataTemplate DataType="vm:LibroBookRow">
-												<Button Classes="podcastTile" Click="LibroBook_Click" Tag="{Binding}">
-													<StackPanel Spacing="4">
-														<Border Classes="tileArt" Height="110">
-															<Grid>
-																<Image img:RemoteImage.Url="{Binding Book.CoverUrl}" Stretch="UniformToFill" />
-																<i:Icon Value="fa-solid fa-circle-check" FontSize="18"
-																        Foreground="{StaticResource OrgZAccentGoldBrush}"
-																        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0"
-																        IsVisible="{Binding IsDownloaded}" />
-															</Grid>
-														</Border>
-														<TextBlock Text="{Binding Book.Title}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource OrgZCarouselTextBrush}" TextTrimming="CharacterEllipsis" />
-														<TextBlock Text="{Binding Book.AuthorDisplay}" FontSize="10" Foreground="{StaticResource OrgZMutedTextBrush}" TextTrimming="CharacterEllipsis" />
-													</StackPanel>
-												</Button>
-											</DataTemplate>
-										</ItemsControl.ItemTemplate>
-									</ItemsControl>
-
-									<TextBlock Text="{Binding LibroStatusText}" FontSize="11" Foreground="{StaticResource OrgZAccentGoldBrush}"
-									           IsVisible="{Binding LibroStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
-								</StackPanel>
-							</controls:PodcastsCard.BodyContent>
-						</controls:PodcastsCard>
+							</StackPanel>
+						</Grid>
 					</StackPanel>
 				</ScrollViewer>
 			</Grid>
 
-			<!-- ==================== Owned (Show All): the full flat DataGrid of every book ==================== -->
+
+			<!-- ==================== Owned (Show All): a plain DataGrid under a gold header ==================== -->
 			<Grid IsVisible="{Binding IsOwned}">
-				<DataGrid ItemsSource="{Binding OwnedBooks}" SelectedItem="{Binding SelectedOwnedBook, Mode=TwoWay}"
-				          DoubleTapped="OwnedBook_DoubleTapped"
-				          AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
-				          CanUserSortColumns="False" GridLinesVisibility="Horizontal" HeadersVisibility="Column"
-				          Background="Transparent" Margin="16">
-					<DataGrid.ContextMenu>
-						<ContextMenu>
-							<MenuItem Header="Play" Command="{Binding PlayOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
-							<MenuItem Header="Re-download" Command="{Binding ReDownloadOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
-							<Separator />
-							<MenuItem Header="Remove" Command="{Binding RemoveOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
-						</ContextMenu>
-					</DataGrid.ContextMenu>
-					<DataGrid.Columns>
-						<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
-						<DataGridTextColumn Header="Author" Binding="{Binding Author}" Width="220" />
-						<DataGridTextColumn Header="Chapters" Binding="{Binding ChaptersLabel}" Width="90" />
-						<DataGridTextColumn Header="Length" Binding="{Binding DurationLabel}" Width="110" />
-						<DataGridTextColumn Header="Status" Binding="{Binding StatusLabel}" Width="140" />
-					</DataGrid.Columns>
-				</DataGrid>
+				<StackPanel Margin="16" Spacing="8">
+					<TextBlock Text="Your Books" FontSize="18" FontWeight="Bold" Foreground="{StaticResource OrgZAccentGoldBrush}" Margin="2,0,0,2" />
+					<DataGrid ItemsSource="{Binding OwnedBooks}" SelectedItem="{Binding SelectedOwnedBook, Mode=TwoWay}"
+					          DoubleTapped="OwnedBook_DoubleTapped" AutoGenerateColumns="False" IsReadOnly="True">
+						<DataGrid.ContextMenu>
+							<ContextMenu>
+								<MenuItem Header="Play" Command="{Binding PlayOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
+								<MenuItem Header="Re-download" Command="{Binding ReDownloadOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
+								<Separator />
+								<MenuItem Header="Remove" Command="{Binding RemoveOwnedBookCommand}" CommandParameter="{Binding SelectedOwnedBook}" />
+							</ContextMenu>
+						</DataGrid.ContextMenu>
+						<DataGrid.Columns>
+							<DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="*" />
+							<DataGridTextColumn Header="Author" Binding="{Binding Author}" Width="220" />
+							<DataGridTextColumn Header="Chapters" Binding="{Binding ChaptersLabel}" Width="90" />
+							<DataGridTextColumn Header="Length" Binding="{Binding DurationLabel}" Width="110" />
+							<DataGridTextColumn Header="Status" Binding="{Binding StatusLabel}" Width="140" />
+						</DataGrid.Columns>
+					</DataGrid>
+				</StackPanel>
 			</Grid>
 		</Grid>
 	</DockPanel>
