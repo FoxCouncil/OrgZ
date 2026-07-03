@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using OrgZ.Models;
 using OrgZ.ViewModels;
@@ -23,6 +24,14 @@ public partial class AudiobooksPanel : UserControl
     private void BookTile_Click(object? sender, RoutedEventArgs e)
     {
         if (Vm is { } vm && (sender as Control)?.Tag is AudiobookListing book)
+        {
+            _ = vm.OpenBookAsync(book);
+        }
+    }
+
+    private void StoreResult_DoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (Vm is { } vm && (sender as DataGrid)?.SelectedItem is AudiobookListing book)
         {
             _ = vm.OpenBookAsync(book);
         }
