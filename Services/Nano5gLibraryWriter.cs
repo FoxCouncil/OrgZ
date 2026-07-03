@@ -6,6 +6,15 @@ using Microsoft.Data.Sqlite;
 namespace OrgZ.Services;
 
 /// <summary>
+/// A Nano 5G whose <c>Locations.itdb.cbk</c> yields no hash72 seed - it's never been synced with
+/// iTunes (or its library was wiped), so there's no valid signature to re-sign against. OrgZ, like
+/// libgpod, can only RE-sign an existing cbk, not bootstrap one from scratch.
+/// </summary>
+public sealed class Nano5gNotSeededException() : InvalidOperationException(
+    "This iPod Nano 5G has never been synced with iTunes, so OrgZ can't write to it yet. " +
+    "Sync it once with iTunes to create its library, then reconnect.");
+
+/// <summary>
 /// Inserts tracks into an iPod Nano 5G <c>iTunes Library.itlp</c> SQLite set
 /// (Library.itdb + Locations.itdb + Dynamic.itdb), mirroring the row pattern iTunes
 /// writes, then re-signs <c>Locations.itdb.cbk</c> via <see cref="ITunesLocationsCbk"/>.
@@ -107,6 +116,22 @@ public sealed class Nano5gLibraryWriter
         }
     }
 
+    /// <summary>
+    /// Recovers the device's hash72 seed (iv/rnd) from a cbk that still matches Locations.itdb.
+    /// Throws <see cref="Nano5gNotSeededException"/> when either file is absent or the seed can't be
+    /// recovered - i.e. the device has never been seeded by iTunes - instead of crashing on a
+    /// missing-file read.
+    /// </summary>
+    private static (byte[] Iv, byte[] Rnd) RecoverSeedOrThrow(string locPath, string cbkPath)
+    {
+        if (File.Exists(locPath) && File.Exists(cbkPath)
+            && ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
+        {
+            return (iv, rnd);
+        }
+        throw new Nano5gNotSeededException();
+    }
+
     /// <summary>Inserts one track across the three databases and re-signs the cbk. Returns its item pid.</summary>
     public long AddTrack(TrackInsert t)
     {
@@ -116,10 +141,7 @@ public sealed class Nano5gLibraryWriter
         var cbkPath = locPath + ".cbk";
 
         // Recover the hash72 seed from the cbk while it still matches Locations.itdb.
-        if (!ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
-        {
-            throw new InvalidOperationException("Could not recover the device's hash72 seed from Locations.itdb.cbk.");
-        }
+        var (iv, rnd) = RecoverSeedOrThrow(locPath, cbkPath);
 
         long itemPid;
         long kindId;
@@ -236,10 +258,7 @@ public sealed class Nano5gLibraryWriter
         var dynPath = Path.Combine(_itlpDir, "Dynamic.itdb");
         var cbkPath = locPath + ".cbk";
 
-        if (!ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
-        {
-            throw new InvalidOperationException("Could not recover the device's hash72 seed from Locations.itdb.cbk.");
-        }
+        var (iv, rnd) = RecoverSeedOrThrow(locPath, cbkPath);
 
         long itemPid;
         long kindId;
@@ -531,10 +550,7 @@ public sealed class Nano5gLibraryWriter
         var dynPath = Path.Combine(_itlpDir, "Dynamic.itdb");
         var cbkPath = locPath + ".cbk";
 
-        if (!ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
-        {
-            throw new InvalidOperationException("Could not recover the device's hash72 seed from Locations.itdb.cbk.");
-        }
+        var (iv, rnd) = RecoverSeedOrThrow(locPath, cbkPath);
 
         string? relative;
         using (var loc = Open(locPath))
@@ -696,10 +712,7 @@ public sealed class Nano5gLibraryWriter
         var dynPath = Path.Combine(_itlpDir, "Dynamic.itdb");
         var cbkPath = locPath + ".cbk";
 
-        if (!ITunesLocationsCbk.TryExtractSeed(File.ReadAllBytes(locPath), File.ReadAllBytes(cbkPath), out var iv, out var rnd))
-        {
-            throw new InvalidOperationException("Could not recover the device's hash72 seed from Locations.itdb.cbk.");
-        }
+        var (iv, rnd) = RecoverSeedOrThrow(locPath, cbkPath);
 
         using (var lib = Open(libPath))
         {

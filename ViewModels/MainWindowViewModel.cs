@@ -5889,6 +5889,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     playlistItems.Add(deviceItem);
                     added++;
                 }
+                catch (Services.Nano5gNotSeededException)
+                {
+                    throw;   // no track will ever write - surface it once, don't tally 100 "failed"s
+                }
                 catch (Exception ex)
                 {
                     _log.Warning(ex, "Sync: failed to add {Track} to {Device}", t.FilePath, device.MountPath);
@@ -5914,6 +5918,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total}", name, device.MountPath, matched, added, failed, playlistItems.Count);
             UpdateMainStatus($"Synced “{name}” to {device.Name} — {playlistItems.Count} track(s), {added} new.");
+        }
+        catch (Services.Nano5gNotSeededException ex)
+        {
+            _log.Warning("Sync to {Device} skipped: {Reason}", device.Name, ex.Message);
+            UpdateMainStatus(ex.Message);
         }
         catch (Exception ex)
         {
@@ -6015,6 +6024,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var ipod = IPodDevice.For(dev);
+
+        // Refresh the device's library from disk FIRST, so add-dedup and the mirror pass match against
+        // what's actually on the device - a stale in-memory view was writing duplicate copies of tracks
+        // (random on-device filenames + always-insert), and mirror needs the true device set to prune.
+        await ReloadStockIPodLibraryAsync(dev);
+
         using var batch = ipod.BeginBatchWrite();
 
         if (plan.Podcasts && ipod.SupportsPodcasts)
