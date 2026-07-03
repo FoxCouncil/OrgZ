@@ -29,6 +29,9 @@ public partial class SyncSettingsDialog : Window
 
         HeaderText.Text = $"Sync “{deviceName}”";
 
+        // Auto-sync (mirror) vs manually manage (add-only). False = the safe add-only default.
+        AutomaticCheck.IsChecked = current.Automatic;
+
         // Only offer what the tier actually writes - a component the device can't carry never shows.
         PodcastsCheck.IsVisible = supportsPodcasts;
         PodcastsCheck.IsChecked = current.Podcasts;
@@ -60,6 +63,7 @@ public partial class SyncSettingsDialog : Window
     {
         var plan = new SyncPlan
         {
+            Automatic = AutomaticCheck.IsChecked == true,
             Podcasts = PodcastsCheck.IsVisible && PodcastsCheck.IsChecked == true,
             Audiobooks = AudiobooksCheck.IsVisible && AudiobooksCheck.IsChecked == true,
             Favorites = FavoritesCheck.IsVisible && FavoritesCheck.IsChecked == true,

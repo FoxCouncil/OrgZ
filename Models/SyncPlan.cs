@@ -20,6 +20,15 @@ public sealed class SyncPlan
     /// <summary>Library playlist ids to sync (each becomes/refreshes a native device playlist).</summary>
     public List<int> PlaylistIds { get; set; } = [];
 
+    /// <summary>
+    /// True = auto-sync (mirror): the device is made to MATCH this plan - selected items are added
+    /// AND anything on the device that's no longer selected is removed, like iTunes' automatic sync.
+    /// False = manually manage: add-only, never removes. False is the safe default and the value old
+    /// saved plans deserialize to, so an existing device is never surprised by a removal. Per-device,
+    /// mirroring iTunes' per-iPod "Manually manage music" choice.
+    /// </summary>
+    public bool Automatic { get; set; }
+
     public bool SyncsAnything => Podcasts || Audiobooks || Favorites || PlaylistIds.Count > 0;
 }
 
