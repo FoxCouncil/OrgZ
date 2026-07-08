@@ -123,7 +123,7 @@
 	<DockPanel>
 		<DockPanel.Styles>
 			<Style Selector="ContentPresenter, TextBlock, TextBox">
-				<Setter Property="TextElement.FontFamily" Value="Cascadia Mono,Consolas"/>
+				<Setter Property="TextElement.FontFamily" Value="{StaticResource OrgZMonoFont}"/>
 			</Style>
 		</DockPanel.Styles>
 

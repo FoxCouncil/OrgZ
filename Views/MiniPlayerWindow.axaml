@@ -17,11 +17,11 @@
 
     <Window.Styles>
 
-        <!-- Consolas across all text so the mini-player matches the main window's
-             LCD typography (size and weight differ per element; only the family
-             is unified). Mirrors the equivalent style in MainWindow.axaml. -->
+        <!-- Embedded Cascadia Mono across all text so the mini-player matches the main
+             window's LCD typography on every OS (size and weight differ per element;
+             only the family is unified). Mirrors the equivalent style in MainWindow.axaml. -->
         <Style Selector="ContentPresenter, TextBlock, TextBox">
-            <Setter Property="TextElement.FontFamily" Value="Cascadia Mono,Consolas" />
+            <Setter Property="TextElement.FontFamily" Value="{StaticResource OrgZMonoFont}" />
         </Style>
 
         <!-- Duplicate of MainWindow's slider style so the mini-player's seek and

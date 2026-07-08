@@ -135,8 +135,10 @@
 		<SolidColorBrush x:Key="OrgZCarouselDotActiveBrush" Color="{StaticResource OrgZCarouselDotActive}" />
 		<SolidColorBrush x:Key="OrgZCarouselDotInactiveBrush" Color="{StaticResource OrgZCarouselDotInactive}" />
 
-		<!-- Font -->
-		<FontFamily x:Key="OrgZMonoFont">Cascadia Mono,Consolas</FontFamily>
+		<!-- Font - embedded so the LCD/mono face is pixel-identical on Windows, macOS and
+		     Linux (Cascadia Mono / Consolas ship only on Windows). Fallbacks stay for the
+		     off chance the embedded resource fails to load. -->
+		<FontFamily x:Key="OrgZMonoFont">avares://OrgZ/Assets/Fonts/CascadiaMono.ttf#Cascadia Mono,Cascadia Mono,Consolas,monospace</FontFamily>
 
 		<!-- Padding compensation for Consolas baseline offset in AccessText -->
 		<Thickness x:Key="OrgZMonoContentPadding">11,7,11,4</Thickness>
