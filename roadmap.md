@@ -123,11 +123,17 @@ booting device counts as the oracle where libgpod can't.
   - every playlist MHIP lacked the type-100 MHOD_ID_PLAYLIST position child libgpod requires → the
     library read back as an EMPTY song list. BuildMhip now writes it.
 
+- **hash58 (Classic 6/6.5/7G, Nano 3G/4G):** ✅ the hash VALUE is now cross-checked - OrgZ's
+  `ITunesDbHash58` output is byte-identical to an INDEPENDENT from-spec implementation
+  (`OrgZ.Tests/oracle/hash58_independent.py`, which generates the AES S-box from GF(2^8) and uses
+  Python's stdlib HMAC-SHA1, sharing nothing with OrgZ but the documented `Fixed[]` constant), over the
+  committed plain fixture + a FireWire GUID (`ITunesDbHash58OracleTests`: committed golden + gated live
+  run). That rules out a porting bug in the y-derivation, zeroed regions or HMAC construction - what the
+  old self-consistency tests couldn't. The canonical libgpod-binary cross-check
+  (`itdb_hash58_write_hash`) is the further confirmation, deferred while the local Docker daemon is
+  wedged; OrgZ's tables are also independently confirmed to be the standard AES S-box / inverse.
+
 ### Tiers still to close
-- **hash58 (Classic 6/6.5/7G, Nano 3G/4G):** OrgZ's `ITunesDbHash58` is a documented port of libgpod's
-  `itdb_hash58.c` with self-consistency tests (deterministic, GUID-sensitive), but the hash VALUE has
-  never been checked against the reference. Intended proof: drive libgpod's own hasher
-  (`itdb_hash58_write_hash`) on the same DB + FireWire GUID and byte-compare. Pending.
 - **hash72 + SQLite (Nano 5G):** the write path is ✅✅ hardware-validated (a stock Nano 5G plays
   OrgZ-added tracks - the booting device is the oracle). A libgpod cross-parse of the compressed CDB is
   the software-oracle follow-up (libgpod 0.8.x CDB support unconfirmed).

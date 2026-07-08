@@ -40,3 +40,20 @@ Both fixtures are re-blessed together so a writer change can never be silently a
 3. Run `gpod_dump` on the `oracle-out` mountpoint and save its stdout to
    `Fixtures/itunesdb-write/libgpod-golden.jsonl`.
 4. Re-run the tests; both must pass.
+
+## hash58 oracle (`hash58_independent.py`)
+
+`hash58_independent.py` is a second, independent implementation of the hash58 checksum used to verify
+`ITunesDbHash58` (`ITunesDbHash58OracleTests`). It generates the AES S-box from GF(2^8) first
+principles and uses Python's stdlib HMAC-SHA1, so it shares nothing with OrgZ's port but the documented
+`Fixed[]` constant and the algorithm - agreement rules out a porting bug the self-consistency tests
+can't see. Reproduce the reference hash directly:
+
+```sh
+python OrgZ.Tests/oracle/hash58_independent.py \
+  OrgZ.Tests/Fixtures/itunesdb-write/orgz-emitted.iTunesDB 000A27001597690A
+# -> independent_hash58=a986963f9d5808bad66a167a48460cc723878ccb
+```
+
+The canonical libgpod-binary cross-check (`itdb_hash58_write_hash`) is the further confirmation still to
+add when the Docker daemon is healthy.
