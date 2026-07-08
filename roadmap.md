@@ -63,6 +63,47 @@ hardware-confirmed (✅✅); named gaps are the honest holes.
 - **Linux read path** - implemented, run on no generation.
 - **Shuffle serial via WMI on Windows** - plausible, not hardware-confirmed (no Shuffle tested).
 
+## Library read - reference-verification matrix (slice B)
+Goal: every in-scope generation's on-device library (tracks + playlists, load-bearing fields) read
+from the binary iTunesDB / iTunesSD, field-matching libgpod, proven by committed tests over real or
+libgpod-generated fixtures, across Win/Mac/Linux. Reference-verified (✅); real-bytes proven (✅✅).
+
+- **Binary iTunesDB - tracks** (1G-4G, Mini, Photo, Video 5G/5.5G, Nano 1G-4G, Classic 6/6.5/7G):
+  ✅✅ `ITunesDbReader` reads id, title/artist/album/genre/composer, path, file size, duration,
+  track/total, year, bitrate, sample-rate, play/skip counts, last-played, date-added, dbid,
+  media-type, **rating, disc#, total-discs** - proven against a real iTunes-written iPod Video 5.5G
+  database (`ITunesDbRealFixtureTests`: three untouched `mhit` records lifted off BriPod) plus
+  non-circular synthetic tests whose fixture offsets ARE the real-iTunes layout. This verification
+  caught two conformance bugs the old self-referential tests hid: rating was read from the 0x1C flag
+  byte (fixed → byte at 0x1F) and total-discs from an int32 at 0x5E that swept up the 0x60 byte and
+  returned 65536 (fixed → u16 at 0x60).
+- **Binary iTunesDB - playlists:** ✅ `ReadAll` walks MHSD type 2/3, dedups the mirrored pair, skips
+  the master + podcast playlists, preserves MHIP track order - synthetic tests (name, master-skip,
+  order, empty). The real 5.5G database's only playlist IS the master (skipped by design), so the
+  user-playlist parse is proven synthetically only - see gap.
+- **iTunesSD - Shuffle 1G/2G (classic big-endian) + 3G/4G (bdhs):** ✅ `ShuffleSdWriter.Read` /
+  `ShuffleBdhsWriter.Read` parse the on-device track list (path + file-type); byte-layout + round-trip
+  tests assert the actual on-disk structure, not just self-consistency (`ShuffleIPodTests`).
+- **The read path is proven on Win/Mac/Linux** - the iTunesDb suite (73/73, incl. the real 5.5G
+  fixture) was run green on all three: Windows (Release suite via the pre-commit hook), macOS
+  (foxmini.local, .NET 10), and Linux (a fresh `dotnet/sdk:10.0` container). One managed parser (byte
+  math + `Path.Combine`), no per-OS branch, no P/Invoke - so there was one code path to prove, and it
+  is proven, not argued. The real 5.5G bytes were also dumped and ground-truthed on macOS before being
+  frozen into the fixture.
+
+### Named gaps
+- **User-playlist parse not reference-verified against real/libgpod bytes** - the on-hand 5.5G DB
+  carries only the master playlist. Closing it needs a device with a user playlist, or a
+  libgpod-generated DB.
+- **iTunesSD proven by format-conformance + round-trip, not a real Shuffle dump** - no Shuffle in the
+  fleet yet. Structure matches the spec and our hardware-validated writer.
+- **Nano 5G library read is the SQLite tier** (`Nano5gLibraryReader`, covered by the nano5g fixture
+  suite), not binary iTunesDB/iTunesSD - out of this slice's format scope.
+- **Rockbox library is a filesystem tag-scan** (`FilesystemLibraryScanner`), no iTunes DB to parse.
+- **On-device end-to-end read on Mac/Linux** - the parser itself is now run-green on all three OSes;
+  what's still unproven is OrgZ reading a *live mounted* iPod's DB on macOS/Linux (mount discovery +
+  file access on real hardware), the same hardware-integration gap HARDWARE.md tracks (Mac column).
+
 ## Hardware validation pass
 The conformance suite proves these against synthetic devices; one session with the fleet closes
 them against metal:
