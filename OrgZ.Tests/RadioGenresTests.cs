@@ -10,7 +10,7 @@ public class RadioGenresTests
     [Theory]
     [InlineData(RadioGenre.Fifties, "50s")]
     [InlineData(RadioGenre.TwoThousands, "2000s")]
-    [InlineData(RadioGenre.AlternativeRock, "Alternative Rock")]
+    [InlineData(RadioGenre.Rock, "Rock")]
     [InlineData(RadioGenre.AmbientChillout, "Ambient/Chillout")]
     [InlineData(RadioGenre.DiscoFunk, "Disco/Funk")]
     [InlineData(RadioGenre.ElectronicDance, "Electronic/Dance")]
@@ -20,6 +20,7 @@ public class RadioGenresTests
     [InlineData(RadioGenre.NewsTalkRadio, "News/Talk Radio")]
     [InlineData(RadioGenre.SportsTalk, "Sports Talk")]
     [InlineData(RadioGenre.Synthwave, "Synthwave")]
+    [InlineData(RadioGenre.Top40Pop, "Top 40/Pop")]
     public void DisplayName_maps_genre_to_label(RadioGenre genre, string expected)
         => Assert.Equal(expected, genre.DisplayName());
 
@@ -30,7 +31,7 @@ public class RadioGenresTests
     [Fact]
     public void DisplayName_int_overload_matches_enum_and_handles_unknown()
     {
-        Assert.Equal("Jazz", RadioGenres.DisplayName((int)RadioGenre.Jazz));
+        Assert.Equal("Jazz/Blues", RadioGenres.DisplayName((int)RadioGenre.JazzBlues));
         Assert.Equal("", RadioGenres.DisplayName(9999));
     }
 
@@ -51,6 +52,18 @@ public class RadioGenresTests
         {
             Assert.Equal(genre, RadioGenres.FromDisplayName(genre.DisplayName()));
         }
+    }
+
+    [Fact]
+    public void Ids_are_display_order_contiguous_from_one()
+    {
+        // The taxonomy invariant: genre ids ARE the display order - decades first, then
+        // alphabetical - with no gaps. Adding/removing a genre means renumbering here and
+        // migrating curated.json in the same commit.
+        Assert.Equal(Enumerable.Range(1, 30), RadioGenres.All.Select(g => (int)g));
+
+        var alphabetical = RadioGenres.All.Skip(6).Select(g => g.DisplayName()).ToList();
+        Assert.Equal(alphabetical.OrderBy(n => n, StringComparer.OrdinalIgnoreCase), alphabetical);
     }
 
     [Fact]

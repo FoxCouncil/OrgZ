@@ -28,83 +28,83 @@
       },
       {
         "id": 7,
-        "name": "Alternative Rock"
-      },
-      {
-        "id": 8,
         "name": "Ambient/Chillout"
       },
       {
-        "id": 9,
+        "id": 8,
         "name": "Bluegrass"
       },
       {
-        "id": 10,
-        "name": "Blues"
-      },
-      {
-        "id": 11,
+        "id": 9,
         "name": "Classical"
       },
       {
-        "id": 12,
+        "id": 10,
         "name": "Comedy"
       },
       {
-        "id": 13,
+        "id": 11,
         "name": "Country"
       },
       {
-        "id": 14,
+        "id": 12,
         "name": "Disco/Funk"
       },
       {
-        "id": 15,
+        "id": 13,
         "name": "Electronic/Dance"
       },
       {
-        "id": 16,
+        "id": 14,
         "name": "Hip-Hop/Rap"
       },
       {
-        "id": 17,
+        "id": 15,
         "name": "Indie"
       },
       {
-        "id": 18,
-        "name": "Jazz"
+        "id": 16,
+        "name": "Jazz/Blues"
       },
       {
-        "id": 19,
+        "id": 17,
         "name": "Latin"
       },
       {
-        "id": 20,
+        "id": 18,
         "name": "Lo-Fi"
       },
       {
-        "id": 21,
+        "id": 19,
         "name": "Metal"
       },
       {
-        "id": 22,
+        "id": 20,
         "name": "Motown/Soul"
       },
       {
-        "id": 23,
+        "id": 21,
         "name": "News/Talk Radio"
       },
       {
-        "id": 24,
+        "id": 22,
+        "name": "Oldies"
+      },
+      {
+        "id": 23,
         "name": "Punk"
       },
       {
-        "id": 25,
+        "id": 24,
         "name": "Reggae"
       },
       {
-        "id": 26,
+        "id": 25,
         "name": "Religious"
+      },
+      {
+        "id": 26,
+        "name": "Rock"
       },
       {
         "id": 27,
@@ -116,6 +116,10 @@
       },
       {
         "id": 29,
+        "name": "Top 40/Pop"
+      },
+      {
+        "id": 30,
         "name": "World"
       }
     ]
@@ -127,7 +131,7 @@
       "streamUrl": "https://hawa.com.ng/stream",
       "streamFormat": "mp3",
       "bitrate": 0,
-      "genreId": 15,
+      "genreId": 13,
       "country": "Nigeria",
       "countryCode": "NG",
       "homepage": "https://hawa.com.ng/",

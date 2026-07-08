@@ -9,13 +9,13 @@ public class GenreNormalizerTests
     // -- Single-tag Normalize --
 
     [Theory]
-    [InlineData("rock", "Alternative Rock")]
-    [InlineData("Rock", "Alternative Rock")]
-    [InlineData("ROCK", "Alternative Rock")]
-    [InlineData("alternative", "Alternative Rock")]
-    [InlineData("grunge", "Alternative Rock")]
-    [InlineData("shoegaze", "Alternative Rock")]
-    [InlineData("post-punk", "Alternative Rock")]
+    [InlineData("rock", "Rock")]
+    [InlineData("Rock", "Rock")]
+    [InlineData("ROCK", "Rock")]
+    [InlineData("alternative", "Rock")]
+    [InlineData("grunge", "Rock")]
+    [InlineData("shoegaze", "Rock")]
+    [InlineData("post-punk", "Rock")]
     [InlineData("punk", "Punk")]
     [InlineData("pop punk", "Punk")]
     [InlineData("hardcore", "Punk")]
@@ -33,11 +33,11 @@ public class GenreNormalizerTests
     }
 
     [Theory]
-    [InlineData("jazz", "Jazz")]
-    [InlineData("smooth jazz", "Jazz")]
-    [InlineData("big band", "Jazz")]
-    [InlineData("blues", "Blues")]
-    [InlineData("delta blues", "Blues")]
+    [InlineData("jazz", "Jazz/Blues")]
+    [InlineData("smooth jazz", "Jazz/Blues")]
+    [InlineData("big band", "Jazz/Blues")]
+    [InlineData("blues", "Jazz/Blues")]
+    [InlineData("delta blues", "Jazz/Blues")]
     [InlineData("classical", "Classical")]
     [InlineData("opera", "Classical")]
     [InlineData("orchestra", "Classical")]
@@ -232,14 +232,29 @@ public class GenreNormalizerTests
     }
 
     [Fact]
-    public void Normalize_PopAndChartTagsAreDeliberatelyOther()
+    public void Normalize_PopAndChartTagsLandInTop40Pop()
     {
-        // The taxonomy has no pop/chart bucket - these need a human call during curation.
-        Assert.Equal("Other", GenreNormalizer.Normalize("pop"));
-        Assert.Equal("Other", GenreNormalizer.Normalize("top 40"));
-        Assert.Equal("Other", GenreNormalizer.Normalize("hits"));
-        Assert.Equal("Other", GenreNormalizer.Normalize("adult contemporary"));
+        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("pop"));
+        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("top 40"));
+        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("top40"));
+        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("hits"));
+        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("adult contemporary"));
+        Assert.Equal("Top 40/Pop", GenreNormalizer.Normalize("chr"));
+        // Genuinely genreless tags still need the human call during curation.
         Assert.Equal("Other", GenreNormalizer.Normalize("eclectic"));
+        Assert.Equal("Other", GenreNormalizer.Normalize("variety"));
+    }
+
+    [Fact]
+    public void Normalize_PopRuleDoesNotStealFromEarlierBuckets()
+    {
+        // Order is load-bearing: these all contain "pop" but belong elsewhere.
+        Assert.Equal("Punk", GenreNormalizer.Normalize("pop punk"));
+        Assert.Equal("Indie", GenreNormalizer.Normalize("indie pop"));
+        Assert.Equal("80s", GenreNormalizer.Normalize("synthpop"));
+        Assert.Equal("90s", GenreNormalizer.Normalize("britpop"));
+        Assert.Equal("World", GenreNormalizer.Normalize("k-pop"));
+        Assert.Equal("World", GenreNormalizer.Normalize("j-pop"));
     }
 
     [Fact]
@@ -260,13 +275,13 @@ public class GenreNormalizerTests
     [Fact]
     public void ExtractPrimaryGenre_CommaSeparated_ReturnsFirstMatch()
     {
-        Assert.Equal("Alternative Rock", GenreNormalizer.ExtractPrimaryGenre("rock,indie,alternative"));
+        Assert.Equal("Rock", GenreNormalizer.ExtractPrimaryGenre("rock,indie,alternative"));
     }
 
     [Fact]
     public void ExtractPrimaryGenre_UnrecognizedFirst_FallsThroughToMatch()
     {
-        Assert.Equal("Jazz", GenreNormalizer.ExtractPrimaryGenre("unrecognized,bebop,jazz"));
+        Assert.Equal("Jazz/Blues", GenreNormalizer.ExtractPrimaryGenre("unrecognized,bebop,jazz"));
     }
 
     [Fact]
@@ -292,7 +307,7 @@ public class GenreNormalizerTests
     [Fact]
     public void ExtractPrimaryGenre_Whitespace_Trimmed()
     {
-        Assert.Equal("Jazz", GenreNormalizer.ExtractPrimaryGenre("  jazz  "));
+        Assert.Equal("Jazz/Blues", GenreNormalizer.ExtractPrimaryGenre("  jazz  "));
     }
 
     [Fact]
