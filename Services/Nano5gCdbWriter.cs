@@ -40,9 +40,9 @@ public static class Nano5gCdbWriter
     public static byte[] Emit(ITunesDbDocument doc, string? fireWireGuid)
     {
         ITunesDbChunkTree.Normalize(doc.Root);
-        // CDB mhbd (db version 0x73) holds its dataset count at 0x14 - keep it in step with the tree
-        // (we add an empty dataset 9). Done here, not in Normalize, since the legacy iTunesDB mhbd
-        // stores this differently and must not be touched.
+        // mhbd dataset count lives at 0x14 for both the CDB and the legacy iTunesDB (verified against
+        // real iTunes output), so Normalize now sets it. Re-assert it here in case a caller mutated the
+        // dataset list (e.g. added an empty dataset 9) between Normalize and Serialize.
         doc.Root.WriteHeaderInt32(0x14, doc.Root.Children.Count(c => c.Magic == "mhsd"));
         var plain = ITunesDbChunkTree.Serialize(doc);
         if (plain.Length < CdbHeaderLen)

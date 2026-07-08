@@ -199,6 +199,7 @@ public class ITunesDbChunkTreeTests
         WriteAscii(mhbd, 0, "mhbd");
         WriteInt32(mhbd, 4, headerSize);
         WriteInt32(mhbd, 8, total);
+        WriteInt32(mhbd, 0x14, mhsds.Count);   // dataset count - a well-formed mhbd carries it (libgpod reads it)
         int p = headerSize;
         foreach (var m in mhsds) { Buffer.BlockCopy(m, 0, mhbd, p, m.Length); p += m.Length; }
         return mhbd;

@@ -16,12 +16,18 @@ public sealed record NewTrack
     public string? Artist { get; init; }
     public string? Album { get; init; }
     public string? Genre { get; init; }
+    public string? Composer { get; init; }
     public long FileSize { get; init; }
     public int LengthMs { get; init; }
     public int Bitrate { get; init; }
     public int SampleRate { get; init; }
     public int Year { get; init; }
     public int TrackNumber { get; init; }
+    public int TotalTracks { get; init; }
+    public int DiscNumber { get; init; }
+    public int TotalDiscs { get; init; }
+    /// <summary>iTunesDB star rating in its 0-100 scale (20 per star). Byte at mhit 0x1F.</summary>
+    public int Rating { get; init; }
     public DateTime DateAddedUtc { get; init; }
 
     /// <summary>64-bit persistent id. Must match the ArtworkDB mhii.song_id when art is attached.</summary>
@@ -134,7 +140,8 @@ public static class ITunesDbWriter
         bool referenced = false;
         foreach (var master in MasterPlaylists(doc))
         {
-            master.Children.Add(BuildMhip(track.TrackId));
+            int position = master.Children.Count(c => c.Magic == "mhip");
+            master.Children.Add(BuildMhip(track.TrackId, position));
             referenced = true;
         }
         if (!referenced)
@@ -248,7 +255,11 @@ public static class ITunesDbWriter
 
         if (addToMasterPlaylists)
         {
-            foreach (var master in MasterPlaylists(doc)) { master.Children.Add(BuildMhip(trackId)); }
+            foreach (var master in MasterPlaylists(doc))
+            {
+                int position = master.Children.Count(c => c.Magic == "mhip");
+                master.Children.Add(BuildMhip(trackId, position));
+            }
         }
         return trackId;
     }
@@ -433,9 +444,10 @@ public static class ITunesDbWriter
         {
             mhyp.Children.Add(longMhod.Clone());               // type-100 playlist-pref mhod
         }
+        int position = 0;
         foreach (var tid in trackIds)
         {
-            mhyp.Children.Add(BuildMhip(tid));
+            mhyp.Children.Add(BuildMhip(tid, position++));
         }
         playlists.Children.Add(mhyp);
 
@@ -619,12 +631,19 @@ public static class ITunesDbWriter
         // 0x08 total size + 0x0C mhod count are filled by Normalize.
         mhit.WriteHeaderInt32(0x10, (int)t.TrackId);     // unique id
         mhit.WriteHeaderInt32(0x14, 1);                  // visible
+        if (t.Rating is > 0 and <= 100)
+        {
+            mhit.Header[0x1F] = (byte)t.Rating;          // star rating (0-100), single byte
+        }
         mhit.WriteHeaderInt32(0x24, (int)t.FileSize);
         mhit.WriteHeaderInt32(0x28, t.LengthMs);
         mhit.WriteHeaderInt32(0x2C, t.TrackNumber);
+        mhit.WriteHeaderInt32(0x30, t.TotalTracks);
         mhit.WriteHeaderInt32(0x34, t.Year);
         mhit.WriteHeaderInt32(0x38, t.Bitrate);
         mhit.WriteHeaderInt32(0x3C, t.SampleRate << 16);
+        WriteUInt16(mhit.Header, 0x5C, t.DiscNumber);    // disc number (u16)
+        WriteUInt16(mhit.Header, 0x60, t.TotalDiscs);    // total discs (u16)
         mhit.WriteHeaderInt32(0x68, MacSeconds(t.DateAddedUtc));   // date added
 
         // 64-bit persistent id (links to ArtworkDB mhii.song_id). Even without
@@ -660,6 +679,7 @@ public static class ITunesDbWriter
         AddStringMhod(mhit, 3, t.Album);
         AddStringMhod(mhit, 4, t.Artist);
         AddStringMhod(mhit, 5, t.Genre);
+        AddStringMhod(mhit, 12, t.Composer);
         if (t.IsPodcast)
         {
             AddStringMhod(mhit, 14, t.Description);   // episode description
@@ -728,14 +748,34 @@ public static class ITunesDbWriter
         return mhod;
     }
 
-    private static ITunesDbChunk BuildMhip(uint trackId)
+    private static ITunesDbChunk BuildMhip(uint trackId, int position)
     {
         var mhip = new ITunesDbChunk { Magic = "mhip", Header = new byte[MhipHeaderSize] };
         WriteAscii(mhip.Header, 0, "mhip");
         mhip.WriteHeaderInt32(0x04, MhipHeaderSize);
         // 0x08 total size + 0x0C mhod count set by Normalize.
+        mhip.WriteHeaderInt32(0x14, (int)trackId);   // playlist-entry id (nonzero, as real iTunes writes)
         mhip.WriteHeaderInt32(0x18, (int)trackId);   // referenced track id
+        // libgpod (get_mhip) - and the iPod firmware - only add a track to a playlist when the MHIP
+        // carries a type-100 MHOD_ID_PLAYLIST position child. Without it the whole library reads as an
+        // empty song list even though the tracks are on disk. Proven against libgpod's itdb_parse.
+        mhip.Children.Add(BuildPlaylistPositionMhod(position));
         return mhip;
+    }
+
+    /// <summary>The per-entry position MHOD (type 100) that libgpod/the firmware require inside every
+    /// playlist MHIP: a 24-byte header + 20-byte body whose first int32 is the track's index.</summary>
+    private static ITunesDbChunk BuildPlaylistPositionMhod(int position)
+    {
+        var mhod = new ITunesDbChunk { Magic = "mhod", Header = new byte[MhodStringHeaderSize] };
+        WriteAscii(mhod.Header, 0, "mhod");
+        mhod.WriteHeaderInt32(0x04, MhodStringHeaderSize);   // header = 24
+        // 0x08 total size (= 24 + 20 = 44) set by Normalize.
+        mhod.WriteHeaderInt32(0x0C, 100);                    // MHOD_ID_PLAYLIST (position index)
+        var body = new byte[20];
+        ITunesDbChunkTree.WriteInt32(body, 0, position);     // track position in the playlist
+        mhod.Body = body;
+        return mhod;
     }
 
     private static ITunesDbChunk NewChunk(string magic, int headerSize)
@@ -766,5 +806,17 @@ public static class ITunesDbWriter
         {
             dest[offset + i] = (byte)magic[i];
         }
+    }
+
+    /// <summary>Writes a little-endian unsigned 16-bit value (disc#/total-discs live as u16s;
+    /// writing an int32 there would spill into the neighbouring field).</summary>
+    private static void WriteUInt16(byte[] dest, int offset, int value)
+    {
+        if (offset < 0 || offset + 2 > dest.Length)
+        {
+            return;
+        }
+        dest[offset] = (byte)(value & 0xFF);
+        dest[offset + 1] = (byte)((value >> 8) & 0xFF);
     }
 }
