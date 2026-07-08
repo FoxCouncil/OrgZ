@@ -7,6 +7,9 @@ namespace OrgZ.Services;
 /// delegates to the Shell.Application COM object's "Eject" verb, which is exactly
 /// what Explorer invokes when you right-click a USB drive → Eject - it flushes the
 /// volume, locks it, dismounts the filesystem, and powers down the USB port.
+/// On macOS it runs <c>diskutil eject</c>, which unmounts every volume on the disk
+/// and sends the SCSI eject - a classic iPod then withdraws its medium and shows
+/// "OK to disconnect", and won't re-present storage until physically replugged.
 /// </summary>
 public static class DeviceEjector
 {
@@ -24,6 +27,9 @@ public static class DeviceEjector
             error = "mount path is empty";
             return false;
         }
+
+        // Our own volume hold would make the unmount fail with "busy" - release it first.
+        DeviceVolumeHold.Release(mountPath);
 
 #if WINDOWS
         try
@@ -67,8 +73,53 @@ public static class DeviceEjector
             return false;
         }
 #else
-        // On macOS/Linux the mount path is under /Volumes or /media; umount(8) is the
-        // canonical path but that needs root. Leave a no-op stub for now.
+        if (OperatingSystem.IsMacOS())
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "/usr/sbin/diskutil",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                psi.ArgumentList.Add("eject");
+                psi.ArgumentList.Add(mountPath.TrimEnd('/'));
+
+                using var process = System.Diagnostics.Process.Start(psi);
+                if (process == null)
+                {
+                    error = "failed to start diskutil";
+                    return false;
+                }
+
+                var stdout = process.StandardOutput.ReadToEnd();
+                var stderr = process.StandardError.ReadToEnd();
+                if (!process.WaitForExit(30_000))
+                {
+                    process.Kill(entireProcessTree: true);
+                    error = "diskutil eject timed out";
+                    return false;
+                }
+
+                if (process.ExitCode == 0)
+                {
+                    return true;
+                }
+
+                error = string.IsNullOrWhiteSpace(stderr) ? stdout.Trim() : stderr.Trim();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        // Linux: udisksctl would be the non-root path - not wired up yet.
         error = "eject not implemented on this platform";
         return false;
 #endif

@@ -332,8 +332,13 @@ public sealed class DeviceDetectionService : IDisposable
             _log.Information("Drive {MountPath} now holds a different device — hot-swap (was Serial={OldSerial} GUID={OldGuid}, now Serial={NewSerial} GUID={NewGuid})",
                 device.MountPath, existing.Serial, existing.FireWireGuid, device.Serial, device.FireWireGuid);
             _connected.Remove(device.MountPath);
+            DeviceVolumeHold.Release(device.MountPath);
             DeviceDisconnected?.Invoke(device.MountPath);
         }
+
+        // Pin the volume before announcing the device - on macOS the Finder sync agent
+        // ejects an un-held iPod volume within seconds of mount.
+        DeviceVolumeHold.Acquire(device.MountPath);
 
         _connected[device.MountPath] = device;
         _log.Information("Device connected: {MountPath} Type={DeviceType} Name={Name} Model={Model} Serial={Serial}", device.MountPath, device.DeviceType, device.Name, device.Model, device.Serial);
@@ -388,6 +393,7 @@ public sealed class DeviceDetectionService : IDisposable
     {
         if (_connected.Remove(mountPath))
         {
+            DeviceVolumeHold.Release(mountPath);
             _log.Information("Device disconnected: {MountPath}", mountPath);
             DeviceDisconnected?.Invoke(mountPath);
         }
