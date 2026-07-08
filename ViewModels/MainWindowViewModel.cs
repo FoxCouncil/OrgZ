@@ -10,6 +10,7 @@ using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using LibVLCSharp.Shared;
 using OrgZ.Services.Audiobooks;
+using OrgZ.Services.DeviceHelper;
 using System.Net.Http;
 using Serilog;
 
@@ -71,6 +72,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // concurrent paths can't interleave the steps and orphan a Media reference
     // or call Play() while libvlc is still transitioning off the previous one.
     private readonly Lock _playbackSwitchLock = new();
+
+    // Radio is single-connection: a StreamSession owns the upstream pull (ICY de-interleave
+    // or HLS client), pumps clean audio to VLC through PipeMediaInput, and raises titles off
+    // the SAME bytes - which are injected into the playing Media via SetMeta, firing the
+    // same MetaChanged event the radio handler already consumes. VLC never opens a network
+    // connection for radio. The handle pairs the session with its MediaInput so teardown
+    // can order them around the Media's own deferred dispose.
+    private sealed record RadioStreamHandle(StreamSession Session, PipeMediaInput Input) : IDisposable
+    {
+        public void Dispose()
+        {
+            Session.Dispose();
+            Input.Dispose();
+        }
+    }
+
+    private RadioStreamHandle? _radioStream;
+
+    /// <summary>Detaches the current radio stream and closes its upstream connection NOW; the returned handle's MediaInput still needs disposal after its Media (via DeferDispose).</summary>
+    private RadioStreamHandle? TakeRadioStream()
+    {
+        var handle = _radioStream;
+        _radioStream = null;
+        handle?.Session.Dispose();
+        return handle;
+    }
 
     private PlaybackContext? _playbackContext;
 
@@ -298,12 +325,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // song totals don't fit books), keyed by the "Audiobooks" label mapping.
         LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = true,  ViewConfigKey = "Audiobooks" });
 
-        if (Settings.Get("OrgZ.ShowIgnored", true))
+        if (Settings.Get("OrgZ.ShowIgnored", false))
         {
             LibraryItems.Add(new() { Name = "Ignored", Icon = "fa-solid fa-eye-slash", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "Ignored" });
         }
 
-        if (Settings.Get("OrgZ.BadFormat.ShowInSidebar", true))
+        if (Settings.Get("OrgZ.BadFormat.ShowInSidebar", false))
         {
             LibraryItems.Add(new() { Name = "Bad Format", Icon = "fa-solid fa-triangle-exclamation", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "BadFormat" });
         }
@@ -2173,6 +2200,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _mprisService?.SetMetadata(track.Title, track.Artist, track.Album, null);
         _macNowPlaying?.SetMetadata(track.Title, track.Artist, track.Album, track.Duration, _cdCoverArtBytes);
 
+        var previousRadio = TakeRadioStream();
         var previousMedia = _currentMedia;
         var previousHandler = _currentMediaMetaHandler;
         _currentMediaMetaHandler = null;
@@ -2207,7 +2235,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             CurrentTrackTimeNumber = 0;
         }
         _ = _player.Play(_currentMedia);
-        DeferDispose(previousMedia, previousHandler);
+        DeferDispose(previousMedia, previousHandler, previousRadio);
 
         ButtonPlayPauseIcon = ICON_PAUSE;
         ButtonPlayPausePadding = new Avalonia.Thickness(0);
@@ -2462,6 +2490,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _mprisService?.SetMetadata(file.Title, file.Artist, file.Album, string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri);
         _macNowPlaying?.SetMetadata(file.Title, file.Artist, file.Album, file.Duration, artBytes);
 
+        var previousRadio = TakeRadioStream();
         var previousMedia = _currentMedia;
         var previousHandler = _currentMediaMetaHandler;
         _currentMediaMetaHandler = null;
@@ -2482,7 +2511,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _lastAudiobookSaveMs = 0;
 
         _ = _player.Play(_currentMedia);
-        DeferDispose(previousMedia, previousHandler);
+        DeferDispose(previousMedia, previousHandler, previousRadio);
 
         ApplyPerTrackOptions(file);
 
@@ -2501,6 +2530,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
         // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
         CurrentAlbumArt = null;
+        _stationArtBitmap = null;
+        _stationArtBytes = null;
+        _radioTrackArtActive = false;
 
 #if WINDOWS
         _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
@@ -2513,38 +2545,76 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _ = LoadFaviconAsync(station.FaviconUrl);
         }
 
-        // Atomic swap: capture previous, build new Media, halt libvlc on the old
-        // one, hand the new one to the player, then defer the dispose of the old.
-        // The lock keeps any concurrent path out of the swap; Stop() forces libvlc's
-        // worker thread to settle on the previous Media before we Play() the next,
-        // closing the race window where Play() was being called mid-transition.
+        // Connecting is real network work (redirects, playlist walks, TLS) done by OUR
+        // StreamSession now, not libvlc - so it runs async with the podcast pattern:
+        // epoch-stamp the request, show loading immediately, re-check the epoch when the
+        // session lands so a superseded connect can't hijack whatever plays by then.
+        var epoch = NewPlaybackEpoch();
+        BeginPlayback();
+        _ = ConnectRadioAsync(station, epoch);
+
+        ApplyPerTrackOptions(station);
+
+        station.LastPlayed = DateTime.UtcNow;
+        station.PlayCount++;
+        MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
+        MediaCache.IncrementPlayCount(station.Id);
+
+        UpdateNavigationButtons();
+    }
+
+    /// <summary>Connects the single upstream pull for a station, then hands the live session to the swap. Resumes on the UI thread (launched from it).</summary>
+    private async Task ConnectRadioAsync(MediaItem station, int epoch)
+    {
+        var session = await StreamSession.ConnectAsync(station.StreamUrl!, CancellationToken.None);
+
+        // Same guard as the podcast resolve: if the user moved on mid-connect, this session
+        // must not start playing over whatever superseded it.
+        if (epoch != _playbackEpoch)
+        {
+            _log.Debug("Radio connect superseded (epoch {Epoch} != current {Current}); dropping session for {Url}", epoch, _playbackEpoch, station.StreamUrl);
+            session.Dispose();
+            return;
+        }
+
+        if (!session.IsLive)
+        {
+            _log.Warning("Radio connect failed for {Url}: {Detail}", station.StreamUrl, session.Facts.Detail);
+            session.Dispose();
+            IsPlaybackLoading = false;
+            UpdateMainStatus($"Station unreachable: {session.Facts.Detail}");
+            return;
+        }
+
+        StartRadioPlayback(session);
+    }
+
+    /// <summary>
+    /// Atomic swap onto a live session: VLC reads the session's audio through a
+    /// PipeMediaInput instead of opening its own connection. The lock keeps any concurrent
+    /// path out of the swap, exactly like the URL-based path this replaces.
+    /// </summary>
+    private void StartRadioPlayback(StreamSession session)
+    {
         lock (_playbackSwitchLock)
         {
             var previousMedia = _currentMedia;
             var previousHandler = _currentMediaMetaHandler;
+            var previousRadio = _radioStream;
+            previousRadio?.Session.Dispose();   // old station's upstream closes NOW, not when GC gets around to it
 
-            _currentMedia = new Media(_vlc, ProcessStreamUrl(station.StreamUrl!), FromType.FromLocation);
+            var pipe = session.StartPumping();
+            var input = new PipeMediaInput(pipe);
+            _radioStream = new RadioStreamHandle(session, input);
+
+            _currentMedia = new Media(_vlc, input);
             ApplyAudioNormalization(_currentMedia, null);   // radio: real-time normvol, no tag to precompute
 
-            // Radio streams over flaky uplinks need more headroom than libvlc's 1s
-            // default network buffer. Without this, the smallest server-side jitter
-            // starves the decoder and libvlc cancels the HTTP/2 stream rather than
-            // waiting for more data - observed as `local stream 1 error: Cancellation
-            // (0x8)` right after the first audio buffer arrives. 3s matches the CD
-            // path's :file-caching=3000 and is the conventional value across VLC
-            // radio guides.
-            _currentMedia.AddOption(":network-caching=3000");
-            // Auto-reconnect when the upstream drops the TCP connection. Many shoutcast
-            // / icecast servers cycle connections aggressively (especially behind CDNs);
-            // without this, a single drop ends playback instead of seamlessly resuming.
-            _currentMedia.AddOption(":http-reconnect");
-            // Stream the body in chunks instead of trying to fully buffer the response
-            // before playback starts. Required for live audio (no Content-Length).
-            _currentMedia.AddOption(":http-continuous");
-            // Standard browser UA -- libvlc's default sometimes gets blocked
-            // by upstream CDNs / firewalls. Same UA we use for the cover-art
-            // and podcast image fetchers so server logs see consistent traffic.
-            _currentMedia.AddOption(":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+            // Callback media reads through libvlc's imem-style access, so file-caching is
+            // the buffering knob (network-caching only governs VLC's own network access,
+            // which radio no longer uses - the session is the network client, with its own
+            // reconnect logic replacing :http-reconnect). 3s matches the CD path.
+            _currentMedia.AddOption(":file-caching=3000");
 
             // Capture THIS specific Media instance. When the user switches stations rapidly,
             // LibVLC can still deliver late MetaChanged events from the previous (disposed)
@@ -2555,6 +2625,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             EventHandler<MediaMetaChangedEventArgs> handler = (s, e) =>
             {
+                // Per-track artwork: injected by the session (iHeart EXTINF) or set by VLC
+                // itself when the stream embeds pictures (ogg/flac → file:// art-cache URL).
+                // Empty/absent means this track has none - fall back to the station favicon.
+                if (e.MetadataType == MetadataType.ArtworkURL)
+                {
+                    string? artUrl;
+                    lock (_playbackSwitchLock)
+                    {
+                        if (!ReferenceEquals(_currentMedia, thisMedia))
+                        {
+                            return;
+                        }
+                        artUrl = thisMedia.Meta(MetadataType.ArtworkURL);
+                    }
+                    UI(() =>
+                    {
+                        if (ReferenceEquals(_currentMedia, thisMedia))
+                        {
+                            _ = LoadRadioTrackArtAsync(artUrl);
+                        }
+                    });
+                    return;
+                }
+
                 if (e.MetadataType != MetadataType.NowPlaying)
                 {
                     return;
@@ -2579,8 +2673,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                 if (string.IsNullOrWhiteSpace(nowPlaying))
                 {
+                    // VLC clearing its own meta (startup, stream transitions) - breaks no
+                    // longer ride this channel (SetMeta rejects empties). Idempotent
+                    // branding restore, harmless at tune-in.
+                    UI(() =>
+                    {
+                        if (ReferenceEquals(_currentMedia, thisMedia))
+                        {
+                            RestoreStationBranding();
+                        }
+                    });
                     return;
                 }
+
+                // iHeart-style streams pad titles with tracking attributes - scrub before display.
+                nowPlaying = IcyMetadata.CleanStreamTitle(nowPlaying!);
 
                 UI(() =>
                 {
@@ -2619,20 +2726,72 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // is more crash-prone than the single transition Play(newMedia) performs
             // internally. The 120 ms debounce in PlayRadioStation + the lock here +
             // the deferred dispose under the same lock is the safe combination.
-            NewPlaybackEpoch();
-            BeginPlayback();
             _ = _player.Play(thisMedia);
-            DeferDispose(previousMedia, previousHandler);
+
+            // Now-playing parsed off the SAME connection the audio rides, injected on the
+            // UI thread under the swap lock, guarded against station switches - an update
+            // that lands after this Media is gone must not stamp its successor (or touch a
+            // disposed native handle). Real titles and covers ride SetMeta so the handler
+            // above stays the consumer for demuxed AND injected values alike (ArtworkURL is
+            // the same slot VLC fills when a stream embeds pictures). CLEAR states are the
+            // exception: LibVLCSharp's SetMeta throws ArgumentNullException on null AND
+            // empty strings (it killed the curator once), so ad breaks and art-less tracks
+            // bypass the meta channel and restore station branding / favicon directly.
+            string? lastInjectedArt = null;
+            session.NowPlayingChanged += nowPlaying => UI(() =>
+            {
+                var revertArt = false;
+                lock (_playbackSwitchLock)
+                {
+                    if (!ReferenceEquals(_currentMedia, thisMedia))
+                    {
+                        return;
+                    }
+                    if (nowPlaying != null)
+                    {
+                        if (nowPlaying.ArtUrl != lastInjectedArt)
+                        {
+                            lastInjectedArt = nowPlaying.ArtUrl;
+                            if (nowPlaying.ArtUrl != null)
+                            {
+                                thisMedia.SetMeta(MetadataType.ArtworkURL, nowPlaying.ArtUrl);
+                            }
+                            else
+                            {
+                                revertArt = true;   // track with art → track without: favicon returns
+                            }
+                        }
+                        thisMedia.SetMeta(MetadataType.NowPlaying, nowPlaying.Title);
+                    }
+                }
+
+                // Outside the lock - these touch UI state and kick off fetches.
+                if (nowPlaying == null)
+                {
+                    lastInjectedArt = null;
+                    RestoreStationBranding();
+                    _ = LoadRadioTrackArtAsync(null);
+                }
+                else if (revertArt)
+                {
+                    _ = LoadRadioTrackArtAsync(null);
+                }
+            });
+
+            // A fast station can deliver its first now-playing between StartPumping and the
+            // subscription above; the session keeps it in Facts, so stamp it now.
+            if (session.Facts.LiveTitle is { } earlyTitle)
+            {
+                if (session.Facts.LiveArtUrl is { } earlyArt)
+                {
+                    lastInjectedArt = earlyArt;
+                    thisMedia.SetMeta(MetadataType.ArtworkURL, earlyArt);
+                }
+                thisMedia.SetMeta(MetadataType.NowPlaying, earlyTitle);
+            }
+
+            DeferDispose(previousMedia, previousHandler, previousRadio);
         }
-
-        ApplyPerTrackOptions(station);
-
-        station.LastPlayed = DateTime.UtcNow;
-        station.PlayCount++;
-        MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
-        MediaCache.IncrementPlayCount(station.Id);
-
-        UpdateNavigationButtons();
     }
 
     /// <summary>
@@ -2881,6 +3040,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 lock (_playbackSwitchLock)
                 {
+                    var previousRadio = TakeRadioStream();
                     var previousMedia = _currentMedia;
                     var previousHandler = _currentMediaMetaHandler;
                     _currentMediaMetaHandler = null;
@@ -2914,7 +3074,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     _pendingResumeMs = savedPos is { } sp && !sp.Completed && sp.PositionMs > 10000 ? sp.PositionMs : null;
                     _lastPodcastSaveMs = _pendingResumeMs ?? 0;
                     _ = _player.Play(_currentMedia);
-                    DeferDispose(previousMedia, previousHandler);
+                    DeferDispose(previousMedia, previousHandler, previousRadio);
                 }
             }
             catch (Exception ex)
@@ -2948,9 +3108,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// to the UI dispatcher at Background priority lets the player claim its
     /// new ref and release the old one before we free the native handle.
     /// </summary>
-    private void DeferDispose(Media? media, EventHandler<MediaMetaChangedEventArgs>? metaHandler = null)
+    private void DeferDispose(Media? media, EventHandler<MediaMetaChangedEventArgs>? metaHandler = null, RadioStreamHandle? radio = null)
     {
-        if (media == null)
+        if (media == null && radio == null)
         {
             return;
         }
@@ -2964,11 +3124,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 try
                 {
-                    if (metaHandler != null)
+                    if (media != null)
                     {
-                        media.MetaChanged -= metaHandler;
+                        if (metaHandler != null)
+                        {
+                            media.MetaChanged -= metaHandler;
+                        }
+                        media.Dispose();
                     }
-                    media.Dispose();
                 }
                 catch
                 {
@@ -2976,12 +3139,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     // previous deferred dispose got there first.
                 }
             }
+            // The MediaInput outlives its Media: by the time the deferred media dispose has
+            // run, VLC's input thread is done with our Read callback and the GCHandle can go.
+            radio?.Dispose();
         }, DispatcherPriority.Background);
     }
 
     private void ClearPlayback()
     {
-        // Stopping supersedes any pending async playback (e.g. a podcast resolve in flight).
+        // Stopping supersedes any pending async playback (e.g. a podcast resolve or radio
+        // connect in flight). Closing the radio session first unblocks VLC's reader (EOF)
+        // so the Stop below never waits on a starved callback read.
+        var radio = TakeRadioStream();
         NewPlaybackEpoch();
         _playbackContext?.Release();
         _playbackContext = null;
@@ -3003,10 +3172,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _currentMedia.Dispose();
             _currentMedia = null;
         }
+        // After the Media is gone, VLC is done with the callback input.
+        radio?.Dispose();
 
         // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
         // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
         CurrentAlbumArt = null;
+        _radioTrackArtActive = false;
         CurrentTrackLine1 = string.Empty;
         CurrentTrackLine2 = string.Empty;
         CurrentTrackTime = "";
@@ -3023,35 +3195,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 #endif
 
         UpdateNavigationButtons();
-    }
-
-    private string ProcessStreamUrl(string streamUrl)
-    {
-        if (!streamUrl.Contains("yp.shoutcast.com", StringComparison.OrdinalIgnoreCase))
-        {
-            return streamUrl;
-        }
-
-        try
-        {
-            var content = _faviconHttp.GetStringAsync(streamUrl).GetAwaiter().GetResult();
-
-            // M3U format: non-# non-empty lines are stream URLs
-            foreach (var line in content.Split('\n'))
-            {
-                var trimmed = line.Trim();
-                if (!string.IsNullOrEmpty(trimmed) && !trimmed.StartsWith('#'))
-                {
-                    return trimmed;
-                }
-            }
-        }
-        catch
-        {
-            // Playlist fetch failed, fall through to original URL
-        }
-
-        return streamUrl;
     }
 
     internal void Play()
@@ -4875,6 +5018,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    // The tuned station's favicon, kept for the life of the station: it's the art floor
+    // radio falls back to whenever the current track carries no artwork of its own.
+    private Bitmap? _stationArtBitmap;
+    private byte[]? _stationArtBytes;
+
     private async Task LoadFaviconAsync(string url)
     {
         try
@@ -4887,6 +5035,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 UI(() =>
                 {
+                    _stationArtBitmap = bitmap;
+                    _stationArtBytes = bytes;
+                    // A per-track cover may have landed before the favicon finished
+                    // downloading - never stomp real track art with the station logo.
+                    if (_radioTrackArtActive)
+                    {
+                        return;
+                    }
                     // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
                     // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
                     CurrentAlbumArt = bitmap;
@@ -4902,6 +5058,87 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         catch
         {
             // Favicon unavailable, keep default icon
+        }
+    }
+
+    // True while the art slot shows a per-track cover instead of the station favicon -
+    // lets a late-finishing favicon download know not to stomp real track art.
+    private bool _radioTrackArtActive;
+
+    /// <summary>Radio LCD back to station identity (the tune-in look): name + tags, station art pushed to SMTC. UI thread only; art slot reverts separately via <see cref="LoadRadioTrackArtAsync"/>(null).</summary>
+    private void RestoreStationBranding()
+    {
+        if (CurrentStation is not { } station)
+        {
+            return;
+        }
+        CurrentTrackLine1 = station.Title ?? "Unknown Station";
+        CurrentTrackLine2 = FormatTags(station.Tags);
+#if WINDOWS
+        _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", _stationArtBytes);
+#endif
+    }
+
+    /// <summary>
+    /// Per-track radio artwork from the stream's metadata channel (iHeart EXTINF art URL,
+    /// or VLC's own file:// art-cache path for streams with embedded pictures). An empty
+    /// or missing URL means the current track has none - revert to the station favicon,
+    /// which is ALWAYS the fallback. Art is decoration: every failure lands on the favicon.
+    /// </summary>
+    private async Task LoadRadioTrackArtAsync(string? url)
+    {
+        var epoch = _playbackEpoch;
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            _radioTrackArtActive = false;
+            CurrentAlbumArt = _stationArtBitmap;
+#if WINDOWS
+            _smtcService?.UpdateMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, _stationArtBytes);
+#endif
+            _macNowPlaying?.SetMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, null, _stationArtBytes);
+            return;
+        }
+
+        try
+        {
+            // iHeart's catalog URLs arrive with a small fit() baked in (typically 200×200),
+            // but the ops parameter is server-side resizable - ask for a size worthy of the
+            // art slot instead of upscaling a thumbnail.
+            if (url.Contains("i.iheart.com/", StringComparison.OrdinalIgnoreCase))
+            {
+                url = System.Text.RegularExpressions.Regex.Replace(url, @"fit\(\d+,\d+\)", "fit(600,600)");
+            }
+
+            // VLC's art cache hands us file:// URLs; the session's injected URLs are http(s).
+            var raw = url.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
+                ? await System.IO.File.ReadAllBytesAsync(new Uri(url).LocalPath)
+                : await _faviconHttp.GetByteArrayAsync(url);
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(raw);
+            var bitmap = BitmapFromBytes(bytes);
+            if (bitmap == null)
+            {
+                return;
+            }
+            UI(() =>
+            {
+                // The fetch raced a station switch - this cover belongs to the old epoch.
+                if (epoch != _playbackEpoch)
+                {
+                    return;
+                }
+                _radioTrackArtActive = true;
+                // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
+                CurrentAlbumArt = bitmap;
+#if WINDOWS
+                _smtcService?.UpdateMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, bytes);
+#endif
+                _macNowPlaying?.SetMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, null, bytes);
+            });
+        }
+        catch
+        {
+            // Track art unavailable - the favicon (or whatever is showing) stands.
         }
     }
 
@@ -6712,6 +6949,150 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             scanCts.Dispose();
         }
+
+        await MaybeAutoReadIdentityAsync(device);
+    }
+
+    // iPods whose privileged identity read we've already attempted this session, keyed by the
+    // most stable id - so we prompt at most once per device even across folder-watcher rescans
+    // or a quick unplug/replug, and never nag after the user declines.
+    private readonly HashSet<string> _identityReadAttempted = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Automatic identity read on connect - but ONLY when the privileged helper service is
+    /// installed and can do it silently (no UAC / auth dialog). Without the service we do
+    /// NOT auto-fire a prompt; the manual info-bar affordance stays as the (deliberately
+    /// unlovely) fallback. So installing the service is what turns "click to read" into
+    /// "it's just there", with no per-connect permission prompt on any OS.
+    /// </summary>
+    private async Task MaybeAutoReadIdentityAsync(ConnectedDevice device)
+    {
+        if (!device.NeedsPrivilegedIdentity)
+        {
+            return;
+        }
+
+        if (!await DeviceHelperClient.IsAvailableAsync())
+        {
+            return;
+        }
+
+        var key = device.FireWireGuid ?? device.Serial ?? device.MountPath;
+        if (!_identityReadAttempted.Add(key))
+        {
+            return;
+        }
+
+        await ReadDeviceIdentityAsync(device);
+    }
+
+    /// <summary>
+    /// Reads the privileged iPod identity - serial + Apple OS version - that only a raw
+    /// disk read can recover (UAC on Windows, authopen on macOS), persisting anything new
+    /// to <c>/.orgz/device</c>. Returns true if a field was learned. The single source for
+    /// both the automatic read-on-connect and the manual info-bar retry.
+    /// </summary>
+    internal async Task<bool> ReadDeviceIdentityAsync(ConnectedDevice device)
+    {
+        if (device.DeviceType != DeviceType.StockIPod)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Prefer the privileged helper service - it does the raw read as root/LocalSystem
+            // with NO prompt. Only if it isn't installed do we fall back to the per-operation
+            // elevation (UAC / authopen), which is what the manual click triggers.
+            var viaService = await DeviceHelperClient.ReadIdentityAsync(device.MountPath, device.IpodGeneration);
+            if (viaService is { } svc && ApplyIdentity(device, svc.Serial, svc.FirmwareVersion, svc.ModelNumber))
+            {
+                _log.Information("Read iPod identity via helper service for {MountPath}: Version={Version} Serial={Serial}", device.MountPath, device.AppleFirmwareVersion, device.Serial);
+                return true;
+            }
+
+            var learned = false;
+            if (OperatingSystem.IsMacOS())
+            {
+                var mac = await Task.Run(() => IPodFirmwarePartition.ReadIdentityMacOS(device.MountPath, device.IpodGeneration));
+                _log.Debug("macOS firmware read diagnostic for {MountPath}:\n{Diagnostic}", device.MountPath, mac.Diagnostic);
+                learned = ApplyIdentity(device, mac.Serial, mac.Version, mac.ModelNumber);
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                // Windows already has the serial from WMI; the elevated read fills the OS version.
+                var result = await IPodFirmwareElevation.ReadAsync(device.MountPath, device.IpodGeneration);
+                if (result.UserDeclined)
+                {
+                    _log.Information("User declined elevation for iPod identity read on {MountPath}", device.MountPath);
+                }
+                else if (string.IsNullOrWhiteSpace(result.Version))
+                {
+                    _log.Warning("iPod identity read returned no version for {MountPath}: {Diagnostic}", device.MountPath, result.Diagnostic);
+                }
+                learned = ApplyIdentity(device, serial: null, version: result.Version, modelNumber: null);
+            }
+
+            if (learned)
+            {
+                _log.Information("Read iPod identity for {MountPath}: Version={Version} Serial={Serial} ModelNumber={ModelNumber}", device.MountPath, device.AppleFirmwareVersion, device.Serial, device.AppleModelNumber);
+            }
+            return learned;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Device identity read failed for {MountPath}", device.MountPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Merges freshly-read identity fields into a live device (never overwriting a value we
+    /// already have), decoding the model from a recovered serial, and persisting to
+    /// <c>/.orgz/device</c> when anything changed. Shared by the service and fallback paths.
+    /// </summary>
+    private bool ApplyIdentity(ConnectedDevice device, string? serial, string? version, string? modelNumber)
+    {
+        var learned = false;
+        var gotExactModel = false;
+        if (!string.IsNullOrWhiteSpace(serial) && string.IsNullOrWhiteSpace(device.Serial))
+        {
+            device.Serial = serial;
+            learned = true;
+            if (IPodModelDatabase.LookupBySerial(serial) is { } info)
+            {
+                device.Model = info.DisplayNameForActualCapacity(device.TotalSpace);
+                device.IpodGeneration = info.Generation;
+                device.Color = info.Color;
+                device.IsGenerationProvisional = false;
+                gotExactModel = true;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(modelNumber) && string.IsNullOrWhiteSpace(device.AppleModelNumber))
+        {
+            device.AppleModelNumber = modelNumber;
+            learned = true;
+            // The model number decodes to the exact model/colour/capacity too - use it when the
+            // serial didn't already give us one (or its suffix wasn't in the table).
+            if (!gotExactModel && IPodModelDatabase.LookupByModelNumber(modelNumber) is { } minfo)
+            {
+                device.Model = minfo.DisplayNameForActualCapacity(device.TotalSpace);
+                device.IpodGeneration = minfo.Generation;
+                device.Color = minfo.Color;
+                device.IsGenerationProvisional = false;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(version) && string.IsNullOrWhiteSpace(device.AppleFirmwareVersion))
+        {
+            device.AppleFirmwareVersion = version;
+            learned = true;
+        }
+
+        if (learned)
+        {
+            DeviceFingerprint.PersistDeviceRecord(device);
+        }
+        return learned;
     }
 
     /// <summary>
@@ -7031,12 +7412,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var pendingCts = Interlocked.Exchange(ref _radioSwitchCts, null);
         pendingCts?.Cancel();
         pendingCts?.Dispose();
+        _radioStream?.Session.Dispose();
         if (_currentMedia != null && _currentMediaMetaHandler != null)
         {
             _currentMedia.MetaChanged -= _currentMediaMetaHandler;
             _currentMediaMetaHandler = null;
         }
         _currentMedia?.Dispose();
+        _radioStream?.Input.Dispose();
+        _radioStream = null;
         _player?.Dispose();
         _vlc?.Dispose();
     }

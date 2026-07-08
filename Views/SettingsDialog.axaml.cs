@@ -37,9 +37,9 @@ public partial class SettingsDialog : Window
         FolderPathText.Text = string.IsNullOrEmpty(App.FolderPath) ? "(No folder selected)" : App.FolderPath;
         MinimizeToTrayCheck.IsChecked = Settings.Get("OrgZ.MinimizeToTray", false);
         RememberLastTrackCheck.IsChecked = Settings.Get("OrgZ.RememberLastTrack", false);
-        ShowIgnoredCheck.IsChecked = Settings.Get("OrgZ.ShowIgnored", true);
+        ShowIgnoredCheck.IsChecked = Settings.Get("OrgZ.ShowIgnored", false);
 
-        BadFormatShowCheck.IsChecked = Settings.Get("OrgZ.BadFormat.ShowInSidebar", true);
+        BadFormatShowCheck.IsChecked = Settings.Get("OrgZ.BadFormat.ShowInSidebar", false);
         BadFormatNoTitleCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoTitle", true);
         BadFormatNoArtistCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoArtist", true);
         BadFormatNoYearCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoYear", true);
