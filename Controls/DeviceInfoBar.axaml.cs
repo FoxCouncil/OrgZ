@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using OrgZ.Models;
-using OrgZ.Services;
 using OrgZ.ViewModels;
 using Serilog;
 
@@ -35,12 +34,11 @@ public partial class DeviceInfoBar : UserControl
     }
 
     /// <summary>
-    /// "Read iPod OS version..." affordance on the Software Version row. Only
-    /// active when the device is stock iPod and AppleFirmwareVersion is empty
-    /// (see <see cref="ConnectedDevice.IsAppleFirmwareReadable"/>). Spawns the
-    /// elevated CD helper to read the firmware partition; on success, updates
-    /// the live device and writes the result to <c>/.orgz/device</c> so future
-    /// non-admin scans pick it up via the merge-on-read path.
+    /// Manual retry for the privileged identity read (serial + OS version) on the Software
+    /// Version row. The read now runs automatically on first connect
+    /// (<c>MainWindowViewModel.MaybeAutoReadIdentityAsync</c>); this affordance stays as the
+    /// path back for a device where the user declined that first authorization. Both call
+    /// the same <c>ReadDeviceIdentityAsync</c>.
     /// </summary>
     private async void FirmwareValue_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -54,26 +52,16 @@ public partial class DeviceInfoBar : UserControl
             return;
         }
 
+        if (TopLevel.GetTopLevel(this)?.DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
         e.Handled = true;
         _firmwareReadInFlight = true;
         try
         {
-            var result = await IPodFirmwareElevation.ReadAsync(device.MountPath, device.IpodGeneration);
-
-            if (!string.IsNullOrWhiteSpace(result.Version))
-            {
-                device.AppleFirmwareVersion = result.Version;
-                DeviceFingerprint.PersistDeviceRecord(device);
-                _log.Information("Persisted Apple firmware version {Version} for device at {MountPath}", result.Version, device.MountPath);
-            }
-            else if (result.UserDeclined)
-            {
-                _log.Information("User declined UAC for iPod firmware read on {MountPath}", device.MountPath);
-            }
-            else
-            {
-                _log.Warning("iPod firmware read returned no version for {MountPath}: {Diagnostic}", device.MountPath, result.Diagnostic);
-            }
+            await vm.ReadDeviceIdentityAsync(device);
         }
         finally
         {

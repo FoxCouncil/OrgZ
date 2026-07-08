@@ -22,6 +22,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\OrgZ.csproj" />
+		<ProjectReference Include="..\tools\station-curator\StationCurator.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
