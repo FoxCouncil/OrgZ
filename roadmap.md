@@ -104,6 +104,36 @@ libgpod-generated fixtures, across Win/Mac/Linux. Reference-verified (✅); real
   what's still unproven is OrgZ reading a *live mounted* iPod's DB on macOS/Linux (mount discovery +
   file access on real hardware), the same hardware-integration gap HARDWARE.md tracks (Mac column).
 
+## Library write - external-oracle matrix (slice C)
+Goal: every in-scope generation's on-device library WRITTEN by OrgZ - add/remove tracks and playlists
+with the load-bearing fields, correctly signed for the tier - such that an INDEPENDENT oracle reads
+back every field and accepts it. The oracle is libgpod's own `itdb_parse` (never OrgZ's reader - that
+circularity is what hid the bugs below), via the committed `OrgZ.Tests/oracle/gpod_dump.c`; the
+booting device counts as the oracle where libgpod can't.
+
+- **Plain tier (1G-4G, Mini, Photo, Video 5G/5.5G, Nano 1G/2G):** ✅✅ libgpod reads back an
+  OrgZ-written iTunesDB with every field exact - id, title/artist/album/genre/composer, path, size,
+  duration, track/total, disc/total, year, bitrate, sample-rate, rating, dbid, date-added - and both
+  playlist forms (master + user) with correct membership and order, across add and remove
+  (`ITunesDbWriterOracleTests`, two committed scenarios: emitted bytes + libgpod golden). The oracle
+  caught three conformance bugs the self-round-trip never could:
+  - the MHBD dataset count (0x14) was never written → libgpod (and the firmware) saw zero datasets and
+    rejected the database ("no mhsd type 1"). Normalize now writes it.
+  - BuildMhit dropped rating, total-tracks, disc#, total-discs and composer → now written.
+  - every playlist MHIP lacked the type-100 MHOD_ID_PLAYLIST position child libgpod requires → the
+    library read back as an EMPTY song list. BuildMhip now writes it.
+
+### Tiers still to close
+- **hash58 (Classic 6/6.5/7G, Nano 3G/4G):** OrgZ's `ITunesDbHash58` is a documented port of libgpod's
+  `itdb_hash58.c` with self-consistency tests (deterministic, GUID-sensitive), but the hash VALUE has
+  never been checked against the reference. Intended proof: drive libgpod's own hasher
+  (`itdb_hash58_write_hash`) on the same DB + FireWire GUID and byte-compare. Pending.
+- **hash72 + SQLite (Nano 5G):** the write path is ✅✅ hardware-validated (a stock Nano 5G plays
+  OrgZ-added tracks - the booting device is the oracle). A libgpod cross-parse of the compressed CDB is
+  the software-oracle follow-up (libgpod 0.8.x CDB support unconfirmed).
+- **iTunesSD + bdhs (Shuffle 1G/2G, 3G/4G):** byte-layout + round-trip verified (slice B); no Shuffle
+  in the fleet and libgpod's iTunesSD read path is thin, so device acceptance is the metal gap.
+
 ## Hardware validation pass
 The conformance suite proves these against synthetic devices; one session with the fleet closes
 them against metal:
