@@ -32,6 +32,36 @@ arrives naturally with shared media grid v1.
 ### iPod device service
 Bundled signed USB filter driver + LocalSystem service for UAC-free device operations (USB
 control-transfer version reads, raw SCSI, sync) - the way iTunes does it.
+macOS flavor: a privileged helper (SMAppService) for the same reads - Serial (SCSI INQUIRY
+VPD 0x80) and Software Version (firmware-partition osos / USB vendor control transfer) are
+unreachable from an unprivileged process there, so a blank-SysInfo classic shows "-" for
+both today (macOS only surfaces the USB iSerial, which is the FireWire GUID).
+
+## Identity read - reference-verification matrix (slice A)
+Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope
+generation, matching libgpod, across Win/Mac/Linux read paths. Reference-verified (✅) below;
+hardware-confirmed (✅✅); named gaps are the honest holes.
+
+- **Decode (serial-suffix + model-number → model/colour/capacity):** ✅ every in-scope generation
+  (1G-4G, Mini 1G/2G, Photo, Video 5G/5.5G, Nano 1G-4G, Classic 6G/6.5G/7G, Shuffle 1G-4G),
+  `LookupBySerial_covers_every_in_scope_generation` using libgpod's own suffix table. Not the
+  Nano 5G+ SQLite tier (out of scope).
+- **Firmware formats:** both documented layouts implemented + unit-tested - board-anchored
+  SysInfo record (HDD gens) and the freemyipod `SCfg` dict (NOR gens). The HDD parser is
+  ✅✅ hardware-proven against a real iPod Video 5.5G byte fixture (`ScanSysCfg_reads_real_5_5G...`,
+  serial 8L645KA1V9M → MA446).
+- **Windows read:** ✅ WMI (`Win32_DiskDrive.SerialNumber`) surfaces the Apple serial unprivileged;
+  ✅✅ on a real 5.5G + Nano 5G. Uniform mechanism across gens.
+- **macOS/Linux read:** serial only via the raw firmware read (Apple's private iPodSBC driver
+  seals off SCSI on macOS; libgpod's `sg` path is Linux-only). HDD 5.5G ✅✅ (real bytes).
+
+### Named gaps
+- **NOR `SCfg` format is code-only, not hardware-validated** - no Nano 3G/Classic NOR dump on hand.
+- **HDD non-5.5G gens (Video 5G, Photo, 1G-4G, Mini, Classic) on macOS/Linux** - same board-anchored
+  format assumed but unproven; need one dump each.
+- **Flash gens (Nano 1G/2G, Shuffle) firmware serial on macOS/Linux** - layout unconfirmed.
+- **Linux read path** - implemented, run on no generation.
+- **Shuffle serial via WMI on Windows** - plausible, not hardware-confirmed (no Shuffle tested).
 
 ## Hardware validation pass
 The conformance suite proves these against synthetic devices; one session with the fleet closes
