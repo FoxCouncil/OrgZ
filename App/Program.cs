@@ -28,6 +28,55 @@ internal class Program
             return CdHelperMode.Run(args);
         }
 
+        // Privileged device-helper daemon mode: the installed OS service (LaunchDaemon /
+        // systemd unit / Windows service) launches OrgZ this way. It runs as root/LocalSystem,
+        // serves silent iPod identity reads over a socket/pipe, and never touches Avalonia.
+        if (Array.IndexOf(args, "--device-helper") >= 0)
+        {
+            Logging.Initialize();
+            try
+            {
+                return Services.DeviceHelper.DeviceHelperDaemon.RunAsync().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                Logging.Shutdown();
+            }
+        }
+
+        // User-session agent that triggers the macOS Removable Volumes consent prompt so the
+        // same-signed root daemon inherits the grant. Must run in a GUI session to prompt.
+        if (Array.IndexOf(args, "--device-helper-agent") >= 0)
+        {
+            Logging.Initialize();
+            try
+            {
+                var primed = Services.DeviceHelper.DeviceHelperAgent.PrimeRemovableAccess();
+                Console.WriteLine($"primed {primed} device(s)");
+                return 0;
+            }
+            finally
+            {
+                Logging.Shutdown();
+            }
+        }
+
+        // One-shot installers (self-elevating). Invoked by the "Install device helper" action.
+        if (Array.IndexOf(args, "--install-device-helper") >= 0)
+        {
+            Logging.Initialize();
+            try
+            {
+                var result = Services.DeviceHelper.DeviceHelperInstaller.InstallAsync().GetAwaiter().GetResult();
+                Console.WriteLine(result.Ok ? "installed" : $"failed: {result.Detail}");
+                return result.Ok ? 0 : 1;
+            }
+            finally
+            {
+                Logging.Shutdown();
+            }
+        }
+
         // Logging must come up first so Velopack/Avalonia init failures are captured.
         Logging.Initialize();
 
@@ -59,6 +108,13 @@ internal class Program
                 Environment.Exit(1);
             }
 #endif
+
+            // App-data stores must exist before the UI constructs - the MainWindow
+            // ctor reads them, and on a first launch on a clean machine nothing has
+            // created the directory or schema yet.
+            MediaCache.EnsureCreated();
+            Services.Podcast.PodcastCache.EnsureCreated();
+            Services.Media.AcquisitionStore.EnsureCreated();
 
             _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
