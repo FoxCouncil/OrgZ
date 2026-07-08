@@ -234,4 +234,93 @@ public class IPodFirmwarePartitionTests
         dest[offset + 2] = (byte)((value >> 16) & 0xFF);
         dest[offset + 3] = (byte)((value >> 24) & 0xFF);
     }
+
+    // ===== ScanSysCfg - reads serial + model number from the firmware SysInfo record =====
+
+    private static byte[] Ascii(string s) => System.Text.Encoding.ASCII.GetBytes(s);
+
+    // Builds the firmware SysInfo record as it actually sits on a 5.5G: the board-name string
+    // "iPod M<nn>", then the null-terminated serial a few bytes later, with the model number
+    // in the same record. Mirrors the real BriPod dump (serial 8L645KA1V9M, model MA446).
+    private static byte[] BuildSysInfoRecord(string board, string serial, string modelNumber)
+    {
+        var buf = new List<byte>();
+        buf.AddRange(Ascii(board)); buf.Add(0);        // "iPod M25\0"
+        buf.AddRange(new byte[8]);                     // padding
+        buf.AddRange(Ascii(serial)); buf.Add(0);       // serial, null-terminated
+        buf.AddRange(new byte[16]);                    // FireWire GUID region etc.
+        buf.AddRange(Ascii(modelNumber)); buf.Add(0);  // "MA446\0"
+        return buf.ToArray();
+    }
+
+    [Fact]
+    public void ScanSysCfg_reads_board_anchored_serial_and_model_number()
+    {
+        var record = BuildSysInfoRecord("iPod M25", "8L645KA1V9M", "MA446");
+        var buf = new byte[record.Length + 200];
+        Array.Copy(record, 0, buf, 60, record.Length);   // embed in a larger buffer
+
+        var (serial, model) = IPodFirmwarePartition.ScanSysCfg(buf, new System.Text.StringBuilder());
+        Assert.Equal("8L645KA1V9M", serial);
+        Assert.Equal("MA446", model);
+    }
+
+    [Fact]
+    public void ScanSysCfg_ignores_a_serial_shaped_run_with_no_board_name()
+    {
+        // A valid-looking 11-char run without an "iPod M" board name before it is firmware
+        // noise, not the serial - the whole reason we anchor (32k such runs in a real dump).
+        var buf = new byte[600];
+        Array.Copy(Ascii("8L645KA1V9M"), 0, buf, 300, 11);
+
+        var (serial, _) = IPodFirmwarePartition.ScanSysCfg(buf, new System.Text.StringBuilder());
+        Assert.Null(serial);
+    }
+
+    [Fact]
+    public void ScanSysCfg_returns_nulls_on_empty_firmware()
+    {
+        var (serial, model) = IPodFirmwarePartition.ScanSysCfg(new byte[2000], new System.Text.StringBuilder());
+        Assert.Null(serial);
+        Assert.Null(model);
+    }
+
+    [Fact]
+    public void ScanSysCfg_reads_real_5_5G_firmware_bytes()
+    {
+        // 160 bytes lifted verbatim from a real iPod Video 5.5G firmware dump (BriPod) - the
+        // SysInfo record: board name "iPod M25", serial "8L645KA1V9M", FireWire GUID, "MA446".
+        // Proves the parser against actual hardware bytes, not just synthetic ones.
+        var record = Convert.FromHexString("f800000069506f64204d32350000000000000000384c3634354b413156394d0000000000000000000000000000000000000000006653d31500270a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b6f3f9ff11000b00425531313141202000000100020000004d4134343600000000000000");
+
+        var (serial, model) = IPodFirmwarePartition.ScanSysCfg(record, new System.Text.StringBuilder());
+        Assert.Equal("8L645KA1V9M", serial);
+        Assert.Equal("MA446", model);
+    }
+
+    [Fact]
+    public void ScanSysCfg_falls_back_to_SCfg_dict_for_NOR_gens()
+    {
+        // The freemyipod 'SCfg' dictionary (Nano 3G / Classic NOR flash): 24-byte header
+        // (magic 'SCfg' LE = "gfCS", num_entries @0x14), then 20-byte entries (4-byte LE tag +
+        // 16 data). No board name, so the HDD parser misses it and the SCfg fallback takes over.
+        var buf = new List<byte>();
+        buf.AddRange(new byte[] { 0x67, 0x66, 0x43, 0x53 });          // 'SCfg' little-endian
+        buf.AddRange(new byte[16]);                                    // size/unk/version/unk
+        buf.AddRange(BitConverter.GetBytes(2));                        // num_entries @0x14
+        void Entry(string tag, string val)
+        {
+            var t = System.Text.Encoding.ASCII.GetBytes(tag);
+            buf.Add(t[3]); buf.Add(t[2]); buf.Add(t[1]); buf.Add(t[0]);   // FourCC → little-endian
+            var d = new byte[16];
+            Array.Copy(Ascii(val), d, val.Length);
+            buf.AddRange(d);
+        }
+        Entry("SrNm", "YM8290ABQ2X");   // arbitrary serial value in the dict
+        Entry("ModN", "MB147");         // Classic 6G Black 80GB model number
+
+        var (serial, model) = IPodFirmwarePartition.ScanSysCfg(buf.ToArray(), new System.Text.StringBuilder());
+        Assert.Equal("YM8290ABQ2X", serial);
+        Assert.Equal("MB147", model);
+    }
 }

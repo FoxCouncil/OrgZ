@@ -91,11 +91,27 @@ public partial class ConnectedDevice : ObservableObject
     /// device is on stock iPod OS (so reading the firmware partition would
     /// actually find a build ID we could decode). Drives the click affordance
     /// on the "Software Version" row in the info bar - Rockbox-booted iPods
-    /// never light up because Apple's osos isn't reachable from there.
+    /// never light up because Apple's osos isn't reachable from there. Windows
+    /// reads via the UAC-elevated helper, macOS via authopen (one auth dialog);
+    /// Linux has no unprivileged raw-disk path yet.
     /// </summary>
     public bool IsAppleFirmwareReadable =>
-        DeviceType == DeviceType.StockIPod
+        (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        && DeviceType == DeviceType.StockIPod
         && string.IsNullOrWhiteSpace(AppleFirmwareVersion);
+
+    /// <summary>
+    /// True when a privileged raw-disk read could still recover identity we don't have -
+    /// the OS version OR (on platforms with no unprivileged serial source, i.e. macOS) the
+    /// serial. Drives the automatic read-on-first-connect; broader than
+    /// <see cref="IsAppleFirmwareReadable"/> (which gates the info-bar affordance on the
+    /// version alone) so a device that already knows its version but not its serial still
+    /// gets read without the user hunting for a click.
+    /// </summary>
+    public bool NeedsPrivilegedIdentity =>
+        (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        && DeviceType == DeviceType.StockIPod
+        && (string.IsNullOrWhiteSpace(AppleFirmwareVersion) || string.IsNullOrWhiteSpace(Serial));
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FormatDisplay))]
@@ -113,6 +129,14 @@ public partial class ConnectedDevice : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(GenerationImage), nameof(HasGenerationImage))]
     private string? _ipodGeneration;
+
+    /// <summary>
+    /// True when <see cref="IpodGeneration"/> was only narrowed to a family from artwork
+    /// correlation IDs (no serial / model number) - enough to pick the write tier, but NOT a
+    /// confirmed identity. A spot-on model/colour/capacity requires the serial, so callers
+    /// must not treat a provisional generation as an authoritative model.
+    /// </summary>
+    public bool IsGenerationProvisional { get; set; }
 
     /// <summary>
     /// Per-generation product image lazily loaded from Assets/Devices/ipod_{slug}.png,
