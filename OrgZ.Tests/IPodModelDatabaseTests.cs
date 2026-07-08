@@ -39,6 +39,40 @@ public class IPodModelDatabaseTests
     }
 
     [Theory]
+    // CONFORMANCE: one real serial suffix per IN-SCOPE generation (the /goal scope - binary
+    // iTunesDB iPods: no-checksum 1G-4G/Mini/Photo/Video/Nano 1G-2G, hash58 Nano 3G-4G/Classic
+    // 6G-7G, iTunesSD Shuffle 1G-4G; NOT Nano 5G+ SQLite). Suffixes are from libgpod's verified
+    // serial_to_model_mapping. This is the "exact identity for EVERY in-scope generation" proof.
+    [InlineData("8L645KABLG6",  "1G",           "",       5)]   // LG6 → 8541
+    [InlineData("8L645KABMMB",  "2G",           "",      10)]   // MMB → 8737
+    [InlineData("8L645KABNRH",  "3G",           "",      10)]   // NRH → 8976
+    [InlineData("8L645KABPS9",  "4G",           "",      20)]   // PS9 → 9282
+    [InlineData("8L645KABPFW",  "Mini 1G",      "Silver", 4)]   // PFW → 9160
+    [InlineData("8L645KABS41",  "Mini 2G",      "Silver", 4)]   // S41 → 9800
+    [InlineData("8L645KABTDU",  "Photo",        "",      20)]   // TDU → A079
+    [InlineData("8L645KABWEC",  "Video 5G",     "White", 30)]   // WEC → A002
+    [InlineData("8L645KABV9M",  "Video 5.5G",   "Black", 30)]   // V9M → A446 (BriPod, real serial)
+    [InlineData("8L645KABUNA",  "Nano 1G",      "White",  1)]   // UNA → A350
+    [InlineData("8L645KABVQ5",  "Nano 2G",      "Silver", 2)]   // VQ5 → A477
+    [InlineData("8L645KABY0P",  "Nano 3G",      "Silver", 4)]   // Y0P → A978
+    [InlineData("8L645KAB37P",  "Nano 4G",      "Green",  4)]   // 37P → B663
+    [InlineData("8L645KABY5N",  "Classic 6G",   "Silver",80)]   // Y5N → B029
+    [InlineData("8L645KAB2C5",  "Classic 6.5G", "Silver",120)]  // 2C5 → B562
+    [InlineData("8L645KAB9ZS",  "Classic 7G",   "Silver",160)]  // 9ZS → C293
+    [InlineData("8L645KABRS9",  "Shuffle 1G",   "",       0)]   // RS9 → 9724 (512MB → 0GB)
+    [InlineData("8L645KABVTE",  "Shuffle 2G",   "Silver", 1)]   // VTE → A546
+    [InlineData("8L645KABA1S",  "Shuffle 3G",   "Silver", 2)]   // A1S → C306
+    [InlineData("8L645KABCMJ",  "Shuffle 4G",   "Silver", 2)]   // CMJ → C584
+    public void LookupBySerial_covers_every_in_scope_generation(string serial, string gen, string color, int gb)
+    {
+        var info = IPodModelDatabase.LookupBySerial(serial);
+        Assert.NotNull(info);
+        Assert.Equal(gen, info!.Generation);
+        Assert.Equal(color, info.Color);
+        Assert.Equal(gb, info.CapacityGb);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using System.Diagnostics;
 using System.Text;
 using System.Xml.Linq;
 using Serilog;
@@ -160,7 +161,78 @@ public static class DeviceFingerprint
             }
         }
 
+        if (hasIPodControl && string.IsNullOrWhiteSpace(device.IpodGeneration))
+        {
+            InferGenerationFromArtwork(root, device);
+        }
+
         return device;
+    }
+
+    /// <summary>
+    /// Last-resort GENERATION-FAMILY hint for a device with an empty SysInfo and no decodable
+    /// serial (macOS exposes only the USB iSerial GUID; the Apple serial lives in the firmware
+    /// partition behind the privileged read). The cover-art .ithmb correlation IDs under
+    /// iPod_Control/Artwork are assigned per generation, so the F-files iTunes left behind
+    /// identify the FAMILY. This is only enough to pick the write tier (capability rows are
+    /// identical across a family, so tier can't be wrong). It is deliberately NOT enough to
+    /// name the exact model, colour, or capacity - those come only from the serial / model
+    /// number - so it never writes <see cref="ConnectedDevice.Model"/>. A spot-on Model shows
+    /// up once the privileged firmware read recovers the serial; until then Model stays as the
+    /// honest USB string (or empty) rather than an invented "5G/5.5G" span.
+    /// </summary>
+    private static void InferGenerationFromArtwork(string root, ConnectedDevice device)
+    {
+        try
+        {
+            var artworkDir = Path.Combine(root, "iPod_Control", "Artwork");
+            if (!Directory.Exists(artworkDir))
+            {
+                return;
+            }
+
+            var ids = new HashSet<int>();
+            foreach (var file in Directory.EnumerateFiles(artworkDir, "F*.ithmb"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);   // "F1028_1"
+                var underscore = name.IndexOf('_');
+                var digits = underscore > 1 ? name[1..underscore] : name[1..];
+                if (int.TryParse(digits, out var id))
+                {
+                    ids.Add(id);
+                }
+            }
+
+            if (ids.Count == 0)
+            {
+                return;
+            }
+
+            // Family's first generation key - chosen only to select the write tier, whose
+            // capability row is identical across the family. NOT a display identity.
+            string? generation =
+                  ids.Contains(1085) || ids.Contains(1089) ? "Nano 6G"
+                : ids.Contains(1056)                       ? "Nano 5G"
+                : ids.Contains(1071) || ids.Contains(1084) ? "Nano 4G"
+                : ids.Contains(1060)                       ? (device.TotalSpace is > 0 and <= 16_000_000_000 ? "Nano 3G" : "Classic 6G")
+                : ids.Contains(1028) || ids.Contains(1029) ? "Video 5G"
+                : ids.Contains(1027) || ids.Contains(1031) ? "Nano 1G"
+                : ids.Contains(1016) || ids.Contains(1017) ? "Photo"
+                : null;
+
+            if (generation == null)
+            {
+                return;
+            }
+
+            device.IsGenerationProvisional = true;   // tier-only guess; not a confirmed identity
+            device.IpodGeneration = generation;
+            _log.Debug("Artwork correlation IDs [{Ids}] narrow the write tier to the {Generation} family (model stays unset until the serial is read)", string.Join(",", ids.Order()), generation);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Artwork-based generation inference failed at {Root}", root);
+        }
     }
 
     /// <summary>
@@ -332,6 +404,239 @@ public static class DeviceFingerprint
             _log.Warning(ex, "WMI disk query failed for {DriveName}", drive.Name);
         }
 #endif
+
+        if (OperatingSystem.IsMacOS())
+        {
+            PopulateFromIORegistry(drive, device);
+        }
+    }
+
+    /// <summary>
+    /// macOS counterpart of the WMI query: resolves the mount to its BSD device node
+    /// (via <c>mount</c>) and asks IOKit (<c>ioreg -a</c> plist) which USB device owns
+    /// that disk - the "BSD Name" of the IOMedia partition sits inside the owning USB
+    /// device's registry subtree. Classic iPods report their FireWire GUID as the USB
+    /// iSerial; the 11-char Apple serial lives only in SCSI INQUIRY VPD, which macOS
+    /// doesn't surface without a pass-through - so generation resolution falls to the
+    /// /.orgz/device record, SysInfo, or the artwork inference below.
+    /// </summary>
+    private static void PopulateFromIORegistry(DriveInfo drive, ConnectedDevice device)
+    {
+        try
+        {
+            var mountPath = drive.RootDirectory.FullName.TrimEnd('/');
+            var bsdName = ResolveMacBsdName(mountPath);
+            if (bsdName == null)
+            {
+                _log.Debug("No BSD device node found for mount {MountPath}", mountPath);
+                return;
+            }
+
+            var plist = RunProcessCapture("/usr/sbin/ioreg", "-a -r -c IOUSBHostDevice -l");
+            if (string.IsNullOrWhiteSpace(plist))
+            {
+                return;
+            }
+
+            XElement? owner = null;
+            var doc = XDocument.Parse(plist);
+            foreach (var deviceDict in doc.Root?.Element("array")?.Elements("dict") ?? [])
+            {
+                FindOwningUsbDevice(deviceDict, bsdName, ref owner);
+                if (owner != null)
+                {
+                    break;
+                }
+            }
+
+            if (owner == null)
+            {
+                _log.Debug("No USB device in the IO registry owns {BsdName}", bsdName);
+                return;
+            }
+
+            string? serial = null, product = null;
+            foreach (var (key, value) in PlistDictEntries(owner))
+            {
+                if (key is "USB Serial Number" or "kUSBSerialNumberString")
+                {
+                    serial ??= value.Value.Trim();
+                }
+                else if (key == "USB Product Name")
+                {
+                    product = value.Value.Trim();
+                }
+            }
+
+            _log.Debug("IORegistry USB device for {BsdName}: Product={Product} Serial={Serial}", bsdName, product, serial);
+
+            if (!string.IsNullOrWhiteSpace(product))
+            {
+                device.HardwareModel = CleanupUsbModelString(product);
+                if (string.IsNullOrWhiteSpace(device.Model))
+                {
+                    device.Model = CleanupUsbModelString(product);
+                }
+            }
+
+            var fwGuid = ExtractAppleFireWireGuid(serial);
+            if (fwGuid != null)
+            {
+                device.FireWireGuid = fwGuid;
+                _log.Debug("FireWire GUID extracted from USB iSerial: {FireWireGuid}", fwGuid);
+            }
+            else if (string.IsNullOrWhiteSpace(device.Serial) && !string.IsNullOrWhiteSpace(serial) && serial.Trim('0').Length > 0)
+            {
+                // No GUID pattern - some bridges report the real Apple serial as iSerial.
+                device.Serial = CleanupUsbSerial(serial);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "IORegistry query failed for {DriveName}", drive.Name);
+        }
+    }
+
+    /// <summary>
+    /// Maps a macOS mount path to its BSD device name ("disk10s3") by parsing
+    /// <c>mount</c> output - lines are "/dev/disk10s3 on /Volumes/Name (hfs, ...)".
+    /// </summary>
+    internal static string? ResolveMacBsdName(string mountPath)
+    {
+        var output = RunProcessCapture("/sbin/mount", "");
+        if (output == null)
+        {
+            return null;
+        }
+
+        foreach (var line in output.Split('\n'))
+        {
+            var onIdx = line.IndexOf(" on ", StringComparison.Ordinal);
+            var parenIdx = line.LastIndexOf(" (", StringComparison.Ordinal);
+            if (onIdx <= 0 || parenIdx <= onIdx)
+            {
+                continue;
+            }
+
+            var path = line[(onIdx + 4)..parenIdx];
+            if (string.Equals(path, mountPath, StringComparison.Ordinal) && line.StartsWith("/dev/", StringComparison.Ordinal))
+            {
+                return line[5..onIdx];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Depth-first search for the innermost registry dict that carries USB identity keys
+    /// AND whose subtree contains the target "BSD Name" - hubs also match the containment
+    /// test, so the deepest matching node is the device (or one of its interface nodes,
+    /// which carry copies of the same serial/product values).
+    /// </summary>
+    private static void FindOwningUsbDevice(XElement dict, string bsdName, ref XElement? owner)
+    {
+        if (!SubtreeContainsBsdName(dict, bsdName))
+        {
+            return;
+        }
+
+        foreach (var (key, _) in PlistDictEntries(dict))
+        {
+            // Require an actual serial key - interface nodes carry idVendor but not
+            // always the serial/product strings, and they'd win as the deepest match.
+            if (key is "USB Serial Number" or "kUSBSerialNumberString")
+            {
+                owner = dict;
+                break;
+            }
+        }
+
+        foreach (var (key, value) in PlistDictEntries(dict))
+        {
+            if (key == "IORegistryEntryChildren" && value.Name.LocalName == "array")
+            {
+                foreach (var child in value.Elements("dict"))
+                {
+                    FindOwningUsbDevice(child, bsdName, ref owner);
+                }
+            }
+        }
+    }
+
+    private static bool SubtreeContainsBsdName(XElement dict, string bsdName)
+    {
+        foreach (var (key, value) in PlistDictEntries(dict))
+        {
+            if (key == "BSD Name" && string.Equals(value.Value.Trim(), bsdName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (key == "IORegistryEntryChildren" && value.Name.LocalName == "array")
+            {
+                foreach (var child in value.Elements("dict"))
+                {
+                    if (SubtreeContainsBsdName(child, bsdName))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Enumerates a plist &lt;dict&gt; as key/value pairs - each &lt;key&gt; element is
+    /// followed by its value element.
+    /// </summary>
+    private static IEnumerable<(string Key, XElement Value)> PlistDictEntries(XElement dict)
+    {
+        string? key = null;
+        foreach (var element in dict.Elements())
+        {
+            if (element.Name.LocalName == "key")
+            {
+                key = element.Value.Trim();
+            }
+            else if (key != null)
+            {
+                yield return (key, element);
+                key = null;
+            }
+        }
+    }
+
+    private static string? RunProcessCapture(string fileName, string arguments)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (process == null)
+            {
+                return null;
+            }
+
+            var output = process.StandardOutput.ReadToEnd();
+            if (!process.WaitForExit(10_000))
+            {
+                process.Kill(entireProcessTree: true);
+                return null;
+            }
+            return output;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Process capture failed: {FileName} {Arguments}", fileName, arguments);
+            return null;
+        }
     }
 
     /// <summary>
