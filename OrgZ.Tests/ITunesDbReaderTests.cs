@@ -81,11 +81,6 @@ public class ITunesDbReaderTests : IDisposable
         Assert.Equal(1982, t.Year);
         Assert.Equal(1, t.TrackNumber);
         Assert.Equal(8, t.TotalTracks);
-        // NB: DiscNumber/TotalDiscs are not asserted here. The reader pulls both as
-        // overlapping int32s (offsets 92 + 94), so they corrupt each other when both
-        // are non-zero. That's a known limitation in the reader's binary layout
-        // assumptions - the iTunesDB spec puts them at offsets 92/94 as int16s.
-        // Covered as a separate documented-limitation test below.
         Assert.Equal(213_000, t.DurationMs);
         Assert.Equal(5_120_000, t.FileSize);
         Assert.Equal(192, t.Bitrate);
@@ -179,24 +174,22 @@ public class ITunesDbReaderTests : IDisposable
         Assert.Equal("アルバム ☆ Album", tracks[0].Album);
     }
 
-    [Fact]
-    public void Read_DiscNumber_when_TotalDiscs_zero_round_trips_cleanly()
+    [Theory]
+    // Disc + total discs at the real-iTunes offsets (0x5C / 0x60), including the "2 of 3"
+    // case that the old overlapping-int32 read returned as 65536. Rating byte at 0x1F.
+    [InlineData(1, 1, 0)]     // single-disc album
+    [InlineData(2, 3, 80)]    // disc 2 of 3, 4-star rating
+    [InlineData(0, 0, 100)]   // no disc info, 5 stars
+    public void Read_disc_total_and_rating_at_real_offsets(int disc, int total, byte rating)
     {
-        // When TotalDiscs=0, the trailing bytes are all zero so the int32 read at
-        // offset 92 picks up just the disc number we wrote. This is the ONE case
-        // where the reader's overlapping-field layout doesn't corrupt DiscNumber.
-        var track = new TestTrack
-        {
-            TrackId = 1,
-            DiscNumber = 1,
-            TotalDiscs = 0,
-        };
+        var track = new TestTrack { TrackId = 1, DiscNumber = disc, TotalDiscs = total, Rating = rating };
 
         File.WriteAllBytes(_dbPath, BuildItDb([track]));
-        var tracks = ITunesDbReader.Read(_dbPath, "F:\\");
+        var t = ITunesDbReader.Read(_dbPath, "F:\\")[0];
 
-        Assert.Equal(1, tracks[0].DiscNumber);
-        Assert.Equal(0, tracks[0].TotalDiscs);
+        Assert.Equal(disc, t.DiscNumber);
+        Assert.Equal(total, t.TotalDiscs);
+        Assert.Equal(rating, t.Rating);
     }
 
     [Fact]
@@ -559,8 +552,10 @@ public class ITunesDbReaderTests : IDisposable
         WriteInt32(mhit, 8, mhitTotal);
         WriteInt32(mhit, 12, mhods.Count);
         WriteInt32(mhit, 16, (int)t.TrackId);
-        // Rating is read as a single byte at offset 28
-        mhit[28] = t.Rating;
+        // These byte offsets match a REAL iTunes-written iTunesDB (verified on hardware), not the
+        // reader's old assumptions - that's what makes this fixture a reference oracle, not a mirror
+        // of the parser. Rating = byte @0x1F; disc# = u16 @0x5C; total discs = u16 @0x60.
+        mhit[0x1F] = t.Rating;
         WriteInt32(mhit, 36, t.FileSize);
         WriteInt32(mhit, 40, t.DurationMs);
         WriteInt32(mhit, 44, t.TrackNumber);
@@ -571,11 +566,8 @@ public class ITunesDbReaderTests : IDisposable
         WriteInt32(mhit, 60, t.SampleRateHz << 16);
         WriteInt32(mhit, 80, t.PlayCount);
         WriteInt32(mhit, 88, t.LastPlayed);
-        WriteInt32(mhit, 92, t.DiscNumber);
-        // TotalDiscs is read with ReadInt32 at offset 94, but actual iTunesDB layout
-        // packs it at offset 94 as int16 - the reader's Int32 read will pull TotalDiscs|0
-        // when both fit. To match what the reader expects, write at offset 94.
-        WriteInt32(mhit, 94, t.TotalDiscs);
+        WriteInt16(mhit, 0x5C, t.DiscNumber);
+        WriteInt16(mhit, 0x60, t.TotalDiscs);
         WriteInt32(mhit, 104, t.DateAdded);
         WriteInt32(mhit, 156, t.SkipCount);
 
@@ -633,5 +625,11 @@ public class ITunesDbReaderTests : IDisposable
         dest[offset + 1] = (byte)((value >> 8) & 0xFF);
         dest[offset + 2] = (byte)((value >> 16) & 0xFF);
         dest[offset + 3] = (byte)((value >> 24) & 0xFF);
+    }
+
+    private static void WriteInt16(byte[] dest, int offset, int value)
+    {
+        dest[offset]     = (byte)(value & 0xFF);
+        dest[offset + 1] = (byte)((value >> 8) & 0xFF);
     }
 }

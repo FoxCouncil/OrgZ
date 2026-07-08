@@ -204,9 +204,14 @@ public static class ITunesDbReader
             SampleRate = (int)((uint)ReadInt32(bytes, pos + 60) >> 16),
             PlayCount = ReadInt32(bytes, pos + 80),
             LastPlayed = ReadMacDate(ReadInt32(bytes, pos + 88)),
-            DiscNumber = ReadInt32(bytes, pos + 92),
-            TotalDiscs = ReadInt32(bytes, pos + 94),
-            Rating = bytes.Length > pos + 28 ? bytes[pos + 28] : 0,
+            // Disc number (0x5C) + total discs (0x60) are 16-bit - verified against a real
+            // iTunes-written DB: disc values sit at 0x5C, totals at 0x60 (0x5E/0x62 stay 0).
+            // The old int32 read of totals at 0x5E overlapped the disc field and returned 65536.
+            DiscNumber = ReadUInt16(bytes, pos + 0x5C),
+            TotalDiscs = ReadUInt16(bytes, pos + 0x60),
+            // Rating is the byte at 0x1F (0/20/40/60/80/100), matching libgpod. 0x1C - what the
+            // reader used to read - is a flag byte (value 1 on most real tracks), never a rating.
+            Rating = pos + 0x1F < bytes.Length ? bytes[pos + 0x1F] : 0,
             DateAdded = ReadMacDate(ReadInt32(bytes, pos + 104)),
             SkipCount = ReadInt32(bytes, pos + 156),
             Dbid = pos + 0x78 <= bytes.Length ? BitConverter.ToUInt64(bytes, pos + 0x70) : 0,
@@ -384,6 +389,12 @@ public static class ITunesDbReader
     {
         if (pos + 4 > bytes.Length) return 0;
         return bytes[pos] | (bytes[pos + 1] << 8) | (bytes[pos + 2] << 16) | (bytes[pos + 3] << 24);
+    }
+
+    private static int ReadUInt16(byte[] bytes, int pos)
+    {
+        if (pos + 2 > bytes.Length) return 0;
+        return bytes[pos] | (bytes[pos + 1] << 8);
     }
 
     private static DateTime? ReadMacDate(int macSeconds)
