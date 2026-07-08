@@ -4,10 +4,10 @@ namespace OrgZ.Models;
 
 /// <summary>
 /// Canonical radio genre taxonomy. Integer values match the genreId in
-/// <c>Assets/stations.json</c>; the loader maps each JSON entry to one of these
-/// values, and the Radio DataGrid groups by their display name. Order is
-/// decades-first (chronological), then alphabetical-by-name, for stable,
-/// predictable IDs across edits.
+/// <c>Assets/stations.json</c> and the curator's curated.json, and they ARE the display
+/// order: decades first (chronological), then alphabetical by display name. When the
+/// taxonomy changes, renumber to keep that invariant and migrate curated.json in the same
+/// commit - stations.json is regenerated wholesale by the curator's export.
 /// </summary>
 public enum RadioGenre
 {
@@ -18,30 +18,30 @@ public enum RadioGenre
     Eighties        = 4,
     Nineties        = 5,
     TwoThousands    = 6,
-    AlternativeRock = 7,
-    AmbientChillout = 8,
-    Bluegrass       = 9,
-    Blues           = 10,
-    Classical       = 11,
-    Comedy          = 12,
-    Country         = 13,
-    DiscoFunk       = 14,
-    ElectronicDance = 15,
-    HipHopRap       = 16,
-    Indie           = 17,
-    Jazz            = 18,
-    Latin           = 19,
-    LoFi            = 20,
-    Metal           = 21,
-    MotownSoul      = 22,
-    NewsTalkRadio   = 23,
-    Punk            = 24,
-    Reggae          = 25,
-    Religious       = 26,
+    AmbientChillout = 7,
+    Bluegrass       = 8,
+    Classical       = 9,
+    Comedy          = 10,
+    Country         = 11,
+    DiscoFunk       = 12,
+    ElectronicDance = 13,
+    HipHopRap       = 14,
+    Indie           = 15,
+    JazzBlues       = 16,
+    Latin           = 17,
+    LoFi            = 18,
+    Metal           = 19,
+    MotownSoul      = 20,
+    NewsTalkRadio   = 21,
+    Oldies          = 22,
+    Punk            = 23,
+    Reggae          = 24,
+    Religious       = 25,
+    Rock            = 26,
     SportsTalk      = 27,
     Synthwave       = 28,
-    World           = 29,
-    Oldies          = 30,
+    Top40Pop        = 29,
+    World           = 30,
 }
 
 public static class RadioGenres
@@ -54,10 +54,8 @@ public static class RadioGenres
         { RadioGenre.Eighties,        "80s" },
         { RadioGenre.Nineties,        "90s" },
         { RadioGenre.TwoThousands,    "2000s" },
-        { RadioGenre.AlternativeRock, "Alternative Rock" },
         { RadioGenre.AmbientChillout, "Ambient/Chillout" },
         { RadioGenre.Bluegrass,       "Bluegrass" },
-        { RadioGenre.Blues,           "Blues" },
         { RadioGenre.Classical,       "Classical" },
         { RadioGenre.Comedy,          "Comedy" },
         { RadioGenre.Country,         "Country" },
@@ -65,7 +63,7 @@ public static class RadioGenres
         { RadioGenre.ElectronicDance, "Electronic/Dance" },
         { RadioGenre.HipHopRap,       "Hip-Hop/Rap" },
         { RadioGenre.Indie,           "Indie" },
-        { RadioGenre.Jazz,            "Jazz" },
+        { RadioGenre.JazzBlues,       "Jazz/Blues" },
         { RadioGenre.Latin,           "Latin" },
         { RadioGenre.LoFi,            "Lo-Fi" },
         { RadioGenre.Metal,           "Metal" },
@@ -75,8 +73,10 @@ public static class RadioGenres
         { RadioGenre.Punk,            "Punk" },
         { RadioGenre.Reggae,          "Reggae" },
         { RadioGenre.Religious,       "Religious" },
+        { RadioGenre.Rock,            "Rock" },
         { RadioGenre.SportsTalk,      "Sports Talk" },
         { RadioGenre.Synthwave,       "Synthwave" },
+        { RadioGenre.Top40Pop,        "Top 40/Pop" },
         { RadioGenre.World,           "World" },
     };
 
@@ -93,6 +93,6 @@ public static class RadioGenres
     public static RadioGenre FromDisplayName(string? name) =>
         name != null && _byName.TryGetValue(name, out var genre) ? genre : RadioGenre.Unknown;
 
-    /// <summary>All known genres in display order.</summary>
+    /// <summary>All known genres in display order - which is id order, by invariant.</summary>
     public static IEnumerable<RadioGenre> All => _names.Keys;
 }

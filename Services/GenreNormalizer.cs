@@ -22,10 +22,8 @@ public static class GenreNormalizer
     public const string Eighties        = "80s";
     public const string Nineties        = "90s";
     public const string TwoThousands    = "2000s";
-    public const string AlternativeRock = "Alternative Rock";
     public const string AmbientChillout = "Ambient/Chillout";
     public const string Bluegrass       = "Bluegrass";
-    public const string Blues           = "Blues";
     public const string Classical       = "Classical";
     public const string Comedy          = "Comedy";
     public const string Country         = "Country";
@@ -33,7 +31,7 @@ public static class GenreNormalizer
     public const string ElectronicDance = "Electronic/Dance";
     public const string HipHopRap       = "Hip-Hop/Rap";
     public const string Indie           = "Indie";
-    public const string Jazz            = "Jazz";
+    public const string JazzBlues       = "Jazz/Blues";
     public const string Latin           = "Latin";
     public const string LoFi            = "Lo-Fi";
     public const string Metal           = "Metal";
@@ -43,8 +41,10 @@ public static class GenreNormalizer
     public const string Punk            = "Punk";
     public const string Reggae          = "Reggae";
     public const string Religious       = "Religious";
+    public const string Rock            = "Rock";
     public const string SportsTalk      = "Sports Talk";
     public const string Synthwave       = "Synthwave";
+    public const string Top40Pop        = "Top 40/Pop";
     public const string World           = "World";
     public const string Other           = "Other";
 
@@ -60,10 +60,8 @@ public static class GenreNormalizer
         Eighties,
         Nineties,
         TwoThousands,
-        AlternativeRock,
         AmbientChillout,
         Bluegrass,
-        Blues,
         Classical,
         Comedy,
         Country,
@@ -71,7 +69,7 @@ public static class GenreNormalizer
         ElectronicDance,
         HipHopRap,
         Indie,
-        Jazz,
+        JazzBlues,
         Latin,
         LoFi,
         Metal,
@@ -81,8 +79,10 @@ public static class GenreNormalizer
         Punk,
         Reggae,
         Religious,
+        Rock,
         SportsTalk,
         Synthwave,
+        Top40Pop,
         World,
         Other,
     ];
@@ -163,16 +163,16 @@ public static class GenreNormalizer
         ("metal",           Metal),
         ("hard rock",       Metal),
 
-        // -- Alternative Rock (post-punk predates the Punk rules so it lands here) --
-        ("post-punk",       AlternativeRock),
-        ("post punk",       AlternativeRock),
-        ("alternative",     AlternativeRock),
-        ("alt rock",        AlternativeRock),
-        ("alt-rock",        AlternativeRock),
-        ("modern rock",     AlternativeRock),
-        ("grunge",          AlternativeRock),
-        ("post-rock",       AlternativeRock),
-        ("shoegaze",        AlternativeRock),
+        // -- Rock (post-punk predates the Punk rules so it lands here) --
+        ("post-punk",       Rock),
+        ("post punk",       Rock),
+        ("alternative",     Rock),
+        ("alt rock",        Rock),
+        ("alt-rock",        Rock),
+        ("modern rock",     Rock),
+        ("grunge",          Rock),
+        ("post-rock",       Rock),
+        ("shoegaze",        Rock),
 
         // -- Punk (before Indie/Reggae so "pop punk" → Punk and "ska punk" → Punk) --
         ("pop punk",        Punk),
@@ -292,19 +292,17 @@ public static class GenreNormalizer
         ("singer songwriter", Country),
         ("acoustic",        Country),
 
-        // -- Jazz (before "blues" so "blues jazz" → Jazz first) --
-        ("smooth jazz",     Jazz),
-        ("big band",        Jazz),
-        ("bebop",           Jazz),
-        ("swing",           Jazz),
-        ("dixieland",       Jazz),
-        ("fusion",          Jazz),
-        ("jazz",            Jazz),
-
-        // -- Blues --
-        ("delta blues",     Blues),
-        ("chicago blues",   Blues),
-        ("blues",           Blues),
+        // -- Jazz / Blues (one bucket since July 2026) --
+        ("smooth jazz",     JazzBlues),
+        ("big band",        JazzBlues),
+        ("bebop",           JazzBlues),
+        ("swing",           JazzBlues),
+        ("dixieland",       JazzBlues),
+        ("fusion",          JazzBlues),
+        ("jazz",            JazzBlues),
+        ("delta blues",     JazzBlues),
+        ("chicago blues",   JazzBlues),
+        ("blues",           JazzBlues),
 
         // -- Classical --
         ("classical",       Classical),
@@ -376,12 +374,23 @@ public static class GenreNormalizer
         ("ethnic",          World),
         ("traditional",     World),
 
-        // -- Rock (fallback - anything still containing "rock" reads as modern rock radio) --
-        ("rock",            AlternativeRock),
+        // -- Top 40 / Pop (chart radio; AFTER World so "j-pop"/"k-pop" stay World, and the
+        //    whole-word matcher keeps "pop" out of "synthpop" which the 80s rules own) --
+        ("top 40",          Top40Pop),
+        ("top40",           Top40Pop),
+        ("chr",             Top40Pop),          // Contemporary Hit Radio, the industry term
+        ("contemporary hit", Top40Pop),
+        ("adult contemporary", Top40Pop),
+        ("hot ac",          Top40Pop),
+        ("hit music",       Top40Pop),
+        ("hits",            Top40Pop),
+        ("pop",             Top40Pop),
 
-        // Deliberately unmapped: "pop", "top 40", "hits", "adult contemporary", "eclectic",
-        // "variety" - the taxonomy has no pop/chart bucket, so those fall through to Other
-        // and get bucketed by hand during curation.
+        // -- Rock (fallback - anything still containing "rock" reads as rock radio) --
+        ("rock",            Rock),
+
+        // Deliberately unmapped: "eclectic", "variety" - genuinely genreless, so they fall
+        // through to Other and get bucketed by hand during curation.
     ];
 
     /// <summary>
