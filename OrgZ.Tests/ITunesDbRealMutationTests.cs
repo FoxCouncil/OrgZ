@@ -98,12 +98,74 @@ public class ITunesDbRealMutationTests
         var original = File.ReadAllBytes(path);
         ITunesDbReader.ReadAll(original, @"X:\", out var origTracks, out _);
         var mutated = Mutate(original, out uint addedId, out uint removedId);
+        var lines = RunOracle(oracle, mutated, out int exit);
 
-        var mount = Path.Combine(Path.GetTempPath(), "orgz-sliceD-" + Guid.NewGuid().ToString("N"));
+        // libgpod must ACCEPT the mutated real database at all - that's the structural-integrity gate.
+        Assert.True(exit == 0, "libgpod rejected the mutated real DB");
+        int trackLines = lines.Count(l => l.Contains("\"kind\":\"track\""));
+
+        // Untouched content preserved + changes applied, as libgpod sees them.
+        Assert.Equal(origTracks.Count, trackLines);                                  // +1 add, -1 remove
+        Assert.Contains(lines, l => l.Contains($"\"id\":{addedId},"));               // new track present
+        Assert.DoesNotContain(lines, l => l.Contains($"\"id\":{removedId},"));       // removed track gone
+        Assert.Contains(lines, l => l.Contains("\"kind\":\"playlist\"") && l.Contains($"\"name\":\"{NewTitle}\"")
+                                    && l.Contains($"[{addedId}]"));                  // new playlist over the new track
+    }
+
+    [Fact]
+    public void Libgpod_reads_podcasts_and_audiobooks_added_to_a_real_library()
+    {
+        var path = RealDbPath;
+        var oracle = Environment.GetEnvironmentVariable("ORGZ_GPOD_DUMP");
+        if (path is null || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
+        {
+            return;   // gated - see class summary
+        }
+
+        var original = File.ReadAllBytes(path);
+        ITunesDbReader.ReadAll(original, @"X:\", out var origTracks, out _);
+        var when = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        // Add a podcast episode + an audiobook INTO the real library, then create the Podcasts list by
+        // cloning the real master (EnsurePodcastPlaylist's real-DB path).
+        var doc = ITunesDbChunkTree.Parse(original);
+        uint epId = ITunesDbWriter.NextTrackId(doc);
+        ITunesDbWriter.AddTrack(doc, new NewTrack
+        {
+            TrackId = epId, IpodPath = ":iPod_Control:Music:F99:EP.mp3", Title = "OrgZ Episode",
+            Artist = "OrgZ", Album = "OrgZ Show", IsPodcast = true, Description = "An episode.",
+            PodcastUrl = "http://example.com/ep.mp3", PodcastRss = "http://example.com/feed.xml",
+            TimeReleased = when, FileSize = 5_000_000, LengthMs = 1_800_000, Bitrate = 128,
+            SampleRate = 44_100, DateAddedUtc = when, Dbid = 0x3000_0000_0000_0001,
+        }, addToMasterPlaylists: false);
+        uint abId = ITunesDbWriter.NextTrackId(doc);
+        ITunesDbWriter.AddTrack(doc, new NewTrack
+        {
+            TrackId = abId, IpodPath = ":iPod_Control:Music:F99:AB.m4b", Title = "OrgZ Book",
+            Artist = "OrgZ", Album = "OrgZ Book", IsAudiobook = true, FileSize = 50_000_000,
+            LengthMs = 36_000_000, Bitrate = 64, SampleRate = 44_100, DateAddedUtc = when,
+            Dbid = 0x4000_0000_0000_0001,
+        });
+        ITunesDbWriter.EnsurePodcastPlaylist(doc, new (string, uint)[] { ("OrgZ Show", epId) });
+        ITunesDbChunkTree.Normalize(doc.Root);
+        var mutated = ITunesDbChunkTree.Serialize(doc);
+
+        var lines = RunOracle(oracle, mutated, out int exit);
+        Assert.True(exit == 0, "libgpod rejected the real DB with podcasts/audiobooks added");
+        Assert.Contains(lines, l => l.Contains($"\"id\":{epId},") && l.Contains("\"mediatype\":4"));   // podcast kind
+        Assert.Contains(lines, l => l.Contains($"\"id\":{abId},") && l.Contains("\"mediatype\":8"));   // audiobook kind
+        Assert.Contains(lines, l => l.Contains("\"is_podcast\":true") && l.Contains($"[{epId}]"));     // episode is a Podcasts member
+        Assert.Equal(origTracks.Count + 2, lines.Count(l => l.Contains("\"kind\":\"track\"")));        // originals preserved
+    }
+
+    /// <summary>Writes the DB to a throwaway mountpoint and runs the libgpod oracle over it, returning
+    /// its stdout lines and exit code.</summary>
+    private static string[] RunOracle(string oracle, byte[] db, out int exitCode)
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-oracle-" + Guid.NewGuid().ToString("N"));
         var itDir = Path.Combine(mount, "iPod_Control", "iTunes");
         Directory.CreateDirectory(itDir);
-        File.WriteAllBytes(Path.Combine(itDir, "iTunesDB"), mutated);
-
+        File.WriteAllBytes(Path.Combine(itDir, "iTunesDB"), db);
         try
         {
             var psi = new ProcessStartInfo(oracle, mount)
@@ -114,21 +176,10 @@ public class ITunesDbRealMutationTests
             };
             using var proc = Process.Start(psi)!;
             string stdout = proc.StandardOutput.ReadToEnd();
-            string stderr = proc.StandardError.ReadToEnd();
+            proc.StandardError.ReadToEnd();
             proc.WaitForExit();
-
-            // libgpod must ACCEPT the mutated real database at all - that's the structural-integrity gate.
-            Assert.True(proc.ExitCode == 0, $"libgpod rejected the mutated real DB ({proc.ExitCode}): {stderr}");
-
-            var lines = stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            int trackLines = lines.Count(l => l.Contains("\"kind\":\"track\""));
-
-            // Untouched content preserved + changes applied, as libgpod sees them.
-            Assert.Equal(origTracks.Count, trackLines);                                  // +1 add, -1 remove
-            Assert.Contains(lines, l => l.Contains($"\"id\":{addedId},"));               // new track present
-            Assert.DoesNotContain(lines, l => l.Contains($"\"id\":{removedId},"));       // removed track gone
-            Assert.Contains(lines, l => l.Contains("\"kind\":\"playlist\"") && l.Contains($"\"name\":\"{NewTitle}\"")
-                                        && l.Contains($"[{addedId}]"));                  // new playlist over the new track
+            exitCode = proc.ExitCode;
+            return stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
         }
         finally
         {
