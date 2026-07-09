@@ -140,6 +140,35 @@ booting device counts as the oracle where libgpod can't.
 - **iTunesSD + bdhs (Shuffle 1G/2G, 3G/4G):** byte-layout + round-trip verified (slice B); no Shuffle
   in the fleet and libgpod's iTunesSD read path is thin, so device acceptance is the metal gap.
 
+## Real-library mutation - co-habitation matrix (slice D)
+Goal: OrgZ mutates a REAL iTunes-written iTunesDB (not one `CreateEmpty` authored) - add/remove tracks
+and playlists, re-sign for the tier - without corrupting everything iTunes put there that OrgZ doesn't
+model, and an independent oracle reads back BOTH the untouched iTunes content AND the OrgZ changes.
+Proven against a real iPod Video 5.5G database (`ITunesDbRealMutationTests`, gated on
+`ORGZ_REAL_ITUNESDB` + `ORGZ_GPOD_DUMP`; hermetic in CI).
+
+- **Preservation:** ✅✅ starting from BriPod's real DB (5 datasets, 2919 tracks, 274 albums), an
+  add-track + add-user-playlist + remove-track leaves the type-4 album table and the type-5 built-in
+  playlists **byte-for-byte identical** - the datasets `ITunesDbChunkTree` preserves as opaque survive a
+  mutation. Run green on Windows AND macOS (the writer is OS-agnostic; the mutation is byte-identical).
+- **Acceptance:** ✅✅ libgpod's `itdb_parse` accepts the mutated real DB and reads back iTunes's
+  untouched content plus the edits - 2919 tracks (2919 +1 −1), the original master "BriPod 5G"
+  preserved, the removed track gone, the new track field-exact, and a new user playlist over it. Run on
+  Linux (WSL libgpod) with the committed test.
+- **Oracle tooling:** libgpod comes from a `debian` Docker container OR - when Docker is down and
+  Homebrew has dropped the formula - `libgpod-dev` in WSL Ubuntu (`wsl -u root apt-get install`), which
+  is how this slice was proven.
+
+### Named gaps
+- **hash58 real-DB mutation + re-sign** - BriPod is the plain tier (unsigned), so re-sign was a no-op
+  here. Mutating a REAL hash58 database (Classic / Nano 3G-4G) and re-signing needs one of those
+  devices' DBs - none in the fleet. (hash58's value itself is already proven, slice C.)
+- **Device boots the mutated DB** - libgpod-accepts is proven; the firmware actually mounting an
+  OrgZ-mutated iTunes library is the metal confirmation.
+- **Removing a track that sits in a type-5 built-in playlist** - `RemoveTrack` cleans MHIPs from the
+  type-2/3 playlists only; a music track (not in Audiobooks/Podcasts) was removed here, so no orphan
+  arose, but type-5 MHIP cleanup is unverified.
+
 ## Hardware validation pass
 The conformance suite proves these against synthetic devices; one session with the fleet closes
 them against metal:
