@@ -57,3 +57,28 @@ python OrgZ.Tests/oracle/hash58_independent.py \
 
 The canonical libgpod-binary cross-check (`itdb_hash58_write_hash`) is the further confirmation still to
 add when the Docker daemon is healthy.
+
+## artwork oracle (`artwork_dump.c`)
+
+`artwork_dump.c` reads an iPod mountpoint with libgpod (`itdb_parse`, which also parses the ArtworkDB)
+and, per track, reports the artwork libgpod links to it - the linkage dbid, and the thumbnail decoded
+via `itdb_artwork_get_pixbuf`: its native dimensions and a sampled pixel. It verifies OrgZ's
+`ArtworkDbWriter` + RGB565 `.ithmb` (`ITunesDbArtworkOracleTests`).
+
+libgpod only parses the ArtworkDB for a device it recognises as supporting cover art, so the mountpoint
+needs `iPod_Control/Device/SysInfo` with a model. `get_ipod_info_from_model_number` drops **one** leading
+letter, so `ModelNumStr: MA446` → `A446` → iPod Video 5.5G (whereas `xMA446` → `MA446`, which does not
+match). Build + run (needs gdk-pixbuf as well as libgpod):
+
+```sh
+docker run --rm -v "$PWD:/src:ro" -w /work mcr.microsoft.com/dotnet/sdk:10.0 bash -lc '
+  apt-get update -qq && apt-get install -y -qq libgpod-dev libgdk-pixbuf-2.0-dev gcc pkg-config >/dev/null
+  cp -r /src/* /work/
+  gcc OrgZ.Tests/oracle/artwork_dump.c -o /tmp/artwork_dump $(pkg-config --cflags --libs libgpod-1.0 gdk-pixbuf-2.0)
+  ORGZ_ARTWORK_DUMP=/tmp/artwork_dump dotnet test OrgZ.Tests/OrgZ.Tests.csproj \
+    --filter FullyQualifiedName~ITunesDbArtworkOracle --nologo
+'
+```
+
+(When Docker is unavailable, the same works under WSL Ubuntu with `libgpod-dev` + `libgdk-pixbuf-2.0-dev`
+installed as root - that is how it was verified.)
