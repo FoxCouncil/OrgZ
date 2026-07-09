@@ -31,6 +31,7 @@ public class ITunesDbWriterOracleTests
     [
         ["simple", "orgz-emitted.iTunesDB", "libgpod-golden.jsonl"],
         ["edit", "orgz-emitted-edit.iTunesDB", "libgpod-golden-edit.jsonl"],
+        ["podcast", "orgz-emitted-podcast.iTunesDB", "libgpod-golden-podcast.jsonl"],
     ];
 
     [Theory]
@@ -89,6 +90,7 @@ public class ITunesDbWriterOracleTests
         {
             "simple" => BuildSimple(),
             "edit" => BuildEdit(),
+            "podcast" => BuildPodcast(),
             _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "unknown oracle scenario"),
         };
 
@@ -124,6 +126,53 @@ public class ITunesDbWriterOracleTests
         ITunesDbWriter.RemoveTrack(doc, 2);                     // drop track 2 (and its master MHIP)
         return doc;
     }
+
+    /// <summary>Two podcast episodes under one show + an audiobook - exercises media kinds (4/8), the
+    /// bookmark/unplayed flags, the podcast episode fields (release date, UTF-8 feed/enclosure URLs) and
+    /// the Podcasts-playlist membership + grouping that libgpod reads back.</summary>
+    private static ITunesDbDocument BuildPodcast()
+    {
+        var doc = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(doc, Episode(1, "Ep One"), addToMasterPlaylists: false);
+        ITunesDbWriter.AddTrack(doc, Episode(2, "Ep Two"), addToMasterPlaylists: false);
+        ITunesDbWriter.AddTrack(doc, new NewTrack
+        {
+            TrackId = 3,
+            IpodPath = ":iPod_Control:Music:F00:AB3.m4b",
+            Title = "My Book",
+            Artist = "Author",
+            Album = "The Book",
+            IsAudiobook = true,
+            FileSize = 50_000_000,
+            LengthMs = 36_000_000,
+            Bitrate = 64,
+            SampleRate = 44_100,
+            DateAddedUtc = Added,
+            Dbid = 0x2000_0000_0000_0003,
+        });
+        ITunesDbWriter.EnsurePodcastPlaylist(doc, new (string, uint)[] { ("The Show", 1u), ("The Show", 2u) });
+        return doc;
+    }
+
+    private static NewTrack Episode(uint id, string title) => new()
+    {
+        TrackId = id,
+        IpodPath = $":iPod_Control:Music:F00:EP{id}.mp3",
+        Title = title,
+        Artist = "Podcaster",
+        Album = "The Show",
+        IsPodcast = true,
+        Description = "An episode.",
+        PodcastUrl = "http://example.com/ep.mp3",
+        PodcastRss = "http://example.com/feed.xml",
+        TimeReleased = Added,
+        FileSize = 5_000_000,
+        LengthMs = 1_800_000,
+        Bitrate = 128,
+        SampleRate = 44_100,
+        DateAddedUtc = Added,
+        Dbid = 0x1000_0000_0000_0000UL | id,
+    };
 
     private static NewTrack Track(uint id, string file, string title, string composer, int trackNo,
         int disc, int totalDiscs, int rating, long size, int lengthMs, ulong dbid) => new()

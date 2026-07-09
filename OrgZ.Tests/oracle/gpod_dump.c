@@ -72,7 +72,15 @@ int main(int argc, char **argv)
         printf("\"skipcount\":%d,", tr->skipcount);
         printf("\"time_added\":%lld,", (long long)tr->time_added);
         printf("\"dbid\":%llu,", (unsigned long long)tr->dbid);
-        printf("\"mediatype\":%u", tr->mediatype);
+        printf("\"mediatype\":%u,", tr->mediatype);
+        printf("\"skip_shuffle\":%u,", tr->skip_when_shuffling);
+        printf("\"bookmark\":%u,", tr->remember_playback_position);
+        printf("\"unplayed\":%u,", tr->mark_unplayed);
+        printf("\"flag4\":%u,", tr->flag4);
+        printf("\"time_released\":%lld,", (long long)tr->time_released);
+        jstr("podcastrss", tr->podcastrss); printf(",");
+        jstr("podcasturl", tr->podcasturl); printf(",");
+        jstr("description", tr->description);
         printf("}\n");
     }
 

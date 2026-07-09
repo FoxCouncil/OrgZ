@@ -581,6 +581,7 @@ public static class ITunesDbWriter
             // episode's groupref) ever equals 256 - otherwise the firmware reads that group's
             // episodes as headers.
             int nextId = 0x1000;
+            int position = 0;
             foreach (var show in order)
             {
                 int groupId = nextId++;
@@ -598,6 +599,10 @@ public static class ITunesDbWriter
                     ep.WriteHeaderInt32(0x14, nextId++);         // this entry's unique id
                     ep.WriteHeaderInt32(0x18, (int)tid);         // the episode track
                     ep.WriteHeaderInt32(0x20, groupId);          // podcast grouping reference → parent group
+                    // Episodes need the type-100 MHOD_ID_PLAYLIST position child too - without it libgpod
+                    // and the firmware don't count them as members and the Podcasts menu reads empty (the
+                    // same bug the music library had). The grouping ref nests them under the show header.
+                    ep.Children.Add(BuildPlaylistPositionMhod(position++));
                     pl.Children.Add(ep);
                 }
             }
@@ -682,9 +687,9 @@ public static class ITunesDbWriter
         AddStringMhod(mhit, 12, t.Composer);
         if (t.IsPodcast)
         {
-            AddStringMhod(mhit, 14, t.Description);   // episode description
-            AddStringMhod(mhit, 15, t.PodcastUrl);    // enclosure (audio) URL
-            AddStringMhod(mhit, 16, t.PodcastRss);    // show RSS/feed URL
+            AddStringMhod(mhit, 14, t.Description);        // episode description (UTF-16 string mhod)
+            AddPlainStringMhod(mhit, 15, t.PodcastUrl);   // enclosure (audio) URL - plain UTF-8
+            AddPlainStringMhod(mhit, 16, t.PodcastRss);   // show RSS/feed URL - plain UTF-8
         }
         return mhit;
     }
@@ -728,6 +733,29 @@ public static class ITunesDbWriter
             return;
         }
         parent.Children.Add(BuildStringMhod(mhodType, text));
+    }
+
+    private static void AddPlainStringMhod(ITunesDbChunk parent, int mhodType, string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+        parent.Children.Add(BuildPlainStringMhod(mhodType, text));
+    }
+
+    /// <summary>Podcast URL/RSS mhods (types 15/16) are a plain UTF-8 string straight after the 24-byte
+    /// header - libgpod reads (total_size − header_size) raw bytes at header_size. Writing them as the
+    /// UTF-16 <see cref="BuildStringMhod"/> made libgpod/iTunes read the inner string-type "1" as the URL.</summary>
+    private static ITunesDbChunk BuildPlainStringMhod(int mhodType, string text)
+    {
+        var mhod = new ITunesDbChunk { Magic = "mhod", Header = new byte[MhodStringHeaderSize] };
+        WriteAscii(mhod.Header, 0, "mhod");
+        mhod.WriteHeaderInt32(0x04, MhodStringHeaderSize);   // header = 24
+        // 0x08 total size (= 24 + UTF-8 byte length) set by Normalize.
+        mhod.WriteHeaderInt32(0x0C, mhodType);
+        mhod.Body = Encoding.UTF8.GetBytes(text);
+        return mhod;
     }
 
     private static ITunesDbChunk BuildStringMhod(int mhodType, string text)
