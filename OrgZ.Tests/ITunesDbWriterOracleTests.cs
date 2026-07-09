@@ -84,6 +84,31 @@ public class ITunesDbWriterOracleTests
 
     // ── scenarios ─────────────────────────────────────────────────────────────
 
+    [Fact]
+    public void Podcast_grouping_nests_episodes_under_the_show_header()
+    {
+        // libgpod confirms the episodes are Podcasts members; this pins the show->episode GROUPING that
+        // the firmware renders: one group-header MHIP (grouping flag 0x100) and every episode MHIP
+        // pointing back at it via its 0x20 grouping ref, each carrying the type-100 membership MHOD.
+        var bytes = File.ReadAllBytes(Path.Combine(FixtureDir, "orgz-emitted-podcast.iTunesDB"));
+        var doc = ITunesDbChunkTree.Parse(bytes);
+
+        var podcasts = doc.Root.Children
+            .Where(m => m.Magic == "mhsd" && m.ReadHeaderInt32(0x0C) == 3)
+            .SelectMany(m => m.Children.Where(c => c.Magic == "mhyp"))
+            .Single(p => p.Header.Length > 0x2B && (p.Header[0x2A] | (p.Header[0x2B] << 8)) == 1);
+
+        var mhips = podcasts.Children.Where(c => c.Magic == "mhip").ToList();
+        var header = Assert.Single(mhips.Where(m => m.ReadHeaderInt32(0x10) == 0x100));   // one show group header
+        int groupId = header.ReadHeaderInt32(0x14);
+        var episodes = mhips.Where(m => m.ReadHeaderInt32(0x18) != 0).ToList();           // MHIPs that reference a track
+
+        Assert.Equal(2, episodes.Count);
+        Assert.All(episodes, ep => Assert.Equal(groupId, ep.ReadHeaderInt32(0x20)));      // nested under the show
+        Assert.All(episodes, ep => Assert.Contains(ep.Children,
+            c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 100));                   // + membership MHOD
+    }
+
     internal static byte[] EmitScenario(string scenario, out string mountPoint)
     {
         var doc = scenario switch

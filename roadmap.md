@@ -169,6 +169,36 @@ Proven against a real iPod Video 5.5G database (`ITunesDbRealMutationTests`, gat
   type-2/3 playlists only; a music track (not in Audiobooks/Podcasts) was removed here, so no orphan
   arose, but type-5 MHIP cleanup is unverified.
 
+## Podcasts + audiobooks - content-type matrix (slice E)
+Goal: OrgZ writes podcasts and audiobooks (into a real iTunes library) with correct media kinds, the
+Podcasts grouping, Audiobooks placement and the bookmark/unplayed flags, verified by libgpod
+(`ITunesDbWriterOracleTests` podcast scenario + `ITunesDbRealMutationTests`, run live via WSL libgpod).
+
+- **Media kinds:** ✅ libgpod reads mediatype 4 (podcast) and 8 (audiobook) back.
+- **Podcasts membership + grouping:** ✅✅ two oracle-caught bugs fixed -
+  - episode MHIPs lacked the type-100 position MHOD → libgpod counted zero members → an EMPTY Podcasts
+    menu (the same bug class as the music library). Fixed; libgpod reads members [1,2].
+  - podcast enclosure/feed URLs (mhod 15/16) were UTF-16 not plain UTF-8 → libgpod read a stray marker
+    byte. Fixed; the real URLs read back.
+  Grouping (show → episodes) is pinned structurally
+  (`Podcast_grouping_nests_episodes_under_the_show_header`: one group-header MHIP, every episode nested
+  via its 0x20 groupref + carrying the membership MHOD).
+- **Bookmark/unplayed flags:** ✅ libgpod reads skip-when-shuffling, remember-position, mark-unplayed=2
+  (new/blue dot) and flag4 for episodes; skip + remember-position for audiobooks.
+- **Into a real library:** ✅✅ adding a podcast + audiobook to BriPod's real DB creates the Podcasts
+  list by cloning the real master; libgpod confirms kinds + membership + the 2919 originals preserved.
+- **Cross-platform:** byte-repro on Windows; live libgpod on Linux (WSL); the writer is OS-agnostic.
+  (WSL `libgpod-dev` is the reliable Docker-free oracle now that Homebrew dropped the formula.)
+
+### Named gaps
+- **On-device menu placement + show→episode nesting DISPLAY** - libgpod accepts the grouping and lists
+  the members; the firmware rendering Podcasts as shows→episodes (and the Audiobooks menu) is metal.
+- **Resume playback (bookmark)** - the flags are written and read back; the firmware honouring the saved
+  position is metal.
+- **Audiobook excluded from Music/Library** - the audiobook currently also sits in the master playlist
+  (media_type 8 still routes it to the Audiobooks menu); whether iTunes keeps audiobooks out of Music
+  is unverified against a real iTunes audiobook.
+
 ## Hardware validation pass
 The conformance suite proves these against synthetic devices; one session with the fleet closes
 them against metal:
