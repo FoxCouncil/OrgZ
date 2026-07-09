@@ -111,4 +111,74 @@ public class ITunesDbArtworkOracleTests
         Assert.Contains("\"w\":100,\"h\":100", line);
         Assert.Matches(@"""px0"":\[2[0-5]\d,\d,\d\]", line);   // red: R in 200s, G and B tiny
     }
+
+    [Fact]
+    public void Libgpod_reads_artwork_added_to_a_real_library()
+    {
+        var path = Environment.GetEnvironmentVariable("ORGZ_REAL_ITUNESDB");
+        var oracle = Environment.GetEnvironmentVariable("ORGZ_ARTWORK_DUMP");
+        if (path is null || !File.Exists(path) || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
+        {
+            return;   // gated - needs a real 5.5G DB + a built artwork_dump
+        }
+
+        const ulong artDbid = 0x00A2_0126_0126_0126;   // distinct from any real track's dbid
+        var original = File.ReadAllBytes(path);
+        ITunesDbReader.ReadAll(original, @"X:\", out var origTracks, out _);
+
+        // Add a track WITH artwork into the real library.
+        var doc = ITunesDbChunkTree.Parse(original);
+        uint newId = ITunesDbWriter.NextTrackId(doc);
+        ITunesDbWriter.AddTrack(doc, new NewTrack
+        {
+            TrackId = newId, IpodPath = ":iPod_Control:Music:F99:ART.mp3", Title = "OrgZ Art",
+            Artist = "OrgZ", Album = "OrgZ", FileSize = 1_000_000, LengthMs = 60_000, Bitrate = 128,
+            SampleRate = 44_100, DateAddedUtc = Added, Dbid = artDbid, HasArtwork = true,
+            ArtworkSize = Dim * Dim * 2,
+        });
+        ITunesDbChunkTree.Normalize(doc.Root);
+        var itdb = ITunesDbChunkTree.Serialize(doc);
+
+        var artDoc = ArtworkDbWriter.Build(artDbid, 100, [new ArtThumb(FormatId, Dim, Dim, 0, Dim * Dim * 2)], Dim * Dim * 2);
+        ITunesDbChunkTree.Normalize(artDoc.Root);
+        var artworkDb = ITunesDbChunkTree.Serialize(artDoc);
+        var ithmb = new byte[Dim * Dim * 2];
+        for (int i = 0; i < ithmb.Length; i += 2) { ithmb[i] = 0x00; ithmb[i + 1] = 0xF8; }
+
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-artreal-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "iTunes"));
+        Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "Artwork"));
+        Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "Device"));
+        File.WriteAllBytes(Path.Combine(mount, "iPod_Control", "iTunes", "iTunesDB"), itdb);
+        File.WriteAllBytes(Path.Combine(mount, "iPod_Control", "Artwork", "ArtworkDB"), artworkDb);
+        File.WriteAllBytes(Path.Combine(mount, "iPod_Control", "Artwork", $"F{FormatId}_1.ithmb"), ithmb);
+        File.WriteAllText(Path.Combine(mount, "iPod_Control", "Device", "SysInfo"), "ModelNumStr: MA446\n");
+
+        try
+        {
+            var psi = new ProcessStartInfo(oracle, $"\"{mount}\" MA446")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var proc = Process.Start(psi)!;
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
+
+            Assert.True(proc.ExitCode == 0, $"artwork_dump failed ({proc.ExitCode}): {stderr}");
+            var lines = stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            Assert.Equal(origTracks.Count + 1, lines.Length);                       // originals preserved + 1
+            var mine = lines.Single(l => l.Contains($"\"id\":{newId},"));
+            Assert.Contains($"\"art_dbid\":{artDbid}", mine);                       // artwork linked to the new track
+            Assert.Contains("\"w\":100,\"h\":100", mine);
+            Assert.Matches(@"""px0"":\[2[0-5]\d,\d,\d\]", mine);
+        }
+        finally
+        {
+            try { Directory.Delete(mount, recursive: true); } catch { /* best-effort */ }
+        }
+    }
 }
