@@ -199,6 +199,39 @@ Podcasts grouping, Audiobooks placement and the bookmark/unplayed flags, verifie
   (media_type 8 still routes it to the Audiobooks menu); whether iTunes keeps audiobooks out of Music
   is unverified against a real iTunes audiobook.
 
+## Album artwork - ArtworkDB matrix (slice F)
+Goal: OrgZ writes album artwork into a real iTunes library - the ArtworkDB + per-generation `.ithmb`
+thumbnail linked to the track - such that libgpod reads it back with correct dimensions and the pixels
+round-tripping. Proven via libgpod's `itdb_parse` + `itdb_artwork_get_pixbuf`
+(`OrgZ.Tests/oracle/artwork_dump.c`, `ITunesDbArtworkOracleTests`).
+
+- **iPod Video 5.5G:** ✅✅ OrgZ writes an ArtworkDB (mhfd/mhsd/mhli/mhii/mhni + filename mhod) + a
+  100×100 RGB565-LE `.ithmb`; libgpod links the artwork to the track by dbid (mhii song_id), decodes the
+  thumbnail to 100×100 and returns the red pixel (0xF800 → R=248) - structure, linkage, dimensions and
+  pixel round-trip all confirmed. The 5.5G formats (1028=100×100, 1029=200×200) match libgpod's
+  `ipod_video_cover_art_info` table exactly.
+- **Into a real library:** ✅✅ adding a track + artwork to BriPod's real DB; libgpod reads the new
+  track's artwork (dims + red pixel) with the 2919 originals preserved.
+- **The artwork writer was already correct** - no bug found (unlike the iTunesDB writer). The only catch
+  was the oracle setup: libgpod parses the ArtworkDB only for a recognised cover-art device, and its
+  model lookup drops one leading letter, so the mountpoint's SysInfo needs ModelNumStr MA446 (→ A446),
+  not xMA446.
+- **Cross-platform:** byte-repro on Windows; live libgpod + gdk-pixbuf on Linux (WSL).
+
+### Named gaps
+- **Per-generation thumbnail formats beyond 5.5G** - `IPodCapabilities` carries formats for Nano
+  1G/2G, Video 5G etc., but only the 5.5G is oracle-verified; each other generation's format
+  (dimensions + RGB565 endianness) wants the same libgpod cross-check (its `Itdb_ArtworkFormat` table is
+  the reference).
+- **mhit `mhii_link` not set** - OrgZ links artwork by dbid (mhii song_id), which libgpod uses; iTunes
+  also sets the mhit's `mhii_link` (image id). Both libgpod and the dbid path work without it, but the
+  firmware may prefer it - unverified.
+- **On-device art display** - libgpod decodes the thumbnail; the iPod rendering it in the now-playing /
+  list views is the metal confirmation.
+- **Real embedded-cover pipeline** - the tests use a synthetic solid-colour thumbnail; the ffmpeg
+  extract → resize → RGB565 path (`IPodTrackImporter`) that pulls a real cover is exercised only against
+  the device, not the oracle.
+
 ## Hardware validation pass
 The conformance suite proves these against synthetic devices; one session with the fleet closes
 them against metal:
