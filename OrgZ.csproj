@@ -69,6 +69,9 @@
 		<PackageReference Include="Velopack" Version="0.0.1298" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" Condition="'$(IsWindowsBuild)' == 'true'" />
 		<PackageReference Include="System.Management" Version="9.0.1" Condition="'$(IsWindowsBuild)' == 'true'" />
+		<!-- ServiceBase: lets the device-helper answer the Windows SCM control dispatcher so
+		     `sc start OrgZDeviceHelper` doesn't time out (error 1053). Windows-only. -->
+		<PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.1" Condition="'$(IsWindowsBuild)' == 'true'" />
 		<PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.1" />
 	</ItemGroup>
 
