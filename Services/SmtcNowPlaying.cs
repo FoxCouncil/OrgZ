@@ -64,6 +64,8 @@ internal sealed class SmtcNowPlaying : INowPlayingIntegration
             _ => MediaPlaybackStatus.Closed,
         });
 
+    public void SetNavigationEnabled(bool previous, bool next) => _smtc.SetNavigationEnabled(previous, next);
+
     // SMTC's DisplayUpdater carries no elapsed-time surface in the interop we expose.
     public void SetPlaybackPosition(TimeSpan elapsed, double rate)
     {

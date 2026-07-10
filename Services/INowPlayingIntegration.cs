@@ -46,6 +46,10 @@ public interface INowPlayingIntegration : IDisposable
     /// <summary>"Playing" / "Paused" / "Stopped" - mirrors transport state to the OS widget.</summary>
     void SetPlaybackStatus(string status);
 
+    /// <summary>Enable/disable the previous/next transport buttons. Only SMTC greys them out;
+    /// MPRIS and macOS advertise them as always available, so they no-op.</summary>
+    void SetNavigationEnabled(bool previous, bool next);
+
     /// <summary>Elapsed time + rate, so the widget's scrubber tracks real playback. No-op on
     /// backends without a position surface.</summary>
     void SetPlaybackPosition(TimeSpan elapsed, double rate);

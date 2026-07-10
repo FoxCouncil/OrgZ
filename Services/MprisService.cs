@@ -153,6 +153,11 @@ public sealed class MprisService : INowPlayingIntegration
     {
     }
 
+    public void SetNavigationEnabled(bool previous, bool next)
+    {
+        // MPRIS advertises CanGoNext / CanGoPrevious as always true; nothing to toggle.
+    }
+
     private VariantValue BuildMetadataVariant()
     {
         lock (_stateLock)
