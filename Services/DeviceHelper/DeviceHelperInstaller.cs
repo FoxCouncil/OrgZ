@@ -56,6 +56,9 @@ public static class DeviceHelperInstaller
     {
         var plistPath = $"/Library/LaunchDaemons/{MacLabel}.plist";
         var dotnetRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet");
+        // Captured here, while we're still the invoking user (pre-elevation), so the root
+        // daemon can restrict its socket to this UID and refuse every other local account.
+        var ownerUid = PeerCredentials.CurrentUid();
         var plist = $"""
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -68,7 +71,7 @@ public static class DeviceHelperInstaller
                     <string>--device-helper</string>
                 </array>
                 <key>EnvironmentVariables</key>
-                <dict><key>DOTNET_ROOT</key><string>{dotnetRoot}</string></dict>
+                <dict><key>DOTNET_ROOT</key><string>{dotnetRoot}</string><key>ORGZ_HELPER_OWNER_UID</key><string>{ownerUid}</string></dict>
                 <key>RunAtLoad</key><true/>
                 <key>KeepAlive</key><true/>
             </dict>
@@ -90,6 +93,9 @@ public static class DeviceHelperInstaller
     private static async Task<InstallResult> InstallLinuxAsync()
     {
         var unitPath = $"/etc/systemd/system/{LinuxUnit}.service";
+        // Captured while we're still the invoking user (pre-elevation) so the root daemon can
+        // restrict its socket to this UID and refuse every other local account.
+        var ownerUid = PeerCredentials.CurrentUid();
         var unit = $"""
             [Unit]
             Description=OrgZ device helper (privileged iPod identity reads)
@@ -98,6 +104,7 @@ public static class DeviceHelperInstaller
             [Service]
             Type=simple
             ExecStart={ExePath} --device-helper
+            Environment=ORGZ_HELPER_OWNER_UID={ownerUid}
             Restart=on-failure
             User=root
 

@@ -25,6 +25,14 @@ public static class DeviceHelperDaemon
         _log.Information("Device helper daemon starting (uid/privileged listener) on {Endpoint}", DeviceHelperProtocol.Endpoint);
         try
         {
+            // Running as root, we must never execute a binary a lesser user could have swapped
+            // out from under us - that turns a device read into arbitrary root code execution.
+            if (!OperatingSystem.IsWindows() && !BinaryIsTrustworthy(out var why))
+            {
+                _log.Fatal("Refusing to run privileged: {Why}", why);
+                return 1;
+            }
+
             if (OperatingSystem.IsWindows())
             {
                 await RunNamedPipeAsync(ct);
@@ -48,6 +56,8 @@ public static class DeviceHelperDaemon
 
     private static async Task RunUnixSocketAsync(CancellationToken ct)
     {
+        var ownerUid = ReadOwnerUid();
+
         // A stale socket file from a previous run blocks bind - remove it first.
         if (File.Exists(DeviceHelperProtocol.Endpoint))
         {
@@ -58,17 +68,33 @@ public static class DeviceHelperDaemon
         listener.Bind(new UnixDomainSocketEndPoint(DeviceHelperProtocol.Endpoint));
         listener.Listen(backlog: 16);
 
-        // Any local user must be able to connect (the socket is created root-owned). The
-        // helper only ever READS device identity, so world-connect is not a privilege leak.
+        // The socket now lives in root-owned /var/run, so the PATH can't be hijacked. Perms:
+        // when we know the owner UID (recorded by the installer), hand the socket to them and
+        // lock everyone else out at the filesystem layer - 0600 + chown owner; root, being the
+        // daemon, connects regardless. Without a known owner (a legacy install) we fall back to
+        // world-connect, but the peer-cred gate below is the real authorization either way.
         if (!OperatingSystem.IsWindows())
         {
-            _ = Chmod(DeviceHelperProtocol.Endpoint, 0b110_110_110);   // 0666
+            if (ownerUid is uint owner)
+            {
+                _ = Chown(DeviceHelperProtocol.Endpoint, owner, unchecked((uint)-1));
+                _ = Chmod(DeviceHelperProtocol.Endpoint, 0b110_000_000);   // 0600
+            }
+            else
+            {
+                _ = Chmod(DeviceHelperProtocol.Endpoint, 0b110_110_110);   // 0666 (legacy fallback)
+            }
         }
 
-        _log.Information("Listening on unix socket {Endpoint}", DeviceHelperProtocol.Endpoint);
+        _log.Information("Listening on unix socket {Endpoint} (owner uid {Owner})", DeviceHelperProtocol.Endpoint, ownerUid?.ToString() ?? "unset");
         while (!ct.IsCancellationRequested)
         {
             var conn = await listener.AcceptAsync(ct);
+            if (!IsAuthorizedPeer(conn, ownerUid))
+            {
+                conn.Dispose();
+                continue;
+            }
             _ = Task.Run(async () =>
             {
                 try
@@ -82,6 +108,85 @@ public static class DeviceHelperDaemon
                 }
             }, ct);
         }
+    }
+
+    /// <summary>The owner UID the installer stamped into the service definition, if any.</summary>
+    private static uint? ReadOwnerUid()
+        => uint.TryParse(Environment.GetEnvironmentVariable("ORGZ_HELPER_OWNER_UID"), out var uid) ? uid : null;
+
+    /// <summary>
+    /// Gate on the kernel-verified peer UID: serve only the owner (root always allowed for
+    /// diagnostics). Fail CLOSED when an owner is configured but the creds can't be read;
+    /// fail OPEN only on a legacy install with no owner recorded, so it keeps working.
+    /// </summary>
+    private static bool IsAuthorizedPeer(Socket conn, uint? ownerUid)
+    {
+        if (!PeerCredentials.TryGetPeerUid(conn, out var peer))
+        {
+            if (ownerUid is not null)
+            {
+                _log.Warning("Refusing connection: peer credentials unreadable while an owner UID is enforced");
+                return false;
+            }
+            return true;
+        }
+
+        if (ownerUid is uint owner && peer != owner && peer != 0)
+        {
+            _log.Warning("Refusing connection from uid {Peer}: not owner {Owner}", peer, owner);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True unless the running executable (or its directory) could be swapped by a non-root
+    /// user - the world-writable cases that would let a device read become root code execution.
+    /// A per-user install (exe owned by that user, not world/group writable) passes, since only
+    /// that user - the one we serve - can touch it.
+    /// </summary>
+    private static bool BinaryIsTrustworthy(out string why)
+    {
+        why = "";
+        var exe = Environment.ProcessPath;
+        if (exe is null)
+        {
+            return true;   // can't determine the path - don't hard-block on that alone
+        }
+
+        try
+        {
+            var exeMode = File.GetUnixFileMode(exe);
+            if ((exeMode & UnixFileMode.OtherWrite) != 0)
+            {
+                why = $"executable {exe} is world-writable";
+                return false;
+            }
+
+            var dir = Path.GetDirectoryName(exe);
+            if (dir is not null)
+            {
+                var dirMode = File.GetUnixFileMode(dir);
+                // A world-writable directory without the sticky bit lets anyone rename the exe aside.
+                if ((dirMode & UnixFileMode.OtherWrite) != 0 && (dirMode & UnixFileMode.StickyBit) == 0)
+                {
+                    why = $"directory {dir} is world-writable without the sticky bit";
+                    return false;
+                }
+                if ((exeMode & UnixFileMode.GroupWrite) != 0 || (dirMode & UnixFileMode.GroupWrite) != 0)
+                {
+                    _log.Warning("Privileged binary {Exe} is group-writable — verify the group contains no untrusted users", exe);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "binary trust check skipped (filesystem error)");
+            return true;
+        }
+
+        return true;
     }
 
     private static async Task RunNamedPipeAsync(CancellationToken ct)
@@ -200,4 +305,8 @@ public static class DeviceHelperDaemon
 
     [DllImport("libc", SetLastError = true, EntryPoint = "chmod")]
     private static extern int Chmod(string path, uint mode);
+
+    // owner/group of (uint)-1 means "leave unchanged" - we only ever set the owner.
+    [DllImport("libc", SetLastError = true, EntryPoint = "chown")]
+    private static extern int Chown(string path, uint owner, uint group);
 }
