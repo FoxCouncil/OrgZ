@@ -392,11 +392,7 @@ public static class IPodFirmwarePartition
 
 #endif
 
-    internal static uint ReadUInt32LE(byte[] bytes, int offset)
-    {
-        if (offset + 4 > bytes.Length) return 0;
-        return (uint)(bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24));
-    }
+    internal static uint ReadUInt32LE(byte[] bytes, int offset) => LittleEndian.ReadUInt32(bytes, offset);
 
     /// <summary>
     /// One firmware image directory entry candidate found by <see cref="ScanForImageEntries"/>.
