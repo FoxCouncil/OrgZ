@@ -99,7 +99,7 @@ public class ITunesDbWriterOracleTests
             .Single(p => p.Header.Length > 0x2B && (p.Header[0x2A] | (p.Header[0x2B] << 8)) == 1);
 
         var mhips = podcasts.Children.Where(c => c.Magic == "mhip").ToList();
-        var header = Assert.Single(mhips.Where(m => m.ReadHeaderInt32(0x10) == 0x100));   // one show group header
+        var header = Assert.Single(mhips, m => m.ReadHeaderInt32(0x10) == 0x100);   // one show group header
         int groupId = header.ReadHeaderInt32(0x14);
         var episodes = mhips.Where(m => m.ReadHeaderInt32(0x18) != 0).ToList();           // MHIPs that reference a track
 
