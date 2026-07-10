@@ -1,0 +1,28 @@
+Third-party binaries bundled with OrgZ
+======================================
+
+OrgZ ships these command-line tools next to the app and invokes them as separate
+processes - it never links against them - so this is "mere aggregation" and OrgZ's
+own license is unaffected. Each is redistributed under its own license.
+
+The exact vendored versions and their SHA-256 hashes are pinned in
+scripts/encoders.json. Where an upstream build ships its own LICENSE file, that file
+is included alongside the binary.
+
+ffmpeg
+  License : LGPL v2.1 (the LGPL build - no GPL codecs enabled; OrgZ needs only
+            ebur128 + the native aac/alac/pcm encoders, all of which are LGPL)
+  Source  : https://ffmpeg.org/   (build: https://github.com/BtbN/FFmpeg-Builds)
+  Used by : iPod transcode + artwork extraction, CD-burn transcode,
+            Sound Check (ReplayGain) loudness measurement
+  Corresponding source is available from ffmpeg.org and the build repository above.
+
+FLAC (flac, libFLAC, libFLAC++)
+  License : BSD 3-Clause (Xiph.Org Foundation)
+  Source  : https://xiph.org/flac/
+  Used by : CD rip to FLAC (Windows bundle; other platforms use a PATH install)
+
+LAME (lame)
+  License : LGPL v2.0
+  Source  : https://lame.sourceforge.io/   (Windows build: https://www.rarewares.org/)
+  Used by : CD rip to MP3 (Windows bundle; other platforms use a PATH install)
