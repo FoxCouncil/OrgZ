@@ -3658,12 +3658,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    internal List<MediaItem> GetPlaylistMediaItems(int playlistId)
+    internal List<MediaItem> GetPlaylistMediaItems(int playlistId, Dictionary<string, MediaItem>? lookup = null)
     {
         var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
-        var lookup = _allItems.Where(i => i.FilePath != null).ToDictionary(i => i.Id);
+        // Callers on a background thread MUST pass a lookup built via BuildItemLookup() on the
+        // UI thread; the null-default path enumerates _allItems here and is only safe on the UI thread.
+        lookup ??= BuildItemLookup();
         return trackIds.Where(lookup.ContainsKey).Select(id => lookup[id]).ToList();
     }
+
+    /// <summary>
+    /// A snapshot id→item map of the library. MUST be built on the UI thread: it enumerates the
+    /// UI-bound <c>_allItems</c>, and reading an ObservableCollection from a threadpool thread
+    /// while the UI may be mutating it throws "collection was modified". Pass the result into any
+    /// <see cref="GetPlaylistMediaItems"/> call that runs inside a <see cref="Task.Run"/>.
+    /// </summary>
+    private Dictionary<string, MediaItem> BuildItemLookup()
+        => _allItems.Where(i => i.FilePath != null).ToDictionary(i => i.Id);
 
     /// <summary>
     /// Snapshot of currently connected devices - safe to enumerate from the view layer
@@ -3977,7 +3988,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         List<MediaItem> tracks;
         if (playlistItem.PlaylistId is int pid)
         {
-            tracks = await Task.Run(() => GetPlaylistMediaItems(pid));
+            var lookup = BuildItemLookup();
+            tracks = await Task.Run(() => GetPlaylistMediaItems(pid, lookup));
         }
         else if (playlistItem.IsFavorites)
         {
@@ -4309,10 +4321,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _allItems.Remove(item);
-        await Task.Run(() => MediaCache.RemoveLibraryFiles([item.Id]));
-        RefreshAllPlaylistConfigs();
-        ApplyFilter();
-        UpdateMainStatus($"Deleted {title}.");
+        try
+        {
+            await Task.Run(() => MediaCache.RemoveLibraryFiles([item.Id]));
+            RefreshAllPlaylistConfigs();
+            ApplyFilter();
+            UpdateMainStatus($"Deleted {title}.");
+        }
+        catch (Exception ex)
+        {
+            // The file is already off disk and out of the live list; a cache/playlist cleanup
+            // failure must not crash the async-void caller - log and let the next scan reconcile.
+            _log.Error(ex, "Post-delete cleanup failed for {Path}", item.FilePath);
+            UpdateMainStatus($"Deleted {title}, but library cleanup hit an error.");
+        }
     }
 
     /// <summary>
@@ -6260,58 +6282,93 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!DeviceStillConnected(dev))
+        {
+            UpdateMainStatus($"{dev.Name} was disconnected — sync cancelled.");
+            return;
+        }
+
         var ipod = IPodDevice.For(dev);
 
-        // Refresh the device's library from disk FIRST, so add-dedup and the mirror pass match against
-        // what's actually on the device - a stale in-memory view was writing duplicate copies of tracks
-        // (random on-device filenames + always-insert), and mirror needs the true device set to prune.
-        await ReloadStockIPodLibraryAsync(dev);
-
-        using var batch = ipod.BeginBatchWrite();
-
-        if (plan.Podcasts && ipod.SupportsPodcasts)
+        try
         {
-            await SyncPodcastsToDeviceAsync(dev, ipod);
-        }
+            // Refresh the device's library from disk FIRST, so add-dedup and the mirror pass match against
+            // what's actually on the device - a stale in-memory view was writing duplicate copies of tracks
+            // (random on-device filenames + always-insert), and mirror needs the true device set to prune.
+            await ReloadStockIPodLibraryAsync(dev);
 
-        if (plan.Audiobooks && ipod.SupportsAudiobooks)
-        {
-            await SyncAudiobooksToDeviceAsync(dev, ipod);
-        }
+            // Snapshot the UI-bound _allItems on THIS (UI) thread before any Task.Run below reads it.
+            var itemById = BuildItemLookup();
 
-        if (plan.Favorites && ipod.SupportsPlaylists)
-        {
-            var favorites = _allItems
-                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
-                .ToList();
-            if (favorites.Count > 0)
+            // Block-scoped using (not `using var`): the batch's Dispose - which flushes/regenerates
+            // the CDB - runs inside the try, so if it throws on a dead mount the catch below owns it.
+            using (var batch = ipod.BeginBatchWrite())
             {
-                await SyncPlaylistToDeviceAsync("Favorites", favorites, dev);
-            }
-        }
-
-        if (plan.PlaylistIds.Count > 0 && ipod.SupportsPlaylists)
-        {
-            var nameById = await Task.Run(() => MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id, p => p.Name));
-            foreach (var pid in plan.PlaylistIds)
-            {
-                var tracks = await Task.Run(() => GetPlaylistMediaItems(pid));
-                if (tracks.Count > 0)
+                if (plan.Podcasts && ipod.SupportsPodcasts)
                 {
-                    await SyncPlaylistToDeviceAsync(nameById.GetValueOrDefault(pid, "Playlist"), tracks, dev);
+                    await SyncPodcastsToDeviceAsync(dev, ipod);
+                }
+
+                if (plan.Audiobooks && ipod.SupportsAudiobooks)
+                {
+                    await SyncAudiobooksToDeviceAsync(dev, ipod);
+                }
+
+                if (plan.Favorites && ipod.SupportsPlaylists)
+                {
+                    var favorites = _allItems
+                        .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
+                        .ToList();
+                    if (favorites.Count > 0)
+                    {
+                        await SyncPlaylistToDeviceAsync("Favorites", favorites, dev);
+                    }
+                }
+
+                if (plan.PlaylistIds.Count > 0 && ipod.SupportsPlaylists)
+                {
+                    var nameById = await Task.Run(() => MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id, p => p.Name));
+                    foreach (var pid in plan.PlaylistIds)
+                    {
+                        var tracks = await Task.Run(() => GetPlaylistMediaItems(pid, itemById));
+                        if (tracks.Count > 0)
+                        {
+                            await SyncPlaylistToDeviceAsync(nameById.GetValueOrDefault(pid, "Playlist"), tracks, dev);
+                        }
+                    }
+                }
+
+                // Auto-sync (mirror): make the device match the plan by pruning music that's no longer
+                // selected. Runs last, inside the same batch, so removals join the single CDB regen.
+                if (plan.Automatic)
+                {
+                    await MirrorRemoveAsync(dev, ipod, plan);
                 }
             }
-        }
 
-        // Auto-sync (mirror): make the device match the plan by pruning music that's no longer
-        // selected. Runs last, inside the same batch, so removals join the single CDB regen.
-        if (plan.Automatic)
+            UpdateMainStatus($"Sync to {dev.Name} complete.");
+        }
+        catch (Exception ex) when (!DeviceStillConnected(dev))
         {
-            await MirrorRemoveAsync(dev, ipod, plan);
+            // The cable came out mid-sync - the writes now hit a dead mount and throw. Stop
+            // rather than crash or grind against a volume that no longer exists.
+            _log.Warning(ex, "Sync aborted — {Device} disconnected mid-sync", dev.MountPath);
+            UpdateMainStatus($"{dev.Name} was disconnected — sync stopped.");
         }
-
-        UpdateMainStatus($"Sync to {dev.Name} complete.");
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Sync to {Device} failed", dev.MountPath);
+            UpdateMainStatus($"Sync to {dev.Name} failed: {ex.Message}");
+        }
     }
+
+    /// <summary>
+    /// Cheap liveness check for a mounted device: false once its volume has vanished (the cable
+    /// was pulled). Used to bail a sync early and to classify a mid-sync exception as an unplug
+    /// rather than a real failure.
+    /// </summary>
+    private static bool DeviceStillConnected(ConnectedDevice dev)
+        => string.IsNullOrEmpty(dev.MountPath) || Directory.Exists(dev.MountPath);
 
     /// <summary>
     /// The auto-sync (mirror) removal pass: makes the device MATCH the plan by pruning what's no
@@ -6350,9 +6407,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 Note(f);
             }
         }
+        var keepLookup = BuildItemLookup();
         foreach (var pid in plan.PlaylistIds)
         {
-            foreach (var t in await Task.Run(() => GetPlaylistMediaItems(pid)))
+            foreach (var t in await Task.Run(() => GetPlaylistMediaItems(pid, keepLookup)))
             {
                 Note(t);
             }
