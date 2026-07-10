@@ -108,37 +108,14 @@ public static class ListViewConfigs
         };
     }
 
-    /// <summary>The Music menu minus "Burn to CD..." - a multi-hour book has no audio-CD story.</summary>
-    private static List<ContextMenuItemDef> BuildAudiobookContextMenu()
-    {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
-            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
-            new ContextMenuItemDef
-            {
-                Header = "Rating",
-                IsRatingMarker = true,
-            },
-            new ContextMenuItemDef
-            {
-                Header = "Add to Playlist",
-                IsAddToPlaylistMarker = true,
-            },
-            new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
-            // Audiobooks: removing from the library IS deleting from disk - the store can
-            // always re-download a book, so there is no soft-ignore middle state to manage.
-            new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
-        ];
-    }
+    /// <summary>The library-track menu minus "Burn to CD..." - a multi-hour book has no audio-CD story.
+    /// (Removing from the library IS deleting from disk; the store can re-download a book.)</summary>
+    private static List<ContextMenuItemDef> BuildAudiobookContextMenu() => Menu(
+        Header(),
+        Playback(),
+        Info(ratable: true),
+        Organize(),
+        Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Remove from Library", "RemoveFromLibrary")));
 
     private static ListViewConfig BuildPodcastsConfig()
     {
@@ -323,22 +300,11 @@ public static class ListViewConfigs
         };
     }
 
-    private static List<ContextMenuItemDef> BuildDeviceContextMenu()
-    {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
-            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Remove from iPod", CommandName = "RemoveFromDevice" },
-        ];
-    }
+    private static List<ContextMenuItemDef> BuildDeviceContextMenu() => Menu(
+        Header(),
+        Playback(),
+        Info(),
+        Items(Cmd("Remove from iPod", "RemoveFromDevice")));
 
     public static ListViewConfig BuildPlaylistConfig(int playlistId, List<string> orderedTrackIds)
     {
@@ -468,19 +434,10 @@ public static class ListViewConfigs
         };
     }
 
-    private static List<ContextMenuItemDef> BuildIgnoredContextMenu()
-    {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Restore to Library", CommandName = "RestoreFromIgnored" },
-            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
-        ];
-    }
+    private static List<ContextMenuItemDef> BuildIgnoredContextMenu() => Menu(
+        Header(),
+        Info(),
+        Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Restore to Library", "RestoreFromIgnored")));
 
     private static ListViewConfig BuildBadFormatConfig()
     {
@@ -525,20 +482,10 @@ public static class ListViewConfigs
         };
     }
 
-    private static List<ContextMenuItemDef> BuildCdAudioContextMenu()
-    {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
-            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Rip Track…", CommandName = "RipTrack" },
-            new ContextMenuItemDef { Header = "Rip Whole CD…", CommandName = "RipCd" },
-        ];
-    }
+    private static List<ContextMenuItemDef> BuildCdAudioContextMenu() => Menu(
+        Header(withArtist: false),
+        Playback(),
+        Items(Cmd("Rip Track…", "RipTrack"), Cmd("Rip Whole CD…", "RipCd")));
 
     private static ListViewConfig BuildFavoritesConfig()
     {
@@ -563,68 +510,98 @@ public static class ListViewConfigs
         };
     }
 
-    private static List<ContextMenuItemDef> BuildMusicContextMenu()
+    private static List<ContextMenuItemDef> BuildMusicContextMenu() => Menu(
+        Header(),
+        Playback(),
+        Info(ratable: true),
+        Organize(),
+        Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Burn to CD…", "BurnToCd"), Cmd("Remove from Library", "RemoveFromLibrary")));
+
+    private static List<ContextMenuItemDef> BuildRadioContextMenu() => Menu(
+        Header(withArtist: false),
+        Playback(queueable: false),
+        Info(),
+        Items(Cmd("Toggle Favorite", "Favorite"), Cmd("Copy Stream URL", "CopyUrl"), Cmd("Visit Homepage", "Homepage")));
+
+    private static List<ContextMenuItemDef> BuildPlaylistContextMenu() => Menu(
+        Header(),
+        Playback(),
+        Info(ratable: true),
+        Organize(),
+        Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Remove from Playlist", "RemoveFromPlaylist"), Cmd("Remove from Library", "RemoveFromLibrary")));
+
+    // --- shared context-menu vocabulary ---------------------------------------------------
+    // Every track menu is the SAME skeleton in the same order - header · playback · info ·
+    // organize · file/destructive - with a separator between the sections a view actually uses.
+    // Menu() drops empty sections and never leaves a dangling separator, so each builder above
+    // just lists the sections it wants; that's what keeps the six menus from drifting apart.
+
+    // A get-only property, NOT a static field: Menu() runs during _configs' static
+    // initialization (far above), which precedes any static field defined here - a field
+    // would still be null then, salting every menu with null separators. Evaluated per use.
+    private static ContextMenuItemDef Sep => new() { IsSeparator = true };
+
+    private static ContextMenuItemDef Cmd(string header, string command) => new() { Header = header, CommandName = command };
+
+    private static IEnumerable<ContextMenuItemDef> Items(params ContextMenuItemDef[] items) => items;
+
+    private static IEnumerable<ContextMenuItemDef> Header(bool withArtist = true)
     {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
-            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
-            new ContextMenuItemDef
-            {
-                Header = "Rating",
-                IsRatingMarker = true,
-            },
-            new ContextMenuItemDef
-            {
-                Header = "Add to Playlist",
-                IsAddToPlaylistMarker = true,
-            },
-            new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Burn to CD…", CommandName = "BurnToCd" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Show in Explorer", CommandName = "ShowInExplorer" },
-            new ContextMenuItemDef { Header = "Remove from Library", CommandName = "RemoveFromLibrary" },
-        ];
+        yield return new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true };
+        if (withArtist)
+        {
+            yield return new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true };
+        }
     }
 
-    private static List<ContextMenuItemDef> BuildRadioContextMenu()
+    private static IEnumerable<ContextMenuItemDef> Playback(bool queueable = true)
     {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Toggle Favorite", CommandName = "Favorite" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Copy Stream URL", CommandName = "CopyUrl" },
-            new ContextMenuItemDef { Header = "Visit Homepage", CommandName = "Homepage" },
-        ];
+        yield return Cmd("Play", "Play");
+        if (queueable)
+        {
+            yield return Cmd("Play Next", "PlayNext");
+            yield return Cmd("Add to Queue", "AddToQueue");
+        }
     }
 
-    private static List<ContextMenuItemDef> BuildPlaylistContextMenu()
+    private static IEnumerable<ContextMenuItemDef> Info(bool ratable = false)
     {
-        return
-        [
-            new ContextMenuItemDef { Header = "{SelectedItem.Title}", IsHeader = true },
-            new ContextMenuItemDef { Header = "{SelectedItem.Artist}", IsHeader = true },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Play", CommandName = "Play" },
-            new ContextMenuItemDef { Header = "Play Next", CommandName = "PlayNext" },
-            new ContextMenuItemDef { Header = "Add to Queue", CommandName = "AddToQueue" },
-            new ContextMenuItemDef { IsSeparator = true },
-            new ContextMenuItemDef { Header = "Remove from Playlist", CommandName = "RemoveFromPlaylist" },
-            new ContextMenuItemDef { Header = "Add to Playlist", IsAddToPlaylistMarker = true },
-            new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true },
-            new ContextMenuItemDef { Header = "Get Info", CommandName = "GetInfo" },
-        ];
+        yield return Cmd("Get Info", "GetInfo");
+        if (ratable)
+        {
+            yield return new ContextMenuItemDef { Header = "Rating", IsRatingMarker = true };
+        }
+    }
+
+    private static IEnumerable<ContextMenuItemDef> Organize(bool playlist = true, bool sync = true)
+    {
+        if (playlist)
+        {
+            yield return new ContextMenuItemDef { Header = "Add to Playlist", IsAddToPlaylistMarker = true };
+        }
+        if (sync)
+        {
+            yield return new ContextMenuItemDef { Header = "Sync", IsSyncToDeviceMarker = true };
+        }
+    }
+
+    /// <summary>Composes the sections that apply into one menu, a separator between each non-empty section.</summary>
+    private static List<ContextMenuItemDef> Menu(params IEnumerable<ContextMenuItemDef>[] sections)
+    {
+        var result = new List<ContextMenuItemDef>();
+        foreach (var section in sections)
+        {
+            var items = section.ToList();
+            if (items.Count == 0)
+            {
+                continue;
+            }
+            if (result.Count > 0)
+            {
+                result.Add(Sep);
+            }
+            result.AddRange(items);
+        }
+        return result;
     }
 }
