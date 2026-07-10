@@ -59,6 +59,12 @@
 		<PackageReference Include="Optris.Icons.Avalonia" Version="12.0.4" />
 		<PackageReference Include="Optris.Icons.Avalonia.FontAwesome" Version="12.0.4" />
 		<PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.7" />
+		<!-- Pin the native SQLite past NU1903 (GHSA-2m69-gcr7-jv3q). Microsoft.Data.Sqlite 9.0.x
+		     transitively pins lib.e_sqlite3 2.1.10, and the whole 2.1.x line (<= 2.1.11) is flagged;
+		     the fix only lands in the 3.0.x native. Override JUST the native binary - the managed
+		     core stays 2.1.10 as Microsoft.Data.Sqlite expects, and the SQLite C ABI core P/Invokes
+		     is stable across the two, so nothing else has to move. -->
+		<PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.50.3" />
 		<PackageReference Include="Serilog" Version="4.2.0" />
 		<!-- SVG rasterization for station logos / remote artwork; Avalonia can't decode SVG natively. -->
 		<PackageReference Include="Svg.Skia" Version="3.2.1" />
