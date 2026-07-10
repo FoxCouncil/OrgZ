@@ -136,9 +136,9 @@ public static class IPodTrackImporter
             var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
             Directory.CreateDirectory(destDir);
 
-            string fileName = RandomTrackName() + targetExt;
-            var destFile = Path.Combine(destDir, fileName);
-            File.Copy(producedFile, destFile, overwrite: true);
+            var destFile = UniqueTrackPath(destDir, targetExt);
+            string fileName = Path.GetFileName(destFile);
+            File.Copy(producedFile, destFile);
             string ipodPath = $":iPod_Control:Music:{folder}:{fileName}";
 
             // --- output properties ---
@@ -282,9 +282,9 @@ public static class IPodTrackImporter
             }
             try
             {
-                var fileName = RandomTrackName() + Path.GetExtension(ep.LocalFile);
-                var destFile = Path.Combine(destDir, fileName);
-                File.Copy(ep.LocalFile, destFile, overwrite: true);
+                var destFile = UniqueTrackPath(destDir, Path.GetExtension(ep.LocalFile));
+                var fileName = Path.GetFileName(destFile);
+                File.Copy(ep.LocalFile, destFile);
 
                 uint trackId = ITunesDbWriter.NextTrackId(doc);
                 // addToMasterPlaylists:false - podcasts must NOT be in the Library/MPL, so they
@@ -391,9 +391,18 @@ public static class IPodTrackImporter
                 }
                 // Append after any existing thumbnails already packed in this format's file.
                 long offset = File.Exists(ithmb) ? new FileInfo(ithmb).Length : 0;
-                await using (var fs = new FileStream(ithmb, FileMode.Append, FileAccess.Write))
+                try
                 {
+                    await using var fs = new FileStream(ithmb, FileMode.Append, FileAccess.Write);
                     await fs.WriteAsync(raw, ct);
+                    await fs.FlushAsync(ct);
+                }
+                catch
+                {
+                    // A torn append would leave bytes the about-to-be-written ArtworkDB never
+                    // records; roll the file back to its pre-append length so a retry starts clean.
+                    try { using var t = new FileStream(ithmb, FileMode.Open, FileAccess.Write); t.SetLength(offset); } catch { }
+                    throw;
                 }
                 thumbs.Add(new ArtThumb(formatId, w, h, (int)offset, expected));
                 totalSize += expected;
@@ -405,13 +414,7 @@ public static class IPodTrackImporter
             var bytes = ITunesDbChunkTree.Serialize(doc);
             ITunesDbChunkTree.Parse(bytes);   // sanity: must re-parse
 
-            if (File.Exists(dbPath) && !File.Exists(dbPath + ".orgzbak"))
-            {
-                File.Copy(dbPath, dbPath + ".orgzbak");
-            }
-            var tmp = dbPath + ".orgztmp";
-            File.WriteAllBytes(tmp, bytes);
-            File.Move(tmp, dbPath, overwrite: true);
+            AtomicFile.WriteAllBytes(dbPath, bytes, backup: dbPath + ".orgzbak");
 
             _log.Information("Wrote ArtworkDB image {ImageId} (+{Count} thumbnails, {Bytes}B); {Total} image(s) total", imageId, thumbs.Count, totalSize, allImages.Count);
             return (true, totalSize, imageId);
@@ -518,9 +521,9 @@ public static class IPodTrackImporter
 
             try
             {
-                var fileName = RandomTrackName() + targetExt;
-                var destFile = Path.Combine(destDir, fileName);
-                File.Copy(produced, destFile, overwrite: true);
+                var destFile = UniqueTrackPath(destDir, targetExt);
+                var fileName = Path.GetFileName(destFile);
+                File.Copy(produced, destFile);
 
                 long fileSize = new FileInfo(destFile).Length;
                 int lengthMs = ep.LengthMs;
@@ -627,9 +630,9 @@ public static class IPodTrackImporter
             const string folder = "F00";
             var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
             Directory.CreateDirectory(destDir);
-            var fileName = RandomTrackName() + targetExt;
-            var destFile = Path.Combine(destDir, fileName);
-            File.Copy(produced, destFile, overwrite: true);
+            var destFile = UniqueTrackPath(destDir, targetExt);
+            var fileName = Path.GetFileName(destFile);
+            File.Copy(produced, destFile);
 
             long fileSize = new FileInfo(destFile).Length;
             int lengthMs = srcLengthMs;
@@ -756,15 +759,12 @@ public static class IPodTrackImporter
         }
 
         var backup = dbPath + ".orgzbak";
-        if (!File.Exists(backup))
+        var hadBackup = File.Exists(backup);
+        AtomicFile.WriteAllBytes(dbPath, outBytes, backup: backup);
+        if (!hadBackup && File.Exists(backup))
         {
-            File.Copy(dbPath, backup);
             _log.Information("Backed up original iTunesDB to {Backup}", backup);
         }
-
-        var tmp = dbPath + ".orgztmp";
-        File.WriteAllBytes(tmp, outBytes);
-        File.Move(tmp, dbPath, overwrite: true);
         return outBytes;
     }
 
@@ -777,6 +777,27 @@ public static class IPodTrackImporter
             name[i] = (char)('A' + Random.Shared.Next(26));
         }
         return new string(name);
+    }
+
+    /// <summary>
+    /// A destination path in <paramref name="destDir"/> proven not to collide with an existing
+    /// file. RandomTrackName draws from only 26^4 names, so on a well-stocked device a plain
+    /// File.Copy(overwrite:true) would eventually clobber another track's audio while the
+    /// database still pointed at it - silent, unrecoverable track loss. We spin a fresh name
+    /// until the slot is free; callers then copy WITHOUT overwrite.
+    /// </summary>
+    private static string UniqueTrackPath(string destDir, string ext)
+    {
+        for (int attempt = 0; attempt < 1000; attempt++)
+        {
+            var candidate = Path.Combine(destDir, RandomTrackName() + ext);
+            if (!File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        // 1000 straight collisions is astronomically unlikely; widen the namespace and move on.
+        return Path.Combine(destDir, RandomTrackName() + "_" + Guid.NewGuid().ToString("N")[..6] + ext);
     }
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;

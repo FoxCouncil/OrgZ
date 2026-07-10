@@ -70,7 +70,8 @@ public static class ShuffleSdWriter
             ms.WriteByte(0);
         }
 
-        File.WriteAllBytes(Path.Combine(iTunesDir, "iTunesSD"), ms.ToArray());
+        var sdPath = Path.Combine(iTunesDir, "iTunesSD");
+        AtomicFile.WriteAllBytes(sdPath, ms.ToArray(), backup: sdPath + ".orgzbak");
     }
 
     /// <summary>Parses <c>{iTunesDir}/iTunesSD</c> back into its track list. Returns empty when the file is
