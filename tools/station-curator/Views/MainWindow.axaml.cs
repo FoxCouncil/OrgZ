@@ -47,10 +47,18 @@ public partial class MainWindow : Window
     private void OnLoadingRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
     {
         var header = e.RowGroupHeader;
+
+        // Empty genres are represented by one hidden placeholder row, so their headers
+        // would claim "(1 Item)" - suppress the count for those groups. Evaluated on every
+        // fire AND on DataContext swaps: recycled headers move between groups.
+        UpdateItemCountVisibility(header);
+
         if (!_observedHeaders.Add(header))
         {
             return;
         }
+
+        header.DataContextChanged += (_, _) => UpdateItemCountVisibility(header);
 
         if (header.FindDescendantOfType<ToggleButton>() is { } expander)
         {
@@ -67,6 +75,14 @@ public partial class MainWindow : Window
                 }
             };
         }
+    }
+
+    /// <summary>"(1 Item)" on a group whose only row is the hidden empty-genre placeholder is a lie - hide the count there, show it everywhere else.</summary>
+    private static void UpdateItemCountVisibility(DataGridRowGroupHeader header)
+    {
+        header.IsItemCountVisible = header.DataContext is not DataGridCollectionViewGroup group
+            || group.ItemCount != 1
+            || (group.Items[0] as CuratedStation)?.IsPlaceholder != true;
     }
 
     private void WireExpander(DataGridRowGroupHeader header, ToggleButton expander)
@@ -100,6 +116,17 @@ public partial class MainWindow : Window
     private void RevealCurated(CuratedStation station)
     {
         Dispatcher.UIThread.Post(() => CuratedGrid.ScrollIntoView(station, null), DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Empty-genre placeholders exist only to force their group header into existence -
+    /// the DataGridCollectionView grouping model can't represent an itemless group. Hide
+    /// the row itself so an empty genre renders as a bare header. Rows are recycled, so
+    /// visibility is set BOTH ways on every load.
+    /// </summary>
+    private void OnCuratedRowLoading(object? sender, DataGridRowEventArgs e)
+    {
+        e.Row.IsVisible = (e.Row.DataContext as CuratedStation)?.IsPlaceholder != true;
     }
 
     private void OnSourceDoubleTapped(object? sender, TappedEventArgs e)

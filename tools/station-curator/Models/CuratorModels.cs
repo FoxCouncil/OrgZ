@@ -43,6 +43,9 @@ public sealed class CuratedStation : INotifyPropertyChanged
     [JsonPropertyName("streams")] public List<StreamVariant> Streams { get; set; } = [];
 
     [JsonIgnore] public string GenreName => GenreId == 0 ? "—" : RadioGenres.DisplayName(GenreId);
+
+    /// <summary>View-only stand-in row that keeps an EMPTY genre's group header visible in the curated grid. Never enters the store - purely a rendering artifact.</summary>
+    [JsonIgnore] public bool IsPlaceholder { get; set; }
     [JsonIgnore] public int StreamCount => Streams.Count;
     [JsonIgnore] public int BestBitrate => Streams.Count == 0 ? 0 : Streams.Max(s => Math.Max(s.Bitrate, s.ProbeBitrate ?? 0));
 
@@ -79,14 +82,9 @@ public sealed class CuratedStation : INotifyPropertyChanged
 
     [JsonIgnore] public bool AnyGeoRisk => Streams.Any(s => s.GeoRisk);
 
-    [JsonIgnore] public string GeoLabel
-    {
-        get
-        {
-            var code = BestVariant()?.ServerCountryCode ?? "";
-            return AnyGeoRisk ? (code.Length > 0 ? $"{code} ⚠" : "⚠") : code.Length > 0 ? code : "—";
-        }
-    }
+    // GeoIP of the server the export would actually ship - flag cell + tooltip.
+    [JsonIgnore] public string? GeoCountryCode => BestVariant()?.ServerCountryCode;
+    [JsonIgnore] public string? GeoCountry => BestVariant()?.ServerCountry;
 
     /// <summary>✓ when the variant the export would ship supports in-stream metadata.</summary>
     [JsonIgnore] public string MetaLabel => BestVariant()?.HasMetadata == true ? "✓" : "—";
@@ -114,12 +112,17 @@ public sealed class CuratedStation : INotifyPropertyChanged
             }
         }
 
+        // Metadata support outranks everything except probe health - a working now-playing
+        // display beats transport preference and bitrate. HLS with metadata is fine.
+        // Ties break on measured tune-in time (real, spans the whole redirect/playlist
+        // chain), with hop count as the proxy when a variant was never timed.
         return Streams
             .OrderBy(s => s.ProbeStatus switch { ProbeStatus.Ok => 0, null or ProbeStatus.Untested => 1, ProbeStatus.Geo => 2, _ => 3 })
-            .ThenBy(s => s.EffectiveFormat == "hls" ? 1 : 0)
-            .ThenByDescending(s => s.ProbeBitrate ?? s.Bitrate)
             .ThenByDescending(s => s.HasMetadata)
+            .ThenBy(s => s.EffectiveFormat.StartsWith("hls", StringComparison.Ordinal) ? 1 : 0)
+            .ThenByDescending(s => s.ProbeBitrate ?? s.Bitrate)
             .ThenBy(s => s.EffectiveFormat switch { "aac" => 0, "mp3" => 1, "ogg" => 2, "flac" => 3, _ => 4 })
+            .ThenBy(s => s.ProbeTuneInMs ?? int.MaxValue)
             .ThenBy(s => s.ProbeRedirects ?? 9)
             .First();
     }
@@ -160,9 +163,11 @@ public sealed class StreamVariant : INotifyPropertyChanged
     [JsonPropertyName("geoRisk")] public bool GeoRisk { get; set; }
     [JsonPropertyName("probeRedirects")] public int? ProbeRedirects { get; set; }
     [JsonPropertyName("probeMetaint")] public int? ProbeMetaint { get; set; }
+    [JsonPropertyName("probeHlsMeta")] public string? ProbeHlsMeta { get; set; }
     [JsonPropertyName("probeTitle")] public string? ProbeTitle { get; set; }
     [JsonPropertyName("probeMeasuredFormat")] public string? ProbeMeasuredFormat { get; set; }
     [JsonPropertyName("probeMeasuredBitrate")] public int? ProbeMeasuredBitrate { get; set; }
+    [JsonPropertyName("probeTuneInMs")] public int? ProbeTuneInMs { get; set; }
     [JsonPropertyName("serverIp")] public string? ServerIp { get; set; }
     [JsonPropertyName("serverCountry")] public string? ServerCountry { get; set; }
     [JsonPropertyName("serverCountryCode")] public string? ServerCountryCode { get; set; }
@@ -176,18 +181,11 @@ public sealed class StreamVariant : INotifyPropertyChanged
     [JsonIgnore] public string ProbeLabel => ProbeStatus ?? "untested";
     [JsonIgnore] public string PlayUrl => string.IsNullOrEmpty(ResolvedUrl) ? Url : ResolvedUrl!;
 
-    [JsonIgnore] public bool HasMetadata => ProbeMetaint is > 0;
+    [JsonIgnore] public bool HasMetadata => ProbeMetaint is > 0 || ProbeHlsMeta != null;
     [JsonIgnore] public string HopsLabel => ProbeRedirects?.ToString() ?? "—";
-    [JsonIgnore] public string MetadataLabel => ProbeMetaint is int m and > 0 ? $"icy {m}" : ProbedAtUtc == null ? "—" : "none";
-
-    [JsonIgnore] public string GeoLabel
-    {
-        get
-        {
-            var code = ServerCountryCode ?? "";
-            return GeoRisk ? (code.Length > 0 ? $"{code} ⚠" : "⚠") : code.Length > 0 ? code : "—";
-        }
-    }
+    [JsonIgnore] public string TuneInLabel => ProbeTuneInMs is int t ? t >= 1000 ? $"{t / 1000.0:0.0}s" : $"{t}ms" : "—";
+    // "extinf" is plaintext playlist metadata (iHeart), not an ID3 channel - label it as itself.
+    [JsonIgnore] public string MetadataLabel => ProbeMetaint is int m and > 0 ? $"icy {m}" : ProbeHlsMeta == "extinf" ? "extinf" : ProbeHlsMeta != null ? $"id3 {ProbeHlsMeta}" : ProbedAtUtc == null ? "—" : "none";
 
     /// <summary>Measured codec/bitrate vs what the directory/server advertised: ✓ agrees, ≠ lies, - nothing to compare yet.</summary>
     [JsonIgnore] public string MatchLabel
@@ -200,7 +198,10 @@ public sealed class StreamVariant : INotifyPropertyChanged
             }
 
             var parts = new List<string>();
-            if (!string.IsNullOrEmpty(ProbeMeasuredFormat) && !string.IsNullOrEmpty(Format) && !Format.Equals(ProbeMeasuredFormat, StringComparison.OrdinalIgnoreCase))
+            // "hls" advertised vs "hls+aac" measured is agreement, not a lie - the composite
+            // just names the codec inside the transport. Only flag genuinely different formats.
+            var hlsInvolved = (Format?.StartsWith("hls", StringComparison.OrdinalIgnoreCase) ?? false) || (ProbeMeasuredFormat?.StartsWith("hls", StringComparison.OrdinalIgnoreCase) ?? false);
+            if (!hlsInvolved && !string.IsNullOrEmpty(ProbeMeasuredFormat) && !string.IsNullOrEmpty(Format) && !Format.Equals(ProbeMeasuredFormat, StringComparison.OrdinalIgnoreCase))
             {
                 parts.Add($"{Format}→{ProbeMeasuredFormat}");
             }
@@ -220,8 +221,13 @@ public sealed class StreamVariant : INotifyPropertyChanged
 }
 
 /// <summary>A station row as one of the directories reports it, before curation.</summary>
-public sealed class SourceStation
+public sealed class SourceStation : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>See <see cref="CuratedStation.NotifyChanged"/> - same row-recycling story. Lets the ✓ curated mark update IN PLACE instead of rebuilding the list (which resets the grid's scroll).</summary>
+    public void NotifyChanged() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(""));
+
     public string Source { get; init; } = "";        // "radio-browser" | "shoutcast" | "icecast:<host>"
     public string? SourceId { get; init; }
     public string Name { get; init; } = "";
@@ -230,10 +236,19 @@ public sealed class SourceStation
     public int Bitrate { get; init; }
     public string? Country { get; init; }
     public string? CountryCode { get; init; }
-    public string? Homepage { get; init; }
-    public string? LogoUrl { get; init; }
+    // Settable: SHOUTcast rows import blank and get these backfilled from the stream
+    // server's own stats endpoint when the URL is resolved (directory carries no images).
+    public string? Homepage { get; set; }
+    public string? LogoUrl { get; set; }
     public string Tags { get; init; } = "";
     public int Popularity { get; init; }              // clicks / listeners, whatever the source counts
+
+    /// <summary>DNAS self-description line (listeners, uptime, bitrate, server version) fetched alongside URL resolution - investigable curation detail.</summary>
+    public string? ServerInfo { get; set; }
+
+    public string HomeLabel => string.IsNullOrWhiteSpace(Homepage) ? "—" : Homepage!;
+    public string LogoLabel => string.IsNullOrWhiteSpace(LogoUrl) ? "—" : LogoUrl!;
+    public string ServerInfoLabel => string.IsNullOrWhiteSpace(ServerInfo) ? "—" : ServerInfo!;
 
     /// <summary>Tag-driven genre suggestion - the curation-time home of GenreNormalizer.</summary>
     public RadioGenre SuggestedGenre => RadioGenres.FromDisplayName(GenreNormalizer.ExtractPrimaryGenre(Tags));

@@ -36,12 +36,20 @@ public static class StationExporter
                 continue;
             }
 
+            // The composite "hls+aac" measured format is curation-time detail; the shipped
+            // schema knows only the transport ("hls") - BundledStationsService keys off it.
+            var format = variant.EffectiveFormat;
+            if (format.StartsWith("hls", StringComparison.Ordinal))
+            {
+                format = "hls";
+            }
+
             exported.Add(new
             {
                 id = station.Id,
                 name = station.Name,
                 streamUrl = variant.PlayUrl,
-                streamFormat = string.IsNullOrEmpty(variant.EffectiveFormat) ? "mp3" : variant.EffectiveFormat,
+                streamFormat = string.IsNullOrEmpty(format) ? "mp3" : format,
                 bitrate = variant.EffectiveBitrate,
                 genreId = station.GenreId,
                 country = station.Country ?? "",
