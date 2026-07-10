@@ -8,7 +8,16 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # OrgZ ships Linux and macOS binaries, but CI only ever ran the Windows leg - the code
+    # behind those artifacts was never exercised. Windows stays the required gate; the Linux
+    # and macOS legs run the same suite and surface platform-specific breakage, but are
+    # informational until the suite is confirmed green on them. Flip this to false to require them.
+    continue-on-error: ${{ matrix.os != 'windows-latest' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +30,8 @@ jobs:
       # The suite is fixture-independent (synthetic device fixtures are committed) and the runner
       # exit code is the gate - a crashed test host reports failure here even when the console
       # summary looks green, which is exactly how a silent StackOverflow once hid a third of the
-      # suite. Release configuration matches the pre-commit hook.
+      # suite. Release configuration matches the pre-commit hook. The NuGet-audit codes are
+      # promoted to errors in CI (see Directory.Build.props), so a dependency with a known
+      # vulnerability - like the NU1903 native-SQLite advisory - can't ride green into a release.
       - name: Run test suite
         run: dotnet test OrgZ.Tests/OrgZ.Tests.csproj -c Release --nologo

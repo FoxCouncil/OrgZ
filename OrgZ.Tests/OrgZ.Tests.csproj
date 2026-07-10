@@ -7,6 +7,10 @@
 		<IsPackable>false</IsPackable>
 		<IsTestProject>true</IsTestProject>
 		<RootNamespace>OrgZ.Tests</RootNamespace>
+		<!-- Gate the xUnit-analyzer issues that were just cleaned to zero, so a blocking
+		     task op or a Where-before-Single can't creep back in and ride green. -->
+		<AnalysisLevel>latest</AnalysisLevel>
+		<WarningsAsErrors>$(WarningsAsErrors);xUnit1031;xUnit2029;xUnit2031</WarningsAsErrors>
 	</PropertyGroup>
 
 	<ItemGroup>

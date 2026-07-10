@@ -41,7 +41,7 @@ public class ITunesDbWriterTests
     {
         var doc = ITunesDbWriter.CreateEmpty();
         Assert.Equal("mhbd", doc.Root.Magic);
-        Assert.Empty(TracksMhsd(doc).Children.Where(c => c.Magic == "mhit"));
+        Assert.DoesNotContain(TracksMhsd(doc).Children, c => c.Magic == "mhit");
         Assert.Equal(1u, ITunesDbWriter.NextTrackId(doc));
     }
 
@@ -63,8 +63,8 @@ public class ITunesDbWriterTests
         var doc = ITunesDbWriter.CreateEmpty();
         ITunesDbWriter.AddTrack(doc, Sample(1));
 
-        Assert.Single(TracksMhsd(doc).Children.Where(c => c.Magic == "mhit"));
-        Assert.Single(Master(doc).Children.Where(c => c.Magic == "mhip"));
+        Assert.Single(TracksMhsd(doc).Children, c => c.Magic == "mhit");
+        Assert.Single(Master(doc).Children, c => c.Magic == "mhip");
     }
 
     [Fact]

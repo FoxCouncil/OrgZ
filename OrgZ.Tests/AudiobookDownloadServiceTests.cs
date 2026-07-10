@@ -43,7 +43,7 @@ public class AudiobookDownloadServiceTests
     // ===== The dot-folder contract: scanner walks it, contents are audiobooks by location =====
 
     [Fact]
-    public void The_scanner_walks_dot_audiobooks_but_still_skips_other_dot_folders()
+    public async Task The_scanner_walks_dot_audiobooks_but_still_skips_other_dot_folders()
     {
         var root = Path.Combine(Path.GetTempPath(), "orgz-abdl-" + Guid.NewGuid().ToString("N"));
         try
@@ -55,7 +55,7 @@ public class AudiobookDownloadServiceTests
             File.WriteAllBytes(inBooks, new byte[16]);
             File.WriteAllBytes(inPodcasts, new byte[16]);
 
-            var items = FileScanner.ScanDirectoryAsync(root).GetAwaiter().GetResult();
+            var items = await FileScanner.ScanDirectoryAsync(root);
 
             var book = Assert.Single(items);   // the podcast stays hidden
             Assert.Equal(inBooks, book.FilePath);
@@ -68,7 +68,7 @@ public class AudiobookDownloadServiceTests
     }
 
     [Fact]
-    public void A_legit_album_folder_starting_with_dots_is_scanned_not_skipped()
+    public async Task A_legit_album_folder_starting_with_dots_is_scanned_not_skipped()
     {
         // Regression: the old blanket "any dotted folder is hidden" rule dropped real albums like
         // "...Baby One More Time" and "...And Justice for All" from the library.
@@ -79,7 +79,7 @@ public class AudiobookDownloadServiceTests
             Directory.CreateDirectory(Path.GetDirectoryName(track)!);
             File.WriteAllBytes(track, new byte[16]);
 
-            var items = FileScanner.ScanDirectoryAsync(root).GetAwaiter().GetResult();
+            var items = await FileScanner.ScanDirectoryAsync(root);
 
             var found = Assert.Single(items);
             Assert.Equal(track, found.FilePath);
