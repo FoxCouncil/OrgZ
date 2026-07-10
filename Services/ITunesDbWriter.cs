@@ -838,13 +838,5 @@ public static class ITunesDbWriter
 
     /// <summary>Writes a little-endian unsigned 16-bit value (disc#/total-discs live as u16s;
     /// writing an int32 there would spill into the neighbouring field).</summary>
-    private static void WriteUInt16(byte[] dest, int offset, int value)
-    {
-        if (offset < 0 || offset + 2 > dest.Length)
-        {
-            return;
-        }
-        dest[offset] = (byte)(value & 0xFF);
-        dest[offset + 1] = (byte)((value >> 8) & 0xFF);
-    }
+    private static void WriteUInt16(byte[] dest, int offset, int value) => LittleEndian.WriteUInt16(dest, offset, value);
 }

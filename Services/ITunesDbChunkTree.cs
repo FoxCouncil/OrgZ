@@ -283,24 +283,7 @@ public static class ITunesDbChunkTree
     private static string Ascii4(byte[] b, int pos)
         => $"{(char)b[pos]}{(char)b[pos + 1]}{(char)b[pos + 2]}{(char)b[pos + 3]}";
 
-    internal static int ReadInt32(byte[] b, int pos)
-    {
-        if (pos < 0 || pos + 4 > b.Length)
-        {
-            return 0;
-        }
-        return b[pos] | (b[pos + 1] << 8) | (b[pos + 2] << 16) | (b[pos + 3] << 24);
-    }
+    internal static int ReadInt32(byte[] b, int pos) => LittleEndian.ReadInt32(b, pos);
 
-    internal static void WriteInt32(byte[] b, int pos, int value)
-    {
-        if (pos < 0 || pos + 4 > b.Length)
-        {
-            return;
-        }
-        b[pos] = (byte)(value & 0xFF);
-        b[pos + 1] = (byte)((value >> 8) & 0xFF);
-        b[pos + 2] = (byte)((value >> 16) & 0xFF);
-        b[pos + 3] = (byte)((value >> 24) & 0xFF);
-    }
+    internal static void WriteInt32(byte[] b, int pos, int value) => LittleEndian.WriteInt32(b, pos, value);
 }

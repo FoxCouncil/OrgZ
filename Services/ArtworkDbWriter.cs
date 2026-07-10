@@ -213,31 +213,13 @@ public static class ArtworkDbWriter
         return c;
     }
 
-    private static void WriteUInt16(byte[] b, int o, ushort v)
-    {
-        b[o] = (byte)(v & 0xFF);
-        b[o + 1] = (byte)((v >> 8) & 0xFF);
-    }
+    private static void WriteUInt16(byte[] b, int o, ushort v) => LittleEndian.WriteUInt16(b, o, v);
 
-    private static void WriteUInt64(byte[] b, int o, ulong v)
-    {
-        for (int i = 0; i < 8; i++)
-        {
-            b[o + i] = (byte)((v >> (8 * i)) & 0xFF);
-        }
-    }
+    private static void WriteUInt64(byte[] b, int o, ulong v) => LittleEndian.WriteUInt64(b, o, v);
 
-    private static int ReadInt32(byte[] b, int o) => b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24);
+    private static int ReadInt32(byte[] b, int o) => LittleEndian.ReadInt32(b, o);
 
-    private static int ReadUInt16(byte[] b, int o) => b[o] | (b[o + 1] << 8);
+    private static int ReadUInt16(byte[] b, int o) => LittleEndian.ReadUInt16(b, o);
 
-    private static ulong ReadUInt64(byte[] b, int o)
-    {
-        ulong v = 0;
-        for (int i = 0; i < 8; i++)
-        {
-            v |= (ulong)b[o + i] << (8 * i);
-        }
-        return v;
-    }
+    private static ulong ReadUInt64(byte[] b, int o) => LittleEndian.ReadUInt64(b, o);
 }

@@ -385,17 +385,9 @@ public static class ITunesDbReader
             && bytes[pos + 3] == magic[3];
     }
 
-    private static int ReadInt32(byte[] bytes, int pos)
-    {
-        if (pos + 4 > bytes.Length) return 0;
-        return bytes[pos] | (bytes[pos + 1] << 8) | (bytes[pos + 2] << 16) | (bytes[pos + 3] << 24);
-    }
+    private static int ReadInt32(byte[] bytes, int pos) => LittleEndian.ReadInt32(bytes, pos);
 
-    private static int ReadUInt16(byte[] bytes, int pos)
-    {
-        if (pos + 2 > bytes.Length) return 0;
-        return bytes[pos] | (bytes[pos + 1] << 8);
-    }
+    private static int ReadUInt16(byte[] bytes, int pos) => LittleEndian.ReadUInt16(bytes, pos);
 
     private static DateTime? ReadMacDate(int macSeconds)
     {
