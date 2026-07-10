@@ -3954,29 +3954,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
 
     /// <summary>Locates ffmpeg on PATH, then a bundled copy next to the app.</summary>
-    private static string? ResolveFfmpeg()
-    {
-        var name = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-        var pathEnv = Environment.GetEnvironmentVariable("PATH");
-        if (!string.IsNullOrEmpty(pathEnv))
-        {
-            var sep = OperatingSystem.IsWindows() ? ';' : ':';
-            foreach (var dir in pathEnv.Split(sep, StringSplitOptions.RemoveEmptyEntries))
-            {
-                try
-                {
-                    var candidate = Path.Combine(dir, name);
-                    if (File.Exists(candidate))
-                    {
-                        return candidate;
-                    }
-                }
-                catch { /* malformed PATH entry */ }
-            }
-        }
-        var bundled = Path.Combine(AppContext.BaseDirectory, "tools", name);
-        return File.Exists(bundled) ? bundled : null;
-    }
+    private static string? ResolveFfmpeg() => ExecutableResolver.Find("ffmpeg");
 
     /// <summary>
     /// Sends a specific playlist (or Favorites) to a connected device from the sidebar's "send to device"

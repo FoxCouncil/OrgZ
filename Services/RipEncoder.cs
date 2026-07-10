@@ -534,55 +534,6 @@ public static class RipEncoder
             }
         }
 
-        private static string ResolveExecutable(string name)
-        {
-            var fileName = OperatingSystem.IsWindows() && !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-                ? name + ".exe"
-                : name;
-
-            // 1. Prefer a system install on PATH - distro packagers and power
-            //    users keep their own versions current. If we shipped a bundled
-            //    binary and silently shadowed a newer system version, security
-            //    fixes wouldn't reach our users until the next OrgZ release.
-            if (TryFindOnPath(fileName, out var fromPath))
-            {
-                return fromPath;
-            }
-
-            // 2. Fall back to a copy bundled next to OrgZ.dll - the AppImage /
-            //    .app / Windows portable layout drops these into "tools/" so the
-            //    first-run rip works without forcing the user to apt-install.
-            var bundled = Path.Combine(AppContext.BaseDirectory, "tools", fileName);
-            if (File.Exists(bundled))
-            {
-                return bundled;
-            }
-
-            // 3. Nowhere to be found - Process.Start will throw Win32Exception,
-            //    which the SubprocessEncoder ctor catches and rewrites into a
-            //    user-facing "install flac/lame" message.
-            return fileName;
-        }
-
-        private static bool TryFindOnPath(string fileName, out string fullPath)
-        {
-            var pathEnv = Environment.GetEnvironmentVariable("PATH");
-            if (!string.IsNullOrEmpty(pathEnv))
-            {
-                var sep = OperatingSystem.IsWindows() ? ';' : ':';
-                foreach (var dir in pathEnv.Split(sep, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var candidate = Path.Combine(dir, fileName);
-                    if (File.Exists(candidate))
-                    {
-                        fullPath = candidate;
-                        return true;
-                    }
-                }
-            }
-
-            fullPath = "";
-            return false;
-        }
+        private static string ResolveExecutable(string name) => ExecutableResolver.FindOrName(name);
     }
 }
