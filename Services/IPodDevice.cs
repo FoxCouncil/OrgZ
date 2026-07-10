@@ -268,17 +268,17 @@ public sealed class Nano5gIPod : IPodDevice
         => Task.Run(() =>
         {
             // Delete the audio + artwork caches, then empty the SQLite library and re-sign the cbk.
-            int removed = DeleteFilesUnder(Path.Combine(MountPath, "iPod_Control", "Music"))
-                        + DeleteFilesUnder(Path.Combine(MountPath, "iPod_Control", "Artwork"));
-            new Nano5gLibraryWriter(Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp")).WipeLibrary();
+            int removed = DeleteFilesUnder(IPodPaths.Music(MountPath))
+                        + DeleteFilesUnder(IPodPaths.Artwork(MountPath));
+            new Nano5gLibraryWriter(IPodPaths.Itlp(MountPath)).WipeLibrary();
             return removed;
         }, ct);
 
     public override Task RemoveTrackAsync(MediaItem item, CancellationToken ct = default)
         => Task.Run(() =>
         {
-            var itlp = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
-            var musicRoot = Path.Combine(MountPath, "iPod_Control", "Music");
+            var itlp = IPodPaths.Itlp(MountPath);
+            var musicRoot = IPodPaths.Music(MountPath);
             var relative = RelativeUnderMusic(item.FilePath, musicRoot)
                 ?? throw new InvalidOperationException($"“{item.Title}” isn't under the iPod's Music folder.");
             long pid = Nano5gLibraryWriter.FindItemPidByLocation(itlp, relative);
@@ -299,8 +299,8 @@ public sealed class Nano5gIPod : IPodDevice
     public override Task CreatePlaylistAsync(string name, IReadOnlyList<MediaItem> deviceTracks, CancellationToken ct = default)
         => Task.Run(() =>
         {
-            var itlp = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
-            var musicRoot = Path.Combine(MountPath, "iPod_Control", "Music");
+            var itlp = IPodPaths.Itlp(MountPath);
+            var musicRoot = IPodPaths.Music(MountPath);
             // Resolve each device item back to its SQLite item pid by on-device location - works for both
             // just-imported and already-present tracks, and doesn't rely on the pid riding in the item.
             var pids = new List<long>(deviceTracks.Count);
@@ -322,7 +322,7 @@ public sealed class Nano5gIPod : IPodDevice
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() =>
         {
-            var itlp = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
+            var itlp = IPodPaths.Itlp(MountPath);
             onProgress?.Invoke("Reading iTunes Library.itlp...");
             Nano5gLibraryReader.ReadAll(itlp, MountPath, out var tracks, out var playlists);
             var items = tracks.Select(t => DeviceItemFromTrack(t, MountPath)).ToList();
@@ -331,7 +331,7 @@ public sealed class Nano5gIPod : IPodDevice
         }, ct);
 
     public override IDisposable? BeginBatchWrite()
-        => new Nano5gLibraryWriter(Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunes Library.itlp"), Device.FireWireGuid).BeginCdbBatch();
+        => new Nano5gLibraryWriter(IPodPaths.Itlp(MountPath), Device.FireWireGuid).BeginCdbBatch();
 }
 
 /// <summary>Pre-Nano-5G stock iPods (no checksum or Hash58): the binary iTunesDB.</summary>
@@ -355,7 +355,7 @@ public sealed class BinaryIPod : IPodDevice
             {
                 throw new InvalidOperationException($"Couldn't identify “{item.Title}” on the iPod.");
             }
-            var dbPath = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunesDB");
+            var dbPath = IPodPaths.ITunesDb(MountPath);
             if (!File.Exists(dbPath))
             {
                 throw new FileNotFoundException($"This iPod has no iTunesDB at '{dbPath}'.", dbPath);
@@ -382,10 +382,10 @@ public sealed class BinaryIPod : IPodDevice
             // Delete the audio + artwork caches, then clear the iTunesDB's track + playlist lists and
             // re-sign it - the reset for every pre-Nano-5G stock iPod (1st-gen FireWire → Classic).
             // Same write discipline as the remove path: one-time backup, then atomic swap.
-            int removed = DeleteFilesUnder(Path.Combine(MountPath, "iPod_Control", "Music"))
-                        + DeleteFilesUnder(Path.Combine(MountPath, "iPod_Control", "Artwork"));
+            int removed = DeleteFilesUnder(IPodPaths.Music(MountPath))
+                        + DeleteFilesUnder(IPodPaths.Artwork(MountPath));
 
-            var dbPath = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunesDB");
+            var dbPath = IPodPaths.ITunesDb(MountPath);
             if (File.Exists(dbPath) && new FileInfo(dbPath).Length > 0)
             {
                 var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
@@ -424,7 +424,7 @@ public sealed class BinaryIPod : IPodDevice
     public override Task RemovePlaylistAsync(string name, CancellationToken ct = default)
         => Task.Run(() =>
         {
-            var dbPath = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunesDB");
+            var dbPath = IPodPaths.ITunesDb(MountPath);
             if (!File.Exists(dbPath))
             {
                 return;
@@ -439,7 +439,7 @@ public sealed class BinaryIPod : IPodDevice
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() =>
         {
-            var dbPath = Path.Combine(MountPath, "iPod_Control", "iTunes", "iTunesDB");
+            var dbPath = IPodPaths.ITunesDb(MountPath);
             // A 0-byte iTunesDB is the empty stub left beside a Nano 5G CDB - treat it as "no DB" and walk
             // the filesystem, matching the pre-refactor fall-through.
             if (!(File.Exists(dbPath) && new FileInfo(dbPath).Length > 0))
@@ -642,8 +642,8 @@ public sealed class ShuffleIPod : IPodDevice
     public override bool SupportsPodcasts => true;     // episodes land as plain tracks
     public override bool SupportsArtwork => false;
 
-    private string ITunesDir => Path.Combine(MountPath, "iPod_Control", "iTunes");
-    private string MusicDir => Path.Combine(MountPath, "iPod_Control", "Music", "F00");
+    private string ITunesDir => IPodPaths.ITunesDir(MountPath);
+    private string MusicDir => Path.Combine(IPodPaths.Music(MountPath), "F00");
 
     /// <summary>3G/4G Shuffles use the newer little-endian "bdhs" iTunesSD; 1G/2G the classic format.</summary>
     private bool UsesBdhs => Generation is not null && (Generation.Contains("3G") || Generation.Contains("4G"));
@@ -766,7 +766,7 @@ public sealed class ShuffleIPod : IPodDevice
     public override Task<int> EraseAsync(CancellationToken ct = default)
         => Task.Run(() =>
         {
-            int removed = DeleteFilesUnder(Path.Combine(MountPath, "iPod_Control", "Music"));
+            int removed = DeleteFilesUnder(IPodPaths.Music(MountPath));
             WriteSd([]);   // valid header, zero entries
             return removed;
         }, ct);
