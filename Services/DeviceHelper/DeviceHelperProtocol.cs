@@ -17,10 +17,13 @@ public static class DeviceHelperProtocol
 {
     public const int Version = 1;
 
-    /// <summary>Named pipe (Windows) / unix-socket file (macOS, Linux) the service listens on.</summary>
+    /// <summary>Named pipe (Windows) / unix-socket file (macOS, Linux) the service listens on.
+    /// Deliberately under root-owned /var/run, NOT /tmp: /tmp is world-writable, so a local
+    /// user could pre-create or symlink the path and race the daemon's bind. /var/run is 0755
+    /// root:root - only root creates the socket there, so the path itself can't be hijacked.</summary>
     public static string Endpoint => OperatingSystem.IsWindows()
         ? "orgz-devicehelper"
-        : "/tmp/orgz-devicehelper.sock";
+        : "/var/run/orgz-devicehelper.sock";
 
     public sealed record Request(int Version, string Op, string MountPath, string? Generation);
 
