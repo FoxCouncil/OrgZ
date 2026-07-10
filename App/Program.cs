@@ -36,6 +36,16 @@ internal class Program
             Logging.Initialize();
             try
             {
+#if WINDOWS
+                // Launched by the SCM (no interactive session) → run under ServiceBase so the
+                // control-dispatcher handshake happens and `sc start` succeeds. A developer
+                // running --device-helper from a console keeps the inline loop (no install).
+                if (OperatingSystem.IsWindows() && !Environment.UserInteractive)
+                {
+                    System.ServiceProcess.ServiceBase.Run(new Services.DeviceHelper.DeviceHelperWindowsService());
+                    return 0;
+                }
+#endif
                 return Services.DeviceHelper.DeviceHelperDaemon.RunAsync().GetAwaiter().GetResult();
             }
             finally
