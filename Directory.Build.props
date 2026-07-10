@@ -1,13 +1,18 @@
 <Project>
 
   <!--
-    In CI (GitHub Actions sets CI=true), promote the NuGet-audit advisory warnings to errors for
-    every project in the repo, so a dependency carrying a known vulnerability - like the NU1903
-    native-SQLite advisory - fails the build instead of riding green into a release. Local dev
-    still just warns, so a freshly published advisory can't block work mid-flow.
+    In CI (GitHub Actions sets CI=true), promote two warning classes to errors for every project
+    in the repo, so neither can ride green into a release:
+      - NuGet-audit advisories (NU190x) - a dependency with a known vulnerability, like the NU1903
+        native-SQLite advisory, fails the build.
+      - CA1416 platform-compatibility - a call into a platform-specific API without a guard fails;
+        the genuinely-guarded device/service types are suppressed with justifications in
+        GlobalSuppressions.cs, so this only catches NEW unguarded call sites.
+    Local dev still just warns, so a freshly published advisory or an in-progress edit can't block
+    work mid-flow.
   -->
   <PropertyGroup Condition="'$(CI)' == 'true'">
-    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904;CA1416</WarningsAsErrors>
   </PropertyGroup>
 
 </Project>
