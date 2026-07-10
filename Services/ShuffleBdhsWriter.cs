@@ -78,7 +78,8 @@ public static class ShuffleBdhsWriter
         w.PatchU32(plTable, (uint)w.Pos);
         WriteMasterLphs(w, tracks.Count);
 
-        File.WriteAllBytes(Path.Combine(iTunesDir, "iTunesSD"), w.ToArray());
+        var sdPath = Path.Combine(iTunesDir, "iTunesSD");
+        AtomicFile.WriteAllBytes(sdPath, w.ToArray(), backup: sdPath + ".orgzbak");
     }
 
     private static void WriteRths(Le w, ShuffleSdTrack t, ulong dbid)

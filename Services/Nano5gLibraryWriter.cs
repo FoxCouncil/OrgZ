@@ -219,7 +219,7 @@ public sealed class Nano5gLibraryWriter
         }
 
         // Re-sign the now-modified Locations.itdb with the recovered seed.
-        File.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
+        AtomicFile.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
         RegenerateCdbUnlessDeferred();
         return itemPid;
     }
@@ -345,7 +345,7 @@ public sealed class Nano5gLibraryWriter
             tx.Commit();
         }
 
-        File.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
+        AtomicFile.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
         RegenerateCdbUnlessDeferred();
         return itemPid;
     }
@@ -600,7 +600,7 @@ public sealed class Nano5gLibraryWriter
             if (File.Exists(abs)) { File.Delete(abs); }
         }
 
-        File.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
+        AtomicFile.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
         RegenerateCdbUnlessDeferred();
     }
 
@@ -745,7 +745,7 @@ public sealed class Nano5gLibraryWriter
         }
 
         // Re-sign the now-empty Locations.itdb so the firmware still trusts it.
-        File.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
+        AtomicFile.WriteAllBytes(cbkPath, ITunesLocationsCbk.Build(File.ReadAllBytes(locPath), iv, rnd));
 
         if (File.Exists(dynPath))
         {
