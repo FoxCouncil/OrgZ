@@ -53,7 +53,7 @@ public static class IPodArtworkReader
             return null;
         }
 
-        var ithmb = Path.Combine(mountPath, "iPod_Control", "Artwork", $"F{thumb.FormatId}_1.ithmb");
+        var ithmb = Path.Combine(IPodPaths.Artwork(mountPath), $"F{thumb.FormatId}_1.ithmb");
         if (!File.Exists(ithmb))
         {
             return null;
@@ -86,7 +86,7 @@ public static class IPodArtworkReader
                 return cached;
             }
 
-            var dbPath = Path.Combine(mountPath, "iPod_Control", "Artwork", "ArtworkDB");
+            var dbPath = IPodPaths.ArtworkDb(mountPath);
             var map = new Dictionary<ulong, ArtImage>();
             if (File.Exists(dbPath))
             {
