@@ -33,6 +33,7 @@ public sealed class AudioSinkBus : IDisposable
     private readonly List<IAudioSink> _sinks = [];
     private AudioFormat? _format;
     private float _masterVolume = 1f;
+    private float _normalizationGain = 1f;
     private bool _disposed;
 
     /// <summary>
@@ -43,6 +44,19 @@ public sealed class AudioSinkBus : IDisposable
     {
         get => _masterVolume;
         set => _masterVolume = Math.Clamp(value, 0f, 1f);
+    }
+
+    /// <summary>
+    /// Automatic loudness-normalization gain (ReplayGain / "Sound Check"), applied on top of
+    /// <see cref="MasterVolume"/>.  Unlike master volume this MAY exceed 1 to bring a quiet track
+    /// up to the reference; the scaling pass clamps samples so an over-boost can't overflow.
+    /// Set to 1 for no normalization.  Takes effect on the next PCM buffer, so it can be changed
+    /// mid-track and the listener hears it immediately.
+    /// </summary>
+    public float NormalizationGain
+    {
+        get => _normalizationGain;
+        set => _normalizationGain = Math.Clamp(value, 0f, 4f);
     }
 
     public IReadOnlyList<IAudioSink> Sinks
@@ -189,15 +203,17 @@ public sealed class AudioSinkBus : IDisposable
             sinks = _sinks.ToArray();
         }
 
-        // Apply master volume if needed.  Scaling is done on a per-call
-        // scratch array so sinks receive the attenuated data and can still
-        // apply their own per-sink volumes on top.
+        // Apply master volume × normalization gain if the product isn't unity.  Scaling is done
+        // on a per-call scratch array so sinks receive the adjusted data and can still apply their
+        // own per-sink volumes on top.  The combined gain can be >1 (a quiet track boosted by
+        // ReplayGain); ScaleS16 clamps so that can't overflow the sample range.
         ReadOnlySpan<byte> buffer = pcm;
         byte[]? scratch = null;
-        if (_masterVolume < 0.999f && _format is { BitsPerSample: 16, Encoding: AudioSampleEncoding.PcmSigned })
+        var effectiveGain = _masterVolume * _normalizationGain;
+        if (Math.Abs(effectiveGain - 1f) > 0.001f && _format is { BitsPerSample: 16, Encoding: AudioSampleEncoding.PcmSigned })
         {
             scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(pcm.Length);
-            ScaleS16(pcm, scratch.AsSpan(0, pcm.Length), _masterVolume);
+            ScaleS16(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
             buffer = scratch.AsSpan(0, pcm.Length);
         }
 

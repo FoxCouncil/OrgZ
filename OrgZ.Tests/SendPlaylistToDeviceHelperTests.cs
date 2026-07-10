@@ -121,6 +121,31 @@ public class SendPlaylistToDeviceHelperTests
     {
         Assert.Equal("trimmed", MainWindowViewModel.SanitizeFileName("  trimmed  "));
     }
+
+    // ===== NormalizationGain (Sound Check) =====
+
+    [Fact]
+    public void NormalizationGain_is_unity_when_sound_check_off()
+    {
+        // Even with a real gain to apply, an off toggle means no scaling.
+        Assert.Equal(1f, MainWindowViewModel.NormalizationGain(soundCheckEnabled: false, replayGainDb: -6.0));
+    }
+
+    [Fact]
+    public void NormalizationGain_is_unity_when_track_has_no_measured_gain()
+    {
+        Assert.Equal(1f, MainWindowViewModel.NormalizationGain(soundCheckEnabled: true, replayGainDb: null));
+    }
+
+    [Theory]
+    [InlineData(0.0, 1.0)]       // already at the reference - no change
+    [InlineData(-6.0, 0.501)]    // loud track attenuated (10^(-6/20))
+    [InlineData(3.0, 1.413)]     // quiet track boosted (10^(3/20))
+    [InlineData(12.0, 1.995)]    // boost capped at +6 dB (10^(6/20); would be 3.98 uncapped)
+    public void NormalizationGain_converts_db_to_linear_and_caps_the_boost(double db, double expected)
+    {
+        Assert.Equal(expected, MainWindowViewModel.NormalizationGain(soundCheckEnabled: true, replayGainDb: db), 3);
+    }
 }
 
 /// <summary>
