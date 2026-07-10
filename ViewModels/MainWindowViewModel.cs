@@ -46,12 +46,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private OrgZ.Services.AudioVisualization.AudioTap _audioTap = null!;
 
 #if WINDOWS
-    private SmtcService? _smtcService;
     private TaskbarThumbBarService? _thumbBarService;
 #endif
 
-    private MprisService? _mprisService;
-    private MacNowPlayingService? _macNowPlaying;
+    // The one OS now-playing surface for this platform (MPRIS / macOS / SMTC), chosen at init.
+    private INowPlayingIntegration? _nowPlaying;
 
     private MusicFolderWatcher? _folderWatcher;
 
@@ -1464,11 +1463,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
 #if WINDOWS
-            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Paused);
             _thumbBarService?.SetPlayingState(false);
 #endif
-            _mprisService?.SetPlaybackStatus("Paused");
-            _macNowPlaying?.SetPlaybackStatus("Paused");
+            _nowPlaying?.SetPlaybackStatus("Paused");
 
             UpdateMainStatus("Paused");
         });
@@ -1482,11 +1479,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPausePadding = ICON_PAUSE_PADDING;
 
 #if WINDOWS
-            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Playing);
             _thumbBarService?.SetPlayingState(true);
 #endif
-            _mprisService?.SetPlaybackStatus("Playing");
-            _macNowPlaying?.SetPlaybackStatus("Playing");
+            _nowPlaying?.SetPlaybackStatus("Playing");
 
             UpdateMainStatus("Playing");
         });
@@ -1533,7 +1528,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // smoothly between pivots at rate=1, which matches OrgZ's display
             // much better than flooding macOS with 4 Hz updates - the widget
             // appeared to coalesce / lag those, ending up several seconds behind.
-            if (_macNowPlaying is not null)
+            if (_nowPlaying is not null)
             {
                 bool firstPush = _lastMacNowPlayingPushMs == long.MinValue;
                 bool rewound = e.Time < _lastMacNowPlayingPushMs;
@@ -1541,7 +1536,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (firstPush || rewound || resyncDue)
                 {
                     _lastMacNowPlayingPushMs = e.Time;
-                    _macNowPlaying.SetPlaybackPosition(TimeSpan.FromMilliseconds(e.Time), 1.0);
+                    _nowPlaying.SetPlaybackPosition(TimeSpan.FromMilliseconds(e.Time), 1.0);
                 }
             }
 
@@ -1571,11 +1566,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
 #if WINDOWS
-            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
             _thumbBarService?.SetPlayingState(false);
 #endif
-            _mprisService?.SetPlaybackStatus("Stopped");
-            _macNowPlaying?.SetPlaybackStatus("Stopped");
+            _nowPlaying?.SetPlaybackStatus("Stopped");
 
             UpdateMainStatus("Stopped");
         });
@@ -1701,64 +1694,66 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Linux shell integration - GNOME/KDE/XFCE media keys + panel widgets. Failure
         // here is non-fatal: if the session bus isn't reachable the service quietly
         // disables itself and the rest of the app keeps working.
+        // Linux shell integration - GNOME/KDE/XFCE media keys + panel widgets. MPRIS's D-Bus
+        // connect happens in InitializeAsync; failure there is non-fatal (it disables itself).
         if (OperatingSystem.IsLinux())
         {
-            _mprisService = new MprisService();
-            // EVERY MPRIS callback fires from the Tmds.DBus worker thread. VM state
-            // touches (player control, property changes) MUST happen on the UI thread
-            // or Avalonia bindings will crash with cross-thread access violations.
-            _mprisService.PlayRequested     += () => Dispatcher.UIThread.Post(Play);
-            _mprisService.PauseRequested    += () => Dispatcher.UIThread.Post(Pause);
-            _mprisService.PlayPauseRequested += () => Dispatcher.UIThread.Post(ButtonPlayPause);
-            _mprisService.NextRequested     += () => Dispatcher.UIThread.Post(ButtonNextTrack);
-            _mprisService.PreviousRequested += () => Dispatcher.UIThread.Post(ButtonPreviousTrack);
-            _mprisService.StopRequested     += () => Dispatcher.UIThread.Post(Stop);
-            _mprisService.RaiseRequested    += () => Dispatcher.UIThread.Post(() =>
-            {
-                if (_window.WindowState == Avalonia.Controls.WindowState.Minimized)
-                {
-                    _window.WindowState = Avalonia.Controls.WindowState.Normal;
-                }
-                _window.Activate();
-            });
-            _ = _mprisService.InitializeAsync();
+            var mpris = new MprisService();
+            _nowPlaying = mpris;
+            WireNowPlaying(mpris);
+            _ = mpris.InitializeAsync();
         }
 
-        // macOS Control Center / lock screen / media-key widget. One-way for now
-        // (we publish metadata + transport state; remote commands need ObjC block
-        // bridging and arrive in a follow-up).
+        // macOS Control Center / lock screen / media-key widget (MPNowPlayingInfoCenter).
         if (OperatingSystem.IsMacOS())
         {
-            _macNowPlaying = new MacNowPlayingService();
-            // ObjC dispatches the remote-command callbacks on the main dispatch
-            // queue (the AppKit thread we're already on for UI work), but post
-            // anyway so a future libdispatch routing change doesn't crash us.
-            _macNowPlaying.PlayRequested      += () => Dispatcher.UIThread.Post(Play);
-            _macNowPlaying.PauseRequested     += () => Dispatcher.UIThread.Post(Pause);
-            _macNowPlaying.PlayPauseRequested += () => Dispatcher.UIThread.Post(ButtonPlayPause);
-            _macNowPlaying.NextRequested      += () => Dispatcher.UIThread.Post(ButtonNextTrack);
-            _macNowPlaying.PreviousRequested  += () => Dispatcher.UIThread.Post(ButtonPreviousTrack);
-            _macNowPlaying.StopRequested      += () => Dispatcher.UIThread.Post(Stop);
+            var mac = new MacNowPlayingService();
+            _nowPlaying = mac;
+            WireNowPlaying(mac);
         }
+    }
+
+    /// <summary>
+    /// Routes an OS now-playing backend's transport events to the player, marshalling each onto
+    /// the UI thread - MPRIS fires on the D-Bus worker thread and SMTC on a COM thread, so a
+    /// direct call would touch Avalonia bindings cross-thread. A backend that never raises a
+    /// given event (e.g. SMTC has no Raise) simply never triggers that handler.
+    /// </summary>
+    private void WireNowPlaying(INowPlayingIntegration np)
+    {
+        np.PlayRequested      += () => Dispatcher.UIThread.Post(Play);
+        np.PauseRequested     += () => Dispatcher.UIThread.Post(Pause);
+        np.PlayPauseRequested += () => Dispatcher.UIThread.Post(ButtonPlayPause);
+        np.NextRequested      += () => Dispatcher.UIThread.Post(ButtonNextTrack);
+        np.PreviousRequested  += () => Dispatcher.UIThread.Post(ButtonPreviousTrack);
+        np.StopRequested      += () => Dispatcher.UIThread.Post(Stop);
+        np.RaiseRequested     += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (_window.WindowState == Avalonia.Controls.WindowState.Minimized)
+            {
+                _window.WindowState = Avalonia.Controls.WindowState.Normal;
+            }
+            _window.Activate();
+        });
     }
 
 #if WINDOWS
     internal void InitializeSmtc(IntPtr hwnd)
     {
-        _smtcService = new SmtcService();
-        if (!_smtcService.Initialize(hwnd))
+        var smtc = new SmtcNowPlaying();
+        if (!smtc.Initialize(hwnd))
         {
-            UpdateMainStatus(_smtcService.InitDiagnostics ?? "SMTC: Init failed (unknown)");
-            _smtcService.Dispose();
-            _smtcService = null;
+            UpdateMainStatus(smtc.Diagnostics ?? "SMTC: Init failed (unknown)");
+            smtc.Dispose();
             return;
         }
 
-        UpdateMainStatus(_smtcService.InitDiagnostics ?? "SMTC: OK");
+        UpdateMainStatus(smtc.Diagnostics ?? "SMTC: OK");
 
-        _smtcService.PlayPauseRequested += ButtonPlayPause;
-        _smtcService.NextRequested += ButtonNextTrack;
-        _smtcService.PreviousRequested += ButtonPreviousTrack;
+        // Connecting SMTC as the now-playing surface is what finally feeds it metadata + status,
+        // not just the transport buttons WireNowPlaying hooks up.
+        WireNowPlaying(smtc);
+        _nowPlaying = smtc;
     }
 
     internal void InitializeThumbBar(IntPtr hwnd)
@@ -2079,9 +2074,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ClearPlayback();
 
 #if WINDOWS
-            _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
             _thumbBarService?.SetPlayingState(false);
 #endif
+            _nowPlaying?.SetPlaybackStatus("Stopped");
 
             _allItems.RemoveAll(i => i.Kind == MediaKind.Music);
             FilteredItems = [];
@@ -2194,11 +2189,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             : track.Album ?? "";
         CurrentAlbumArt = _cdCoverArt;
 
-#if WINDOWS
-        _smtcService?.UpdateMetadata(track.Title, track.Artist, track.Album, null);
-#endif
-        _mprisService?.SetMetadata(track.Title, track.Artist, track.Album, null);
-        _macNowPlaying?.SetMetadata(track.Title, track.Artist, track.Album, track.Duration, _cdCoverArtBytes);
+        _nowPlaying?.SetMetadata(new NowPlayingMetadata(track.Title, track.Artist, track.Album, Duration: track.Duration, ArtBytes: _cdCoverArtBytes));
 
         var previousRadio = TakeRadioStream();
         var previousMedia = _currentMedia;
@@ -2484,11 +2475,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         artBytes ??= ExtractAlbumArtBytes(file.FilePath!);
         CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
 
-#if WINDOWS
-        _smtcService?.UpdateMetadata(file.Title, file.Artist, file.Album, artBytes);
-#endif
-        _mprisService?.SetMetadata(file.Title, file.Artist, file.Album, string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri);
-        _macNowPlaying?.SetMetadata(file.Title, file.Artist, file.Album, file.Duration, artBytes);
+        _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtUri: string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri, ArtBytes: artBytes));
 
         var previousRadio = TakeRadioStream();
         var previousMedia = _currentMedia;
@@ -2534,11 +2521,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _stationArtBytes = null;
         _radioTrackArtActive = false;
 
-#if WINDOWS
-        _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", null);
-#endif
-        _mprisService?.SetMetadata(station.Title, station.Tags, "Internet Radio", station.FaviconUrl);
-        _macNowPlaying?.SetMetadata(station.Title, station.Tags, "Internet Radio", null);
+        _nowPlaying?.SetMetadata(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl));
 
         if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
         {
@@ -2713,9 +2696,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     CurrentTrackLine1 = title ?? nowPlaying;
                     CurrentTrackLine2 = artist ?? string.Empty;
 
-#if WINDOWS
-                    _smtcService?.UpdateMetadata(title, artist, CurrentStation?.Title, null);
-#endif
+                    _nowPlaying?.SetMetadata(new NowPlayingMetadata(title, artist, CurrentStation?.Title));
                 });
             };
             thisMedia.MetaChanged += handler;
@@ -2988,11 +2969,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 FilePath  = isLocal ? source : null,
             };
 
-#if WINDOWS
-            _smtcService?.UpdateMetadata(episode.Title, feed.Title, "Podcast", null);
-#endif
-            _mprisService?.SetMetadata(episode.Title, feed.Title, "Podcast", episode.Image ?? feed.DisplayImage);
-            _macNowPlaying?.SetMetadata(episode.Title, feed.Title, "Podcast", null);
+            _nowPlaying?.SetMetadata(new NowPlayingMetadata(episode.Title, feed.Title, "Podcast", ArtUri: episode.Image ?? feed.DisplayImage));
 
             var artUrl = !string.IsNullOrWhiteSpace(episode.Image) ? episode.Image : feed.DisplayImage;
             if (!string.IsNullOrWhiteSpace(artUrl))
@@ -3190,9 +3167,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
 #if WINDOWS
-        _smtcService?.SetPlaybackStatus(MediaPlaybackStatus.Stopped);
         _thumbBarService?.SetPlayingState(false);
 #endif
+        _nowPlaying?.SetPlaybackStatus("Stopped");
 
         UpdateNavigationButtons();
     }
@@ -4895,18 +4872,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             IsBackTrackButtonEnabled = false;
             IsNextTrackButtonEnabled = false;
 #if WINDOWS
-            _smtcService?.SetNavigationEnabled(false, false);
             _thumbBarService?.SetNavigationEnabled(false, false);
 #endif
+            _nowPlaying?.SetNavigationEnabled(false, false);
             return;
         }
 
         IsBackTrackButtonEnabled = _playbackContext.HasPrevious;
         IsNextTrackButtonEnabled = _playbackContext.HasNext;
 #if WINDOWS
-        _smtcService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
         _thumbBarService?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
 #endif
+        _nowPlaying?.SetNavigationEnabled(IsBackTrackButtonEnabled, IsNextTrackButtonEnabled);
     }
 
     internal void UpdateMainStatus(string status)
@@ -5004,10 +4981,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (_currentPodcastStream is { } ps && ps.Episode.Id == episode.Id)
                 {
                     CurrentAlbumArt = bitmap;
-#if WINDOWS
-                    _smtcService?.UpdateMetadata(episode.Title, feed.Title, "Podcast", bytes);
-#endif
-                    _macNowPlaying?.SetMetadata(episode.Title, feed.Title, "Podcast", null, bytes);
+                    _nowPlaying?.SetArtwork(bytes);
                 }
             });
         }
@@ -5046,12 +5020,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
                     // Explicit Dispose() while a render pass is in flight causes ObjectDisposedException.
                     CurrentAlbumArt = bitmap;
-#if WINDOWS
-                    _smtcService?.UpdateMetadata(CurrentStation?.Title, CurrentStation?.Tags, "Internet Radio", bytes);
-#endif
-                    // macOS Now Playing only learns about the artwork after the
-                    // favicon download finishes - push an updated metadata frame.
-                    _macNowPlaying?.SetMetadata(CurrentStation?.Title, CurrentStation?.Tags, "Internet Radio", null, bytes);
+                    // The now-playing widgets only learn the artwork once the favicon
+                    // download finishes - push it to the current track's cover.
+                    _nowPlaying?.SetArtwork(bytes);
                 });
             }
         }
@@ -5074,9 +5045,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         CurrentTrackLine1 = station.Title ?? "Unknown Station";
         CurrentTrackLine2 = FormatTags(station.Tags);
-#if WINDOWS
-        _smtcService?.UpdateMetadata(station.Title, station.Tags, "Internet Radio", _stationArtBytes);
-#endif
+        _nowPlaying?.SetMetadata(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl, ArtBytes: _stationArtBytes));
     }
 
     /// <summary>
@@ -5093,10 +5062,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _radioTrackArtActive = false;
             CurrentAlbumArt = _stationArtBitmap;
-#if WINDOWS
-            _smtcService?.UpdateMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, _stationArtBytes);
-#endif
-            _macNowPlaying?.SetMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, null, _stationArtBytes);
+            _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _stationArtBytes));
             return;
         }
 
@@ -5130,10 +5096,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _radioTrackArtActive = true;
                 // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
                 CurrentAlbumArt = bitmap;
-#if WINDOWS
-                _smtcService?.UpdateMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, bytes);
-#endif
-                _macNowPlaying?.SetMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, null, bytes);
+                _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: bytes));
             });
         }
         catch
@@ -7438,10 +7401,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 #if WINDOWS
         _thumbBarService?.Dispose();
-        _smtcService?.Dispose();
 #endif
-        _mprisService?.Dispose();
-        _macNowPlaying?.Dispose();
+        _nowPlaying?.Dispose();
         _audioOutput.SavePersistedSelections();
         _audioTap?.Dispose();
         _audioOutput.Dispose();

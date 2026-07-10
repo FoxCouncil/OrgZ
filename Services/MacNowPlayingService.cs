@@ -154,6 +154,11 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
         Publish();
     }
 
+    public void SetNavigationEnabled(bool previous, bool next)
+    {
+        // The macOS remote-command center leaves next/previous always enabled.
+    }
+
     public void SetMetadata(string? title, string? artist, string? album, TimeSpan? duration, byte[]? artworkBytes = null)
     {
         _cachedTitle = title;
