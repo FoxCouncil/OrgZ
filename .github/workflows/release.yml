@@ -39,6 +39,13 @@ jobs:
       - name: Install Velopack CLI
         run: dotnet tool install -g vpk
 
+      # Pull OUR vetted, SHA-256-pinned ffmpeg/flac/lame from the encoders release (see
+      # scripts/encoders.json) into tools/<rid>/ so the publish step bundles them. Tools not yet
+      # vendored are skipped - the app just falls back to a PATH install for those.
+      - name: Bundle media tools (ffmpeg + rip encoders)
+        shell: pwsh
+        run: scripts/fetch-encoders.ps1 -Rid ${{ matrix.rid }}
+
       - name: Publish
         run: dotnet publish OrgZ.csproj -c Release -r ${{ matrix.rid }} --self-contained -o publish -p:Version=${{ steps.version.outputs.VERSION }}
 

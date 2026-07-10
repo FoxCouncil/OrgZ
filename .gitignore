@@ -347,6 +347,10 @@ paket-files/
 #tools/**
 #!tools/packages.config
 
+# OrgZ: vendored media-tool binaries are staged here before upload to the encoders
+# release, never committed (see scripts/encoders.json + scripts/fetch-encoders.ps1).
+scripts/staged/
+
 # Tabs Studio
 *.tss
 

@@ -1,0 +1,29 @@
+{
+  "$comment": [
+    "Pinned, self-hosted media tools bundled next to OrgZ (ffmpeg, flac, lame).",
+    "sha256 = PENDING means the asset hasn't been vendored + uploaded to our release yet;",
+    "fetch-encoders.ps1 skips those (runtime falls back to a PATH install).",
+    "",
+    "To vet + (re)host a build:",
+    "  1. pwsh scripts/fetch-encoders.ps1 -Vendor            # downloads upstream, hashes, stages to scripts/staged/, writes the sha256 values back here",
+    "  2. create a GitHub release tagged '<release>' on <repo> and upload everything in scripts/staged/",
+    "  3. commit this file (now with real hashes)",
+    "Thereafter every build/release fetches OUR copy and verifies the hash — a re-tag or",
+    "compromise upstream can't reach users, because the bytes come from us and are checked."
+  ],
+  "repo": "FoxCouncil/OrgZ",
+  "release": "encoders-1",
+  "tools": {
+    "win-x64": [
+      { "out": "ffmpeg.exe",     "asset": "ffmpeg-win-x64.exe",   "sha256": "PENDING", "license": "LGPL-2.1", "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip", "archive": "zip",  "entry": "ffmpeg.exe" },
+      { "out": "flac.exe",       "asset": "flac-win-x64.exe",     "sha256": "PENDING", "license": "BSD",      "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",                                    "archive": "zip",  "entry": "flac-1.4.3-win/Win64/flac.exe" },
+      { "out": "libFLAC.dll",    "asset": "libFLAC-win-x64.dll",  "sha256": "PENDING", "license": "BSD",      "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",                                    "archive": "zip",  "entry": "flac-1.4.3-win/Win64/libFLAC.dll" },
+      { "out": "libFLAC++.dll",  "asset": "libFLACpp-win-x64.dll","sha256": "PENDING", "license": "BSD",      "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",                                    "archive": "zip",  "entry": "flac-1.4.3-win/Win64/libFLAC++.dll" },
+      { "out": "lame.exe",       "asset": "lame-win-x64.exe",     "sha256": "PENDING", "license": "LGPL-2.0", "upstreamUrl": "https://www.rarewares.org/files/mp3/lame3.100.1-x64.zip",                                        "archive": "zip",  "entry": "lame.exe", "referer": "https://www.rarewares.org/mp3-lame-bundle.php" }
+    ],
+    "linux-x64": [
+      { "out": "ffmpeg", "asset": "ffmpeg-linux-x64", "sha256": "PENDING", "license": "LGPL-2.1", "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz", "archive": "tar.xz", "entry": "*/bin/ffmpeg" }
+    ],
+    "osx-arm64": []
+  }
+}

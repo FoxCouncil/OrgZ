@@ -44,6 +44,15 @@
 	  <Content Include="Assets\app.ico" />
 	</ItemGroup>
 
+	<!-- Ship the third-party binary license notices next to the app (LGPL/BSD compliance for the
+	     bundled ffmpeg/flac/lame). Included in every build/publish regardless of RID. -->
+	<ItemGroup>
+		<Content Include="licenses\**\*" Link="licenses\%(RecursiveDir)%(Filename)%(Extension)">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+		</Content>
+	</ItemGroup>
+
 	<ItemGroup>
 		<PackageReference Include="Avalonia" Version="12.0.3" />
 		<PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
@@ -181,5 +190,27 @@
 		<Copy SourceFiles="@(WindowsEncoderBinary)"
 		      DestinationFolder="$(OutDir)tools"
 		      SkipUnchangedFiles="true" />
+	</Target>
+
+	<!-- Publish-time bundling: the AfterBuild copies above land tools/ in bin/ (so `dotnet run`
+	     during dev finds them), but `dotnet publish` doesn't carry them into the publish output.
+	     This copies the target RID's fetched media tools (ffmpeg, flac, lame) into publish/tools/
+	     so they ship in the Velopack package. release.yml runs scripts/fetch-encoders.ps1 to
+	     populate tools/<rid>/ before publish; ExecutableResolver finds them at BaseDirectory/tools. -->
+	<Target Name="BundleMediaToolsOnPublish"
+	        AfterTargets="Publish"
+	        Condition="'$(RuntimeIdentifier)' != '' And Exists('$(MSBuildProjectDirectory)/tools/$(RuntimeIdentifier)')">
+		<ItemGroup>
+			<_PublishMediaTool Include="tools/$(RuntimeIdentifier)/*"
+			                   Exclude="tools/$(RuntimeIdentifier)/*.md;tools/$(RuntimeIdentifier)/.gitignore;tools/$(RuntimeIdentifier)/.gitkeep" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_PublishMediaTool)"
+		      DestinationFolder="$(PublishDir)tools"
+		      SkipUnchangedFiles="true"
+		      Condition="'@(_PublishMediaTool)' != ''" />
+		<!-- ELF/Mach-O binaries need the executable bit; .NET's Copy doesn't preserve mode. -->
+		<Exec Command="chmod +x '$(PublishDir)tools'/*"
+		      Condition="'@(_PublishMediaTool)' != '' And !$([MSBuild]::IsOSPlatform('Windows'))"
+		      IgnoreExitCode="true" />
 	</Target>
 </Project>
