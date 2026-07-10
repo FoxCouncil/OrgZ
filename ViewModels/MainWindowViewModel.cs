@@ -2061,6 +2061,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Sidebar composition depends on OrgZ.ShowIgnored - refresh in case it was toggled
         RebuildLibraryItems();
 
+        // Sound Check (OrgZ.NormalizeVolume) may have just been toggled - re-apply loudness
+        // normalization to the CURRENT track so the difference is audible the moment the dialog
+        // closes, not only on the next track.
+        SetupNormalization(CurrentPlayingItem);
+
         if (dialog.SettingsReset)
         {
             Stop();
@@ -2413,36 +2418,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// iTunes "Sound Check": when enabled, level playback loudness across tracks. Combined model -
-    /// if the file already carries a ReplayGain tag, VLC applies that precise, one-time-computed
-    /// value (audio-replay-gain-mode=track); if not, VLC normalizes naturally in real time
-    /// (normvol) AND a one-shot background pass measures + tags the file so next play is precise.
-    /// Radio streams (no MediaItem) always take the normvol path. Set per-media, so it takes effect
-    /// from the next track; the filter runs before OrgZ's audio tap, leaving the VU meter and sink
-    /// volume untouched.
+    /// iTunes "Sound Check": level playback loudness across tracks by applying each track's
+    /// ReplayGain as a runtime gain on OrgZ's own sink bus. Because it's a live multiplier on the
+    /// PCM - not a VLC media option, which OrgZ's audio tap bypasses - it takes effect immediately,
+    /// including when the setting is toggled mid-track, and is deterministic. A local track with no
+    /// measured gain yet is analyzed in the background; the instant its gain lands it's applied to
+    /// the still-playing track and tagged so next play is precise. Radio/podcast streams carry no
+    /// gain and play unmodified.
     /// </summary>
-    private void ApplyAudioNormalization(Media media, MediaItem? item)
+    private void SetupNormalization(MediaItem? item)
     {
-        if (!Settings.Get("OrgZ.NormalizeVolume", false))
-        {
-            return;
-        }
+        var enabled = Settings.Get("OrgZ.NormalizeVolume", false);
+        _audioOutput.Bus.NormalizationGain = NormalizationGain(enabled, item?.ReplayGainTrackGainDb);
 
-        if (item?.HasReplayGain == true)
-        {
-            media.AddOption(":audio-replay-gain-mode=track");
-            // Boosting a quiet track toward the reference could push its peaks past 0 dBFS -
-            // peak protection caps the gain so a loud transient can't clip.
-            media.AddOption(":audio-replay-gain-peak-protection");
-            return;
-        }
-
-        // No precomputed gain: normalize live now, and tag this file in the background so it gets
-        // the precise value for next time. Only worth doing for a real local file.
-        media.AddOption(":audio-filter=normvol");
-        media.AddOption(":norm-max-level=2.0");
-
-        if (item is { FilePath: { } path } && item.Kind is MediaKind.Music or MediaKind.Audiobook && File.Exists(path) && ResolveFfmpeg() is { } ffmpeg)
+        if (enabled
+            && item is { FilePath: { } path } && item.Kind is MediaKind.Music or MediaKind.Audiobook
+            && !item.HasReplayGain && File.Exists(path) && ResolveFfmpeg() is { } ffmpeg)
         {
             _ = Task.Run(async () =>
             {
@@ -2453,10 +2444,31 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     {
                         item.ReplayGainTrackGainDb = g;
                         _ = Task.Run(() => MediaCache.UpdateReplayGain(item.Id, g));
+                        // Still playing this track (and Sound Check still on)? Apply its just-measured
+                        // gain without waiting for a replay.
+                        if (ReferenceEquals(CurrentPlayingItem, item))
+                        {
+                            _audioOutput.Bus.NormalizationGain = NormalizationGain(Settings.Get("OrgZ.NormalizeVolume", false), item.ReplayGainTrackGainDb);
+                        }
                     });
                 }
             });
         }
+    }
+
+    /// <summary>
+    /// The linear playback-gain multiplier for a track under Sound Check: its ReplayGain converted
+    /// from dB, capped at +6 dB of boost so a quiet track can't slam into clipping. Returns 1.0 when
+    /// normalization is off or the track carries no measured gain (radio, or a file not yet analyzed).
+    /// Pure, so the dB→linear conversion + cap are unit-testable.
+    /// </summary>
+    internal static float NormalizationGain(bool soundCheckEnabled, double? replayGainDb)
+    {
+        if (!soundCheckEnabled || replayGainDb is not { } db)
+        {
+            return 1f;
+        }
+        return (float)Math.Pow(10.0, Math.Min(db, 6.0) / 20.0);
     }
 
     private void ExecutePlayMusic(MediaItem file)
@@ -2483,7 +2495,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentMediaMetaHandler = null;
         _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
         ApplyVisualizerOption(_currentMedia);
-        ApplyAudioNormalization(_currentMedia, file);
+        SetupNormalization(file);
 
         // Local file - opens instantly, so skip the barber pole.
         NewPlaybackEpoch();
@@ -2591,7 +2603,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _radioStream = new RadioStreamHandle(session, input);
 
             _currentMedia = new Media(_vlc, input);
-            ApplyAudioNormalization(_currentMedia, null);   // radio: real-time normvol, no tag to precompute
+            SetupNormalization(null);   // radio stream: no ReplayGain tag, plays unmodified
 
             // Callback media reads through libvlc's imem-style access, so file-caching is
             // the buffering knob (network-caching only governs VLC's own network access,
@@ -3025,7 +3037,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     _currentMedia = isLocal
                         ? new Media(_vlc, source, FromType.FromPath)
                         : new Media(_vlc, source, FromType.FromLocation);
-                    ApplyAudioNormalization(_currentMedia, null);   // podcast episode: real-time normvol
+                    SetupNormalization(null);   // podcast episode: no ReplayGain tag, plays unmodified
 
                     if (!isLocal)
                     {
