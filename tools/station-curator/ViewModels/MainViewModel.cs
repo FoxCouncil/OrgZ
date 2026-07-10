@@ -3,6 +3,7 @@
 using Avalonia.Collections;
 using Avalonia.Threading;
 using OrgZ.Models;
+using OrgZ.Services;
 using OrgZ.StationCurator.Models;
 using OrgZ.StationCurator.Services;
 
@@ -20,6 +21,8 @@ public partial class MainViewModel : ObservableObject
     {
         _db = CuratedStore.Load();
         _player.StateChanged += state => Dispatcher.UIThread.Post(() => OnPlayerState(state));
+        _player.NowPlayingChanged += title => Dispatcher.UIThread.Post(() => OnNowPlayingMeta(title));
+        _player.FactsSettled += facts => Dispatcher.UIThread.Post(() => _ = ApplyAuditionFactsAsync(facts));
         if (!_player.IsAvailable)
         {
             StatusMessage = $"Playback unavailable: {_player.UnavailableReason}";
@@ -49,14 +52,13 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private SourceStation? _selectedSource;
     [ObservableProperty] private string _importGenre = "Auto";
 
-    // Pre-import probe readout for the SOURCE pane; cleared whenever the selection moves.
-    [ObservableProperty] private string _sourceProbeSummary = "";
-    [ObservableProperty] private string _sourceProbeStats = "";
+    // Pre-import probe result for the SOURCE pane - one StreamVariant row rendered by the
+    // same grid the STATION pane uses, so both sides read identically. Cleared on selection move.
+    public ObservableCollection<StreamVariant> SourceProbeRows { get; } = [];
 
     partial void OnSelectedSourceChanged(SourceStation? value)
     {
-        SourceProbeSummary = "";
-        SourceProbeStats = "";
+        SourceProbeRows.Clear();
     }
 
     public ObservableCollection<SourceStation> SourceResults { get; } = [];
@@ -211,12 +213,12 @@ public partial class MainViewModel : ObservableObject
 
     private void RemarkSourceRows()
     {
-        var rows = SourceResults.ToList();
-        SourceResults.Clear();
-        foreach (var r in rows)
+        // In-place update + INPC poke - rebuilding the collection would reset the source
+        // grid's scroll position (and multi-selection) on every import.
+        foreach (var r in SourceResults)
         {
             r.CuratedMark = StationMatcher.FindMatch(_db.Stations, r) != null ? "✓" : "";
-            SourceResults.Add(r);
+            r.NotifyChanged();
         }
     }
 
@@ -237,6 +239,12 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private CuratedStation? _selectedCurated;
     [ObservableProperty] private StreamVariant? _selectedVariant;
+
+    // The stream-level buttons act on the SELECTED row only - disabled without one, so a
+    // click with nothing selected can never surprise-probe anything.
+    partial void OnSelectedVariantChanged(StreamVariant? value) => ProbeVariantCommand.NotifyCanExecuteChanged();
+
+    private bool CanProbeVariant() => SelectedVariant != null;
     [ObservableProperty] private string _curatedFilterGenre = "All";
     [ObservableProperty] private string _curatedSearch = "";
 
@@ -316,10 +324,33 @@ public partial class MainViewModel : ObservableObject
                 (s.Description?.Contains(CuratedSearch, StringComparison.OrdinalIgnoreCase) ?? false));
         }
 
+        var filtered = rows.ToList();
+
+        // Empty genres stay visible: one inert "-" placeholder row per stationless genre, so
+        // coverage gaps (like a freshly added genre) are impossible to miss. Skipped while
+        // searching (a text search should surface matches only) and for "Unassigned" (that
+        // pseudo-bucket only exists when stations are actually in it). Placeholders live in
+        // the VIEW list only - never the store, so save/export/import can't see them.
+        if (string.IsNullOrWhiteSpace(CuratedSearch) && CuratedFilterGenre != "Unassigned")
+        {
+            IEnumerable<RadioGenre> scope = CuratedFilterGenre == "All"
+                ? RadioGenres.All
+                : [RadioGenres.FromDisplayName(CuratedFilterGenre)];
+            var present = filtered.Select(s => s.GenreId).ToHashSet();
+            foreach (var genre in scope)
+            {
+                if (genre != RadioGenre.Unknown && !present.Contains((int)genre))
+                {
+                    filtered.Add(new CuratedStation { Id = $"placeholder:{(int)genre}", Name = "—", GenreId = (int)genre, IsPlaceholder = true });
+                }
+            }
+        }
+
         // No SortDescriptions on the view: the list is pre-sorted by taxonomy id (unassigned
         // last), and DataGridCollectionView's insertion-order fallback keeps the genre groups
-        // in that order instead of re-sorting the headers alphabetically.
-        _curatedList = rows.OrderBy(s => s.GenreId == 0 ? int.MaxValue : s.GenreId).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        // in that order instead of re-sorting the headers alphabetically. Genre ids ARE the
+        // display order by invariant - taxonomy changes renumber and migrate curated.json.
+        _curatedList = filtered.OrderBy(s => s.GenreId == 0 ? int.MaxValue : s.GenreId).ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var view = new DataGridCollectionView(_curatedList);
         view.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(CuratedStation.GenreName)));
         CuratedView = view;
@@ -400,6 +431,10 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = $"No stream URL for {src.Name}";
             return;
         }
+        _auditionVariant = null;
+        _auditionStation = null;
+        _auditionSource = src;
+        _auditionUrl = url;
         StartPlayback(src.Name, url);
     }
 
@@ -412,6 +447,24 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = $"Resolving {src.Name}…";
             url = await ShoutcastClient.ResolveStreamUrlAsync(src.SourceId, CancellationToken.None) ?? "";
             src.StreamUrl = url;
+        }
+
+        // The directory API carries no homepage or images, but the DNAS server describes
+        // itself - homepage (→ favicon logo), listener stats, uptime, version. Fetched once
+        // per row; rides into imports via src.Homepage/LogoUrl.
+        if (src.Source == "shoutcast" && !string.IsNullOrEmpty(url) && src.ServerInfo == null)
+        {
+            var details = await ShoutcastClient.FetchServerDetailsAsync(url, CancellationToken.None);
+            if (details != null)
+            {
+                if (!string.IsNullOrWhiteSpace(details.Homepage))
+                {
+                    src.Homepage ??= details.Homepage;
+                    src.LogoUrl ??= await ShoutcastClient.ResolveLogoUrlAsync(details.Homepage, CancellationToken.None);
+                }
+                src.ServerInfo = details.Summary;
+                src.NotifyChanged();
+            }
         }
         return url;
     }
@@ -455,6 +508,10 @@ public partial class MainViewModel : ObservableObject
             StatusMessage = $"{SelectedCurated.Name} has no streams";
             return;
         }
+        _auditionVariant = variant;
+        _auditionStation = SelectedCurated;
+        _auditionSource = null;
+        _auditionUrl = variant.PlayUrl;
         StartPlayback($"{SelectedCurated.Name} ({variant.EffectiveFormat} {variant.EffectiveBitrate}k)", variant.PlayUrl);
     }
 
@@ -462,6 +519,7 @@ public partial class MainViewModel : ObservableObject
     private void StopPlayback()
     {
         _player.Stop();
+        _nowPlayingBase = "";
         NowPlaying = "";
         StatusMessage = "Stopped (stop button)";
     }
@@ -477,7 +535,67 @@ public partial class MainViewModel : ObservableObject
         {
             return;
         }
+        _auditionVariant = best;
+        _auditionStation = SelectedCurated;
+        _auditionSource = null;
+        _auditionUrl = best.PlayUrl;
         StartPlayback($"{SelectedCurated!.Name} ({best.EffectiveFormat} {best.EffectiveBitrate}k)", best.PlayUrl);
+    }
+
+    // -- Audition probing: every listen IS a probe. The player's session settles its facts
+    // (real codec, bitrate, metadata channel, tune-in time) off the SAME connection the
+    // audio rides - no second connection is ever opened for an audition. --
+
+    /// <summary>What the in-flight audition should stamp when the session's facts settle.</summary>
+    private StreamVariant? _auditionVariant;
+    private CuratedStation? _auditionStation;
+    private SourceStation? _auditionSource;
+    private string? _auditionUrl;
+
+    private async Task ApplyAuditionFactsAsync(OrgZ.Services.StreamFacts facts)
+    {
+        try
+        {
+            var url = _auditionUrl;
+            if (url == null)
+            {
+                return;
+            }
+            var outcome = await StreamProber.FinishOutcomeAsync(StreamProber.FromFacts(facts), url);
+
+            if (_auditionVariant is { } variant)
+            {
+                ApplyProbe(variant, outcome);
+                if (outcome.Ok && _auditionStation is { } station)
+                {
+                    await EnrichStationFromServerAsync(station, url);
+                }
+                SaveStore();
+                RebuildVariants();
+                RefreshCuratedGridCells();
+            }
+            else if (_auditionSource is { } src)
+            {
+                var row = new StreamVariant
+                {
+                    Url = url,
+                    Format = src.Format,
+                    Bitrate = src.Bitrate,
+                    Source = src.Source,
+                    SourceId = src.SourceId,
+                };
+                ApplyProbe(row, outcome);
+                if (SelectedSource == src)
+                {
+                    SourceProbeRows.Clear();
+                    SourceProbeRows.Add(row);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort: playback reports its own failures.
+        }
     }
 
     private bool PlayerReady()
@@ -490,11 +608,27 @@ public partial class MainViewModel : ObservableObject
         return true;
     }
 
+    /// <summary>The "▶ station" part of the toolbar readout; live stream metadata gets appended after ♪.</summary>
+    private string _nowPlayingBase = "";
+
     private void StartPlayback(string label, string url)
     {
-        NowPlaying = $"▶ {label}";
+        _nowPlayingBase = $"▶ {label}";
+        NowPlaying = _nowPlayingBase;
         StatusMessage = $"Opening {url}…";
         _player.Play(url);
+    }
+
+    // One source of truth: LibVLC's MetaChanged. Titles the demuxer can't read (https ICY,
+    // HLS timed-ID3) are injected into the Media by the player's sidecar and arrive here
+    // through the exact same event.
+    private void OnNowPlayingMeta(string? title)
+    {
+        if (_nowPlayingBase.Length == 0)
+        {
+            return;
+        }
+        NowPlaying = string.IsNullOrWhiteSpace(title) ? _nowPlayingBase : $"{_nowPlayingBase} ♪ {IcyMetadata.CleanStreamTitle(title!)}";
     }
 
     private void OnPlayerState(string state)
@@ -516,6 +650,7 @@ public partial class MainViewModel : ObservableObject
             case "error":
             {
                 StatusMessage = $"Playback failed: {NowPlaying.TrimStart('▶', ' ')}";
+                _nowPlayingBase = "";
                 NowPlaying = "";
             }
             break;
@@ -523,12 +658,14 @@ public partial class MainViewModel : ObservableObject
             case "ended":
             {
                 StatusMessage = "Stream ended";
+                _nowPlayingBase = "";
                 NowPlaying = "";
             }
             break;
 
             case "stopped":
             {
+                _nowPlayingBase = "";
                 NowPlaying = "";
             }
             break;
@@ -537,7 +674,10 @@ public partial class MainViewModel : ObservableObject
 
     // -- Probing --
 
-    /// <summary>Pre-import probe for the SOURCE pane - same prober, results land in the pane labels instead of the store.</summary>
+    /// <summary>
+    /// Pre-import probe for the SOURCE pane - same prober, and the result is materialized as a
+    /// StreamVariant so the pane's grid shows the exact columns the STATION pane does.
+    /// </summary>
     [RelayCommand]
     private async Task ProbeSourceAsync()
     {
@@ -549,21 +689,29 @@ public partial class MainViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            SourceProbeSummary = "probing…";
-            SourceProbeStats = "";
             var url = await ResolveSourceUrlAsync(src);
             if (string.IsNullOrEmpty(url))
             {
-                SourceProbeSummary = "no stream URL";
+                StatusMessage = $"No stream URL for {src.Name}";
                 return;
             }
-            var outcome = await StreamProber.ProbeAsync(url, CancellationToken.None);
+            StatusMessage = $"Probing {url}…";
+            var variant = new StreamVariant
+            {
+                Url = url,
+                Format = src.Format,
+                Bitrate = src.Bitrate,
+                Source = src.Source,
+                SourceId = src.SourceId,
+            };
+            ApplyProbe(variant, await StreamProber.ProbeAsync(url, CancellationToken.None));
             if (SelectedSource != src)
             {
                 return; // Selection moved on while the probe ran; don't stamp the wrong row's pane.
             }
-            SourceProbeSummary = $"{outcome.Status} — {outcome.Detail}";
-            SourceProbeStats = FormatSourceProbeStats(src, outcome);
+            SourceProbeRows.Clear();
+            SourceProbeRows.Add(variant);
+            StatusMessage = $"Probe: {variant.ProbeStatus} — {variant.ProbeDetail}";
         }
         finally
         {
@@ -571,44 +719,69 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private static string FormatSourceProbeStats(SourceStation src, ProbeOutcome outcome)
+    /// <summary>Overwrites the station's advertised country with the probed server's GeoIP country - the one that actually matters for shipping.</summary>
+    [RelayCommand]
+    private void UseGeoIpCountry()
     {
-        var parts = new List<string>();
-        var format = outcome.MeasuredFormat ?? outcome.Format;
-        var kbps = outcome.MeasuredBitrate ?? outcome.Bitrate;
-        if (!string.IsNullOrEmpty(format))
+        var station = SelectedCurated;
+        var best = station?.BestVariant();
+        if (station == null || best?.ServerCountryCode == null)
         {
-            parts.Add(kbps is int k and > 0 ? $"{format} {k}k" : format!);
+            StatusMessage = "No GeoIP data — probe the station first";
+            return;
         }
-        parts.Add($"{outcome.Redirects} hops");
-        parts.Add(outcome.MetaInt is int m ? $"icy {m}" : "no metadata");
-        if (!string.IsNullOrEmpty(outcome.MeasuredFormat) && !string.IsNullOrEmpty(src.Format) && !src.Format.Equals(outcome.MeasuredFormat, StringComparison.OrdinalIgnoreCase))
-        {
-            parts.Add($"≠ {src.Format}→{outcome.MeasuredFormat}");
-        }
-        if (outcome.MeasuredBitrate is int measured && src.Bitrate > 0 && Math.Abs(measured - src.Bitrate) > 16)
-        {
-            parts.Add($"≠ {src.Bitrate}→{measured}k");
-        }
-        if (outcome.ServerCountryCode != null)
-        {
-            parts.Add(outcome.GeoSuspect ? $"{outcome.ServerCountryCode} ⚠" : outcome.ServerCountryCode);
-        }
-        else if (outcome.GeoSuspect)
-        {
-            parts.Add("⚠");
-        }
-        return string.Join(" · ", parts);
+        station.Country = best.ServerCountry ?? best.ServerCountryCode;
+        station.CountryCode = best.ServerCountryCode;
+        station.NotifyChanged();
+        StatusMessage = $"Country set from GeoIP: {station.Country} ({station.CountryCode})";
     }
 
-    [RelayCommand]
+    /// <summary>
+    /// SHOUTcast-compatible servers self-describe (stats?sid=1&amp;json=1) - a probe of any
+    /// live variant fills the station's BLANK identity fields: homepage and favicon-derived
+    /// logo. Never overwrites curated values (and Notes is Fox's field - enrichment stays
+    /// out of it); a non-DNAS server (Icecast, plain CDN) answers nothing and this no-ops.
+    /// </summary>
+    private static async Task<bool> EnrichStationFromServerAsync(CuratedStation station, string url)
+    {
+        if (!string.IsNullOrWhiteSpace(station.Homepage) && !string.IsNullOrWhiteSpace(station.LogoUrl))
+        {
+            return false;
+        }
+        var details = await ShoutcastClient.FetchServerDetailsAsync(url, CancellationToken.None);
+        if (details == null || string.IsNullOrWhiteSpace(details.Homepage))
+        {
+            return false;
+        }
+
+        var changed = false;
+        if (string.IsNullOrWhiteSpace(station.Homepage))
+        {
+            station.Homepage = details.Homepage;
+            changed = true;
+        }
+        if (string.IsNullOrWhiteSpace(station.LogoUrl))
+        {
+            station.LogoUrl = await ShoutcastClient.ResolveLogoUrlAsync(details.Homepage, CancellationToken.None);
+            changed |= !string.IsNullOrWhiteSpace(station.LogoUrl);
+        }
+        if (changed)
+        {
+            station.NotifyChanged();
+        }
+        return changed;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanProbeVariant))]
     private async Task ProbeVariantAsync()
     {
         // Work off a captured reference: RebuildVariants clears the variants collection, which
         // makes the grid drop its selection and push null back into SelectedVariant mid-method.
         var variant = SelectedVariant;
-        if (SelectedCurated == null || variant == null)
+        var station = SelectedCurated;
+        if (station == null || variant == null)
         {
+            StatusMessage = "Select a stream row first";
             return;
         }
         IsBusy = true;
@@ -616,6 +789,10 @@ public partial class MainViewModel : ObservableObject
         {
             StatusMessage = $"Probing {variant.Url}…";
             ApplyProbe(variant, await StreamProber.ProbeAsync(variant.Url, CancellationToken.None));
+            if (variant.ProbeStatus == ProbeStatus.Ok)
+            {
+                await EnrichStationFromServerAsync(station, variant.PlayUrl);
+            }
             SaveStore();
             RebuildVariants();
             RefreshCuratedGridCells();
@@ -676,13 +853,24 @@ public partial class MainViewModel : ObservableObject
             });
             await Task.WhenAll(tasks);
 
+            // Identity backfill off the same round: one DNAS self-description per station
+            // with blanks, via its first live variant.
+            var enriched = 0;
+            foreach (var station in stations)
+            {
+                if (station.Streams.FirstOrDefault(v => v.ProbeStatus == ProbeStatus.Ok) is { } live && await EnrichStationFromServerAsync(station, live.PlayUrl))
+                {
+                    enriched++;
+                }
+            }
+
             SaveStore();
             RebuildVariants();
             RefreshCuratedGridCells();
             var ok = work.Count(v => v.ProbeStatus == ProbeStatus.Ok);
             var dead = work.Count(v => v.ProbeStatus == ProbeStatus.Dead);
             var geo = work.Count(v => v.ProbeStatus == ProbeStatus.Geo);
-            StatusMessage = $"Probed {work.Count} streams: {ok} ok, {dead} dead, {geo} geoblocked";
+            StatusMessage = $"Probed {work.Count} streams: {ok} ok, {dead} dead, {geo} geoblocked" + (enriched > 0 ? $", {enriched} enriched" : "");
         }
         finally
         {
@@ -704,9 +892,11 @@ public partial class MainViewModel : ObservableObject
         variant.GeoRisk = outcome.GeoSuspect;
         variant.ProbeRedirects = outcome.Redirects;
         variant.ProbeMetaint = outcome.MetaInt;
+        variant.ProbeHlsMeta = outcome.HlsMeta;
         variant.ProbeTitle = outcome.StreamTitle;
         variant.ProbeMeasuredFormat = outcome.MeasuredFormat;
         variant.ProbeMeasuredBitrate = outcome.MeasuredBitrate;
+        variant.ProbeTuneInMs = outcome.TuneInMs ?? variant.ProbeTuneInMs;
         variant.ServerIp = outcome.ServerIp;
         variant.ServerCountry = outcome.ServerCountry;
         variant.ServerCountryCode = outcome.ServerCountryCode;

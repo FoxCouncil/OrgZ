@@ -8,6 +8,8 @@ using System.Net.Sockets;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 
+using OrgZ.Services;
+
 namespace OrgZ.StationCurator.Services;
 
 public sealed record GeoInfo(string Ip, string? Country, string? CountryCode);
