@@ -20,7 +20,7 @@ namespace OrgZ.Services;
 /// Non-fatal: if the session bus isn't reachable the service logs a warning and goes
 /// silent - the app keeps working without shell integration.
 /// </summary>
-public sealed class MprisService : IDisposable
+public sealed class MprisService : INowPlayingIntegration
 {
     private const string BusName = "org.mpris.MediaPlayer2.orgz";
     private const string ObjectPath = "/org/mpris/MediaPlayer2";
@@ -137,6 +137,20 @@ public sealed class MprisService : IDisposable
         {
             ["Metadata"] = BuildMetadataVariant(),
         });
+    }
+
+    // ── INowPlayingIntegration ──────────────────────────────────────────
+    // MPRIS carries artwork as a URL inside the Metadata dict, so the byte-based SetArtwork
+    // and the position surface don't apply here (Position is advertised as 0 / CanSeek=false).
+    public void SetMetadata(NowPlayingMetadata metadata)
+        => SetMetadata(metadata.Title, metadata.Artist, metadata.Album, metadata.ArtUri);
+
+    public void SetArtwork(byte[] artBytes)
+    {
+    }
+
+    public void SetPlaybackPosition(TimeSpan elapsed, double rate)
+    {
     }
 
     private VariantValue BuildMetadataVariant()

@@ -21,7 +21,7 @@ namespace OrgZ.Services;
 /// for the metadata path to be visible.
 /// </summary>
 [SupportedOSPlatform("macos")]
-public sealed class MacNowPlayingService : IDisposable
+public sealed class MacNowPlayingService : INowPlayingIntegration
 {
     private static readonly ILogger _log = Logging.For<MacNowPlayingService>();
 
@@ -37,6 +37,8 @@ public sealed class MacNowPlayingService : IDisposable
     public event Action? NextRequested;
     public event Action? PreviousRequested;
     public event Action? StopRequested;
+    // macOS has no "raise the app from the widget" command; declared for the interface, never fired.
+    public event Action? RaiseRequested;
 
     // Cached selector / class pointers. Once registered with the Objective-C
     // runtime these are valid for the lifetime of the process, so we resolve
@@ -137,6 +139,20 @@ public sealed class MacNowPlayingService : IDisposable
     private byte[]? _cachedArtwork;
     private double _cachedElapsedSeconds;
     private double _cachedRate;
+
+    // macOS sets everything up in the constructor, so there's nothing async to await.
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public void SetMetadata(NowPlayingMetadata metadata)
+        => SetMetadata(metadata.Title, metadata.Artist, metadata.Album, metadata.Duration, metadata.ArtBytes);
+
+    /// <summary>Swap just the cover for the current track (art usually arrives after the
+    /// metadata) without disturbing the cached title/position.</summary>
+    public void SetArtwork(byte[] artBytes)
+    {
+        _cachedArtwork = artBytes;
+        Publish();
+    }
 
     public void SetMetadata(string? title, string? artist, string? album, TimeSpan? duration, byte[]? artworkBytes = null)
     {
