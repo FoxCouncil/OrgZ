@@ -22,8 +22,6 @@
 		<NativeMenu>
 			<NativeMenuItem Header="File">
 				<NativeMenu>
-					<NativeMenuItem Header="Change Library Folder..." Command="{Binding ChangeLibraryFolderCommand}" />
-					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Import Playlist..." Command="{Binding ImportPlaylistCommand}" />
 					<NativeMenuItem Header="Export Library..." Command="{Binding ExportLibraryCommand}" />
 					<NativeMenuItemSeparator />
@@ -46,6 +44,9 @@
 			</NativeMenuItem>
 			<NativeMenuItem Header="Help">
 				<NativeMenu>
+					<NativeMenuItem Header="Report a Bug" Command="{Binding ReportBugCommand}" />
+					<NativeMenuItem Header="OrgZ on GitHub" Command="{Binding OpenGitHubCommand}" />
+					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="About OrgZ" Command="{Binding ShowAboutCommand}" />
 				</NativeMenu>
 			</NativeMenuItem>

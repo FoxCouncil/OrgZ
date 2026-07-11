@@ -1928,6 +1928,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _window.Close();
     }
 
+    private const string GitHubUrl = "https://github.com/FoxCouncil/OrgZ";
+
+    [RelayCommand]
+    private void OpenGitHub() => HtmlInlinesBuilder.OpenUrl(GitHubUrl);
+
+    [RelayCommand]
+    private void ReportBug() => HtmlInlinesBuilder.OpenUrl($"{GitHubUrl}/issues/new");
+
     [RelayCommand]
     internal async Task ShowAbout()
     {
