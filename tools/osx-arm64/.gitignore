@@ -1,0 +1,5 @@
+# The macOS ffmpeg is built from source (scripts/build-ffmpeg-mac.sh) and vendored to the
+# encoders release - never committed here. Allow only the README and this file.
+*
+!.gitignore
+!README.md

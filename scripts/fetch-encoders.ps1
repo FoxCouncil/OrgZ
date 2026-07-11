@@ -73,6 +73,11 @@ if ($Vendor) {
     $staged = Join-Path $PSScriptRoot 'staged'
     New-Item -ItemType Directory -Force $staged | Out-Null
     foreach ($t in $tools) {
+        if (-not $t.upstreamUrl) {
+            # Built from source rather than downloaded (e.g. macOS ffmpeg) - can't vet it here.
+            Write-Host "skip $Rid/$($t.out): built from source — run $($t.builtFrom), then upload + set its sha256"
+            continue
+        }
         Write-Host "vendor $Rid/$($t.out)  <-  $($t.upstreamUrl)"
         $arc = Save-Url $t.upstreamUrl $t.referer
         try {

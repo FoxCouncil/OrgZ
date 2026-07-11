@@ -24,6 +24,8 @@
     "linux-x64": [
       { "out": "ffmpeg", "asset": "ffmpeg-linux-x64", "sha256": "PENDING", "license": "LGPL-2.1", "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz", "archive": "tar.xz", "entry": "*/bin/ffmpeg" }
     ],
-    "osx-arm64": []
+    "osx-arm64": [
+      { "out": "ffmpeg", "asset": "ffmpeg-osx-arm64", "sha256": "PENDING", "license": "LGPL-2.1", "builtFrom": "ffmpeg.org source via scripts/build-ffmpeg-mac.sh" }
+    ]
   }
 }
