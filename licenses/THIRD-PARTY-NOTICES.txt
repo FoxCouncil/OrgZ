@@ -12,10 +12,13 @@ is included alongside the binary.
 ffmpeg
   License : LGPL v2.1 (the LGPL build - no GPL codecs enabled; OrgZ needs only
             ebur128 + the native aac/alac/pcm encoders, all of which are LGPL)
-  Source  : https://ffmpeg.org/   (build: https://github.com/BtbN/FFmpeg-Builds)
+  Source  : https://ffmpeg.org/
+            Windows/Linux: prebuilt LGPL builds from https://github.com/BtbN/FFmpeg-Builds
+            macOS: built from ffmpeg.org source (LGPL) via scripts/build-ffmpeg-mac.sh
   Used by : iPod transcode + artwork extraction, CD-burn transcode,
             Sound Check (ReplayGain) loudness measurement
-  Corresponding source is available from ffmpeg.org and the build repository above.
+  Corresponding source is available from ffmpeg.org (and, for the prebuilt platforms,
+  the build repository above).
 
 FLAC (flac, libFLAC, libFLAC++)
   License : BSD 3-Clause (Xiph.Org Foundation)
