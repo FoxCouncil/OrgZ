@@ -126,7 +126,13 @@ public partial class MainViewModel : ObservableObject
     // -- Import --
 
     [RelayCommand]
-    private async Task ImportSelectedAsync()
+    private Task ImportSelectedAsync() => ImportRowsAsync(autoGenre: false);
+
+    /// <summary>Import forcing the tag-detected (Suggested) genre, ignoring the Genre dropdown - the "always use our detection" shortcut.</summary>
+    [RelayCommand]
+    private Task ImportSelectedAutoAsync() => ImportRowsAsync(autoGenre: true);
+
+    private async Task ImportRowsAsync(bool autoGenre)
     {
         var rows = _selectedSources.Count > 0 ? _selectedSources.ToList() : SelectedSource != null ? [SelectedSource] : [];
         if (rows.Count == 0)
@@ -178,7 +184,7 @@ public partial class MainViewModel : ObservableObject
                 }
                 else
                 {
-                    var genreId = ImportGenre == "Auto" ? (int)src.SuggestedGenre : (int)RadioGenres.FromDisplayName(ImportGenre);
+                    var genreId = autoGenre || ImportGenre == "Auto" ? (int)src.SuggestedGenre : (int)RadioGenres.FromDisplayName(ImportGenre);
                     var id = StationMatcher.MakeStationId(src);
                     while (_db.Stations.Any(s => s.Id == id))
                     {
@@ -239,6 +245,7 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private CuratedStation? _selectedCurated;
     [ObservableProperty] private StreamVariant? _selectedVariant;
+    [ObservableProperty] private string _newStreamUrl = "";
 
     // The stream-level buttons act on the SELECTED row only - disabled without one, so a
     // click with nothing selected can never surprise-probe anything.
@@ -300,6 +307,9 @@ public partial class MainViewModel : ObservableObject
         {
             SelectedVariant = Variants.FirstOrDefault(v => v.Id == keepId);
         }
+        // Auto-select the first stream when nothing carried over (e.g. a fresh station selection),
+        // so the stream-level actions and Play target a row immediately.
+        SelectedVariant ??= Variants.FirstOrDefault();
     }
 
     private void RefreshCuratedView()
@@ -366,6 +376,24 @@ public partial class MainViewModel : ObservableObject
         StoreSummary = $"{_db.Stations.Count} stations · {streams} streams · {shipping} shippable";
     }
 
+    /// <summary>Create a blank station from scratch and select it, so every field can be filled by hand
+    /// (Name/Genre/Country/Home/Logo/Notes in the STATION panel, plus Add Stream for the URL).</summary>
+    [RelayCommand]
+    private void NewStation()
+    {
+        var id = "manual-" + Guid.NewGuid().ToString("N")[..8];
+        var station = new CuratedStation { Id = id, Name = "New Station", GenreId = 0 };
+        _db.Stations.Add(station);
+        SaveStore();
+        // Clear filters so an active genre/search filter can't hide the fresh (unassigned) station.
+        CuratedFilterGenre = "All";
+        CuratedSearch = "";
+        RefreshCuratedView();
+        SelectedCurated = _curatedList.FirstOrDefault(s => s.Id == id);
+        CuratedRevealRequested?.Invoke(station);
+        StatusMessage = "New blank station — edit its details, then paste a URL into Add Stream";
+    }
+
     [RelayCommand]
     private void RemoveStation()
     {
@@ -408,6 +436,30 @@ public partial class MainViewModel : ObservableObject
         SelectedCurated.PreferredStreamId = SelectedCurated.PreferredStreamId == SelectedVariant.Id ? null : SelectedVariant.Id;
         SaveStore();
         RebuildVariants();
+    }
+
+    /// <summary>Manually attach a stream URL (e.g. a SomaFM .pls or a direct ICY URL) to the selected station.</summary>
+    [RelayCommand]
+    private void AddStream()
+    {
+        var station = SelectedCurated;
+        var url = NewStreamUrl?.Trim();
+        if (station == null || string.IsNullOrWhiteSpace(url))
+        {
+            StatusMessage = "Select a station and type a stream URL first";
+            return;
+        }
+        if (station.Streams.Any(v => StationMatcher.UrlsEqual(v.Url, url)))
+        {
+            StatusMessage = "That URL is already a stream on this station";
+            return;
+        }
+        station.Streams.Add(new StreamVariant { Url = url, Source = "manual" });
+        NewStreamUrl = "";
+        SaveStore();
+        RebuildVariants();
+        UpdateStoreSummary();
+        StatusMessage = $"Added stream to {station.Name} — probe it to fill format/bitrate";
     }
 
     // -- Playback --
