@@ -133,6 +133,7 @@
 					<TextBlock Classes="label" Text="Genre" />
 					<ComboBox Width="170" ItemsSource="{Binding ImportGenreChoices}" SelectedItem="{Binding ImportGenre}" />
 					<Button Content="Import Selected" Command="{Binding ImportSelectedCommand}" />
+					<Button Content="Add Station (Auto Genre)" Command="{Binding ImportSelectedAutoCommand}" />
 					<Button Content="Show in Curated" Command="{Binding JumpToCuratedCommand}" />
 				</StackPanel>
 
@@ -245,6 +246,7 @@
 					<ComboBox Width="160" ItemsSource="{Binding CuratedFilterChoices}" SelectedItem="{Binding CuratedFilterGenre}" />
 					<TextBlock Classes="label" Text="Search" />
 					<TextBox Width="180" Text="{Binding CuratedSearch}" />
+					<Button Content="New Station" Command="{Binding NewStationCommand}" />
 					<Button Content="Remove Station" Command="{Binding RemoveStationCommand}" />
 					<Button Content="Probe Station" Command="{Binding ProbeStationCommand}" />
 				</StackPanel>
@@ -290,6 +292,9 @@
 								<Button Content="Probe" Command="{Binding ProbeVariantCommand}" />
 								<Button Content="Prefer" Command="{Binding SetPreferredVariantCommand}" />
 								<Button Content="Remove Stream" Command="{Binding RemoveVariantCommand}" />
+								<TextBlock Classes="label" Text="Add URL" />
+								<TextBox Width="260" VerticalAlignment="Center" Text="{Binding NewStreamUrl}" />
+								<Button Content="Add Stream" Command="{Binding AddStreamCommand}" />
 							</StackPanel>
 							<DataGrid ItemsSource="{Binding Variants}"
 							          SelectedItem="{Binding SelectedVariant}"
