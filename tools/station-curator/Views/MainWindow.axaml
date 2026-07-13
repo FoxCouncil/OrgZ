@@ -65,6 +65,7 @@
 			<DockPanel>
 				<StackPanel Orientation="Horizontal" Spacing="6">
 					<Button Content="Save" Command="{Binding SaveStoreCommand}" />
+					<Button Content="Reload" Command="{Binding ReloadStoreCommand}" />
 					<Button Content="Export stations.json" Command="{Binding ExportStationsCommand}" />
 					<Button Content="Probe All" Command="{Binding ProbeAllCommand}" />
 				</StackPanel>
