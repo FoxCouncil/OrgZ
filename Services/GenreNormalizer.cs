@@ -30,6 +30,7 @@ public static class GenreNormalizer
     public const string DiscoFunk       = "Disco/Funk";
     public const string ElectronicDance = "Electronic/Dance";
     public const string HipHopRap       = "Hip-Hop/Rap";
+    public const string Holiday         = "Holiday";
     public const string Indie           = "Indie";
     public const string JazzBlues       = "Jazz/Blues";
     public const string Latin           = "Latin";
@@ -68,6 +69,7 @@ public static class GenreNormalizer
         DiscoFunk,
         ElectronicDance,
         HipHopRap,
+        Holiday,
         Indie,
         JazzBlues,
         Latin,
@@ -137,6 +139,12 @@ public static class GenreNormalizer
         ("audiobook",       NewsTalkRadio),
         ("podcast",         NewsTalkRadio),
         ("current affairs", NewsTalkRadio),
+
+        // -- Holiday (seasonal; before genre/decade catches so "christmas country" → Holiday) --
+        ("christmas",       Holiday),
+        ("xmas",            Holiday),
+        ("holiday",         Holiday),
+        ("noel",            Holiday),
 
         // -- Synthwave (before 80s and before the Electronic "synth" catch) --
         ("synthwave",       Synthwave),

@@ -15,6 +15,7 @@ public class RadioGenresTests
     [InlineData(RadioGenre.DiscoFunk, "Disco/Funk")]
     [InlineData(RadioGenre.ElectronicDance, "Electronic/Dance")]
     [InlineData(RadioGenre.HipHopRap, "Hip-Hop/Rap")]
+    [InlineData(RadioGenre.Holiday, "Holiday")]
     [InlineData(RadioGenre.LoFi, "Lo-Fi")]
     [InlineData(RadioGenre.MotownSoul, "Motown/Soul")]
     [InlineData(RadioGenre.NewsTalkRadio, "News/Talk Radio")]
@@ -39,7 +40,7 @@ public class RadioGenresTests
     public void All_lists_every_named_genre_once_and_excludes_Unknown()
     {
         var all = RadioGenres.All.ToList();
-        Assert.Equal(30, all.Count);
+        Assert.Equal(31, all.Count);
         Assert.DoesNotContain(RadioGenre.Unknown, all);
         Assert.Equal(all.Count, all.Distinct().Count());
         Assert.All(all, g => Assert.NotEqual("", g.DisplayName()));
@@ -60,7 +61,7 @@ public class RadioGenresTests
         // The taxonomy invariant: genre ids ARE the display order - decades first, then
         // alphabetical - with no gaps. Adding/removing a genre means renumbering here and
         // migrating curated.json in the same commit.
-        Assert.Equal(Enumerable.Range(1, 30), RadioGenres.All.Select(g => (int)g));
+        Assert.Equal(Enumerable.Range(1, 31), RadioGenres.All.Select(g => (int)g));
 
         var alphabetical = RadioGenres.All.Skip(6).Select(g => g.DisplayName()).ToList();
         Assert.Equal(alphabetical.OrderBy(n => n, StringComparer.OrdinalIgnoreCase), alphabetical);
