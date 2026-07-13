@@ -16,10 +16,14 @@ public partial class MainViewModel : ObservableObject
     private readonly CuratedDb _db;
     private List<SourceStation> _selectedSources = [];
     private CancellationTokenSource? _cts;
+    // Baseline of station ids we last loaded/saved - lets SaveStore tell an EXTERNAL append (keep)
+    // apart from a station we deleted this session (don't resurrect). See CuratedStore.SaveMerging.
+    private HashSet<string> _knownIds = [];
 
     public MainViewModel()
     {
         _db = CuratedStore.Load();
+        _knownIds = _db.Stations.Select(s => s.Id).ToHashSet();
         _player.StateChanged += state => Dispatcher.UIThread.Post(() => OnPlayerState(state));
         _player.NowPlayingChanged += title => Dispatcher.UIThread.Post(() => OnNowPlayingMeta(title));
         _player.FactsSettled += facts => Dispatcher.UIThread.Post(() => _ = ApplyAuditionFactsAsync(facts));
@@ -970,8 +974,32 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     public void SaveStore()
     {
-        CuratedStore.Save(_db);
+        var merged = CuratedStore.SaveMerging(_db, _knownIds);
+        _knownIds = _db.Stations.Select(s => s.Id).ToHashSet();
+        if (merged.Count > 0)
+        {
+            // Externally-added stations were folded in - surface them in the grid, not just on disk.
+            RefreshCuratedView();
+            StatusMessage = $"Merged {merged.Count} externally-added station{(merged.Count == 1 ? "" : "s")} from disk";
+        }
         RefreshCuratedGridCells();
+    }
+
+    /// <summary>Re-read curated.json from disk, discarding the in-memory store. Lets an external
+    /// edit (seed script, hand edit) land without restarting the tool. Repopulates _db in place
+    /// because the field is readonly and referenced throughout.</summary>
+    [RelayCommand]
+    public void ReloadStore()
+    {
+        var fresh = CuratedStore.Load();
+        _db.SchemaVersion = fresh.SchemaVersion;
+        _db.Stations.Clear();
+        _db.Stations.AddRange(fresh.Stations);
+        _knownIds = _db.Stations.Select(s => s.Id).ToHashSet();
+        SelectedCurated = null;
+        RefreshCuratedView();
+        UpdateStoreSummary();
+        StatusMessage = $"Reloaded {_db.Stations.Count} stations from disk";
     }
 
     [RelayCommand]
