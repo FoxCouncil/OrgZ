@@ -60,6 +60,11 @@ public abstract class IPodDevice
     /// list IS its play order). Menu-navigated iPods order by their own indexes, so they stay false.</summary>
     public virtual bool SupportsReorder => false;
 
+    /// <summary>Whether the sidebar shows Podcasts/Audiobooks sub-views under the device. A screenless
+    /// one-list player (Shuffle) has no such menus - pushed episodes fold into its single track list -
+    /// so the sub-views would only ever be empty and are hidden entirely.</summary>
+    public virtual bool HasKindSubViews => true;
+
     /// <summary>Whether <see cref="AddTrackAsync"/> would transcode this track rather than copy it -
     /// so progress UI can say "Transcoding" only when that's the truth. Base is false (Rockbox and
     /// generic players copy everything); each stock tier answers with its own compatibility rules.</summary>
@@ -689,6 +694,7 @@ public sealed class ShuffleIPod : IPodDevice
     public override bool SupportsPodcasts => true;     // episodes land as plain tracks
     public override bool SupportsArtwork => false;
     public override bool SupportsReorder => true;      // the iTunesSD list IS the play order
+    public override bool HasKindSubViews => false;     // one flat list, no Podcasts/Audiobooks menus
 
     public override bool WillTranscode(MediaItem libraryTrack)
         => !string.IsNullOrEmpty(libraryTrack.FilePath) && !PlaysNatively(libraryTrack.FilePath);
