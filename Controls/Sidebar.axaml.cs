@@ -197,11 +197,10 @@ public partial class Sidebar : UserControl
 
         menu.Items.Add(exportAs);
 
-        // "Sync" submenu - one item per connected device that can take a playlist (Rockbox, binary
-        // iTunesDB iPods, and the Nano 5G via its SQLite + CDB stack). Capability comes from the
-        // IPodDevice model, not the blanket "stock = read-only" flag, so genuinely-writable iPods show.
+        // "Sync" submenu - one item per connected device that can take the playlist's TRACKS
+        // (the native playlist itself is optional garnish: a Shuffle still gets the songs).
         var sendTo = new Avalonia.Controls.MenuItem { Header = "Sync" };
-        var writableDevices = vm.ConnectedDevicesSnapshot().Where(d => IPodDevice.For(d).SupportsPlaylists).ToList();
+        var writableDevices = vm.ConnectedDevicesSnapshot().Where(d => IPodDevice.For(d).SupportsTrackAdd).ToList();
         if (writableDevices.Count == 0)
         {
             var none = new Avalonia.Controls.MenuItem { Header = "No compatible devices", IsEnabled = false };
