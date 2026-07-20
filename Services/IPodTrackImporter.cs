@@ -33,6 +33,22 @@ public static class IPodTrackImporter
     internal static string TargetExtension(string sourceExtension)
         => IsNativelyCompatible(sourceExtension) ? sourceExtension.ToLowerInvariant() : ".m4a";
 
+    /// <summary>True when the file's audio codec is ALAC (regardless of extension - it hides in the same
+    /// .m4a container as AAC). The devices that can't decode ALAC (iPod 1G/2G, Shuffle 1G/2G) need this
+    /// container-level check; unreadable files read as "not ALAC" so they fall back to a plain copy.</summary>
+    internal static bool IsAlacFile(string sourceFile)
+    {
+        try
+        {
+            using var f = TagLib.File.Create(sourceFile);
+            return f.Properties.Codecs?.OfType<TagLib.IAudioCodec>().Any(c => c.Description?.Contains("alac", StringComparison.OrdinalIgnoreCase) == true) == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Stock iPods (5G/5.5G) decode ALAC only up to 48 kHz / 16-bit, and the iTunesDB stores
     /// the sample rate as <c>rate &lt;&lt; 16</c> (so anything &gt; 65535 corrupts). Keep a
@@ -47,6 +63,7 @@ public static class IPodTrackImporter
         string ffmpegPath,
         string? generation = null,
         string? fireWireGuid = null,
+        Action<string, double>? onProgress = null,   // ("transcode"|"copy", 0..1) - each phase runs its own 0..1
         CancellationToken ct = default)
     {
         if (!File.Exists(sourceFile))
@@ -101,13 +118,25 @@ public static class IPodTrackImporter
         if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash72)
         {
             return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath, generation, fireWireGuid,
-                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, isAudiobook, ct);
+                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, isAudiobook, onProgress, ct);
         }
 
         // --- produce an iPod-compatible file ---
         var ext = Path.GetExtension(sourceFile);
         bool compatible = IsNativelyCompatible(ext);
         string targetExt = TargetExtension(ext);
+
+        // The FireWire-era iPod 1G/2G never got ALAC - Apple shipped Apple Lossless decode (mid-2004
+        // firmware) to dock-connector models only. Same silent-skip failure the Shuffle 2G showed on
+        // metal, so those two transcode to AAC 256k instead, and an ALAC-in-.m4a source (which the
+        // extension alone can't reveal) counts as incompatible for them.
+        bool supportsAlac = generation is not ("1G" or "2G");
+        if (compatible && !supportsAlac
+            && (ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) || ext.Equals(".m4b", StringComparison.OrdinalIgnoreCase))
+            && IsAlacFile(sourceFile))
+        {
+            compatible = false;
+        }
 
         // Stock iPods (5G/5.5G) decode ALAC only up to 48 kHz / 16-bit - hi-res
         // (e.g. 96/24) won't play and also overflows the iTunesDB sample-rate field
@@ -126,7 +155,15 @@ public static class IPodTrackImporter
         {
             producedFile = Path.Combine(Path.GetTempPath(), "orgz_alac_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
             producedIsTemp = true;
-            await TranscodeToAlacAsync(ffmpegPath, sourceFile, producedFile, targetSampleRate, ct);
+            var report = onProgress;
+            if (supportsAlac)
+            {
+                await TranscodeToAlacAsync(ffmpegPath, sourceFile, producedFile, targetSampleRate, srcLengthMs, report == null ? null : f => report("transcode", f), ct);
+            }
+            else
+            {
+                await TranscodeToAacAsync(ffmpegPath, sourceFile, producedFile, targetSampleRate, srcLengthMs, report == null ? null : f => report("transcode", f), ct);
+            }
         }
 
         try
@@ -138,7 +175,8 @@ public static class IPodTrackImporter
 
             var destFile = UniqueTrackPath(destDir, targetExt);
             string fileName = Path.GetFileName(destFile);
-            File.Copy(producedFile, destFile);
+            var copyReport = onProgress;
+            await CopyFileWithProgressAsync(producedFile, destFile, copyReport == null ? null : f => copyReport("copy", f), ct);
             string ipodPath = $":iPod_Control:Music:{folder}:{fileName}";
 
             // --- output properties ---
@@ -516,7 +554,7 @@ public static class IPodTrackImporter
                 audioFormat = 502; extFourCc = 0x4D344120; kindString = "Apple Lossless audio file"; targetExt = ".m4a";
                 produced = Path.Combine(Path.GetTempPath(), "orgz_pcast_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
                 producedIsTemp = true;
-                await TranscodeToAlacAsync(ffmpegPath, ep.LocalFile, produced, 44100, ct);
+                await TranscodeToAlacAsync(ffmpegPath, ep.LocalFile, produced, 44100, 0, null, ct);
             }
 
             try
@@ -595,7 +633,8 @@ public static class IPodTrackImporter
     private static async Task<IPodImportResult> ImportToNano5gAsync(
         string mountPath, string sourceFile, string ffmpegPath, string? generation, string? fireWireGuid,
         string? title, string? artist, string? album, string? genre,
-        int year, int trackNo, int srcLengthMs, int srcSampleRate, bool isAudiobook, CancellationToken ct)
+        int year, int trackNo, int srcLengthMs, int srcSampleRate, bool isAudiobook,
+        Action<string, double>? onProgress, CancellationToken ct)
     {
         // The Nano 5G plays MP3 and MP4-container AAC/ALAC. Pass those through; transcode anything
         // else (FLAC/WAV/AIFF) to ALAC so it stays lossless - never down to MP3.
@@ -622,7 +661,8 @@ public static class IPodTrackImporter
             recordedSampleRate = TargetSampleRate(srcSampleRate);
             produced = Path.Combine(Path.GetTempPath(), "orgz_alac_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
             producedIsTemp = true;
-            await TranscodeToAlacAsync(ffmpegPath, sourceFile, produced, recordedSampleRate, ct);
+            var report = onProgress;
+            await TranscodeToAlacAsync(ffmpegPath, sourceFile, produced, recordedSampleRate, srcLengthMs, report == null ? null : f => report("transcode", f), ct);
         }
 
         try
@@ -632,7 +672,8 @@ public static class IPodTrackImporter
             Directory.CreateDirectory(destDir);
             var destFile = UniqueTrackPath(destDir, targetExt);
             var fileName = Path.GetFileName(destFile);
-            File.Copy(produced, destFile);
+            var copyReport = onProgress;
+            await CopyFileWithProgressAsync(produced, destFile, copyReport == null ? null : f => copyReport("copy", f), ct);
 
             long fileSize = new FileInfo(destFile).Length;
             int lengthMs = srcLengthMs;
@@ -693,7 +734,7 @@ public static class IPodTrackImporter
         }
     }
 
-    private static async Task TranscodeToAlacAsync(string ffmpegPath, string input, string output, int sampleRate, CancellationToken ct)
+    internal static async Task TranscodeToAlacAsync(string ffmpegPath, string input, string output, int sampleRate, int durationMs, Action<double>? onProgress, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(ffmpegPath)
         {
@@ -715,16 +756,111 @@ public static class IPodTrackImporter
         psi.ArgumentList.Add("s16p");                  // 16-bit (5.5G ALAC ceiling)
         psi.ArgumentList.Add("-map_metadata");
         psi.ArgumentList.Add("0");
-        psi.ArgumentList.Add(output);
+        // moov before mdat, like every iTunes-written file (see TranscodeToAacAsync).
+        psi.ArgumentList.Add("-movflags");
+        psi.ArgumentList.Add("+faststart");
 
         _log.Information("Transcoding to ALAC: {Input} -> {Output}", input, output);
+        await RunFfmpegAsync(psi, output, durationMs, onProgress, ct);
+    }
+
+    /// <summary>AAC 256 kbps in an .m4a wrapper - the lossy fallback for the devices that can't
+    /// decode ALAC (iPod 1G/2G, Shuffle 1G/2G). Everything else gets <see cref="TranscodeToAlacAsync"/>.</summary>
+    internal static async Task TranscodeToAacAsync(string ffmpegPath, string input, string output, int sampleRate, int durationMs, Action<double>? onProgress, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo(ffmpegPath)
+        {
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-i");
+        psi.ArgumentList.Add(input);
+        psi.ArgumentList.Add("-map");
+        psi.ArgumentList.Add("0:a:0");
+        psi.ArgumentList.Add("-c:a");
+        psi.ArgumentList.Add("aac");
+        psi.ArgumentList.Add("-b:a");
+        psi.ArgumentList.Add("256k");
+        // Vintage fixed-function decoders (Shuffle 2G's SigmaTel-era SoC) choke on encoder features
+        // Apple's own AAC encoder never emits - disable PNS and intensity stereo so the stream looks
+        // like what the firmware grew up on.
+        psi.ArgumentList.Add("-aac_pns");
+        psi.ArgumentList.Add("0");
+        psi.ArgumentList.Add("-aac_is");
+        psi.ArgumentList.Add("0");
+        psi.ArgumentList.Add("-ar");
+        psi.ArgumentList.Add(sampleRate.ToString());
+        psi.ArgumentList.Add("-map_metadata");
+        psi.ArgumentList.Add("0");
+        // moov before mdat, like every iTunes-written file - hardware players stream the container
+        // front-to-back and stutter (or worse) when the sample tables live at the end.
+        psi.ArgumentList.Add("-movflags");
+        psi.ArgumentList.Add("+faststart");
+
+        _log.Information("Transcoding to AAC: {Input} -> {Output}", input, output);
+        await RunFfmpegAsync(psi, output, durationMs, onProgress, ct);
+    }
+
+    /// <summary>
+    /// Runs ffmpeg with the output path appended, reporting real progress when asked: ffmpeg's
+    /// <c>-progress pipe:1</c> stream carries <c>out_time_us</c> lines, and fraction = out_time over
+    /// the source duration. (ffmpeg quirk: the <c>out_time_ms</c> key is ALSO microseconds.) Stdout
+    /// is always drained so the pipe can't fill and deadlock the encode.
+    /// </summary>
+    private static async Task RunFfmpegAsync(ProcessStartInfo psi, string output, int durationMs, Action<double>? onProgress, CancellationToken ct)
+    {
+        psi.ArgumentList.Add("-nostats");
+        psi.ArgumentList.Add("-progress");
+        psi.ArgumentList.Add("pipe:1");
+        psi.ArgumentList.Add(output);
+
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        var stderr = await proc.StandardError.ReadToEndAsync(ct);
+        var stderrTask = proc.StandardError.ReadToEndAsync(ct);
+
+        string? line;
+        while ((line = await proc.StandardOutput.ReadLineAsync(ct)) != null)
+        {
+            if (onProgress == null || durationMs <= 0)
+            {
+                continue;   // draining only
+            }
+            if ((line.StartsWith("out_time_us=", StringComparison.Ordinal) || line.StartsWith("out_time_ms=", StringComparison.Ordinal))
+                && long.TryParse(line.AsSpan(line.IndexOf('=') + 1), out var us) && us > 0)
+            {
+                onProgress(Math.Clamp(us / 1000.0 / durationMs, 0, 1));
+            }
+        }
+
+        var stderr = await stderrTask;
         await proc.WaitForExitAsync(ct);
         if (proc.ExitCode != 0)
         {
             var tail = stderr.Length > 800 ? stderr[^800..] : stderr;
             throw new InvalidOperationException($"ffmpeg exited {proc.ExitCode}: {tail}");
+        }
+    }
+
+    /// <summary>Chunked file copy with byte-accurate progress - the device write is the slow phase on
+    /// USB-1.1-era iPods, and File.Copy gives no feedback at all.</summary>
+    internal static async Task CopyFileWithProgressAsync(string source, string dest, Action<double>? onProgress, CancellationToken ct)
+    {
+        const int BufSize = 1 << 20;
+        await using var src = File.OpenRead(source);
+        await using var dst = File.Create(dest);
+        var buf = new byte[BufSize];
+        long total = src.Length, done = 0;
+        int read;
+        while ((read = await src.ReadAsync(buf, ct)) > 0)
+        {
+            await dst.WriteAsync(buf.AsMemory(0, read), ct);
+            done += read;
+            if (total > 0)
+            {
+                onProgress?.Invoke((double)done / total);
+            }
         }
     }
 
