@@ -53,6 +53,32 @@ public class IPodRenameTests
         }
     }
 
+    [Fact]
+    public void Master_playlist_name_reads_without_parsing_tracks()
+    {
+        // iTunes names the hidden master playlist after the iPod; our own writer stamps "OrgZ".
+        var path = Path.Combine(Path.GetTempPath(), "orgz-mpl-" + Guid.NewGuid().ToString("N") + ".itunesdb");
+        try
+        {
+            var doc = ITunesDbWriter.CreateEmpty();
+            ITunesDbChunkTree.Normalize(doc.Root);
+            File.WriteAllBytes(path, ITunesDbChunkTree.Serialize(doc));
+            Assert.Equal("OrgZ", ITunesDbReader.TryReadDeviceName(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Track_only_database_reads_as_no_device_name()
+    {
+        // The bripod fixture is a tracks-only envelope (mhsd type 1, no playlist dataset).
+        var fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "itunesdb", "bripod-3tracks.itunesdb");
+        Assert.Null(ITunesDbReader.TryReadDeviceName(fixture));
+    }
+
     [Theory]
     [InlineData("FoxPod", "FoxPod")]
     [InlineData("DEBBIE'S IPOD", "DEBBIE'S IP")]        // FAT32's 11-char ceiling, trailing space trimmed

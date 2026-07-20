@@ -73,11 +73,26 @@ public static class DeviceFingerprint
             Name = ResolveVolumeName(drive, root),
         };
 
-        // iTunes stores the user's iPod name in DeviceInfo (UTF-16, unclipped) - prefer it over the
-        // volume label, which FAT32 truncates at 11 chars ("DEBBIE'S IPOD" mounts as "DEBBIE'S IP").
-        if (hasIPodControl && IPodRename.TryReadName(root) is { } deviceInfoName)
+        // The user's full iPod name beats the volume label (FAT32 clips labels at 11 chars -
+        // "DEBBIE'S IPOD" mounts as "DEBBIE'S IP"). Chain: the DeviceInfo file iTunes writes
+        // (UTF-16, authoritative), then the iTunesDB's hidden master playlist, which iTunes also
+        // names after the iPod - skipping "OrgZ", the placeholder our own writer stamps on fresh
+        // databases (an OrgZ-erased iPod must not rename itself "OrgZ").
+        if (hasIPodControl)
         {
-            device.Name = deviceInfoName;
+            if (IPodRename.TryReadName(root) is { } deviceInfoName)
+            {
+                device.Name = deviceInfoName;
+            }
+            else
+            {
+                var itdbPath = IPodPaths.ITunesDb(root);
+                if (File.Exists(itdbPath) && ITunesDbReader.TryReadDeviceName(itdbPath) is { } masterName
+                    && !string.Equals(masterName, "OrgZ", StringComparison.Ordinal))
+                {
+                    device.Name = masterName;
+                }
+            }
         }
 
         // Read the on-device /.orgz/device record first - it's the authoritative cache
