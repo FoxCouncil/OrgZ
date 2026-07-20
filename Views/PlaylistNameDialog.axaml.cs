@@ -29,12 +29,20 @@ public partial class PlaylistNameDialog : Window
             PromptText.Text = prompt;
         }
 
-        Loaded += (_, _) => NameInput.Focus();
+        Loaded += (_, _) =>
+        {
+            NameInput.Focus();
+            NameInput.CaretIndex = NameInput.Text?.Length ?? 0;   // append-ready, not start-of-text
+        };
     }
 
     private void OkButton_Click(object? sender, RoutedEventArgs e)
     {
-        Close(NameInput.Text);
+        // OK is the default button (Enter submits) - but only a non-empty name counts as OK.
+        if (!string.IsNullOrWhiteSpace(NameInput.Text))
+        {
+            Close(NameInput.Text);
+        }
     }
 
     private void CancelButton_Click(object? sender, RoutedEventArgs e)

@@ -12,8 +12,8 @@
 		<TextBlock x:Name="PromptText" Text="Playlist name:" />
 		<TextBox x:Name="NameInput" Watermark="My Playlist" />
 		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-			<Button Content="OK" Width="70" Click="OkButton_Click" />
-			<Button Content="Cancel" Width="70" Click="CancelButton_Click" />
+			<Button Content="OK" Width="70" Click="OkButton_Click" IsDefault="True" />
+			<Button Content="Cancel" Width="70" Click="CancelButton_Click" IsCancel="True" />
 		</StackPanel>
 	</StackPanel>
 </Window>
