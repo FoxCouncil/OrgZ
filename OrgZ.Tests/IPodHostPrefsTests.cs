@@ -59,18 +59,22 @@ public class IPodHostPrefsTests
             Put(0x380, "DEBBIE-PC");
             File.WriteAllBytes(IPodHostPrefs.PrefsPath(mount), prefs);
 
-            var (user, computers) = IPodHostPrefs.ReadHosts(mount);
-            Assert.Equal("Fox", user);
-            Assert.Equal(["DEBBIE-PC", "FOXDESK"], computers);
+            var hosts = IPodHostPrefs.ReadHosts(mount);
+            Assert.Equal("Fox", hosts.UserName);
+            Assert.Equal("FOXDESK", hosts.Computer);   // the active slot iTunes rewrites
+            // Every legacy slot raw - no deduping; an old iPod reads as the trip it really carries.
+            Assert.Equal(["DEBBIE-PC", "DEBBIE-PC", "DEBBIE-PC"], hosts.LegacySlots.Select(s => s.Value).ToArray());
+            Assert.Equal([0x1C0, 0x280, 0x380], hosts.LegacySlots.Select(s => s.Offset).ToArray());
 
             // The scrub: machines become "{user}'s Computer", the user survives, and OrgZ backups die.
             File.WriteAllBytes(Path.Combine(mount, "iPod_Control", "iTunes", "iTunesDB.orgzbak"), new byte[10]);
             Assert.True(IPodHostPrefs.ScrubHosts(mount));
             IPodHostPrefs.PurgeBackups(mount);
 
-            var (user2, computers2) = IPodHostPrefs.ReadHosts(mount);
-            Assert.Equal("Fox", user2);
-            Assert.Equal(["Fox's Computer"], computers2);
+            var scrubbed = IPodHostPrefs.ReadHosts(mount);
+            Assert.Equal("Fox", scrubbed.UserName);
+            Assert.Equal("Fox's Computer", scrubbed.Computer);
+            Assert.All(scrubbed.LegacySlots, s => Assert.Equal("Fox's Computer", s.Value));
             Assert.Empty(Directory.GetFiles(Path.Combine(mount, "iPod_Control", "iTunes"), "*.orgzbak"));
 
             Assert.False(IPodHostPrefs.ScrubHosts(mount));   // second pass - nothing left to scrub

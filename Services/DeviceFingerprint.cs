@@ -94,15 +94,14 @@ public static class DeviceFingerprint
                 }
             }
 
-            // Surface the identity trail the iPod carries (iTunesPrefs host slots) - user name plus
-            // every computer that ever adopted it. Shown in the info bar; Erase scrubs the machines.
-            var (hostUser, hostComputers) = IPodHostPrefs.ReadHosts(root);
-            if (hostUser != null || hostComputers.Count > 0)
-            {
-                device.HostHistory = hostComputers.Count > 0
-                    ? $"{hostUser ?? "?"} — {string.Join(", ", hostComputers)}"
-                    : hostUser;
-            }
+            // Surface the custody record the iPod carries (iTunesPrefs host slots): user, active
+            // computer, and every legacy slot raw - one info-bar row each. Erase scrubs the machines.
+            var hosts = IPodHostPrefs.ReadHosts(root);
+            device.HostUserName = hosts.UserName;
+            device.HostComputer = hosts.Computer;
+            device.HostLegacy1 = hosts.LegacySlots.ElementAtOrDefault(0)?.Value;
+            device.HostLegacy2 = hosts.LegacySlots.ElementAtOrDefault(1)?.Value;
+            device.HostLegacy3 = hosts.LegacySlots.ElementAtOrDefault(2)?.Value;
         }
 
         // Read the on-device /.orgz/device record first - it's the authoritative cache

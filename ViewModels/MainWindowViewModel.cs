@@ -7649,8 +7649,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     IPodHostPrefs.ScrubHosts(dev.MountPath);
                     IPodHostPrefs.PurgeBackups(dev.MountPath);
                 });
-                var (hostUser, hostComputers) = IPodHostPrefs.ReadHosts(dev.MountPath);
-                dev.HostHistory = hostComputers.Count > 0 ? $"{hostUser ?? "?"} — {string.Join(", ", hostComputers)}" : hostUser;
+                var hosts = IPodHostPrefs.ReadHosts(dev.MountPath);
+                dev.HostUserName = hosts.UserName;
+                dev.HostComputer = hosts.Computer;
+                dev.HostLegacy1 = hosts.LegacySlots.ElementAtOrDefault(0)?.Value;
+                dev.HostLegacy2 = hosts.LegacySlots.ElementAtOrDefault(1)?.Value;
+                dev.HostLegacy3 = hosts.LegacySlots.ElementAtOrDefault(2)?.Value;
             }
         }
         catch (NotImplementedException)
