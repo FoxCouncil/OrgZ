@@ -346,6 +346,14 @@ public sealed class DeviceDetectionService : IDisposable
         // ejects an un-held iPod volume within seconds of mount.
         DeviceVolumeHold.Acquire(device.MountPath);
 
+        // Etch the iTunes disk-use flag on every stock iPod we adopt: with it clear, Apple Mobile
+        // Device Service ejects the volume after each iTunes session and only a physical replug
+        // brings it back. OrgZ is in charge; iTunes is a guest.
+        if (device.DeviceType == DeviceType.StockIPod)
+        {
+            IPodHostPrefs.EtchDiskUse(device.MountPath);
+        }
+
         _connected[device.MountPath] = device;
         _log.Information("Device connected: {MountPath} Type={DeviceType} Name={Name} Model={Model} Serial={Serial}", device.MountPath, device.DeviceType, device.Name, device.Model, device.Serial);
         DeviceConnected?.Invoke(device);
