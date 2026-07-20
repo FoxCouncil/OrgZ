@@ -73,6 +73,74 @@ public static class ITunesDbReader
     }
 
     /// <summary>
+    /// Reads just the hidden master playlist's name - iTunes names it after the iPod, so on devices
+    /// that predate the DeviceInfo file this IS the iPod's full name (the FAT32 volume label clips
+    /// at 11 chars). Only the playlist datasets are parsed - track MHITs are skipped wholesale, so
+    /// a Classic's multi-megabyte database costs one file read, not a full parse. Null when the DB
+    /// is unreadable or the master carries no name.
+    /// </summary>
+    public static string? TryReadDeviceName(string iTunesDbPath)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(iTunesDbPath);
+            if (bytes.Length < 12 || !MatchMagic(bytes, 0, "mhbd"))
+            {
+                return null;
+            }
+
+            int headerSize = ReadInt32(bytes, 4);
+            int totalSize = ReadInt32(bytes, 8);
+            int pos = headerSize;
+            while (pos < totalSize - 8 && pos + 16 <= bytes.Length)
+            {
+                if (!MatchMagic(bytes, pos, "mhsd"))
+                {
+                    break;
+                }
+                int mhsdHeaderSize = ReadInt32(bytes, pos + 4);
+                int mhsdTotalSize = ReadInt32(bytes, pos + 8);
+                int mhsdType = ReadInt32(bytes, pos + 12);
+
+                if (mhsdType == 2 || mhsdType == 3)
+                {
+                    int mhlpPos = pos + mhsdHeaderSize;
+                    if (mhlpPos + 12 <= bytes.Length && MatchMagic(bytes, mhlpPos, "mhlp"))
+                    {
+                        int mhlpHeaderSize = ReadInt32(bytes, mhlpPos + 4);
+                        int playlistCount = ReadInt32(bytes, mhlpPos + 8);
+                        int mhypPos = mhlpPos + mhlpHeaderSize;
+                        for (int i = 0; i < playlistCount && mhypPos + 12 <= bytes.Length; i++)
+                        {
+                            var pl = ReadMhyp(bytes, mhypPos, out int mhypTotalSize);
+                            if (pl is { IsMaster: true } && !string.IsNullOrWhiteSpace(pl.Name))
+                            {
+                                return pl.Name!.Trim();
+                            }
+                            if (mhypTotalSize <= 0)
+                            {
+                                break;
+                            }
+                            mhypPos += mhypTotalSize;
+                        }
+                    }
+                }
+
+                if (mhsdTotalSize <= 0)
+                {
+                    break;
+                }
+                pos += mhsdTotalSize;
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// A single playlist entry from the iTunesDB. Name comes from the first string MHOD
     /// child of the MHYP; TrackIds is the ordered list of MHIP references. Apple hides
     /// one "master library" playlist at the front (flag byte is 1 in MHYP header) that
