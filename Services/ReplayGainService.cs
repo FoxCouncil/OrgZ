@@ -46,14 +46,18 @@ public static class ReplayGainService
                 using var file = TagLib.File.Create(filePath);
                 file.Tag.ReplayGainTrackGain = gainDb;
                 file.Save();
+                _log.Information("ReplayGain {Gain:0.00} dB (from {Lufs:0.0} LUFS) -> {Path}", gainDb, lufs, filePath);
             }
             catch (Exception ex)
             {
-                _log.Warning(ex, "Could not write the ReplayGain tag on {Path}", filePath);
-                return null;
+                // The file is usually locked by the very PLAYER we're analyzing for. Losing the tag
+                // write must never lose the MEASUREMENT - that bug silently disabled Sound Check for
+                // half of all plays (gain computed, then discarded with the failed tag). The caller
+                // applies the gain live and caches it in the library DB, so normalization works this
+                // play and every one after; the file tag lands whenever the file is next writable.
+                _log.Debug(ex, "ReplayGain tag deferred (file busy) on {Path} - gain {Gain:0.00} dB still applies", filePath, gainDb);
             }
 
-            _log.Information("ReplayGain {Gain:0.00} dB (from {Lufs:0.0} LUFS) -> {Path}", gainDb, lufs, filePath);
             return gainDb;
         }
         finally
