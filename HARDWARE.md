@@ -30,7 +30,7 @@ Color variants collapsed into one row. Win / Mac = OrgZ tested against the devic
 | iPod Classic 7G | 2009 | hash58 | alac | | | | | |
 | iPod Nano 1G | 2005 | None (direct iTunesDB) | alac | | | | | NEEDED to dump |
 | iPod Nano 2G | 2006 | None (direct iTunesDB) | alac | | | | | |
-| iPod Nano 3G | 2007 | hash58 | alac | | | | | |
+| iPod Nano 3G | 2007 | hash58 | alac | ✅ | | | | |
 | iPod Nano 4G | 2008 | hash58 | alac | | | | | |
 | iPod Nano 5G | 2009 | hash72 + SQLite | alac | ✅ | | ✅ | | ✅ |
 
