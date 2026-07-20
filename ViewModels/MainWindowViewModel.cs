@@ -3979,6 +3979,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (dev.DeviceType == DeviceType.StockIPod)
                 {
                     IPodRename.WriteName(dev.MountPath, name);
+
+                    // iTunes shows the iTunesDB master playlist's name as the DEVICE name (that's
+                    // why a renamed iPod kept its old identity there) - rename it in step.
+                    var dbPath = IPodPaths.ITunesDb(dev.MountPath);
+                    if (File.Exists(dbPath) && new FileInfo(dbPath).Length > 0)
+                    {
+                        var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+                        ITunesDbWriter.RenameMasterPlaylists(doc, name);
+                        IPodTrackImporter.CommitDb(doc, dbPath, dev.MountPath, dev.IpodGeneration, dev.FireWireGuid);
+                    }
                 }
                 IPodRename.TrySetVolumeLabel(dev.MountPath, name);
             });
