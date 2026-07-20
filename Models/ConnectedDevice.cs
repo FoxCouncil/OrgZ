@@ -46,13 +46,52 @@ public partial class ConnectedDevice : ObservableObject
     private string? _hostComputer;
 
     [ObservableProperty]
-    private string? _hostLegacy1;
+    private string? _hostRecordLabel1;
+    [ObservableProperty]
+    private string? _hostRecordValue1;
 
     [ObservableProperty]
-    private string? _hostLegacy2;
+    private string? _hostRecordLabel2;
+    [ObservableProperty]
+    private string? _hostRecordValue2;
 
     [ObservableProperty]
-    private string? _hostLegacy3;
+    private string? _hostRecordLabel3;
+    [ObservableProperty]
+    private string? _hostRecordValue3;
+
+    /// <summary>Fills the Host Record rows from the raw legacy slot values, collapsing identical
+    /// values into one row - three DEBBIE-PCs read as "Host Record 1,2,3: DEBBIE-PC", mixed slots
+    /// keep their own rows. Slot numbering is 1-based in engraving order.</summary>
+    public void SetHostRecords(IReadOnlyList<string?> slotValues)
+    {
+        var groups = new List<(string Value, List<int> Slots)>();
+        for (int i = 0; i < slotValues.Count; i++)
+        {
+            var v = slotValues[i];
+            if (string.IsNullOrWhiteSpace(v))
+            {
+                continue;
+            }
+            var existing = groups.FirstOrDefault(g => string.Equals(g.Value, v, StringComparison.Ordinal));
+            if (existing.Slots != null)
+            {
+                existing.Slots.Add(i + 1);
+            }
+            else
+            {
+                groups.Add((v!, [i + 1]));
+            }
+        }
+
+        (string?, string?) Row(int idx) => idx < groups.Count
+            ? ($"Host Record {string.Join(",", groups[idx].Slots)}:", groups[idx].Value)
+            : (null, null);
+
+        (HostRecordLabel1, HostRecordValue1) = Row(0);
+        (HostRecordLabel2, HostRecordValue2) = Row(1);
+        (HostRecordLabel3, HostRecordValue3) = Row(2);
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelDisplay), nameof(ModelLabelDisplay), nameof(DisplayName))]
