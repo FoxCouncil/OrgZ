@@ -851,9 +851,11 @@ public sealed class ShuffleIPod : IPodDevice
         => Task.Run(async () =>
         {
             // Stage into Music/F00 (copy or transcode - the firmware only plays MP3/AAC/ALAC/WAV), then
-            // add it to the iTunesSD list so the firmware will actually play it.
+            // add it to the iTunesSD so the firmware plays it AND to the iTunesDB so iTunes sees it -
+            // both files, every time, exactly like iTunes itself (see the co-habitation block below).
             var dest = await StageIntoMusicAsync(libraryTrack.FilePath!, ffmpegPath, libraryTrack.SampleRate ?? 0, (int)(libraryTrack.Duration?.TotalMilliseconds ?? 0), onProgress, ct);
             AppendToSd(dest);
+            SyncDbWithSd(dest, libraryTrack);
 
             long size = 0;
             try { size = new FileInfo(dest).Length; } catch { /* cosmetic */ }
@@ -953,6 +955,7 @@ public sealed class ShuffleIPod : IPodDevice
             var list = ReadSd();
             list.RemoveAll(e => string.Equals(e.IpodPath, ipodPath, StringComparison.OrdinalIgnoreCase));
             WriteSd(list);
+            RemoveDbRow(item.FilePath);
             if (File.Exists(item.FilePath))
             {
                 File.Delete(item.FilePath);
@@ -964,8 +967,124 @@ public sealed class ShuffleIPod : IPodDevice
         {
             int removed = DeleteFilesUnder(IPodPaths.Music(MountPath));
             WriteSd([]);   // valid header, zero entries
+
+            // Keep iTunes's view in step: an erased device must read as empty there too.
+            var dbPath = IPodPaths.ITunesDb(MountPath);
+            if (File.Exists(dbPath) && new FileInfo(dbPath).Length > 0)
+            {
+                var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+                ITunesDbWriter.ClearLibrary(doc);
+                IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+            }
             return removed;
         }, ct);
+
+    // ── iTunes co-habitation ─────────────────────────────────────────────────
+    // The firmware plays from iTunesSD, but iTUNES reads the iTunesDB - and writes BOTH on every
+    // sync. So must we: without DB rows our tracks are invisible in iTunes, and an iTunes sync
+    // would rewrite the iTunesSD from its stale view, clobbering every OrgZ-added track.
+    // (Hardware-found: a device OrgZ had synced for a day showed its 2023 iTunes library, and
+    // nothing else, when plugged into iTunes.)
+
+    /// <summary>Brings the iTunesDB in line with the iTunesSD after an add: every SD entry gets a DB
+    /// row. The just-added file carries its library metadata; entries from before OrgZ maintained
+    /// the DB are backfilled with tags read from their files, so one new add heals the whole device.
+    /// Existing rows (iTunes's own) are never touched.</summary>
+    private void SyncDbWithSd(string justAddedDest, MediaItem justAddedMeta)
+    {
+        var dbPath = IPodPaths.ITunesDb(MountPath);
+        ITunesDbDocument doc;
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (File.Exists(dbPath) && new FileInfo(dbPath).Length > 0)
+        {
+            var bytes = File.ReadAllBytes(dbPath);
+            doc = ITunesDbChunkTree.Parse(bytes);
+            ITunesDbReader.ReadAll(bytes, MountPath, out var rows, out _);
+            foreach (var row in rows)
+            {
+                if (!string.IsNullOrEmpty(row.FilePath))
+                {
+                    known.Add(row.FilePath);
+                }
+            }
+        }
+        else
+        {
+            doc = ITunesDbWriter.CreateEmpty();
+        }
+
+        bool changed = false;
+        foreach (var e in ReadSd())
+        {
+            var abs = Path.GetFullPath(Path.Combine(MountPath, e.IpodPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+            if (known.Contains(abs) || !File.Exists(abs))
+            {
+                continue;
+            }
+
+            MediaItem meta;
+            if (string.Equals(abs, justAddedDest, StringComparison.OrdinalIgnoreCase))
+            {
+                meta = justAddedMeta;
+            }
+            else
+            {
+                meta = new MediaItem { Id = abs, Kind = MediaKind.Music, FilePath = abs, Title = Path.GetFileNameWithoutExtension(abs) };
+                AudioFileAnalyzer.AnalyzeFile(meta);
+            }
+
+            ITunesDbWriter.AddTrack(doc, new NewTrack
+            {
+                TrackId = ITunesDbWriter.NextTrackId(doc),
+                IpodPath = ":" + Path.GetRelativePath(MountPath, abs).Replace('\\', ':').Replace('/', ':'),
+                Title = meta.Title,
+                Artist = meta.Artist,
+                Album = meta.Album,
+                Genre = meta.Genre,
+                Composer = meta.Composer,
+                FileSize = new FileInfo(abs).Length,
+                LengthMs = (int)(meta.Duration?.TotalMilliseconds ?? 0),
+                Bitrate = meta.AudioBitrate ?? 0,
+                SampleRate = meta.SampleRate ?? 0,
+                Year = (int)(meta.Year ?? 0),
+                TrackNumber = (int)(meta.Track ?? 0),
+                TotalTracks = (int)(meta.TotalTracks ?? 0),
+                DiscNumber = (int)(meta.Disc ?? 0),
+                TotalDiscs = (int)(meta.TotalDiscs ?? 0),
+                DateAddedUtc = DateTime.UtcNow,
+                Dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue),
+            });
+            changed = true;
+        }
+
+        if (changed)
+        {
+            IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+        }
+    }
+
+    /// <summary>Drops the removed track's iTunesDB row (matched by on-device path) so iTunes never
+    /// shows a ghost. Rows we can't match - or a device with no DB at all - are left alone.</summary>
+    private void RemoveDbRow(string absoluteFilePath)
+    {
+        var dbPath = IPodPaths.ITunesDb(MountPath);
+        if (!File.Exists(dbPath) || new FileInfo(dbPath).Length == 0)
+        {
+            return;
+        }
+        var bytes = File.ReadAllBytes(dbPath);
+        ITunesDbReader.ReadAll(bytes, MountPath, out var rows, out _);
+        var row = rows.FirstOrDefault(t => string.Equals(t.FilePath, absoluteFilePath, StringComparison.OrdinalIgnoreCase));
+        if (row == null)
+        {
+            return;
+        }
+        var doc = ITunesDbChunkTree.Parse(bytes);
+        if (ITunesDbWriter.RemoveTrack(doc, row.TrackId))
+        {
+            IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+        }
+    }
 
     private string ToIpodPath(string absolute) => "/" + Path.GetRelativePath(MountPath, absolute).Replace('\\', '/');
 

@@ -305,6 +305,60 @@ public class ShuffleIPodTests
         }
     }
 
+    /// <summary>
+    /// iTunes co-habitation: the firmware plays from iTunesSD but iTunes reads the iTunesDB, and a
+    /// device where only the SD is maintained looks frozen-in-time in iTunes (hardware-found - a day
+    /// of OrgZ syncs was invisible there, and an iTunes sync would have clobbered them all). Every
+    /// add must land in BOTH files, adds must backfill rows for pre-co-habitation SD entries,
+    /// removes must drop the row, and erase must empty the DB too.
+    /// </summary>
+    [Fact]
+    public async Task Adds_maintain_the_iTunesDB_so_iTunes_sees_our_tracks()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-shufdb2-" + Guid.NewGuid().ToString("N"));
+        var srcDir = Path.Combine(Path.GetTempPath(), "orgz-shufdb2src-" + Guid.NewGuid().ToString("N"));
+        var iTunesDir = Path.Combine(mount, "iPod_Control", "iTunes");
+        Directory.CreateDirectory(iTunesDir);
+        Directory.CreateDirectory(srcDir);
+        try
+        {
+            // A pre-co-habitation device state: one orphan track listed in the SD with no DB at all.
+            var orphanDir = Path.Combine(mount, "iPod_Control", "Music", "F00");
+            Directory.CreateDirectory(orphanDir);
+            File.WriteAllBytes(Path.Combine(orphanDir, "ORPH.mp3"), new byte[400]);
+            ShuffleSdWriter.Write(iTunesDir, [new ShuffleSdTrack("/iPod_Control/Music/F00/ORPH.mp3", 1)]);
+
+            var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, IpodGeneration = "Shuffle 2G", Name = "Shuffle" };
+            var ipod = IPodDevice.For(device);
+
+            var songSrc = Path.Combine(srcDir, "song.mp3");
+            File.WriteAllBytes(songSrc, new byte[500]);
+            var added = await ipod.AddTrackAsync(new MediaItem { Id = songSrc, FilePath = songSrc, FileName = "song.mp3", Title = "Night of Fire", Artist = "Niko", Album = "Super Eurobeat", Kind = MediaKind.Music }, "ffmpeg");
+
+            // Both the new track AND the backfilled orphan have DB rows now, with the new one's
+            // library metadata intact - this is what iTunes displays.
+            var dbPath = Path.Combine(iTunesDir, "iTunesDB");
+            Assert.True(File.Exists(dbPath));
+            var rows = ITunesDbReader.Read(dbPath, mount);
+            Assert.Equal(2, rows.Count);
+            var newRow = rows.Single(r => r.Title == "Night of Fire");
+            Assert.Equal("Niko", newRow.Artist);
+            Assert.Equal(added.FilePath, newRow.FilePath);
+            Assert.Contains(rows, r => r.FilePath!.EndsWith("ORPH.mp3"));
+
+            // Remove drops the row; erase empties the DB entirely.
+            await ipod.RemoveTrackAsync(added);
+            Assert.Single(ITunesDbReader.Read(dbPath, mount));
+            await ipod.EraseAsync();
+            Assert.Empty(ITunesDbReader.Read(dbPath, mount));
+        }
+        finally
+        {
+            Directory.Delete(mount, recursive: true);
+            Directory.Delete(srcDir, recursive: true);
+        }
+    }
+
     [Fact]
     public void Bdhs_iTunesSD_layout_is_correct_and_round_trips()
     {
