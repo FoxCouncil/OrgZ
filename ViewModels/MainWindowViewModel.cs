@@ -7638,6 +7638,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             removed = await ipod.EraseAsync();
+
+            // Privacy pass: an erased iPod stops testifying. The iTunesPrefs machine-name slots
+            // become "{user}'s Computer", and OrgZ's own .orgzbak ghosts (pre-erase databases with
+            // their track lists and old device name) go with them.
+            if (dev.DeviceType == DeviceType.StockIPod)
+            {
+                await Task.Run(() =>
+                {
+                    IPodHostPrefs.ScrubHosts(dev.MountPath);
+                    IPodHostPrefs.PurgeBackups(dev.MountPath);
+                });
+                var (hostUser, hostComputers) = IPodHostPrefs.ReadHosts(dev.MountPath);
+                dev.HostHistory = hostComputers.Count > 0 ? $"{hostUser ?? "?"} — {string.Join(", ", hostComputers)}" : hostUser;
+            }
         }
         catch (NotImplementedException)
         {

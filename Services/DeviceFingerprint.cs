@@ -93,6 +93,16 @@ public static class DeviceFingerprint
                     device.Name = masterName;
                 }
             }
+
+            // Surface the identity trail the iPod carries (iTunesPrefs host slots) - user name plus
+            // every computer that ever adopted it. Shown in the info bar; Erase scrubs the machines.
+            var (hostUser, hostComputers) = IPodHostPrefs.ReadHosts(root);
+            if (hostUser != null || hostComputers.Count > 0)
+            {
+                device.HostHistory = hostComputers.Count > 0
+                    ? $"{hostUser ?? "?"} — {string.Join(", ", hostComputers)}"
+                    : hostUser;
+            }
         }
 
         // Read the on-device /.orgz/device record first - it's the authoritative cache

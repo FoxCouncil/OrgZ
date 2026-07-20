@@ -46,6 +46,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" Classes="label" />
@@ -88,6 +89,11 @@
 
                 <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
                 <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
+
+                <!-- The identity trail engraved in the on-device iTunesPrefs: user + every computer
+                     that ever adopted this iPod. Erase scrubs the machine names. -->
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Set up by:" Classes="label" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" Text="{Binding HostHistoryDisplay}" Classes="value" />
             </Grid>
         </controls:MediaHeaderBar.Body>
 
