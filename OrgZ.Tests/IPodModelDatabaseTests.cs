@@ -84,6 +84,18 @@ public class IPodModelDatabaseTests
     }
 
     [Fact]
+    public void LookupBySerial_decodes_nano_2g_pink_vql()
+    {
+        // Regression: VQL was dropped when the libgpod suffix table was ported (VQK and VKL made it,
+        // VQL didn't) - found on real metal ("Lyn's iPod", YM7150MRVQL, showed as bare "Apple iPod").
+        var info = IPodModelDatabase.LookupBySerial("YM7150MRVQL");
+        Assert.NotNull(info);
+        Assert.Equal("Nano 2G", info!.Generation);
+        Assert.Equal("Pink", info.Color);
+        Assert.Equal(4, info.CapacityGb);
+    }
+
+    [Fact]
     public void LookupBySerial_unknown_suffix_returns_null()
     {
         Assert.Null(IPodModelDatabase.LookupBySerial("8K72ZZZ"));
