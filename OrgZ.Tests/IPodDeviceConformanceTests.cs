@@ -58,7 +58,7 @@ public class IPodDeviceConformanceTests
     //          generation      dbWrite playlists podcasts artwork audiobooks
     [InlineData("Video 5.5G",   true,   true,     true,    true,   true)]
     [InlineData("Nano 5G",      true,   true,     true,    true,   true)]
-    [InlineData("Shuffle 2G",   true,   true,     true,    false,  false)]   // podcasts/playlists fold into the one list; no audiobook concept in iTunesSD - a book shuffled into songs is worse than absent
+    [InlineData("Shuffle 2G",   true,   false,    true,    false,  false)]   // NO playlist concept on the hardware - a playlist sync delivers its tracks only; podcasts fold into the one list; no audiobook concept in iTunesSD - a book shuffled into songs is worse than absent
     [InlineData("Nano 7G",      false,  false,    false,   false,  false)]
     public void Capability_claims_are_the_agreed_spec(string generation, bool dbWrite, bool playlists, bool podcasts, bool artwork, bool audiobooks)
     {
@@ -194,14 +194,14 @@ public class IPodDeviceConformanceTests
     }
 
     // ── shuffle tier: podcasts + playlists fold into the single track list ────
-    // These capabilities are CLAIMED (flags true), so the lifecycle must prove them: episodes land
-    // as plain tracks in the iTunesSD order, and syncing a playlist REPLACES the device's list -
-    // that's what a screenless one-list device is.
+    // Podcasts are CLAIMED (flag true), so the lifecycle must prove them landing as plain tracks in
+    // the iTunesSD order. Playlists are NOT claimed - the hardware has no playlist concept, so a
+    // playlist sync delivers its tracks and nothing else, and the unclaimed operation throws loudly.
 
     [Theory]
     [InlineData("Shuffle 2G")]   // classic big-endian iTunesSD
     [InlineData("Shuffle 4G")]   // little-endian bdhs
-    public async Task Shuffle_tier_podcasts_land_as_tracks_and_a_playlist_replaces_the_list(string generation)
+    public async Task Shuffle_tier_podcasts_land_as_tracks_and_playlists_are_refused(string generation)
     {
         var mount = Path.Combine(Path.GetTempPath(), "orgz-conf-" + Guid.NewGuid().ToString("N"));
         var srcDir = Path.Combine(Path.GetTempPath(), "orgz-confsrc-" + Guid.NewGuid().ToString("N"));
@@ -213,7 +213,8 @@ public class IPodDeviceConformanceTests
             var ipod = IPodDevice.For(device);
             Assert.IsType<ShuffleIPod>(ipod);
             Assert.True(ipod.SupportsPodcasts);
-            Assert.True(ipod.SupportsPlaylists);
+            Assert.False(ipod.SupportsPlaylists);
+            Assert.True(ipod.SupportsTrackAdd);   // playlist syncs still deliver their songs
 
             // Podcast episodes land as plain tracks in the device list.
             int pushed = await ipod.AddPodcastsAsync(
@@ -228,13 +229,14 @@ public class IPodDeviceConformanceTests
             // Re-pushing the same episodes adds nothing (same on-device path).
             Assert.Equal(0, await ipod.AddPodcastsAsync([Episode(srcDir, "DEADLOCK", "Episode One")], "ffmpeg-not-installed"));
 
-            // A playlist sync REPLACES the device's one list with exactly its tracks.
+            // Adding a song APPENDS to the one list - nothing is ever replaced or dropped.
             var song = await ipod.AddTrackAsync(LibraryTrack(srcDir, "Night of Fire"), "ffmpeg-not-installed");
             Assert.Equal(3, (await ipod.ReadLibraryAsync()).Tracks.Count);
-            await ipod.CreatePlaylistAsync("Only This", [song]);
-            var afterPlaylist = await ipod.ReadLibraryAsync();
-            var only = Assert.Single(afterPlaylist.Tracks);
-            Assert.Equal(song.FilePath, only.FilePath);
+
+            // The unclaimed playlist operation is a loud gap, not a silent no-op (the old
+            // implementation REPLACED the whole device list - destructive and surprising).
+            await Assert.ThrowsAsync<NotImplementedException>(() => ipod.CreatePlaylistAsync("Only This", [song]));
+            Assert.Equal(3, (await ipod.ReadLibraryAsync()).Tracks.Count);
         }
         finally
         {
