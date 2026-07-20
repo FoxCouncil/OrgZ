@@ -1,8 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
-using System.Globalization;
 using System.Linq;
-using System.Text;
 using OrgZ.Models;
 
 namespace OrgZ.Services;
@@ -691,9 +689,11 @@ public sealed class RockboxIPod : IPodDevice
 /// <summary>
 /// iPod Shuffle: screenless, no iTunesDB - audio files live under <c>iPod_Control/Music/F00</c> and
 /// the play order is the <c>iTunesSD</c> track list (big-endian classic on 1G/2G, little-endian
-/// "bdhs" on 3G/4G). The hardware has no playlist concept, so <see cref="SupportsPlaylists"/> is
-/// false - a playlist sync just appends its tracks to the one list - and podcasts fold in as plain
-/// tracks. Drag-reorder of the device grid IS the ordering tool (<see cref="SupportsReorder"/>).
+/// "bdhs" on 3G/4G). The hardware has no playlist or podcast concept, so both capabilities are
+/// honestly false: a playlist sync just appends its tracks to the one list, and podcasts aren't
+/// offered at all - only LEGIT support, no folding episodes into the song pile. (The 3G/4G bdhs
+/// format has typed playlist/podcast list sections + VoiceOver - real support is possible there,
+/// pending hardware to validate on.) Drag-reorder of the device grid IS the ordering tool.
 /// </summary>
 public sealed class ShuffleIPod : IPodDevice
 {
@@ -701,7 +701,7 @@ public sealed class ShuffleIPod : IPodDevice
 
     public override bool SupportsDatabaseWrite => true;
     public override bool SupportsPlaylists => false;   // the hardware has NO playlist concept - a playlist sync delivers its tracks (appended), nothing more
-    public override bool SupportsPodcasts => true;     // episodes land as plain tracks
+    public override bool SupportsPodcasts => false;    // no podcast concept either - only LEGIT support counts, no folding episodes into the song list (3G/4G bdhs typed lists could do it for real, pending metal)
     public override bool SupportsArtwork => false;
     public override bool SupportsReorder => true;      // the iTunesSD list IS the play order
     public override bool HasKindSubViews => false;     // one flat list, no Podcasts/Audiobooks menus
@@ -810,26 +810,21 @@ public sealed class ShuffleIPod : IPodDevice
 
     /// <summary>Lands a source file in Music/F00 in a format this Shuffle can play: native formats copy
     /// as-is, everything else transcodes into an .m4a (ALAC lossless on 3G/4G, AAC 256k on 1G/2G) and
-    /// gets the source's tags re-applied. Music gets an iTunes-style random 4-caps name (exactly what
-    /// the firmware grew up on - see <see cref="DeviceFileName"/> for why names must be plain ASCII);
-    /// podcasts pass <paramref name="fixedName"/> so a re-push of the same episode maps to the same
-    /// path and dedupes. Progress: ("transcode", 0..1) for the encode, then ("copy", 0..1) for the
-    /// device write - the slow phase on the Shuffle's USB 1.1 link.</summary>
-    private async Task<string> StageIntoMusicAsync(string sourceFile, string ffmpegPath, int sourceSampleRate, int durationMs, Action<string, double>? onProgress, CancellationToken ct, string? fixedName = null)
+    /// gets the source's tags re-applied. Names are iTunes-style random 4-caps - the only alphabet the
+    /// firmware has ever parsed (a single U+2019 in an iTunesSD path made a real 2G silently skip the
+    /// track). Progress: ("transcode", 0..1) for the encode, then ("copy", 0..1) for the device write -
+    /// the slow phase on the Shuffle's USB 1.1 link.</summary>
+    private async Task<string> StageIntoMusicAsync(string sourceFile, string ffmpegPath, int sourceSampleRate, int durationMs, Action<string, double>? onProgress, CancellationToken ct)
     {
         Directory.CreateDirectory(MusicDir);
         if (PlaysNatively(sourceFile))
         {
-            var ext = Path.GetExtension(sourceFile);
-            var nativeDest = fixedName != null ? Path.Combine(MusicDir, fixedName + ext) : IPodTrackImporter.UniqueTrackPath(MusicDir, ext);
-            if (!File.Exists(nativeDest))
-            {
-                await IPodTrackImporter.CopyFileWithProgressAsync(sourceFile, nativeDest, onProgress == null ? null : f => onProgress("copy", f), ct);
-            }
+            var nativeDest = IPodTrackImporter.UniqueTrackPath(MusicDir, Path.GetExtension(sourceFile));
+            await IPodTrackImporter.CopyFileWithProgressAsync(sourceFile, nativeDest, onProgress == null ? null : f => onProgress("copy", f), ct);
             return nativeDest;
         }
 
-        var dest = fixedName != null ? Path.Combine(MusicDir, fixedName + ".m4a") : IPodTrackImporter.UniqueTrackPath(MusicDir, ".m4a");
+        var dest = IPodTrackImporter.UniqueTrackPath(MusicDir, ".m4a");
         var staged = Path.Combine(Path.GetTempPath(), "orgz_shuf_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
         try
         {
@@ -886,27 +881,6 @@ public sealed class ShuffleIPod : IPodDevice
                 FileSize = size,
                 IsAnalyzed = true,
             };
-        }, ct);
-
-    public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
-        => Task.Run(async () =>
-        {
-            Directory.CreateDirectory(MusicDir);
-            var list = ReadSd();
-            int added = 0;
-            for (int i = 0; i < episodes.Count; i++)
-            {
-                onProgress?.Invoke(i + 1, episodes.Count);
-                var dest = await StageIntoMusicAsync(episodes[i].LocalFile, ffmpegPath, 0, 0, null, ct, fixedName: DeviceFileName(episodes[i].LocalFile));
-                var ipodPath = ToIpodPath(dest);
-                if (!list.Any(x => string.Equals(x.IpodPath, ipodPath, StringComparison.OrdinalIgnoreCase)))
-                {
-                    list.Add(new ShuffleSdTrack(ipodPath, ShuffleSdWriter.FileTypeFor(dest)));
-                    added++;
-                }
-            }
-            WriteSd(list);
-            return added;
         }, ct);
 
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
@@ -994,33 +968,6 @@ public sealed class ShuffleIPod : IPodDevice
         }, ct);
 
     private string ToIpodPath(string absolute) => "/" + Path.GetRelativePath(MountPath, absolute).Replace('\\', '/');
-
-    /// <summary>The on-device file name for a source: ASCII-folded, then filesystem-sanitized. The
-    /// 2006-era firmware's FAT name matching has only ever seen iTunes's 4-char ASCII names, and one
-    /// U+2019 apostrophe in an iTunesSD path made the 2G silently skip the track (hardware-confirmed:
-    /// same bytes played fine once renamed to ASCII). NFKD strips accents to base letters; curly
-    /// quotes/dashes map to their ASCII cousins; anything else non-ASCII becomes '_'.</summary>
-    private static string DeviceFileName(string sourceFile)
-    {
-        var normalized = Path.GetFileNameWithoutExtension(sourceFile).Normalize(NormalizationForm.FormKD);
-        var sb = new StringBuilder(normalized.Length);
-        foreach (var c in normalized)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
-            {
-                continue;
-            }
-            sb.Append(c switch
-            {
-                '‘' or '’' => '\'',
-                '“' or '”' => '_',   // straight " is FAT-invalid anyway
-                '–' or '—' => '-',
-                _ when c < 0x80 => c,
-                _ => '_',
-            });
-        }
-        return Sanitize(sb.ToString());
-    }
 
     private void AppendToSd(string destFile)
     {
