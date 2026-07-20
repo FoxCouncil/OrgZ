@@ -99,7 +99,7 @@ public static class DeviceFingerprint
             var hosts = IPodHostPrefs.ReadHosts(root);
             device.HostUserName = hosts.UserName;
             device.HostComputer = hosts.Computer;
-            device.SetHostRecords(hosts.LegacySlots.Select(s => s.Value).ToList());
+            device.SetHostRecords(hosts.LegacySlots.Select(s => s.Value).ToList(), hosts.Computer);
         }
 
         // Read the on-device /.orgz/device record first - it's the authoritative cache

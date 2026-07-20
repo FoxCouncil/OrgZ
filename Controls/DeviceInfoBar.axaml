@@ -107,7 +107,8 @@
                 <TextBlock Grid.Row="3" Grid.Column="4" Text="{Binding HostComputer}" Classes="value"
                            IsVisible="{Binding HostComputer, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                <!-- Identical slots collapse into one row ("Host Record 1,2,3: DEBBIE-PC"). -->
+                <!-- Legacy slots collapse: identical values = one "Host:" row, values matching the
+                     Computer row vanish, distinct leftovers get their own rows. -->
                 <TextBlock Grid.Row="4" Grid.Column="0" Text="{Binding HostRecordLabel1}" Classes="label"
                            IsVisible="{Binding HostRecordValue1, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding HostRecordValue1}" Classes="value"
