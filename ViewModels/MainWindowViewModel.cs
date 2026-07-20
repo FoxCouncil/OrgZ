@@ -4868,6 +4868,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _deviceDetection = new DeviceDetectionService();
         _deviceDetection.DeviceConnected += device => UI(() => _ = HandleDeviceConnectedAsync(device));
         _deviceDetection.DeviceDisconnected += mountPath => UI(() => HandleDeviceDisconnected(mountPath));
+        _deviceDetection.DeviceEjectedByHost += name => UI(() =>
+            UpdateMainStatus($"iTunes ejected {name} — replug it to reconnect (enable “disk use” in iTunes to stop the auto-eject)."));
         _deviceDetection.CdDriveEvent += () => UI(() => _ = ScanForCdAsync());
         _deviceDetection.Start();
     }

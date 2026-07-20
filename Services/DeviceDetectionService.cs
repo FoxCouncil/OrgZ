@@ -19,6 +19,12 @@ public sealed class DeviceDetectionService : IDisposable
     public event Action<ConnectedDevice>? DeviceConnected;
     public event Action<string>? DeviceDisconnected;
 
+    /// <summary>Fires (after <see cref="DeviceDisconnected"/>) when the vanished volume's iPod is
+    /// still on the USB bus in eject-limbo - iTunes/AMDS ejected it, the firmware took its storage
+    /// offline, and only a physical replug revives it. The user deserves to be TOLD that, not a
+    /// silently emptied sidebar. Carries the departed device's display name.</summary>
+    public event Action<string>? DeviceEjectedByHost;
+
     /// <summary>
     /// Fires when a CD-ROM drive sees media arrival or removal. The subscriber is expected
     /// to run its own TOC/MusicBrainz scan - this service only signals "something changed".
@@ -391,13 +397,40 @@ public sealed class DeviceDetectionService : IDisposable
 
     private void RemoveDrive(string mountPath)
     {
-        if (_connected.Remove(mountPath))
+        if (_connected.TryGetValue(mountPath, out var departed) && _connected.Remove(mountPath))
         {
             DeviceVolumeHold.Release(mountPath);
             _log.Information("Device disconnected: {MountPath}", mountPath);
             DeviceDisconnected?.Invoke(mountPath);
+
+#if WINDOWS
+            if (departed.DeviceType is DeviceType.StockIPod or DeviceType.RockboxIPod && AppleUsbNodeInLimbo())
+            {
+                _log.Warning("{Name} was ejected by iTunes/AMDS (USB node still present in limbo) - replug required", departed.Name);
+                DeviceEjectedByHost?.Invoke(departed.Name);
+            }
+#endif
         }
     }
+
+#if WINDOWS
+    /// <summary>True when an Apple USB device is still enumerated but carries a Configuration
+    /// Manager problem code (21 = "removal pending", the iTunes/AMDS eject). The volume is gone yet
+    /// the hardware never left the bus - the signature of a host-side eject rather than an unplug.</summary>
+    private static bool AppleUsbNodeInLimbo()
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT ConfigManagerErrorCode FROM Win32_PnPEntity WHERE PNPDeviceID LIKE 'USB\\\\VID_05AC%' AND ConfigManagerErrorCode <> 0");
+            return searcher.Get().Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+#endif
 
 #if WINDOWS
     private void OnVolumeEvent(object sender, EventArrivedEventArgs e)
