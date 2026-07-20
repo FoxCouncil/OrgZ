@@ -60,34 +60,24 @@ public partial class ConnectedDevice : ObservableObject
     [ObservableProperty]
     private string? _hostRecordValue3;
 
-    /// <summary>Fills the Host Record rows from the raw legacy slot values, collapsing identical
-    /// values into one row - three DEBBIE-PCs read as "Host Record 1,2,3: DEBBIE-PC", mixed slots
-    /// keep their own rows. Slot numbering is 1-based in engraving order.</summary>
-    public void SetHostRecords(IReadOnlyList<string?> slotValues)
+    /// <summary>Fills the Host rows from the raw legacy slot values: identical values collapse into
+    /// one "Host:" row (no numbering - it was noise), values matching the active Computer are
+    /// dropped entirely (that row already tells the story), distinct leftovers each get their own
+    /// row in engraving order.</summary>
+    public void SetHostRecords(IReadOnlyList<string?> slotValues, string? activeComputer)
     {
-        var groups = new List<(string Value, List<int> Slots)>();
-        for (int i = 0; i < slotValues.Count; i++)
+        var distinct = new List<string>();
+        foreach (var v in slotValues)
         {
-            var v = slotValues[i];
-            if (string.IsNullOrWhiteSpace(v))
+            if (!string.IsNullOrWhiteSpace(v)
+                && !string.Equals(v, activeComputer, StringComparison.Ordinal)
+                && !distinct.Contains(v!, StringComparer.Ordinal))
             {
-                continue;
-            }
-            var existing = groups.FirstOrDefault(g => string.Equals(g.Value, v, StringComparison.Ordinal));
-            if (existing.Slots != null)
-            {
-                existing.Slots.Add(i + 1);
-            }
-            else
-            {
-                groups.Add((v!, [i + 1]));
+                distinct.Add(v!);
             }
         }
 
-        (string?, string?) Row(int idx) => idx < groups.Count
-            ? ($"Host Record {string.Join(",", groups[idx].Slots)}:", groups[idx].Value)
-            : (null, null);
-
+        (string?, string?) Row(int idx) => idx < distinct.Count ? ("Host:", distinct[idx]) : (null, null);
         (HostRecordLabel1, HostRecordValue1) = Row(0);
         (HostRecordLabel2, HostRecordValue2) = Row(1);
         (HostRecordLabel3, HostRecordValue3) = Row(2);

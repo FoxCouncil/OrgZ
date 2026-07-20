@@ -7652,7 +7652,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 var hosts = IPodHostPrefs.ReadHosts(dev.MountPath);
                 dev.HostUserName = hosts.UserName;
                 dev.HostComputer = hosts.Computer;
-                dev.SetHostRecords(hosts.LegacySlots.Select(s => s.Value).ToList());
+                dev.SetHostRecords(hosts.LegacySlots.Select(s => s.Value).ToList(), hosts.Computer);
             }
         }
         catch (NotImplementedException)
