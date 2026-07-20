@@ -37,6 +37,24 @@ public class ITunesDbWriterTests
                .Children.Single(c => c.Magic == "mhyp" && c.Header[0x14] == 1);
 
     [Fact]
+    public void ReorderMasterPlaylists_rewrites_mhip_order_and_positions()
+    {
+        var doc = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(doc, Sample(1));
+        ITunesDbWriter.AddTrack(doc, Sample(2));
+        ITunesDbWriter.AddTrack(doc, Sample(3));
+
+        // Reorder mentioning only two ids - the unmentioned track keeps its relative slot at the end.
+        ITunesDbWriter.ReorderMasterPlaylists(doc, [3u, 1u]);
+
+        var mhips = Master(doc).Children.Where(c => c.Magic == "mhip").ToList();
+        Assert.Equal(new[] { 3, 1, 2 }, mhips.Select(c => c.ReadHeaderInt32(0x18)).ToArray());
+        // Every entry carries exactly one position MHOD (type 100), re-stamped 0..n - without it the
+        // firmware reads the playlist as empty.
+        Assert.All(mhips, m => Assert.Single(m.Children, c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 100));
+    }
+
+    [Fact]
     public void CreateEmpty_is_well_formed_and_empty()
     {
         var doc = ITunesDbWriter.CreateEmpty();

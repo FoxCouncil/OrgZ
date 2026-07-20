@@ -745,6 +745,34 @@ public sealed class ShuffleIPod : IPodDevice
                 }
             }
             WriteSd(result);
+
+            // Mirror the new order into the iTunesDB master playlist: iTunes DISPLAYS that order,
+            // and an iTunes-side sync would rebuild the SD from it - the co-habitation rule again.
+            var dbPath = IPodPaths.ITunesDb(MountPath);
+            if (File.Exists(dbPath) && new FileInfo(dbPath).Length > 0)
+            {
+                var bytes = File.ReadAllBytes(dbPath);
+                ITunesDbReader.ReadAll(bytes, MountPath, out var rows, out _);
+                var idByPath = rows
+                    .Where(r => !string.IsNullOrEmpty(r.FilePath))
+                    .GroupBy(r => r.FilePath!, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().TrackId, StringComparer.OrdinalIgnoreCase);
+                var orderedIds = new List<uint>();
+                foreach (var entry in result)
+                {
+                    var abs = Path.GetFullPath(Path.Combine(MountPath, entry.IpodPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+                    if (idByPath.TryGetValue(abs, out var tid))
+                    {
+                        orderedIds.Add(tid);
+                    }
+                }
+                if (orderedIds.Count > 0)
+                {
+                    var doc = ITunesDbChunkTree.Parse(bytes);
+                    ITunesDbWriter.ReorderMasterPlaylists(doc, orderedIds);
+                    IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+                }
+            }
         }, ct);
 
     private string ITunesDir => IPodPaths.ITunesDir(MountPath);
