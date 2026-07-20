@@ -828,6 +828,10 @@ public sealed class ShuffleIPod : IPodDevice
             using var dst = TagLib.File.Create(stagedFile);
             src.Tag.CopyTo(dst.Tag, overwrite: true);
             dst.Tag.Pictures = src.Tag.Pictures;
+            if (!double.IsNaN(src.Tag.ReplayGainTrackGain))
+            {
+                dst.Tag.ReplayGainTrackGain = src.Tag.ReplayGainTrackGain;   // CopyTo skips RG - the device copy keeps its loudness stamp
+            }
             dst.Save();
         }
         catch (Exception ex)
@@ -1081,6 +1085,7 @@ public sealed class ShuffleIPod : IPodDevice
                 TotalDiscs = (int)(meta.TotalDiscs ?? 0),
                 DateAddedUtc = DateTime.UtcNow,
                 Dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue),
+                ReplayGainDb = meta.ReplayGainTrackGainDb,   // -> mhit soundcheck (0x4C)
             });
             changed = true;
         }

@@ -37,6 +37,22 @@ public class ITunesDbWriterTests
                .Children.Single(c => c.Magic == "mhyp" && c.Header[0x14] == 1);
 
     [Fact]
+    public void AddTrack_writes_soundcheck_from_replaygain()
+    {
+        // iTunes Sound Check units: 1000·10^(−gain/10). A quiet track (−6.5 dB gain means it plays
+        // LOUD and needs attenuating... the field encodes the correction the firmware applies.
+        var doc = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(doc, Sample(1) with { ReplayGainDb = -6.5 });
+        var mhit = TracksMhsd(doc).Children.Single(c => c.Magic == "mhit");
+        Assert.Equal(4467, mhit.ReadHeaderInt32(0x4C));
+
+        // No gain -> field stays 0 (firmware treats it as "no adjustment").
+        var plain = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(plain, Sample(1));
+        Assert.Equal(0, TracksMhsd(plain).Children.Single(c => c.Magic == "mhit").ReadHeaderInt32(0x4C));
+    }
+
+    [Fact]
     public void ReorderMasterPlaylists_rewrites_mhip_order_and_positions()
     {
         var doc = ITunesDbWriter.CreateEmpty();
