@@ -97,7 +97,7 @@
                      (0x1C0/0x280/0x380 - layers modern iTunes stopped rewriting). All slots shown
                      raw, one row each: an old iPod reads as the trip of names it really carries.
                      Erase scrubs the machine names. -->
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="User Name:" Classes="label"
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="User:" Classes="label"
                            IsVisible="{Binding HostUserName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding HostUserName}" Classes="value"
                            IsVisible="{Binding HostUserName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
