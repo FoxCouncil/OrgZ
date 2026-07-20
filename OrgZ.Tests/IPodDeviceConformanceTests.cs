@@ -58,7 +58,7 @@ public class IPodDeviceConformanceTests
     //          generation      dbWrite playlists podcasts artwork audiobooks
     [InlineData("Video 5.5G",   true,   true,     true,    true,   true)]
     [InlineData("Nano 5G",      true,   true,     true,    true,   true)]
-    [InlineData("Shuffle 2G",   true,   false,    true,    false,  false)]   // NO playlist concept on the hardware - a playlist sync delivers its tracks only; podcasts fold into the one list; no audiobook concept in iTunesSD - a book shuffled into songs is worse than absent
+    [InlineData("Shuffle 2G",   true,   false,    false,   false,  false)]   // NO playlist, podcast, or audiobook concept on the hardware - only legit support counts, so a playlist sync delivers its tracks and everything else is refused loudly
     [InlineData("Nano 7G",      false,  false,    false,   false,  false)]
     public void Capability_claims_are_the_agreed_spec(string generation, bool dbWrite, bool playlists, bool podcasts, bool artwork, bool audiobooks)
     {
@@ -194,14 +194,14 @@ public class IPodDeviceConformanceTests
     }
 
     // ── shuffle tier: podcasts + playlists fold into the single track list ────
-    // Podcasts are CLAIMED (flag true), so the lifecycle must prove them landing as plain tracks in
-    // the iTunesSD order. Playlists are NOT claimed - the hardware has no playlist concept, so a
-    // playlist sync delivers its tracks and nothing else, and the unclaimed operation throws loudly.
+    // The Shuffle claims ONLY what its hardware has: a single track list. Playlists and podcasts
+    // are unclaimed - the fold-into-the-song-pile shims are gone ("only legit support") - and the
+    // unclaimed operations throw loudly instead of silently faking it.
 
     [Theory]
     [InlineData("Shuffle 2G")]   // classic big-endian iTunesSD
     [InlineData("Shuffle 4G")]   // little-endian bdhs
-    public async Task Shuffle_tier_podcasts_land_as_tracks_and_playlists_are_refused(string generation)
+    public async Task Shuffle_tier_claims_only_the_one_list_and_refuses_the_rest(string generation)
     {
         var mount = Path.Combine(Path.GetTempPath(), "orgz-conf-" + Guid.NewGuid().ToString("N"));
         var srcDir = Path.Combine(Path.GetTempPath(), "orgz-confsrc-" + Guid.NewGuid().ToString("N"));
@@ -212,31 +212,20 @@ public class IPodDeviceConformanceTests
             var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, Name = "SHUF", IpodGeneration = generation };
             var ipod = IPodDevice.For(device);
             Assert.IsType<ShuffleIPod>(ipod);
-            Assert.True(ipod.SupportsPodcasts);
+            Assert.False(ipod.SupportsPodcasts);
             Assert.False(ipod.SupportsPlaylists);
             Assert.True(ipod.SupportsTrackAdd);   // playlist syncs still deliver their songs
 
-            // Podcast episodes land as plain tracks in the device list.
-            int pushed = await ipod.AddPodcastsAsync(
-            [
-                Episode(srcDir, "DEADLOCK", "Episode One"),
-                Episode(srcDir, "DEADLOCK", "Episode Two"),
-            ], "ffmpeg-not-installed");
-            Assert.Equal(2, pushed);
-            var afterPodcasts = await ipod.ReadLibraryAsync();
-            Assert.Equal(2, afterPodcasts.Tracks.Count);
-
-            // Re-pushing the same episodes adds nothing (same on-device path).
-            Assert.Equal(0, await ipod.AddPodcastsAsync([Episode(srcDir, "DEADLOCK", "Episode One")], "ffmpeg-not-installed"));
-
             // Adding a song APPENDS to the one list - nothing is ever replaced or dropped.
             var song = await ipod.AddTrackAsync(LibraryTrack(srcDir, "Night of Fire"), "ffmpeg-not-installed");
-            Assert.Equal(3, (await ipod.ReadLibraryAsync()).Tracks.Count);
+            await ipod.AddTrackAsync(LibraryTrack(srcDir, "Deja Vu"), "ffmpeg-not-installed");
+            Assert.Equal(2, (await ipod.ReadLibraryAsync()).Tracks.Count);
 
-            // The unclaimed playlist operation is a loud gap, not a silent no-op (the old
-            // implementation REPLACED the whole device list - destructive and surprising).
+            // Unclaimed operations are loud gaps, not silent no-ops (the old playlist shim REPLACED
+            // the whole device list; the old podcast shim folded episodes into the song pile).
             await Assert.ThrowsAsync<NotImplementedException>(() => ipod.CreatePlaylistAsync("Only This", [song]));
-            Assert.Equal(3, (await ipod.ReadLibraryAsync()).Tracks.Count);
+            await Assert.ThrowsAsync<NotImplementedException>(() => ipod.AddPodcastsAsync([Episode(srcDir, "DEADLOCK", "Episode One")], "ffmpeg-not-installed"));
+            Assert.Equal(2, (await ipod.ReadLibraryAsync()).Tracks.Count);
         }
         finally
         {
