@@ -36,6 +36,7 @@ nav:
   - Devices:
     - iPods & Rockbox: devices/ipod-rockbox.md
     - Playlists & Syncing: devices/syncing.md
+    - Supported Hardware: devices/supported-hardware.md
   - Settings: settings.md
   - Changelog: changelog.md
   - Credits: credits.md

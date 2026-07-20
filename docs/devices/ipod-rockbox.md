@@ -9,16 +9,21 @@ each device.
 
 | Device | How OrgZ reads it | Writable? |
 |--------|-------------------|-----------|
-| **iPod running Apple firmware** ("stock") | Parses the on-device **iTunesDB** | **Read-only**: see note below |
+| **iPod running Apple firmware** ("stock") | Parses the on-device **iTunesDB** (or **iTunesSD** on Shuffles, SQLite on the Nano 5G) | Read / write - see [Supported Hardware](supported-hardware.md) |
 | **iPod running [Rockbox](https://www.rockbox.org/)** | Walks the filesystem and reads tags with TagLib | Read / write |
 | **Other Rockbox players** (Sansa, iRiver, Cowon, FiiO, ...) | Same filesystem walk | Read / write |
 | **Generic USB players** | Removable drive with audio files | Read / write |
 
-!!! note "Why stock iPods are read-only"
-    Writing to an Apple-firmware iPod means rewriting its iTunesDB, which OrgZ
-    doesn't do (yet). You can browse and play a stock iPod's library, but to copy
-    playlists onto it you'll want [Rockbox](https://www.rockbox.org/) installed -
-    Rockbox stores music as plain files, which OrgZ can work with directly.
+!!! note "Writing to stock iPods"
+    OrgZ writes each generation's native database directly - the plain iTunesDB,
+    the hash58-checksummed variant (Classic, Nano 3G/4G), the Nano 5G's SQLite
+    library, and the Shuffle's iTunesSD play order - no iTunes required. Tracks
+    the device can't decode are transcoded on the way in (lossless where the
+    hardware allows), and on Shuffles you can drag rows in the track grid to
+    change the device's play order. See [Supported Hardware](supported-hardware.md)
+    for every model, its database tier, and its transcode target. The Nano 6G/7G
+    and iPod Touch stay read-only: their databases require a signature with no
+    open-source implementation.
 
 ## Connecting
 
