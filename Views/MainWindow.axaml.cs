@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     internal static MediaItem? DraggedMediaItem;
     private static int _draggedPlaylistRowIndex = -1;
     private static readonly DataFormat<string> PlaylistRowDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.PlaylistRowIndex");
+    private static readonly DataFormat<string> DeviceRowDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.DeviceRowIndex");
     private PointerPressedEventArgs? _gridPressEvent;
     private Point? _gridDragOrigin;
     private MediaItem? _gridDragItem;
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
         DragDrop.SetAllowDrop(MainDataGrid, true);
         MainDataGrid.AddHandler(DragDrop.DragOverEvent, MainDataGrid_DragOver);
         MainDataGrid.AddHandler(DragDrop.DropEvent, MainDataGrid_Drop);
+        MainDataGrid.AddHandler(DragDrop.DragLeaveEvent, (_, _) => HideDragVisuals());
 
         // Column-header context menu: right-click any header → toggle columns + persist.
         // Wired at the tunneling stage so the DataGrid doesn't eat the event first.
@@ -1115,6 +1117,12 @@ public partial class MainWindow : Window
                 menuItem.SubmenuOpened += (_, _) => PopulateSyncToDeviceMenu(menuItem);
                 PopulateSyncToDeviceMenu(menuItem);   // seed it so the arrow/placeholder shows immediately
             }
+            else if (def.IsSyncToLibraryMarker)
+            {
+                // Playlists load async and change at runtime - rebuild on every open.
+                menuItem.SubmenuOpened += (_, _) => PopulateSyncToLibraryMenu(menuItem);
+                PopulateSyncToLibraryMenu(menuItem);
+            }
             else if (def.Children is { Count: > 0 })
             {
                 BuildMenuItems(menuItem.Items, def.Children);
@@ -1184,6 +1192,50 @@ public partial class MainWindow : Window
                 }
             };
             parent.Items.Add(entry);
+        }
+    }
+
+    private void PopulateSyncToLibraryMenu(Avalonia.Controls.MenuItem parent)
+    {
+        parent.Items.Clear();
+
+        var music = new Avalonia.Controls.MenuItem { Header = "Music" };
+        music.Click += async (_, _) =>
+        {
+            if (_viewModel.SelectedItem is { } sel)
+            {
+                await _viewModel.SyncDeviceTrackToLibraryAsync(sel, addToFavorites: false, playlistId: null);
+            }
+        };
+        parent.Items.Add(music);
+
+        var favorites = new Avalonia.Controls.MenuItem { Header = "Favorites" };
+        favorites.Click += async (_, _) =>
+        {
+            if (_viewModel.SelectedItem is { } sel)
+            {
+                await _viewModel.SyncDeviceTrackToLibraryAsync(sel, addToFavorites: true, playlistId: null);
+            }
+        };
+        parent.Items.Add(favorites);
+
+        var playlists = _viewModel.PlaylistItems.Where(p => p.PlaylistId.HasValue).ToList();
+        if (playlists.Count > 0)
+        {
+            parent.Items.Add(new Separator());
+            foreach (var p in playlists)
+            {
+                var playlistId = p.PlaylistId!.Value;
+                var entry = new Avalonia.Controls.MenuItem { Header = p.Name };
+                entry.Click += async (_, _) =>
+                {
+                    if (_viewModel.SelectedItem is { } sel)
+                    {
+                        await _viewModel.SyncDeviceTrackToLibraryAsync(sel, addToFavorites: false, playlistId: playlistId);
+                    }
+                };
+                parent.Items.Add(entry);
+            }
         }
     }
 
@@ -1554,9 +1606,26 @@ public partial class MainWindow : Window
         var data = new DataTransfer();
         data.Add(DataTransferItem.Create(Sidebar.MediaItemDragFormat, "media"));
 
+        bool reorderDrag = false;
         if (_viewModel.ActivePlaylistId.HasValue && _gridDragRowIndex >= 0)
         {
             data.Add(DataTransferItem.Create(PlaylistRowDragFormat, "row"));
+            reorderDrag = true;
+        }
+        else if (_gridDragRowIndex >= 0 && _viewModel.ActiveReorderableDevice != null
+                 && _gridDragRowIndex < _viewModel.FilteredItems.Count && ReferenceEquals(_viewModel.FilteredItems[_gridDragRowIndex], DraggedMediaItem))
+        {
+            // Device play-order drag (Shuffle tier). Only when the grid is showing on-device order -
+            // with a header sort active the display no longer maps onto the device list, which the
+            // row-identity check catches (the pressed row's item must sit at that same index in
+            // FilteredItems).
+            data.Add(DataTransferItem.Create(DeviceRowDragFormat, "row"));
+            reorderDrag = true;
+        }
+
+        if (reorderDrag && _gridDragItem != null)
+        {
+            BeginDragVisuals(_gridDragItem);
         }
 
         // Include the actual file so external apps (Telegram, Explorer, etc.) receive it as a file drop
@@ -1576,6 +1645,7 @@ public partial class MainWindow : Window
         await DragDrop.DoDragDropAsync(pressEvent, data, DragDropEffects.Move | DragDropEffects.Copy);
         DraggedMediaItem = null;
         _draggedPlaylistRowIndex = -1;
+        HideDragVisuals();
     }
 
     private void MainDataGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -1591,22 +1661,150 @@ public partial class MainWindow : Window
         _gridPressEvent = null;
     }
 
+    // ── row-reorder drag visuals: insertion line + pointer ghost + edge auto-scroll ──
+    // All three ride one hit-test-invisible Canvas adorning MainDataGrid, so nothing fights the
+    // DataGridRow template. The auto-scroll runs on a timer (DragOver only fires while the pointer
+    // MOVES - holding still at an edge must keep scrolling).
+
+    private Canvas? _dragOverlay;
+    private Border? _dropLine;
+    private Border? _dragGhost;
+    private TextBlock? _dragGhostText;
+    private Avalonia.Threading.DispatcherTimer? _dragScrollTimer;
+    private Point _lastDragPos;
+
+    private void EnsureDragOverlay()
+    {
+        if (_dragOverlay != null)
+        {
+            return;
+        }
+
+        IBrush accent = this.TryFindResource("SystemControlHighlightAccentBrush", ActualThemeVariant, out var res) && res is IBrush accentRes ? accentRes : Brushes.DodgerBlue;
+
+        _dropLine = new Border { Background = accent, Height = 2, IsVisible = false };
+        _dragGhostText = new TextBlock { FontSize = 12 };
+        _dragGhost = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xD8, 0x20, 0x20, 0x20)),
+            BorderBrush = accent,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(8, 3),
+            Opacity = 0.9,
+            IsVisible = false,
+            Child = _dragGhostText,
+        };
+
+        _dragOverlay = new Canvas { IsHitTestVisible = false };
+        _dragOverlay.Children.Add(_dropLine);
+        _dragOverlay.Children.Add(_dragGhost);
+
+        var layer = Avalonia.Controls.Primitives.AdornerLayer.GetAdornerLayer(MainDataGrid);
+        if (layer != null)
+        {
+            Avalonia.Controls.Primitives.AdornerLayer.SetAdornedElement(_dragOverlay, MainDataGrid);
+            layer.Children.Add(_dragOverlay);
+        }
+    }
+
+    private void BeginDragVisuals(MediaItem item)
+    {
+        EnsureDragOverlay();
+        if (_dragGhostText != null)
+        {
+            _dragGhostText.Text = string.IsNullOrWhiteSpace(item.Artist) ? item.Title ?? item.FileName ?? "1 track" : $"{item.Title} — {item.Artist}";
+        }
+    }
+
+    private void UpdateDragVisuals(DragEventArgs e)
+    {
+        var pos = e.GetPosition(MainDataGrid);
+        _lastDragPos = pos;
+
+        if (_dragGhost != null)
+        {
+            Canvas.SetLeft(_dragGhost, pos.X + 14);
+            Canvas.SetTop(_dragGhost, pos.Y + 12);
+            _dragGhost.IsVisible = true;
+        }
+
+        var row = (e.Source as Visual)?.FindAncestorOfType<DataGridRow>();
+        if (row != null && _dropLine != null && row.TranslatePoint(new Point(0, 0), MainDataGrid) is { } rowTop)
+        {
+            bool before = e.GetPosition(row).Y < row.Bounds.Height / 2;
+            _dropLine.Width = MainDataGrid.Bounds.Width;
+            Canvas.SetLeft(_dropLine, 0);
+            Canvas.SetTop(_dropLine, Math.Max(0, rowTop.Y + (before ? 0 : row.Bounds.Height) - 1));
+            _dropLine.IsVisible = true;
+        }
+        else if (_dropLine != null)
+        {
+            _dropLine.IsVisible = false;   // past the last row - the drop still means "move to end"
+        }
+
+        if (_dragScrollTimer == null)
+        {
+            _dragScrollTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+            _dragScrollTimer.Tick += (_, _) =>
+            {
+                const double zone = 32, step = 26;
+                var sv = MainDataGrid.FindDescendantOfType<ScrollViewer>();
+                if (sv == null)
+                {
+                    return;
+                }
+                if (_lastDragPos.Y < zone)
+                {
+                    sv.Offset = new Vector(sv.Offset.X, Math.Max(0, sv.Offset.Y - step));
+                }
+                else if (_lastDragPos.Y > MainDataGrid.Bounds.Height - zone)
+                {
+                    var max = Math.Max(0, sv.Extent.Height - sv.Viewport.Height);
+                    sv.Offset = new Vector(sv.Offset.X, Math.Min(max, sv.Offset.Y + step));
+                }
+            };
+        }
+        _dragScrollTimer.Start();
+    }
+
+    private void HideDragVisuals()
+    {
+        _dragScrollTimer?.Stop();
+        if (_dropLine != null)
+        {
+            _dropLine.IsVisible = false;
+        }
+        if (_dragGhost != null)
+        {
+            _dragGhost.IsVisible = false;
+        }
+    }
+
     private void MainDataGrid_DragOver(object? sender, DragEventArgs e)
     {
-        // Only accept playlist-row drags, and only when we're currently viewing the same playlist
-        if (!_viewModel.ActivePlaylistId.HasValue || !e.DataTransfer.Contains(PlaylistRowDragFormat))
+        // Row-reorder drags only: a playlist's rows while viewing that playlist, or a reorderable
+        // device's rows (Shuffle play order) while viewing that device.
+        bool playlistRow = _viewModel.ActivePlaylistId.HasValue && e.DataTransfer.Contains(PlaylistRowDragFormat);
+        bool deviceRow = _viewModel.ActiveReorderableDevice != null && e.DataTransfer.Contains(DeviceRowDragFormat);
+        if (!playlistRow && !deviceRow)
         {
             e.DragEffects = DragDropEffects.None;
             return;
         }
 
+        UpdateDragVisuals(e);
         e.DragEffects = DragDropEffects.Move;
         e.Handled = true;
     }
 
     private void MainDataGrid_Drop(object? sender, DragEventArgs e)
     {
-        if (!_viewModel.ActivePlaylistId.HasValue || !e.DataTransfer.Contains(PlaylistRowDragFormat))
+        HideDragVisuals();
+
+        bool playlistRow = _viewModel.ActivePlaylistId.HasValue && e.DataTransfer.Contains(PlaylistRowDragFormat);
+        bool deviceRow = _viewModel.ActiveReorderableDevice != null && e.DataTransfer.Contains(DeviceRowDragFormat);
+        if (!playlistRow && !deviceRow)
         {
             return;
         }
@@ -1617,7 +1815,10 @@ public partial class MainWindow : Window
             return;
         }
 
+        // The landing spot must match the insertion line the user saw: upper half of the target row
+        // = before it, lower half = after it, past the last row = the very end.
         var targetRow = (e.Source as Visual)?.FindAncestorOfType<DataGridRow>();
+        bool insertBefore = targetRow != null && e.GetPosition(targetRow).Y < targetRow.Bounds.Height / 2;
         int toIndex;
         if (targetRow != null)
         {
@@ -1634,7 +1835,16 @@ public partial class MainWindow : Window
             toIndex = 0;
         }
 
-        _viewModel.ReorderPlaylistTrack(fromIndex, toIndex);
+        if (playlistRow)
+        {
+            _viewModel.ReorderPlaylistTrack(fromIndex, toIndex, insertBefore);
+        }
+        else
+        {
+            // Item-based, not index-based: the dragged item moves relative to the target row's item
+            // (null target = dropped past the last row = move to the end of the device order).
+            _viewModel.ReorderDeviceTrack(DraggedMediaItem, targetRow?.DataContext as MediaItem, insertBefore);
+        }
         e.Handled = true;
     }
 }

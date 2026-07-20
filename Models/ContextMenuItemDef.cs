@@ -26,4 +26,10 @@ public record ContextMenuItemDef
     /// connected device that can accept the selected item's kind - "Sync > (Device Name)".
     /// </summary>
     public bool IsSyncToDeviceMarker { get; init; }
+
+    /// <summary>
+    /// Marker: when set, the view populates this submenu (on open) with reverse-sync targets for a
+    /// device track - "Sync to Library > Music / Favorites / (each playlist)".
+    /// </summary>
+    public bool IsSyncToLibraryMarker { get; init; }
 }
