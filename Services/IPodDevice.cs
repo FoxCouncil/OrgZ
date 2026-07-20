@@ -65,6 +65,11 @@ public abstract class IPodDevice
     /// so the sub-views would only ever be empty and are hidden entirely.</summary>
     public virtual bool HasKindSubViews => true;
 
+    /// <summary>Whether <see cref="AddTrackAsync"/> works on this tier at all - the honest "can this
+    /// device take songs" gate. Distinct from <see cref="SupportsPlaylists"/>: a playlist synced to a
+    /// tracks-only device still delivers its songs, just without the native playlist.</summary>
+    public virtual bool SupportsTrackAdd => false;
+
     /// <summary>Whether <see cref="AddTrackAsync"/> would transcode this track rather than copy it -
     /// so progress UI can say "Transcoding" only when that's the truth. Base is false (Rockbox and
     /// generic players copy everything); each stock tier answers with its own compatibility rules.</summary>
@@ -282,6 +287,7 @@ public sealed class Nano5gIPod : IPodDevice
     public override bool SupportsPodcasts => true;
     public override bool SupportsArtwork => true;
     public override bool SupportsAudiobooks => true;   // media_kind=8 via the SQLite writer
+    public override bool SupportsTrackAdd => true;
 
     /// <summary>Mirrors ImportToNano5gAsync's pass-through set (.mp3/.m4a/.m4b/.aac): the 5G takes
     /// MP3 and MP4-container codecs as-is and transcodes everything else (FLAC/WAV/AIFF) to ALAC.</summary>
@@ -372,6 +378,7 @@ public sealed class BinaryIPod : IPodDevice
     public override bool SupportsPodcasts => true;
     public override bool SupportsArtwork => true;
     public override bool SupportsAudiobooks => true;   // media_type=8 in the binary iTunesDB MHIT
+    public override bool SupportsTrackAdd => true;
 
     /// <summary>Mirrors <see cref="IPodTrackImporter.ImportAsync"/>'s decision: non-native formats
     /// transcode, and on the ALAC-less 1G/2G an ALAC-in-.m4a source re-encodes to AAC too.</summary>
@@ -521,6 +528,7 @@ public sealed class RockboxIPod : IPodDevice
     public override bool SupportsPodcasts => true;
     public override bool SupportsArtwork => true;          // sidecar/embedded art, the player handles it
     public override bool SupportsAudiobooks => true;       // plain files - .m4b by container, tagged MP3s by genre, both re-detected on read
+    public override bool SupportsTrackAdd => true;         // filesystem copy - always available
 
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
         => Task.Run(async () =>
@@ -695,6 +703,7 @@ public sealed class ShuffleIPod : IPodDevice
     public override bool SupportsArtwork => false;
     public override bool SupportsReorder => true;      // the iTunesSD list IS the play order
     public override bool HasKindSubViews => false;     // one flat list, no Podcasts/Audiobooks menus
+    public override bool SupportsTrackAdd => true;
 
     public override bool WillTranscode(MediaItem libraryTrack)
         => !string.IsNullOrEmpty(libraryTrack.FilePath) && !PlaysNatively(libraryTrack.FilePath);

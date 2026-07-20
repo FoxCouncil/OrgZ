@@ -3784,7 +3784,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return false;
         }
         var ipod = IPodDevice.For(device);
-        return item.Kind == MediaKind.Audiobook ? ipod.SupportsAudiobooks : ipod.SupportsPlaylists;
+        return item.Kind == MediaKind.Audiobook ? ipod.SupportsAudiobooks : ipod.SupportsTrackAdd;
     }
 
     /// <summary>
@@ -6374,9 +6374,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         (SelectedSidebarItem?.PlaylistId != null || SelectedSidebarItem?.IsFavorites == true)
         && _connectedDevices.Values.Any(IsSyncTarget);
 
-    /// <summary>A connected device we can sync a playlist to - whatever tier claims playlists
-    /// (filesystem players, binary iTunesDB iPods, the Nano 5G SQLite stack, Shuffles).</summary>
-    private static bool IsSyncTarget(ConnectedDevice d) => IPodDevice.For(d).SupportsPlaylists;
+    /// <summary>A connected device we can sync a playlist's TRACKS to - the playlist itself is
+    /// optional garnish (a tier without native playlists still gets the songs).</summary>
+    private static bool IsSyncTarget(ConnectedDevice d) => IPodDevice.For(d).SupportsTrackAdd;
 
     /// <summary>
     /// Syncs the active playlist (or Favorites) to a connected device: Rockbox → copy missing
@@ -6483,18 +6483,26 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            SetLcdBusy($"Writing playlist “{name}”", 1);
-            await ipod.CreatePlaylistAsync(name, playlistItems);
+            // The playlist write is optional garnish: a tier without native playlists still got the
+            // songs above, it just has nothing to hang the name on.
+            if (ipod.SupportsPlaylists)
+            {
+                SetLcdBusy($"Writing playlist “{name}”", 1);
+                await ipod.CreatePlaylistAsync(name, playlistItems);
 
-            // Reflect the new playlist + freshly-imported audio in OrgZ's device tree right away.
+                // Reflect the new playlist in OrgZ's device tree right away.
+                var pl = new DevicePlaylist { Name = name, Key = SanitizeFileName(name), TrackIds = playlistItems.Select(x => x.Id).ToList() };
+                PublishDevicePlaylists(device, device.Playlists.Where(e => e.Key != pl.Key).Append(pl).ToList());
+            }
+
             IPodArtworkReader.Invalidate(device.MountPath);
-            var pl = new DevicePlaylist { Name = name, Key = SanitizeFileName(name), TrackIds = playlistItems.Select(x => x.Id).ToList() };
-            PublishDevicePlaylists(device, device.Playlists.Where(e => e.Key != pl.Key).Append(pl).ToList());
             device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
             ApplyFilter();
 
-            _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total}", name, device.MountPath, matched, added, failed, playlistItems.Count);
-            UpdateMainStatus($"Synced “{name}” to {device.Name} — {playlistItems.Count} track(s), {added} new.");
+            _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total} nativePlaylist={Native}", name, device.MountPath, matched, added, failed, playlistItems.Count, ipod.SupportsPlaylists);
+            UpdateMainStatus(ipod.SupportsPlaylists
+                ? $"Synced “{name}” to {device.Name} — {playlistItems.Count} track(s), {added} new."
+                : $"Synced “{name}”'s tracks to {device.Name} — {added} new (no playlists on this device).");
         }
         catch (Services.Nano5gNotSeededException ex)
         {
@@ -6645,7 +6653,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
 
                 ct.ThrowIfCancellationRequested();
-                if (plan.Favorites && ipod.SupportsPlaylists)
+                if (plan.Favorites && ipod.SupportsTrackAdd)
                 {
                     var favorites = _allItems
                         .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
@@ -6656,7 +6664,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     }
                 }
 
-                if (plan.PlaylistIds.Count > 0 && ipod.SupportsPlaylists)
+                if (plan.PlaylistIds.Count > 0 && ipod.SupportsTrackAdd)
                 {
                     var nameById = await Task.Run(() => MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id, p => p.Name));
                     foreach (var pid in plan.PlaylistIds)
