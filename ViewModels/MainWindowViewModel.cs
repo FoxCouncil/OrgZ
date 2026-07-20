@@ -3878,6 +3878,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var prefix = count > 1 ? $"({index}/{count}) " : string.Empty;
         var title = track.Title ?? track.FileName ?? "track";
+
+        // Analyze-at-sync: a track crossing to a device gets its loudness measured if it never was.
+        // The LIBRARY file is tagged (permanent - the library analyzes itself through use), and the
+        // tier picks the value up for the transcoded copy's tag + the device row's soundcheck field.
+        if (track.ReplayGainTrackGainDb is null && !string.IsNullOrEmpty(track.FilePath) && File.Exists(track.FilePath)
+            && track.Source?.StartsWith("device:", StringComparison.Ordinal) != true)
+        {
+            SetLcdBusy($"{prefix}Analyzing “{title}”…", 0);
+            ct.ThrowIfCancellationRequested();
+            var gain = await ReplayGainService.ComputeAndTagAsync(track.FilePath, ffmpeg, ct);
+            if (gain is { } g)
+            {
+                track.ReplayGainTrackGainDb = g;
+                _ = Task.Run(() => MediaCache.UpdateReplayGain(track.Id, g), CancellationToken.None);
+            }
+        }
+
         SetLcdBusy(prefix + (ipod.WillTranscode(track) ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), 0);
         var deviceItem = await ipod.AddTrackAsync(track, ffmpeg,
             (stage, f) => SetLcdBusy(prefix + (stage == "transcode" ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), f), ct);

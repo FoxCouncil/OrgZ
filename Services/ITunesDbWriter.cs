@@ -30,6 +30,10 @@ public sealed record NewTrack
     public int Rating { get; init; }
     public DateTime DateAddedUtc { get; init; }
 
+    /// <summary>ReplayGain track gain (dB). Converted to iTunes Sound Check units for mhit 0x4C so
+    /// the device firmware normalizes playback volume.</summary>
+    public double? ReplayGainDb { get; init; }
+
     /// <summary>64-bit persistent id. Must match the ArtworkDB mhii.song_id when art is attached.</summary>
     public ulong Dbid { get; init; }
     public bool HasArtwork { get; init; }
@@ -704,6 +708,13 @@ public static class ITunesDbWriter
         WriteUInt16(mhit.Header, 0x5C, t.DiscNumber);    // disc number (u16)
         WriteUInt16(mhit.Header, 0x60, t.TotalDiscs);    // total discs (u16)
         mhit.WriteHeaderInt32(0x68, MacSeconds(t.DateAddedUtc));   // date added
+
+        // iTunes Sound Check (mhit 0x4C): units are 1000·10^(−gain/10) per libgpod's soundcheck
+        // field - the firmware reads this to level playback volume across tracks.
+        if (t.ReplayGainDb is { } replayGain)
+        {
+            mhit.WriteHeaderInt32(0x4C, (int)Math.Clamp(Math.Round(1000.0 * Math.Pow(10.0, -replayGain / 10.0)), 0, int.MaxValue));
+        }
 
         // 64-bit persistent id (links to ArtworkDB mhii.song_id). Even without
         // artwork a unique dbid is good hygiene - the iPod uses it to de-dup.

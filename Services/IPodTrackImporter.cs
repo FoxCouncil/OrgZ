@@ -93,6 +93,7 @@ public static class IPodTrackImporter
         // audiobook as an iPod audiobook without any caller having to say so.
         string? title = null, artist = null, album = null, genre = null;
         int year = 0, trackNo = 0, srcLengthMs = 0, srcSampleRate = 0;
+        double? srcReplayGain = null;
         bool isAudiobook = AudiobookDetector.KindForPath(sourceFile) == MediaKind.Audiobook;
         try
         {
@@ -105,6 +106,7 @@ public static class IPodTrackImporter
             trackNo = (int)tf.Tag.Track;
             srcLengthMs   = (int)tf.Properties.Duration.TotalMilliseconds;
             srcSampleRate = tf.Properties.AudioSampleRate;
+            srcReplayGain = double.IsNaN(tf.Tag.ReplayGainTrackGain) ? null : tf.Tag.ReplayGainTrackGain;
             isAudiobook  |= AudiobookDetector.TagsSayAudiobook(tf);
         }
         catch (Exception ex)
@@ -232,6 +234,7 @@ public static class IPodTrackImporter
                 HasArtwork   = hasArt,
                 ArtworkSize  = artSize,
                 IsAudiobook  = isAudiobook,
+                ReplayGainDb = srcReplayGain,   // analyze-at-sync stamps the source before we read it
             });
 
             var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
