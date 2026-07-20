@@ -68,9 +68,10 @@ public class ShuffleIPodTests
 
             var source = new MediaItem { Id = songSrc, FilePath = songSrc, FileName = "song.mp3", Title = "Song", Kind = MediaKind.Music };
 
-            // ── ADD: copies to Music/F00 and lists it in iTunesSD ──
+            // ── ADD: copies to Music/F00 (iTunes-style 4-caps name) and lists it in iTunesSD ──
             var item = await ipod.AddTrackAsync(source, "ffmpeg");
-            Assert.Equal(Path.Combine(mount, "iPod_Control", "Music", "F00", "song.mp3"), item.FilePath);
+            Assert.Equal(Path.Combine(mount, "iPod_Control", "Music", "F00"), Path.GetDirectoryName(item.FilePath));
+            Assert.Matches(@"^[A-Z]{4}\.mp3$", Path.GetFileName(item.FilePath)!);
             Assert.True(File.Exists(item.FilePath));
 
             // ── READ ──
@@ -194,12 +195,12 @@ public class ShuffleIPodTests
     }
 
     /// <summary>
-    /// On-device names must be pure ASCII: one U+2019 apostrophe in an iTunesSD path made the 2G
-    /// silently skip the track (hardware-confirmed - the same bytes played once renamed). Accents
-    /// fold to base letters, curly punctuation to ASCII cousins, the rest to '_'.
+    /// Music lands under iTunes-style random 4-caps names - the only alphabet the 2006 firmware has
+    /// ever parsed. Hardware-confirmed necessity: one U+2019 apostrophe in an iTunesSD path made the
+    /// 2G silently skip the track (the same bytes played once ASCII-renamed).
     /// </summary>
     [Fact]
-    public async Task Device_file_names_are_ascii_folded()
+    public async Task Music_lands_with_itunes_style_four_caps_names()
     {
         var mount = Path.Combine(Path.GetTempPath(), "orgz-shufascii-" + Guid.NewGuid().ToString("N"));
         var srcDir = Path.Combine(Path.GetTempPath(), "orgz-shufasciisrc-" + Guid.NewGuid().ToString("N"));
@@ -213,7 +214,8 @@ public class ShuffleIPodTests
             var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, IpodGeneration = "Shuffle 2G", Name = "Shuffle" };
             var item = await IPodDevice.For(device).AddTrackAsync(new MediaItem { Id = songSrc, FilePath = songSrc, FileName = Path.GetFileName(songSrc), Title = "Where It’s At", Kind = MediaKind.Music }, "ffmpeg");
 
-            Assert.Equal("08 - Where It's At - Beck _.mp3", Path.GetFileName(item.FilePath));
+            Assert.Matches(@"^[A-Z]{4}\.mp3$", Path.GetFileName(item.FilePath)!);
+            Assert.True(File.Exists(item.FilePath));
         }
         finally
         {
