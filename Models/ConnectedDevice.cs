@@ -33,6 +33,14 @@ public partial class ConnectedDevice : ObservableObject
     [ObservableProperty]
     private bool _hasKindSubViews = true;
 
+    /// <summary>The identity trail read from the on-device iTunesPrefs - "user — every computer that
+    /// ever adopted this iPod" (e.g. "Fox — DEBBIE-PC, FOXDESK"). Null when the device carries none.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HostHistoryDisplay))]
+    private string? _hostHistory;
+
+    public string HostHistoryDisplay => string.IsNullOrWhiteSpace(HostHistory) ? "—" : HostHistory!;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelDisplay), nameof(ModelLabelDisplay), nameof(DisplayName))]
     private string? _model;

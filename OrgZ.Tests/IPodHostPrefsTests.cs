@@ -44,6 +44,44 @@ public class IPodHostPrefsTests
     }
 
     [Fact]
+    public void ReadHosts_and_scrub_round_trip()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-prefs-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "iTunes"));
+        try
+        {
+            var prefs = new byte[1232];
+            void Put(int off, string s) => System.Text.Encoding.UTF8.GetBytes(s).CopyTo(prefs, off);
+            Put(0x1C0, "DEBBIE-PC");
+            Put(0x280, "DEBBIE-PC");
+            Put(0x2C0, "Fox");
+            Put(0x300, "FOXDESK");
+            Put(0x380, "DEBBIE-PC");
+            File.WriteAllBytes(IPodHostPrefs.PrefsPath(mount), prefs);
+
+            var (user, computers) = IPodHostPrefs.ReadHosts(mount);
+            Assert.Equal("Fox", user);
+            Assert.Equal(["DEBBIE-PC", "FOXDESK"], computers);
+
+            // The scrub: machines become "{user}'s Computer", the user survives, and OrgZ backups die.
+            File.WriteAllBytes(Path.Combine(mount, "iPod_Control", "iTunes", "iTunesDB.orgzbak"), new byte[10]);
+            Assert.True(IPodHostPrefs.ScrubHosts(mount));
+            IPodHostPrefs.PurgeBackups(mount);
+
+            var (user2, computers2) = IPodHostPrefs.ReadHosts(mount);
+            Assert.Equal("Fox", user2);
+            Assert.Equal(["Fox's Computer"], computers2);
+            Assert.Empty(Directory.GetFiles(Path.Combine(mount, "iPod_Control", "iTunes"), "*.orgzbak"));
+
+            Assert.False(IPodHostPrefs.ScrubHosts(mount));   // second pass - nothing left to scrub
+        }
+        finally
+        {
+            Directory.Delete(mount, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Etch_tolerates_missing_or_short_prefs()
     {
         var mount = Path.Combine(Path.GetTempPath(), "orgz-prefs-" + Guid.NewGuid().ToString("N"));
