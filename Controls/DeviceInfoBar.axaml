@@ -97,20 +97,30 @@
                      (0x1C0/0x280/0x380 - layers modern iTunes stopped rewriting). All slots shown
                      raw, one row each: an old iPod reads as the trip of names it really carries.
                      Erase scrubs the machine names. -->
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="User Name:" Classes="label" />
-                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding HostUserNameDisplay}" Classes="value" />
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="User Name:" Classes="label"
+                           IsVisible="{Binding HostUserName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding HostUserName}" Classes="value"
+                           IsVisible="{Binding HostUserName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                <TextBlock Grid.Row="3" Grid.Column="3" Text="Computer:" Classes="label" />
-                <TextBlock Grid.Row="3" Grid.Column="4" Text="{Binding HostComputerDisplay}" Classes="value" />
+                <TextBlock Grid.Row="3" Grid.Column="3" Text="Computer:" Classes="label"
+                           IsVisible="{Binding HostComputer, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock Grid.Row="3" Grid.Column="4" Text="{Binding HostComputer}" Classes="value"
+                           IsVisible="{Binding HostComputer, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Host Record 1:" Classes="label" />
-                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding HostLegacy1Display}" Classes="value" />
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Host Record 1:" Classes="label"
+                           IsVisible="{Binding HostLegacy1, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding HostLegacy1}" Classes="value"
+                           IsVisible="{Binding HostLegacy1, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                <TextBlock Grid.Row="4" Grid.Column="3" Text="Host Record 2:" Classes="label" />
-                <TextBlock Grid.Row="4" Grid.Column="4" Text="{Binding HostLegacy2Display}" Classes="value" />
+                <TextBlock Grid.Row="4" Grid.Column="3" Text="Host Record 2:" Classes="label"
+                           IsVisible="{Binding HostLegacy2, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock Grid.Row="4" Grid.Column="4" Text="{Binding HostLegacy2}" Classes="value"
+                           IsVisible="{Binding HostLegacy2, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="Host Record 3:" Classes="label" />
-                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding HostLegacy3Display}" Classes="value" />
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Host Record 3:" Classes="label"
+                           IsVisible="{Binding HostLegacy3, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding HostLegacy3}" Classes="value"
+                           IsVisible="{Binding HostLegacy3, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </Grid>
         </controls:MediaHeaderBar.Body>
 

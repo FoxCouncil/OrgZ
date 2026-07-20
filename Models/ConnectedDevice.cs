@@ -37,31 +37,22 @@ public partial class ConnectedDevice : ObservableObject
     // Oldest layer to newest: the first computer (legacy slots iTunes stopped rewriting), the
     // active computer (0x300, overwritten on each adoption), and the user (0x2C0).
 
+    // Custody rows HIDE when empty (unlike the always-present identity fields' em-dash) - a device
+    // with no engraved hosts shouldn't render five blank rows of forensics.
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HostUserNameDisplay))]
     private string? _hostUserName;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HostComputerDisplay))]
     private string? _hostComputer;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HostLegacy1Display))]
     private string? _hostLegacy1;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HostLegacy2Display))]
     private string? _hostLegacy2;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HostLegacy3Display))]
     private string? _hostLegacy3;
-
-    public string HostUserNameDisplay => string.IsNullOrWhiteSpace(HostUserName) ? "—" : HostUserName!;
-    public string HostComputerDisplay => string.IsNullOrWhiteSpace(HostComputer) ? "—" : HostComputer!;
-    public string HostLegacy1Display => string.IsNullOrWhiteSpace(HostLegacy1) ? "—" : HostLegacy1!;
-    public string HostLegacy2Display => string.IsNullOrWhiteSpace(HostLegacy2) ? "—" : HostLegacy2!;
-    public string HostLegacy3Display => string.IsNullOrWhiteSpace(HostLegacy3) ? "—" : HostLegacy3!;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelDisplay), nameof(ModelLabelDisplay), nameof(DisplayName))]
@@ -375,9 +366,10 @@ public partial class ConnectedDevice : ObservableObject
     }
 
     /// <summary>
-    /// Combined firmware display. Shows "iPod OS X.Y / Rockbox Y.Z" on dual-firmware
-    /// iPods, falls back to either alone when only one was detected, and shows an
-    /// em-dash when neither source yielded anything.
+    /// Combined firmware display, BOOTED OS FIRST - the first entry tells you at a glance which
+    /// mode the device is running: "Rockbox 3.15 / iPod OS 1.3" when Rockbox is booted (DeviceType
+    /// carries the live boot mode from fingerprinting), Apple first on stock. Falls back to either
+    /// alone, em-dash when neither source yielded anything.
     /// </summary>
     public string FirmwareVersionDisplay
     {
@@ -390,7 +382,14 @@ public partial class ConnectedDevice : ObservableObject
             }
             if (!string.IsNullOrWhiteSpace(FirmwareVersion))
             {
-                parts.Add(FirmwareVersion);
+                if (DeviceType is DeviceType.RockboxIPod or DeviceType.RockboxOther)
+                {
+                    parts.Insert(0, FirmwareVersion);   // booted OS leads
+                }
+                else
+                {
+                    parts.Add(FirmwareVersion);
+                }
             }
             return parts.Count > 0 ? string.Join(" / ", parts) : "\u2014";
         }
