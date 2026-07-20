@@ -97,6 +97,10 @@ public partial class Sidebar : UserControl
 
             var settings = new Avalonia.Controls.MenuItem { Header = "Settings" };
 
+            var renameDevice = new Avalonia.Controls.MenuItem { Header = "Rename…" };
+            renameDevice.Click += async (_, _) => await vm.RenameDeviceAsync(sb);
+            settings.Items.Add(renameDevice);
+
             var refresh = new Avalonia.Controls.MenuItem { Header = "Refresh Device Info" };
             refresh.Click += (_, _) => vm.RefreshDeviceInfo(sb);
             settings.Items.Add(refresh);
