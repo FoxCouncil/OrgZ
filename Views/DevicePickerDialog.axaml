@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		x:Class="OrgZ.Views.DevicePickerDialog"
+		x:CompileBindings="False"
+		Title="Choose Device"
+		MinWidth="320" MinHeight="160"
+		SizeToContent="WidthAndHeight"
+		CanResize="True"
+		WindowStartupLocation="CenterOwner"
+		Classes="orgzDialog">
+	<StackPanel Margin="16" Spacing="12">
+		<TextBlock x:Name="PromptText" Text="Sync to:" />
+		<ListBox x:Name="DeviceList" MinHeight="70" DoubleTapped="DeviceList_DoubleTapped" />
+		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+			<Button Content="Sync" Width="70" Click="OkButton_Click" IsDefault="True" />
+			<Button Content="Cancel" Width="70" Click="CancelButton_Click" IsCancel="True" />
+		</StackPanel>
+	</StackPanel>
+</Window>

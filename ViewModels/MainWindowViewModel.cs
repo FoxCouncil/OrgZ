@@ -6407,10 +6407,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var device = _connectedDevices.Values.FirstOrDefault(IsSyncTarget);
-        if (device == null)
+        // Never guess between plugged-in iPods: one target syncs directly, several must be chosen
+        // from - grabbing the first dictionary entry was a dangerous game.
+        var targets = _connectedDevices.Values.Where(IsSyncTarget).ToList();
+        if (targets.Count == 0)
         {
+            UpdateMainStatus("No connected device can take this playlist.");
             return;
+        }
+        var device = targets[0];
+        if (targets.Count > 1)
+        {
+            var name0 = string.IsNullOrWhiteSpace(playlistItem.Name) ? "this playlist" : $"“{playlistItem.Name}”";
+            var picker = new Views.DevicePickerDialog(targets.Select(t => t.SidebarLabel).ToList(), title: "Sync Playlist", prompt: $"Sync {name0} to:");
+            var chosen = await picker.ShowDialog<int?>(_window);
+            if (chosen is not { } idx)
+            {
+                return;
+            }
+            device = targets[idx];
         }
 
         var name = string.IsNullOrWhiteSpace(playlistItem.Name) ? "Playlist" : playlistItem.Name;
