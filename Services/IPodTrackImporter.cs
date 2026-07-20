@@ -941,7 +941,7 @@ public static class IPodTrackImporter
     /// database still pointed at it - silent, unrecoverable track loss. We spin a fresh name
     /// until the slot is free; callers then copy WITHOUT overwrite.
     /// </summary>
-    private static string UniqueTrackPath(string destDir, string ext)
+    internal static string UniqueTrackPath(string destDir, string ext)
     {
         for (int attempt = 0; attempt < 1000; attempt++)
         {

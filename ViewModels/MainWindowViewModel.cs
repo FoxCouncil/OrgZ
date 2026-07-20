@@ -4692,7 +4692,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var artist = SanitizeFolderName(string.IsNullOrWhiteSpace(deviceItem.Artist) ? "Unknown Artist" : deviceItem.Artist!);
         var album = SanitizeFolderName(string.IsNullOrWhiteSpace(deviceItem.Album) ? "Unknown Album" : deviceItem.Album!);
         var destDir = Path.Combine(App.FolderPath, artist, album);
-        var baseName = Path.GetFileNameWithoutExtension(deviceItem.FilePath);
+        // Name the library copy from its tags when we have them - on-device files carry iTunes-style
+        // 4-caps names (RLED.m4a) that would litter the library as gibberish.
+        var baseName = !string.IsNullOrWhiteSpace(deviceItem.Title)
+            ? SanitizeFolderName(deviceItem.Track is { } trackNo && trackNo > 0 ? $"{trackNo:00} - {deviceItem.Title}" : deviceItem.Title!)
+            : Path.GetFileNameWithoutExtension(deviceItem.FilePath);
         var ext = Path.GetExtension(deviceItem.FilePath);
         var dest = Path.Combine(destDir, baseName + ext);
         for (int n = 2; File.Exists(dest); n++)

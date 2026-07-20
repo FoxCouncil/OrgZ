@@ -810,15 +810,18 @@ public sealed class ShuffleIPod : IPodDevice
 
     /// <summary>Lands a source file in Music/F00 in a format this Shuffle can play: native formats copy
     /// as-is, everything else transcodes into an .m4a (ALAC lossless on 3G/4G, AAC 256k on 1G/2G) and
-    /// gets the source's tags re-applied. Always re-stages over an existing dest - a stale file may
-    /// predate a codec-policy fix. Progress: ("transcode", 0..1) for the encode, then ("copy", 0..1)
-    /// for the device write - the slow phase on the Shuffle's USB 1.1 link.</summary>
-    private async Task<string> StageIntoMusicAsync(string sourceFile, string ffmpegPath, int sourceSampleRate, int durationMs, Action<string, double>? onProgress, CancellationToken ct)
+    /// gets the source's tags re-applied. Music gets an iTunes-style random 4-caps name (exactly what
+    /// the firmware grew up on - see <see cref="DeviceFileName"/> for why names must be plain ASCII);
+    /// podcasts pass <paramref name="fixedName"/> so a re-push of the same episode maps to the same
+    /// path and dedupes. Progress: ("transcode", 0..1) for the encode, then ("copy", 0..1) for the
+    /// device write - the slow phase on the Shuffle's USB 1.1 link.</summary>
+    private async Task<string> StageIntoMusicAsync(string sourceFile, string ffmpegPath, int sourceSampleRate, int durationMs, Action<string, double>? onProgress, CancellationToken ct, string? fixedName = null)
     {
         Directory.CreateDirectory(MusicDir);
         if (PlaysNatively(sourceFile))
         {
-            var nativeDest = Path.Combine(MusicDir, DeviceFileName(sourceFile) + Path.GetExtension(sourceFile));
+            var ext = Path.GetExtension(sourceFile);
+            var nativeDest = fixedName != null ? Path.Combine(MusicDir, fixedName + ext) : IPodTrackImporter.UniqueTrackPath(MusicDir, ext);
             if (!File.Exists(nativeDest))
             {
                 await IPodTrackImporter.CopyFileWithProgressAsync(sourceFile, nativeDest, onProgress == null ? null : f => onProgress("copy", f), ct);
@@ -826,7 +829,7 @@ public sealed class ShuffleIPod : IPodDevice
             return nativeDest;
         }
 
-        var dest = Path.Combine(MusicDir, DeviceFileName(sourceFile) + ".m4a");
+        var dest = fixedName != null ? Path.Combine(MusicDir, fixedName + ".m4a") : IPodTrackImporter.UniqueTrackPath(MusicDir, ".m4a");
         var staged = Path.Combine(Path.GetTempPath(), "orgz_shuf_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
         try
         {
@@ -894,7 +897,7 @@ public sealed class ShuffleIPod : IPodDevice
             for (int i = 0; i < episodes.Count; i++)
             {
                 onProgress?.Invoke(i + 1, episodes.Count);
-                var dest = await StageIntoMusicAsync(episodes[i].LocalFile, ffmpegPath, 0, 0, null, ct);
+                var dest = await StageIntoMusicAsync(episodes[i].LocalFile, ffmpegPath, 0, 0, null, ct, fixedName: DeviceFileName(episodes[i].LocalFile));
                 var ipodPath = ToIpodPath(dest);
                 if (!list.Any(x => string.Equals(x.IpodPath, ipodPath, StringComparison.OrdinalIgnoreCase)))
                 {
