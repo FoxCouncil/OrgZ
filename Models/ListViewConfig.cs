@@ -304,7 +304,8 @@ public static class ListViewConfigs
         Header(),
         Playback(),
         Info(),
-        Items(Cmd("Remove from iPod", "RemoveFromDevice")));
+        Items(new ContextMenuItemDef { Header = "Sync to Library", IsSyncToLibraryMarker = true },
+              Cmd("Remove from iPod", "RemoveFromDevice")));
 
     public static ListViewConfig BuildPlaylistConfig(int playlistId, List<string> orderedTrackIds)
     {

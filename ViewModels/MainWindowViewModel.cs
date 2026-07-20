@@ -2441,6 +2441,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (enabled
             && item is { FilePath: { } path } && item.Kind is MediaKind.Music or MediaKind.Audiobook
+            && item.Source?.StartsWith("device:", StringComparison.Ordinal) != true   // never rewrite a file on a synced device - those bytes belong to its own database
             && !item.HasReplayGain && File.Exists(path) && ResolveFfmpeg() is { } ffmpeg)
         {
             _ = Task.Run(async () =>
@@ -3822,14 +3823,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var ipod = IPodDevice.For(device);
         using var batch = ipod.BeginBatchWrite();
-        BeginLcdBusy($"Syncing to {device.Name}");
+        // Top row: the operation + device. Second row: what's happening to WHICH media - phase and
+        // track title (the device is already named above).
+        var busyTitle = item.Title ?? item.FileName ?? "track";
+        BeginLcdBusy($"Syncing to {device.Name}", ipod.WillTranscode(item) ? $"Transcoding “{busyTitle}”…" : $"Copying “{busyTitle}”…");
         try
         {
-            var deviceItem = await ipod.AddTrackAsync(item, ffmpeg ?? "ffmpeg");
+            // Live per-phase progress on the LCD: the detail row names the phase and the bar is that
+            // phase's own 0..1 (ffmpeg position over duration, then bytes written over file size).
+            var deviceItem = await ipod.AddTrackAsync(item, ffmpeg ?? "ffmpeg",
+                (stage, f) => SetLcdBusy(stage == "transcode" ? $"Transcoding “{busyTitle}”…" : $"Copying “{busyTitle}”…", f));
             _allItems.Add(deviceItem);
             IPodArtworkReader.Invalidate(device.MountPath);
             device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
-            ApplyFilter();
+            AddToLiveView(deviceItem);
             _log.Information("Synced “{Title}” to {Device}", item.Title, device.MountPath);
             UpdateMainStatus($"Synced “{item.Title}” to {device.Name}.");
         }
@@ -3870,7 +3877,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 dev.AdjustSpaceFor(track, -removedSize);
             }
             IPodArtworkReader.Invalidate(dev.MountPath);
-            ApplyFilter();
+            RemoveFromLiveView(track);
             UpdateMainStatus($"Removed “{track.Title}” from {dev.Name}.");
         }
         catch (NotImplementedException)
@@ -3885,8 +3892,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Imports a dragged library track onto the dropped-on iPod (transcode + iTunesDB +
-    /// artwork + checksum). Progress shows on the LCD; errors go to the log.
+    /// Drag-onto-device import: delegates to <see cref="SyncItemToDeviceAsync"/> so a drop and the
+    /// right-click "Sync > (device)" are ONE code path - same duplicate check, same batch write,
+    /// same space accounting, same progress surface. They diverged once (drag skipped the duplicate
+    /// check and demanded ffmpeg even for Rockbox); never again.
     /// </summary>
     internal async Task ImportMediaToDeviceAsync(SidebarItem? deviceItem, MediaItem? track)
     {
@@ -3894,58 +3903,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
-        var dev = DeviceForSidebarItem(deviceItem)!;
-
-        if (string.IsNullOrEmpty(track.FilePath) || !File.Exists(track.FilePath))
-        {
-            UpdateMainStatus($"Can't add “{track.Title}” — source file is missing.");
-            return;
-        }
-
-        var ffmpeg = ResolveFfmpeg();
-        if (ffmpeg is null)
-        {
-            UpdateMainStatus("ffmpeg not found on PATH — needed to transcode for the iPod.");
-            return;
-        }
-
-        // Progress shows on the LCD (the rip/progress page), not the retired activity feed.
-        var title = track.Title ?? Path.GetFileName(track.FilePath);
-        IsBusy = true;
-        BusyTitle = $"Adding “{title}”";
-        BusyDetail = $"Transcoding for {dev.Name}…";
-        BusyPercent = 0;
-        try
-        {
-            // Import via the device tier, then reflect it in the live list right away (no re-scan).
-            var imported = await IPodDevice.For(dev).AddTrackAsync(track, ffmpeg);
-            _allItems.Add(imported);
-            IPodArtworkReader.Invalidate(dev.MountPath);
-            if (imported.FileSize is { } sz && sz > 0)
-            {
-                dev.AdjustSpaceFor(imported, sz);
-            }
-            ApplyFilter();
-
-            BusyTitle = $"Added “{title}”";
-            BusyDetail = $"On {dev.Name}";
-            BusyPercent = 1;
-            await Task.Delay(1800);
-        }
-        catch (Exception ex)
-        {
-            _log.Error(ex, "Failed to add {Track} to {Device}", track.FilePath, dev.MountPath);
-            BusyTitle = "Couldn't add to iPod";
-            BusyDetail = ex.Message;
-            await Task.Delay(3500);
-        }
-        finally
-        {
-            IsBusy = false;
-            BusyTitle = string.Empty;
-            BusyDetail = string.Empty;
-            BusyPercent = 0;
-        }
+        await SyncItemToDeviceAsync(track, DeviceForSidebarItem(deviceItem)!);
     }
 
 
@@ -4373,9 +4331,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// Reorders a track within the currently-active playlist.
-    /// fromIndex/toIndex are positions within the current FilteredItems list.
+    /// fromIndex/toIndex are positions within the current FilteredItems list;
+    /// <paramref name="insertBefore"/> places the moved track before (true) or after (false) the
+    /// target - matching the insertion line the drag showed.
     /// </summary>
-    internal void ReorderPlaylistTrack(int fromIndex, int toIndex)
+    internal void ReorderPlaylistTrack(int fromIndex, int toIndex, bool insertBefore = false)
     {
         if (_activeViewConfig?.PlaylistId == null)
         {
@@ -4397,23 +4357,309 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var targetItem = FilteredItems[toIndex];
 
         var fromDbIdx = fullOrder.IndexOf(movedItem.Id);
-        var toDbIdx = fullOrder.IndexOf(targetItem.Id);
-        if (fromDbIdx < 0 || toDbIdx < 0)
+        if (fromDbIdx < 0 || fullOrder.IndexOf(targetItem.Id) < 0)
         {
             return;
         }
 
         fullOrder.RemoveAt(fromDbIdx);
-        fullOrder.Insert(toDbIdx, movedItem.Id);
+        int insertIdx = fullOrder.IndexOf(targetItem.Id);
+        if (!insertBefore)
+        {
+            insertIdx++;
+        }
+        fullOrder.Insert(Math.Clamp(insertIdx, 0, fullOrder.Count), movedItem.Id);
 
         MediaCache.ReorderPlaylistTracks(playlistId, fullOrder);
 
         var key = $"Playlist:{playlistId}";
         ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, fullOrder));
         _activeViewConfig = ListViewConfigs.Get(key);
-        ApplyFilter();
+        MoveWithinLiveView(movedItem, targetItem, insertBefore);
         SetScrollOffset?.Invoke(scroll);
     }
+
+    /// <summary>
+    /// In-place ADD twin of <see cref="MoveWithinLiveView"/> for a single new row: appends to the
+    /// live list and re-reads the SAME DataGridCollectionView when the active view shows the item,
+    /// instead of the full ApplyFilter rebuild whose ItemsSource swap snaps the grid scroll. Always
+    /// bumps the cache version so every other (and future) view rebuilds from _allItems on access.
+    /// </summary>
+    private void AddToLiveView(MediaItem item)
+    {
+        _dataVersion++;
+        if (_activeViewConfig?.BaseFilter is { } visible && visible(item) && !FilteredItems.Contains(item))
+        {
+            var scroll = GetScrollOffset?.Invoke() ?? 0;
+            FilteredItems.Add(item);
+            FilteredItemsView?.Refresh();
+            UpdateViewStats(_activeViewConfig, FilteredItems);
+            SetScrollOffset?.Invoke(scroll);
+        }
+    }
+
+    /// <summary>In-place REMOVE twin of <see cref="MoveWithinLiveView"/> - same reasoning, same
+    /// scroll preservation, same cache-version bump.</summary>
+    private void RemoveFromLiveView(MediaItem item)
+    {
+        _dataVersion++;
+        var scroll = GetScrollOffset?.Invoke() ?? 0;
+        if (FilteredItems.Remove(item))
+        {
+            FilteredItemsView?.Refresh();
+            if (_activeViewConfig != null)
+            {
+                UpdateViewStats(_activeViewConfig, FilteredItems);
+            }
+            SetScrollOffset?.Invoke(scroll);
+        }
+    }
+
+    /// <summary>
+    /// Reflects a row move in the LIVE view: mutates the current FilteredItems list in place and
+    /// re-reads the SAME DataGridCollectionView. Never goes through ApplyFilter for a reorder - that
+    /// swaps the grid's ItemsSource (new list + new view), which resets its scroll position to the
+    /// top for a frame before the restore lands: the visible "jump".
+    /// </summary>
+    private void MoveWithinLiveView(MediaItem moved, MediaItem? target, bool insertBefore)
+    {
+        var list = FilteredItems;
+        int fromIdx = list.IndexOf(moved);
+        if (fromIdx < 0)
+        {
+            return;
+        }
+        list.RemoveAt(fromIdx);
+        int insertIdx = target != null ? list.IndexOf(target) : list.Count;
+        if (insertIdx < 0)
+        {
+            insertIdx = list.Count;
+        }
+        else if (target != null && !insertBefore)
+        {
+            insertIdx++;
+        }
+        list.Insert(Math.Clamp(insertIdx, 0, list.Count), moved);
+        FilteredItemsView?.Refresh();
+    }
+
+    /// <summary>
+    /// The connected device whose flat play order the current view shows, when that device's tier
+    /// supports reordering (Shuffles - the iTunesSD list IS the play order). Null for every other view,
+    /// including a device's kind sub-views. Used by the view to enable drag-to-reorder.
+    /// </summary>
+    internal ConnectedDevice? ActiveReorderableDevice
+    {
+        get
+        {
+            var key = _activeViewConfig?.Key;
+            if (key == null)
+            {
+                return null;
+            }
+            var dev = _connectedDevices.Values.FirstOrDefault(d => string.Equals(key, $"Device:{d.MountPath}", StringComparison.OrdinalIgnoreCase));
+            if (dev == null || dev.DeviceType != DeviceType.StockIPod)
+            {
+                return null;
+            }
+            return IPodDevice.For(dev).SupportsReorder ? dev : null;
+        }
+    }
+
+    /// <summary>
+    /// Moves one track within the device's flat play order and persists the new order to the device.
+    /// Item-based on purpose: the device view shows _allItems insertion order (the scan order = the
+    /// on-device order; it has no Sorter), so moving the item within _allItems IS the reorder. A null
+    /// <paramref name="target"/> moves the track to the end of the device's order;
+    /// <paramref name="insertBefore"/> places it before (true) or after (false) the target - matching
+    /// the insertion line the drag showed.
+    /// </summary>
+    internal void ReorderDeviceTrack(MediaItem? moved, MediaItem? target, bool insertBefore = false)
+    {
+        var dev = ActiveReorderableDevice;
+        if (dev == null || moved == null || ReferenceEquals(moved, target))
+        {
+            return;
+        }
+
+        var source = $"device:{dev.MountPath}";
+        int fromAll = _allItems.IndexOf(moved);
+        int toAll = target != null ? _allItems.IndexOf(target) : -1;
+        if (fromAll < 0 || moved.Source != source || (target != null && toAll < 0))
+        {
+            return;
+        }
+
+        var scroll = GetScrollOffset?.Invoke() ?? 0;
+        _allItems.RemoveAt(fromAll);
+        if (target == null)
+        {
+            int last = -1;
+            for (int i = 0; i < _allItems.Count; i++)
+            {
+                if (_allItems[i].Source == source && _allItems[i].Kind == MediaKind.Music)
+                {
+                    last = i;
+                }
+            }
+            _allItems.Insert(last + 1, moved);
+        }
+        else
+        {
+            int insertIdx = _allItems.IndexOf(target);
+            if (!insertBefore)
+            {
+                insertIdx++;
+            }
+            _allItems.Insert(Math.Clamp(insertIdx, 0, _allItems.Count), moved);
+        }
+        MoveWithinLiveView(moved, target, insertBefore);
+        SetScrollOffset?.Invoke(scroll);
+
+        var ordered = _allItems.Where(i => i.Source == source && i.Kind == MediaKind.Music).ToList();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await IPodDevice.For(dev).ReorderAsync(ordered);
+                _log.Information("Reordered play order on {Device}: {Count} tracks", dev.MountPath, ordered.Count);
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to reorder tracks on {Device}", dev.MountPath);
+                UI(() => UpdateMainStatus($"Couldn't reorder on {dev.Name}: {ex.Message}"));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Reverse sync: copies a track OFF a connected device into the local library folder
+    /// ({library}/{Artist}/{Album}/), imports it, and optionally favorites it or adds it to a
+    /// playlist. FairPlay-protected files are refused (they only play on the buyer's authorized
+    /// devices); soft duplicates (same title + artist already in the library), low-quality sources
+    /// (&lt; 128 kbps), and extension/format mismatches warn before anything is copied.
+    /// </summary>
+    internal async Task SyncDeviceTrackToLibraryAsync(MediaItem deviceItem, bool addToFavorites, int? playlistId)
+    {
+        if (deviceItem.Source?.StartsWith("device:", StringComparison.Ordinal) != true || string.IsNullOrEmpty(deviceItem.FilePath) || !File.Exists(deviceItem.FilePath))
+        {
+            UpdateMainStatus($"Can't sync “{deviceItem.Title}” — the file isn't reachable on the device.");
+            return;
+        }
+        if (string.IsNullOrEmpty(App.FolderPath))
+        {
+            UpdateMainStatus("No library folder is configured.");
+            return;
+        }
+        if (IsProtectedTrack(deviceItem.FilePath))
+        {
+            UpdateMainStatus($"“{deviceItem.Title}” is FairPlay-protected — it can't be synced to the library.");
+            return;
+        }
+
+        var warnings = new List<string>();
+        var dup = _allItems.FirstOrDefault(i => IsLocalLibraryFile(i) && i.Kind == MediaKind.Music
+            && !string.IsNullOrWhiteSpace(i.Title) && string.Equals(i.Title, deviceItem.Title, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(i.Artist ?? string.Empty, deviceItem.Artist ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+        if (dup != null)
+        {
+            warnings.Add($"Your library already has “{dup.Title}” by {(string.IsNullOrWhiteSpace(dup.Artist) ? "an unknown artist" : dup.Artist)}.");
+        }
+        if (deviceItem.AudioBitrate is > 0 and < 128)
+        {
+            warnings.Add($"This file is low quality ({deviceItem.AudioBitrate} kbps).");
+        }
+        if (deviceItem.FileNameMatchesHeaders == false)
+        {
+            warnings.Add("Its file extension doesn't match its actual audio format.");
+        }
+        if (warnings.Count > 0)
+        {
+            var confirm = new Views.ConfirmDialog("Sync to Library", string.Join("\n\n", warnings) + "\n\nSync anyway?", "Sync");
+            if (!await confirm.ShowDialog<bool>(_window))
+            {
+                return;
+            }
+        }
+
+        var artist = SanitizeFolderName(string.IsNullOrWhiteSpace(deviceItem.Artist) ? "Unknown Artist" : deviceItem.Artist!);
+        var album = SanitizeFolderName(string.IsNullOrWhiteSpace(deviceItem.Album) ? "Unknown Album" : deviceItem.Album!);
+        var destDir = Path.Combine(App.FolderPath, artist, album);
+        var baseName = Path.GetFileNameWithoutExtension(deviceItem.FilePath);
+        var ext = Path.GetExtension(deviceItem.FilePath);
+        var dest = Path.Combine(destDir, baseName + ext);
+        for (int n = 2; File.Exists(dest); n++)
+        {
+            dest = Path.Combine(destDir, $"{baseName} ({n}){ext}");
+        }
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                Directory.CreateDirectory(destDir);
+                File.Copy(deviceItem.FilePath, dest);
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Reverse sync copy failed: {Source} -> {Dest}", deviceItem.FilePath, dest);
+            UpdateMainStatus($"Couldn't copy “{deviceItem.Title}” — {ex.Message}");
+            return;
+        }
+
+        // Import directly (the folder watcher would eventually catch it, but the caller needs the
+        // library item NOW for the Favorites/playlist step; LibraryContainsPath dedupes the echo).
+        var item = FileScanner.CreateMediaItemFromPath(dest);
+        if (item == null)
+        {
+            UpdateMainStatus($"Copied “{deviceItem.Title}” but couldn't import it.");
+            return;
+        }
+        _allItems.Add(item);
+        await AnalyzeAllFilesAsync([item]);
+        ApplyFilter();
+        UpdateTitle();
+        UpdateData();
+
+        if (addToFavorites)
+        {
+            AddToFavorites(item);
+        }
+        else if (playlistId is { } pid)
+        {
+            AddTrackToPlaylist(pid, item);
+        }
+
+        _log.Information("Reverse-synced “{Title}” from {Device} -> {Dest}", deviceItem.Title, deviceItem.Source, dest);
+        UpdateMainStatus($"Synced “{item.Title ?? deviceItem.Title}” to {(addToFavorites ? "Favorites" : playlistId != null ? "the playlist" : "your library")}.");
+    }
+
+    /// <summary>FairPlay detection: the .m4p extension, or a 'drms' sample entry hiding inside an
+    /// .m4a/.m4b container (the extension alone can't tell a purchased-protected file).</summary>
+    internal static bool IsProtectedTrack(string filePath)
+    {
+        var ext = Path.GetExtension(filePath);
+        if (ext.Equals(".m4p", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) || ext.Equals(".m4b", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var f = TagLib.File.Create(filePath);
+                return f.Properties.Codecs?.OfType<TagLib.IAudioCodec>().Any(c => c.Description?.Contains("drms", StringComparison.OrdinalIgnoreCase) == true) == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static string SanitizeFolderName(string s) => string.Join("_", s.Split(Path.GetInvalidFileNameChars())).TrimEnd('.', ' ');
 
     #endregion
 
