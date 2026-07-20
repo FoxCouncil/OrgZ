@@ -3225,6 +3225,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         station.IsFavorite = !station.IsFavorite;
         MediaCache.SetFavorite(station.Id, station.IsFavorite);
 
+        // Same stale-cache hole as playlists: switching views never bumps the version, so the
+        // Favorites cache must die now or the next visit serves the pre-toggle list.
+        _viewCache.Remove("Favorites");
+
         // Only rebuild the list when viewing Favorites (item may need to appear/disappear)
         if (SelectedSidebarItem?.IsFavorites == true)
         {
@@ -3246,6 +3250,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         item.IsFavorite = true;
         MediaCache.SetFavorite(item.Id, true);
+        _viewCache.Remove("Favorites");   // see ToggleFavorite - a view switch alone reuses stale caches
         if (SelectedSidebarItem?.IsFavorites == true)
         {
             ApplyFilter();
@@ -4173,6 +4178,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var key = $"Playlist:{playlistId}";
         var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
         ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, trackIds));
+
+        // Kill the playlist's cached view: a view SWITCH never bumps the data version, so without
+        // this a playlist cached while empty is served verbatim on the next visit - header counting
+        // its real tracks over an empty grid.
+        _viewCache.Remove(key);
 
         // Refresh view if currently viewing this playlist
         if (SelectedSidebarItem?.ViewConfigKey == key)
