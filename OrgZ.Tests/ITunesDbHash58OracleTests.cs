@@ -16,6 +16,27 @@ namespace OrgZ.Tests;
 /// </summary>
 public class ITunesDbHash58OracleTests
 {
+    /// <summary>
+    /// The metal pin. On 2026-07-20, OrgZ's hash58 over a real Nano 3G's pristine iTunes-written
+    /// database matched the device's stored checksum byte-for-byte (FireWire GUID 000A27001B2660C8).
+    /// This test freezes THAT verified implementation: a deterministic synthetic input hashed by the
+    /// exact build that matched on hardware. Any future drift in the substitution tables, key
+    /// derivation, zeroed regions, or HMAC breaks this value. The hash is computed natively - no
+    /// external tool involved, then or ever.
+    /// </summary>
+    [Fact]
+    public void Hash58_matches_the_hardware_verified_pin()
+    {
+        var db = new byte[4096];
+        new Random(0x58AB).NextBytes(db);
+        db[0] = (byte)'m'; db[1] = (byte)'h'; db[2] = (byte)'b'; db[3] = (byte)'d';
+        db[4] = 0xF4; db[5] = 0; db[6] = 0; db[7] = 0;   // headerSize 0xF4
+
+        ITunesDbHash58.Apply(db, "000A27001B2660C8");
+
+        Assert.Equal("A11B17C9E345B62D52165BB971613B5E35D5EFEE", Convert.ToHexString(db[0x58..0x6C]));
+    }
+
     // The FireWire GUID and the reference hash the independent oracle produced for the committed plain
     // fixture. Reproduce with: python OrgZ.Tests/oracle/hash58_independent.py \
     //   OrgZ.Tests/Fixtures/itunesdb-write/orgz-emitted.iTunesDB 000A27001597690A
