@@ -1,6 +1,8 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using OrgZ.Models;
 
 namespace OrgZ.Services;
@@ -816,7 +818,7 @@ public sealed class ShuffleIPod : IPodDevice
         Directory.CreateDirectory(MusicDir);
         if (PlaysNatively(sourceFile))
         {
-            var nativeDest = Path.Combine(MusicDir, Sanitize(Path.GetFileNameWithoutExtension(sourceFile)) + Path.GetExtension(sourceFile));
+            var nativeDest = Path.Combine(MusicDir, DeviceFileName(sourceFile) + Path.GetExtension(sourceFile));
             if (!File.Exists(nativeDest))
             {
                 await IPodTrackImporter.CopyFileWithProgressAsync(sourceFile, nativeDest, onProgress == null ? null : f => onProgress("copy", f), ct);
@@ -824,7 +826,7 @@ public sealed class ShuffleIPod : IPodDevice
             return nativeDest;
         }
 
-        var dest = Path.Combine(MusicDir, Sanitize(Path.GetFileNameWithoutExtension(sourceFile)) + ".m4a");
+        var dest = Path.Combine(MusicDir, DeviceFileName(sourceFile) + ".m4a");
         var staged = Path.Combine(Path.GetTempPath(), "orgz_shuf_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
         try
         {
@@ -989,6 +991,33 @@ public sealed class ShuffleIPod : IPodDevice
         }, ct);
 
     private string ToIpodPath(string absolute) => "/" + Path.GetRelativePath(MountPath, absolute).Replace('\\', '/');
+
+    /// <summary>The on-device file name for a source: ASCII-folded, then filesystem-sanitized. The
+    /// 2006-era firmware's FAT name matching has only ever seen iTunes's 4-char ASCII names, and one
+    /// U+2019 apostrophe in an iTunesSD path made the 2G silently skip the track (hardware-confirmed:
+    /// same bytes played fine once renamed to ASCII). NFKD strips accents to base letters; curly
+    /// quotes/dashes map to their ASCII cousins; anything else non-ASCII becomes '_'.</summary>
+    private static string DeviceFileName(string sourceFile)
+    {
+        var normalized = Path.GetFileNameWithoutExtension(sourceFile).Normalize(NormalizationForm.FormKD);
+        var sb = new StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+            sb.Append(c switch
+            {
+                '‘' or '’' => '\'',
+                '“' or '”' => '_',   // straight " is FAT-invalid anyway
+                '–' or '—' => '-',
+                _ when c < 0x80 => c,
+                _ => '_',
+            });
+        }
+        return Sanitize(sb.ToString());
+    }
 
     private void AppendToSd(string destFile)
     {

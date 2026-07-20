@@ -194,6 +194,35 @@ public class ShuffleIPodTests
     }
 
     /// <summary>
+    /// On-device names must be pure ASCII: one U+2019 apostrophe in an iTunesSD path made the 2G
+    /// silently skip the track (hardware-confirmed - the same bytes played once renamed). Accents
+    /// fold to base letters, curly punctuation to ASCII cousins, the rest to '_'.
+    /// </summary>
+    [Fact]
+    public async Task Device_file_names_are_ascii_folded()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-shufascii-" + Guid.NewGuid().ToString("N"));
+        var srcDir = Path.Combine(Path.GetTempPath(), "orgz-shufasciisrc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(mount);
+        Directory.CreateDirectory(srcDir);
+        try
+        {
+            var songSrc = Path.Combine(srcDir, "08 - Where It’s Ät — Béck ♥.mp3");
+            File.WriteAllBytes(songSrc, new byte[500]);
+
+            var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, IpodGeneration = "Shuffle 2G", Name = "Shuffle" };
+            var item = await IPodDevice.For(device).AddTrackAsync(new MediaItem { Id = songSrc, FilePath = songSrc, FileName = Path.GetFileName(songSrc), Title = "Where It’s At", Kind = MediaKind.Music }, "ffmpeg");
+
+            Assert.Equal("08 - Where It's At - Beck _.mp3", Path.GetFileName(item.FilePath));
+        }
+        finally
+        {
+            Directory.Delete(mount, recursive: true);
+            Directory.Delete(srcDir, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// A stock Shuffle can't decode FLAC - hardware-confirmed on a real 2G, where a verbatim-copied
     /// FLAC is silently skipped by the firmware. The add path must transcode it, so with no ffmpeg
     /// available the add must FAIL LOUDLY and leave the device untouched - never fall back to copying
