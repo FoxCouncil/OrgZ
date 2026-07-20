@@ -8,29 +8,31 @@ Color variants collapsed into one row. Win / Mac = OrgZ tested against the devic
 
 **Identity decode (serial → model/colour/capacity) is verified against libgpod's tables for every row below** - so the model we'd *show* for any of these is a sound best guess. The **Notes** column flags what hardware would upgrade that guess to confirmed: specifically, reading the serial off that generation's own firmware on macOS/Linux (Windows already gets it from WMI). A blank Notes cell means fully confirmed.
 
-| Model | Released | Sync tier | Win | Mac | iTunes | Rockbox | Notes |
-|---|---|---|---|---|---|---|---|
-| iPod 1G | 2001 | None (direct iTunesDB) | | | | | |
-| iPod 2G | 2002 | None (direct iTunesDB) | | | | | |
-| iPod 3G | 2003 | None (direct iTunesDB) | | | | | |
-| iPod 4G | 2004 | None (direct iTunesDB) | | | | | |
-| iPod Photo | 2004 | None (direct iTunesDB) | | | | | |
-| iPod Video 5G | 2005 | None (direct iTunesDB) | | | | | |
-| iPod Video 5.5G | 2006 | None (direct iTunesDB) | ✅ | ✅ | | | ✅ |
-| iPod Shuffle 1G | 2005 | iTunesSD | | | | | NEEDED |
-| iPod Shuffle 2G | 2006 | iTunesSD | | | | | |
-| iPod Shuffle 3G | 2009 | iTunesSD | | | | | |
-| iPod Shuffle 4G | 2010 | iTunesSD | | | | | |
-| iPod Mini 1G | 2004 | None (direct iTunesDB) | | | | | Needed |
-| iPod Mini 2G | 2005 | None (direct iTunesDB) | | | | | |
-| iPod Classic 6G | 2007 | hash58 | | | | | |
-| iPod Classic 6.5G | 2008 | hash58 | | | | | |
-| iPod Classic 7G | 2009 | hash58 | | | | | |
-| iPod Nano 1G | 2005 | None (direct iTunesDB) | | | | | NEEDED to dump |
-| iPod Nano 2G | 2006 | None (direct iTunesDB) | | | | | |
-| iPod Nano 3G | 2007 | hash58 | | | | | |
-| iPod Nano 4G | 2008 | hash58 | | | | | |
-| iPod Nano 5G | 2009 | hash72 + SQLite | ✅ | | ✅ | | ✅ |
+**Transcode** is the codec fourCC OrgZ targets when a source file needs converting for that model (FLAC/OGG/etc - natively playable files always copy through untouched): `alac` = Apple Lossless, `mp4a` = AAC 256 kbps. Four models can't decode ALAC and get AAC instead: the FireWire-era iPod 1G/2G (Apple only shipped ALAC decode to dock-connector models, mid-2004 firmware) and the Shuffle 1G/2G (ALAC arrived with the Shuffle 3G) - hardware-confirmed on a real Shuffle 2G, where a valid ALAC file is silently skipped.
+
+| Model | Released | Sync tier | Transcode | Win | Mac | iTunes | Rockbox | Notes |
+|---|---|---|---|---|---|---|---|---|
+| iPod 1G | 2001 | None (direct iTunesDB) | mp4a | | | | | |
+| iPod 2G | 2002 | None (direct iTunesDB) | mp4a | | | | | |
+| iPod 3G | 2003 | None (direct iTunesDB) | alac | | | | | |
+| iPod 4G | 2004 | None (direct iTunesDB) | alac | | | | | |
+| iPod Photo | 2004 | None (direct iTunesDB) | alac | | | | | |
+| iPod Video 5G | 2005 | None (direct iTunesDB) | alac | | | | | |
+| iPod Video 5.5G | 2006 | None (direct iTunesDB) | alac | ✅ | ✅ | | | ✅ |
+| iPod Shuffle 1G | 2005 | iTunesSD | mp4a | | | | | NEEDED |
+| iPod Shuffle 2G | 2006 | iTunesSD | mp4a | ✅ | | | | |
+| iPod Shuffle 3G | 2009 | iTunesSD | alac | | | | | |
+| iPod Shuffle 4G | 2010 | iTunesSD | alac | | | | | |
+| iPod Mini 1G | 2004 | None (direct iTunesDB) | alac | | | | | Needed |
+| iPod Mini 2G | 2005 | None (direct iTunesDB) | alac | | | | | |
+| iPod Classic 6G | 2007 | hash58 | alac | | | | | |
+| iPod Classic 6.5G | 2008 | hash58 | alac | | | | | |
+| iPod Classic 7G | 2009 | hash58 | alac | | | | | |
+| iPod Nano 1G | 2005 | None (direct iTunesDB) | alac | | | | | NEEDED to dump |
+| iPod Nano 2G | 2006 | None (direct iTunesDB) | alac | | | | | |
+| iPod Nano 3G | 2007 | hash58 | alac | | | | | |
+| iPod Nano 4G | 2008 | hash58 | alac | | | | | |
+| iPod Nano 5G | 2009 | hash72 + SQLite | alac | ✅ | | ✅ | | ✅ |
 
 iPod Touch and iPhone are out of scope
 
