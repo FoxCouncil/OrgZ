@@ -7444,6 +7444,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 oldDevice.Format               = refreshed.Format;
                 oldDevice.RefreshSpace();
 
+                // The sidebar row's label is a snapshot from connect time - push the fresh one
+                // (renames land here via RenameDeviceAsync -> RefreshDeviceInfo).
+                item.Name = oldDevice.SidebarLabel;
+
                 DeviceFingerprint.PersistDeviceRecord(oldDevice);
                 _log.Information("Refreshed device info: {Model} at {MountPath}", oldDevice.Model, mountPath);
             }
