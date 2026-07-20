@@ -21,7 +21,11 @@ public partial class ConnectedDevice : ObservableObject
 
     public required DeviceType DeviceType { get; init; }
 
-    public string Name { get; set; } = "Device";
+    /// <summary>Observable so a rename propagates to the info bar (DisplayName) and sidebar label
+    /// without a reconnect.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName), nameof(SidebarLabel))]
+    private string _name = "Device";
 
     /// <summary>Whether the device's tier has Podcasts/Audiobooks sub-views (set from
     /// <c>IPodDevice.HasKindSubViews</c> on connect). A one-list device (Shuffle) hides both its

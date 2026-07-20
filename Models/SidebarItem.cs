@@ -2,12 +2,17 @@
 
 using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace OrgZ.Models;
 
-internal class SidebarItem
+internal partial class SidebarItem : ObservableObject
 {
-    public string Name { get; init; } = string.Empty;
+    /// <summary>Mutable + observable, unlike the rest of the row: a device rename updates the label
+    /// in place (rebuilding the tree item would collapse it and drop selection).</summary>
+    [ObservableProperty]
+    private string _name = string.Empty;
+
     public string Icon { get; init; } = string.Empty;
 
     /// <summary>
