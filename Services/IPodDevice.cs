@@ -56,6 +56,21 @@ public abstract class IPodDevice
     public virtual Task<int> EraseAsync(CancellationToken ct = default)
         => throw new NotImplementedException($"Erase is not implemented for {GetType().Name} ({Generation ?? "?"}).");
 
+    /// <summary>True when the device has one flat, user-orderable play order (the Shuffle's iTunesSD
+    /// list IS its play order). Menu-navigated iPods order by their own indexes, so they stay false.</summary>
+    public virtual bool SupportsReorder => false;
+
+    /// <summary>Whether <see cref="AddTrackAsync"/> would transcode this track rather than copy it -
+    /// so progress UI can say "Transcoding" only when that's the truth. Base is false (Rockbox and
+    /// generic players copy everything); each stock tier answers with its own compatibility rules.</summary>
+    public virtual bool WillTranscode(MediaItem libraryTrack) => false;
+
+    /// <summary>Persists a new flat play order. <paramref name="orderedTracks"/> are the device's own
+    /// items (from <see cref="ReadLibraryAsync"/>) in the desired order; tracks on the device that the
+    /// caller doesn't mention keep their old relative order after the mentioned ones.</summary>
+    public virtual Task ReorderAsync(IReadOnlyList<MediaItem> orderedTracks, CancellationToken ct = default)
+        => throw new NotImplementedException($"Reorder is not implemented for {GetType().Name} ({Generation ?? "?"}).");
+
     /// <summary>
     /// Removes one item - any media kind (music / podcast / audiobook) - from the device: its
     /// database rows and its audio file, so a re-scan no longer shows it. Each tier locates the item
@@ -68,8 +83,10 @@ public abstract class IPodDevice
     /// Imports one library track onto the device - transcoding to whatever the tier needs - and returns
     /// the device-side <see cref="MediaItem"/> (its on-device path + id) so the caller can drop it into a
     /// playlist or the live view. Each tier picks its own format + database.
+    /// <paramref name="onProgress"/>, when set, receives ("transcode"|"copy", 0..1) - each phase runs
+    /// its own 0..1 so progress UI can show a true bar per stage.
     /// </summary>
-    public virtual Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
+    public virtual Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
         => throw new NotImplementedException($"AddTrack is not implemented for {GetType().Name} ({Generation ?? "?"}).");
 
     /// <summary>
@@ -261,6 +278,12 @@ public sealed class Nano5gIPod : IPodDevice
     public override bool SupportsArtwork => true;
     public override bool SupportsAudiobooks => true;   // media_kind=8 via the SQLite writer
 
+    /// <summary>Mirrors ImportToNano5gAsync's pass-through set (.mp3/.m4a/.m4b/.aac): the 5G takes
+    /// MP3 and MP4-container codecs as-is and transcodes everything else (FLAC/WAV/AIFF) to ALAC.</summary>
+    public override bool WillTranscode(MediaItem libraryTrack)
+        => !string.IsNullOrEmpty(libraryTrack.FilePath)
+           && Path.GetExtension(libraryTrack.FilePath).ToLowerInvariant() is not (".mp3" or ".m4a" or ".m4b" or ".aac");
+
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() => IPodTrackImporter.AddPodcastEpisodesNano5gAsync(MountPath, ToEpisodes(episodes), ffmpegPath, Device.FireWireGuid, onProgress, ct), ct);
 
@@ -289,10 +312,10 @@ public sealed class Nano5gIPod : IPodDevice
             new Nano5gLibraryWriter(itlp, Device.FireWireGuid).RemoveTrack(pid, musicRoot);
         }, ct);
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
         => Task.Run(async () =>
         {
-            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, ct);
+            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, onProgress, ct);
             return DeviceItemFromImport(libraryTrack, r);
         }, ct);
 
@@ -345,6 +368,24 @@ public sealed class BinaryIPod : IPodDevice
     public override bool SupportsArtwork => true;
     public override bool SupportsAudiobooks => true;   // media_type=8 in the binary iTunesDB MHIT
 
+    /// <summary>Mirrors <see cref="IPodTrackImporter.ImportAsync"/>'s decision: non-native formats
+    /// transcode, and on the ALAC-less 1G/2G an ALAC-in-.m4a source re-encodes to AAC too.</summary>
+    public override bool WillTranscode(MediaItem libraryTrack)
+    {
+        if (string.IsNullOrEmpty(libraryTrack.FilePath))
+        {
+            return false;
+        }
+        var ext = Path.GetExtension(libraryTrack.FilePath);
+        if (!IPodTrackImporter.IsNativelyCompatible(ext))
+        {
+            return true;
+        }
+        return Generation is "1G" or "2G"
+            && (ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) || ext.Equals(".m4b", StringComparison.OrdinalIgnoreCase))
+            && IPodTrackImporter.IsAlacFile(libraryTrack.FilePath);
+    }
+
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() => IPodTrackImporter.AddPodcastEpisodes(MountPath, Device.IpodGeneration, Device.FireWireGuid, ToEpisodes(episodes), onProgress), ct);
 
@@ -395,10 +436,10 @@ public sealed class BinaryIPod : IPodDevice
             return removed;
         }, ct);
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
         => Task.Run(async () =>
         {
-            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, ct);
+            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, onProgress, ct);
             return DeviceItemFromImport(libraryTrack, r);
         }, ct);
 
@@ -533,8 +574,8 @@ public sealed class RockboxIPod : IPodDevice
             File.Delete(item.FilePath);
         }, ct);
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
-        => Task.Run(() =>
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+        => Task.Run(async () =>
         {
             // Rockbox plays straight off disk: copy into /Music/{Artist}/{Album}/ (no transcode) and hand
             // back a device-side item pointing at the on-device path.
@@ -542,7 +583,7 @@ public sealed class RockboxIPod : IPodDevice
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             if (!File.Exists(dest))
             {
-                File.Copy(libraryTrack.FilePath!, dest);
+                await IPodTrackImporter.CopyFileWithProgressAsync(libraryTrack.FilePath!, dest, onProgress == null ? null : f => onProgress("copy", f), ct);
             }
             long size = 0;
             try { size = new FileInfo(dest).Length; } catch { /* cosmetic */ }
@@ -558,9 +599,15 @@ public sealed class RockboxIPod : IPodDevice
                 Artist = libraryTrack.Artist,
                 Album = libraryTrack.Album,
                 Genre = libraryTrack.Genre,
+                Composer = libraryTrack.Composer,
                 Duration = libraryTrack.Duration,
                 Track = libraryTrack.Track,
+                TotalTracks = libraryTrack.TotalTracks,
+                Disc = libraryTrack.Disc,
+                TotalDiscs = libraryTrack.TotalDiscs,
                 Year = libraryTrack.Year,
+                Extension = Path.GetExtension(dest),
+                HasAlbumArt = libraryTrack.HasAlbumArt,
                 FileSize = size,
                 IsAnalyzed = true,
             };
@@ -641,6 +688,47 @@ public sealed class ShuffleIPod : IPodDevice
     public override bool SupportsPlaylists => true;    // the playlist BECOMES the device's one list
     public override bool SupportsPodcasts => true;     // episodes land as plain tracks
     public override bool SupportsArtwork => false;
+    public override bool SupportsReorder => true;      // the iTunesSD list IS the play order
+
+    public override bool WillTranscode(MediaItem libraryTrack)
+        => !string.IsNullOrEmpty(libraryTrack.FilePath) && !PlaysNatively(libraryTrack.FilePath);
+
+    public override Task ReorderAsync(IReadOnlyList<MediaItem> orderedTracks, CancellationToken ct = default)
+        => Task.Run(() =>
+        {
+            // Reorder the EXISTING iTunesSD entries so each keeps its own volume/start/stop/flags -
+            // never rebuild them from MediaItems. Entries the caller didn't mention (e.g. podcasts
+            // hidden from the music view) keep their old relative order after the mentioned ones.
+            var current = ReadSd();
+            var byPath = new Dictionary<string, ShuffleSdTrack>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in current)
+            {
+                byPath[entry.IpodPath] = entry;
+            }
+
+            var result = new List<ShuffleSdTrack>(current.Count);
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in orderedTracks)
+            {
+                if (string.IsNullOrEmpty(t.FilePath))
+                {
+                    continue;
+                }
+                var ipodPath = ToIpodPath(t.FilePath);
+                if (byPath.TryGetValue(ipodPath, out var entry) && used.Add(ipodPath))
+                {
+                    result.Add(entry);
+                }
+            }
+            foreach (var entry in current)
+            {
+                if (!used.Contains(entry.IpodPath))
+                {
+                    result.Add(entry);
+                }
+            }
+            WriteSd(result);
+        }, ct);
 
     private string ITunesDir => IPodPaths.ITunesDir(MountPath);
     private string MusicDir => Path.Combine(IPodPaths.Music(MountPath), "F00");
@@ -654,13 +742,102 @@ public sealed class ShuffleIPod : IPodDevice
         else { ShuffleSdWriter.Write(ITunesDir, list); }
     }
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
-        => Task.Run(() =>
+    private static readonly Serilog.ILogger _log = Logging.For("ShuffleSync");
+
+    /// <summary>Extensions the Shuffle firmware decodes natively (every generation): MP3, AAC-family
+    /// .m4a/.m4b, WAV. Anything else (FLAC, OGG, ...) MUST be transcoded first: hardware-confirmed on a
+    /// real 2G that a copied FLAC is silently skipped by the firmware. An .m4a needs a second look on
+    /// 1G/2G - see <see cref="PlaysNatively"/>.</summary>
+    private static readonly HashSet<string> NativeExtensions = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".m4a", ".m4b", ".aac", ".wav" };
+
+    /// <summary>ALAC decode arrived with the Shuffle 3G (2009). The 1G/2G lack the horsepower - iTunes
+    /// itself converts lossless to AAC when syncing them. Hardware-confirmed on a real 2G: a perfectly
+    /// valid ALAC .m4a is silently skipped just like the FLAC was.</summary>
+    private bool SupportsAlac => UsesBdhs;
+
+    /// <summary>True when this Shuffle's firmware can decode the file as-is. Extension check first; for
+    /// an .m4a/.m4b on a 1G/2G the container has to be asked whether the codec is ALAC (the extension
+    /// can't tell), because those generations only decode the AAC family.</summary>
+    private bool PlaysNatively(string sourceFile)
+    {
+        var ext = Path.GetExtension(sourceFile);
+        if (!NativeExtensions.Contains(ext))
         {
-            // Shuffle plays any file straight off disk (no transcode): copy into Music/F00, then add it to
-            // the iTunesSD list so the firmware will actually play it.
-            Directory.CreateDirectory(MusicDir);
-            var dest = CopyIntoMusic(libraryTrack.FilePath!);
+            return false;
+        }
+        if (SupportsAlac || (!ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) && !ext.Equals(".m4b", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+        return !IPodTrackImporter.IsAlacFile(sourceFile);
+    }
+
+    /// <summary>ffmpeg's tag mapping into the iTunes .m4a atoms drops fields (track/disc numbers, genre,
+    /// art) - re-copy the source's tags onto the staged file with TagLib so the device file carries the
+    /// full metadata. Best-effort: a tag failure never blocks the sync.</summary>
+    private static void CopyTags(string sourceFile, string stagedFile)
+    {
+        try
+        {
+            using var src = TagLib.File.Create(sourceFile);
+            using var dst = TagLib.File.Create(stagedFile);
+            src.Tag.CopyTo(dst.Tag, overwrite: true);
+            dst.Tag.Pictures = src.Tag.Pictures;
+            dst.Save();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Couldn't copy tags from {Source} onto the transcoded file", sourceFile);
+        }
+    }
+
+    /// <summary>Lands a source file in Music/F00 in a format this Shuffle can play: native formats copy
+    /// as-is, everything else transcodes into an .m4a (ALAC lossless on 3G/4G, AAC 256k on 1G/2G) and
+    /// gets the source's tags re-applied. Always re-stages over an existing dest - a stale file may
+    /// predate a codec-policy fix. Progress: ("transcode", 0..1) for the encode, then ("copy", 0..1)
+    /// for the device write - the slow phase on the Shuffle's USB 1.1 link.</summary>
+    private async Task<string> StageIntoMusicAsync(string sourceFile, string ffmpegPath, int sourceSampleRate, int durationMs, Action<string, double>? onProgress, CancellationToken ct)
+    {
+        Directory.CreateDirectory(MusicDir);
+        if (PlaysNatively(sourceFile))
+        {
+            var nativeDest = Path.Combine(MusicDir, Sanitize(Path.GetFileNameWithoutExtension(sourceFile)) + Path.GetExtension(sourceFile));
+            if (!File.Exists(nativeDest))
+            {
+                await IPodTrackImporter.CopyFileWithProgressAsync(sourceFile, nativeDest, onProgress == null ? null : f => onProgress("copy", f), ct);
+            }
+            return nativeDest;
+        }
+
+        var dest = Path.Combine(MusicDir, Sanitize(Path.GetFileNameWithoutExtension(sourceFile)) + ".m4a");
+        var staged = Path.Combine(Path.GetTempPath(), "orgz_shuf_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
+        try
+        {
+            int rate = IPodTrackImporter.TargetSampleRate(sourceSampleRate);
+            if (SupportsAlac)
+            {
+                await IPodTrackImporter.TranscodeToAlacAsync(ffmpegPath, sourceFile, staged, rate, durationMs, onProgress == null ? null : f => onProgress("transcode", f), ct);
+            }
+            else
+            {
+                await IPodTrackImporter.TranscodeToAacAsync(ffmpegPath, sourceFile, staged, rate, durationMs, onProgress == null ? null : f => onProgress("transcode", f), ct);
+            }
+            CopyTags(sourceFile, staged);
+            await IPodTrackImporter.CopyFileWithProgressAsync(staged, dest, onProgress == null ? null : f => onProgress("copy", f), ct);
+        }
+        finally
+        {
+            try { File.Delete(staged); } catch { /* temp cleanup - best effort */ }
+        }
+        return dest;
+    }
+
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+        => Task.Run(async () =>
+        {
+            // Stage into Music/F00 (copy or transcode - the firmware only plays MP3/AAC/ALAC/WAV), then
+            // add it to the iTunesSD list so the firmware will actually play it.
+            var dest = await StageIntoMusicAsync(libraryTrack.FilePath!, ffmpegPath, libraryTrack.SampleRate ?? 0, (int)(libraryTrack.Duration?.TotalMilliseconds ?? 0), onProgress, ct);
             AppendToSd(dest);
 
             long size = 0;
@@ -677,16 +854,22 @@ public sealed class ShuffleIPod : IPodDevice
                 Artist = libraryTrack.Artist,
                 Album = libraryTrack.Album,
                 Genre = libraryTrack.Genre,
+                Composer = libraryTrack.Composer,
                 Duration = libraryTrack.Duration,
                 Track = libraryTrack.Track,
+                TotalTracks = libraryTrack.TotalTracks,
+                Disc = libraryTrack.Disc,
+                TotalDiscs = libraryTrack.TotalDiscs,
                 Year = libraryTrack.Year,
+                Extension = Path.GetExtension(dest),
+                HasAlbumArt = libraryTrack.HasAlbumArt,
                 FileSize = size,
                 IsAnalyzed = true,
             };
         }, ct);
 
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
-        => Task.Run(() =>
+        => Task.Run(async () =>
         {
             Directory.CreateDirectory(MusicDir);
             var list = ReadSd();
@@ -694,7 +877,7 @@ public sealed class ShuffleIPod : IPodDevice
             for (int i = 0; i < episodes.Count; i++)
             {
                 onProgress?.Invoke(i + 1, episodes.Count);
-                var dest = CopyIntoMusic(episodes[i].LocalFile);
+                var dest = await StageIntoMusicAsync(episodes[i].LocalFile, ffmpegPath, 0, 0, null, ct);
                 var ipodPath = ToIpodPath(dest);
                 if (!list.Any(x => string.Equals(x.IpodPath, ipodPath, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -722,13 +905,39 @@ public sealed class ShuffleIPod : IPodDevice
         => Task.Run(() =>
         {
             onProgress?.Invoke("Reading iTunesSD...");
+
+            // The iTunesSD is only paths - no titles, no artists. But iTunes writes a full iTunesDB
+            // beside it on every Shuffle it syncs (the firmware ignores it; iTunes reads it back), so
+            // that's where the metadata lives. Join SD entries to DB rows by device path; entries the
+            // DB doesn't know (OrgZ-copied files, foreign syncs) fall back to the file's own tags.
+            var byPath = new Dictionary<string, ITunesDbReader.ITunesTrack>(StringComparer.OrdinalIgnoreCase);
+            var dbPath = IPodPaths.ITunesDb(MountPath);
+            if (File.Exists(dbPath) && new FileInfo(dbPath).Length > 0)
+            {
+                onProgress?.Invoke("Parsing iTunesDB...");
+                foreach (var t in ITunesDbReader.Read(dbPath, MountPath))
+                {
+                    if (!string.IsNullOrEmpty(t.FilePath))
+                    {
+                        byPath[t.FilePath] = t;
+                    }
+                }
+            }
+
             var items = new List<MediaItem>();
             foreach (var e in ReadSd())
             {
+                ct.ThrowIfCancellationRequested();
                 var abs = Path.GetFullPath(Path.Combine(MountPath, e.IpodPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+                if (byPath.TryGetValue(abs, out var dbTrack))
+                {
+                    items.Add(DeviceItemFromTrack(dbTrack, MountPath));
+                    continue;
+                }
+
                 long size = 0;
                 try { size = File.Exists(abs) ? new FileInfo(abs).Length : 0; } catch { /* cosmetic */ }
-                items.Add(new MediaItem
+                var item = new MediaItem
                 {
                     Id = abs,
                     Kind = MediaKind.Music,
@@ -739,8 +948,13 @@ public sealed class ShuffleIPod : IPodDevice
                     Title = Path.GetFileNameWithoutExtension(abs),
                     Extension = Path.GetExtension(abs),
                     FileSize = size,
-                    IsAnalyzed = true,
-                });
+                };
+                if (size > 0)
+                {
+                    AudioFileAnalyzer.AnalyzeFile(item);
+                }
+                item.IsAnalyzed = true;
+                items.Add(item);
             }
             onBatch?.Invoke(items);
             return new DeviceLibrary(items, []);
@@ -772,17 +986,6 @@ public sealed class ShuffleIPod : IPodDevice
         }, ct);
 
     private string ToIpodPath(string absolute) => "/" + Path.GetRelativePath(MountPath, absolute).Replace('\\', '/');
-
-    private string CopyIntoMusic(string sourceFile)
-    {
-        Directory.CreateDirectory(MusicDir);
-        var dest = Path.Combine(MusicDir, Sanitize(Path.GetFileNameWithoutExtension(sourceFile)) + Path.GetExtension(sourceFile));
-        if (!File.Exists(dest))
-        {
-            File.Copy(sourceFile, dest);
-        }
-        return dest;
-    }
 
     private void AppendToSd(string destFile)
     {

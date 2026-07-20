@@ -11,7 +11,7 @@ namespace OrgZ.Services;
 public sealed record ShuffleSdTrack(
     string IpodPath,
     int FileType,                    // 1 = MP3, 2 = AAC, 4 = WAV
-    int Volume = 100,                // 0 (-100%) .. 100 (0%) .. 200 (+100%); 100 = unchanged
+    int Volume = 0,                  // 0 = no adjustment (what iTunes writes on every track - confirmed on a real 2G's iTunesSD); the 0..200 spec scale only applies when set
     int StartTimeMs = 0,
     int StopTimeMs = 0,              // 0 = play to end
     bool PlayInShuffle = true,
@@ -39,7 +39,7 @@ public static class ShuffleSdWriter
 
         // ── header (18 bytes) ──
         Put24(ms, tracks.Count);
-        Put24(ms, 0x010600);
+        Put24(ms, 0x010800);         // captured off a real Shuffle 2G's iTunes-written iTunesSD; libgpod writes the older 0x010600
         Put24(ms, HeaderSize);
         Put24(ms, 0);
         Put24(ms, 0);
