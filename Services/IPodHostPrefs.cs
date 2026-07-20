@@ -26,32 +26,37 @@ public static class IPodHostPrefs
     private static readonly int[] ComputerSlots = [0x1C0, 0x280, 0x300, 0x380];
     private const int SlotSize = 0x40;
 
-    /// <summary>The identity strings the iPod carries: the user-name slot plus every distinct
-    /// computer-name slot. The people have a right to know what their hardware testifies about.</summary>
-    public static (string? User, IReadOnlyList<string> Computers) ReadHosts(string mountPath)
+    /// <summary>One engraved host-name slot: its byte offset in iTunesPrefs and its content
+    /// (null when empty). Every populated slot is a custody witness - no deduping, no collapsing;
+    /// an old iPod should read as the trip of names it really carries.</summary>
+    public sealed record HostSlot(int Offset, string? Value);
+
+    /// <summary>The identity record an iPod carries. <see cref="Computer"/> is the ACTIVE slot
+    /// (0x300) - iTunes overwrites it on adoption; <see cref="LegacySlots"/> (0x1C0/0x280/0x380) are
+    /// layers modern iTunes stopped rewriting, fossilizing earlier custody.</summary>
+    public sealed record HostIdentity(string? UserName, string? Computer, IReadOnlyList<HostSlot> LegacySlots);
+
+    private const int CurrentComputerSlot = 0x300;
+    private static readonly int[] LegacyComputerSlots = [0x1C0, 0x280, 0x380];
+
+    /// <summary>Reads the identity trail. The people have a right to know what their hardware
+    /// testifies about.</summary>
+    public static HostIdentity ReadHosts(string mountPath)
     {
         try
         {
             var path = PrefsPath(mountPath);
             if (!File.Exists(path))
             {
-                return (null, []);
+                return new HostIdentity(null, null, []);
             }
             var bytes = File.ReadAllBytes(path);
-            var computers = new List<string>();
-            foreach (var slot in ComputerSlots)
-            {
-                var s = ReadSlot(bytes, slot);
-                if (!string.IsNullOrWhiteSpace(s) && !computers.Contains(s, StringComparer.Ordinal))
-                {
-                    computers.Add(s);
-                }
-            }
-            return (ReadSlot(bytes, UserSlot), computers);
+            var legacy = LegacyComputerSlots.Select(slot => new HostSlot(slot, ReadSlot(bytes, slot))).ToList();
+            return new HostIdentity(ReadSlot(bytes, UserSlot), ReadSlot(bytes, CurrentComputerSlot), legacy);
         }
         catch
         {
-            return (null, []);
+            return new HostIdentity(null, null, []);
         }
     }
 

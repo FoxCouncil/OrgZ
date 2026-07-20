@@ -33,13 +33,35 @@ public partial class ConnectedDevice : ObservableObject
     [ObservableProperty]
     private bool _hasKindSubViews = true;
 
-    /// <summary>The identity trail read from the on-device iTunesPrefs - "user — every computer that
-    /// ever adopted this iPod" (e.g. "Fox — DEBBIE-PC, FOXDESK"). Null when the device carries none.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HostHistoryDisplay))]
-    private string? _hostHistory;
+    // ── the custody record engraved in the on-device iTunesPrefs ──
+    // Oldest layer to newest: the first computer (legacy slots iTunes stopped rewriting), the
+    // active computer (0x300, overwritten on each adoption), and the user (0x2C0).
 
-    public string HostHistoryDisplay => string.IsNullOrWhiteSpace(HostHistory) ? "—" : HostHistory!;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HostUserNameDisplay))]
+    private string? _hostUserName;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HostComputerDisplay))]
+    private string? _hostComputer;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HostLegacy1Display))]
+    private string? _hostLegacy1;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HostLegacy2Display))]
+    private string? _hostLegacy2;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HostLegacy3Display))]
+    private string? _hostLegacy3;
+
+    public string HostUserNameDisplay => string.IsNullOrWhiteSpace(HostUserName) ? "—" : HostUserName!;
+    public string HostComputerDisplay => string.IsNullOrWhiteSpace(HostComputer) ? "—" : HostComputer!;
+    public string HostLegacy1Display => string.IsNullOrWhiteSpace(HostLegacy1) ? "—" : HostLegacy1!;
+    public string HostLegacy2Display => string.IsNullOrWhiteSpace(HostLegacy2) ? "—" : HostLegacy2!;
+    public string HostLegacy3Display => string.IsNullOrWhiteSpace(HostLegacy3) ? "—" : HostLegacy3!;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelDisplay), nameof(ModelLabelDisplay), nameof(DisplayName))]

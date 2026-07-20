@@ -47,6 +47,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:" Classes="label" />
@@ -90,10 +92,25 @@
                 <TextBlock Grid.Row="2" Grid.Column="3" Text="Format:" Classes="label" />
                 <TextBlock Grid.Row="2" Grid.Column="4" Text="{Binding FormatDisplay}" Classes="value" />
 
-                <!-- The identity trail engraved in the on-device iTunesPrefs: user + every computer
-                     that ever adopted this iPod. Erase scrubs the machine names. -->
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Set up by:" Classes="label" />
-                <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" Text="{Binding HostHistoryDisplay}" Classes="value" />
+                <!-- The custody record engraved in the on-device iTunesPrefs: user (0x2C0), active
+                     computer (0x300, iTunes overwrites on adoption), and every legacy host slot
+                     (0x1C0/0x280/0x380 - layers modern iTunes stopped rewriting). All slots shown
+                     raw, one row each: an old iPod reads as the trip of names it really carries.
+                     Erase scrubs the machine names. -->
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="User Name:" Classes="label" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding HostUserNameDisplay}" Classes="value" />
+
+                <TextBlock Grid.Row="3" Grid.Column="3" Text="Computer:" Classes="label" />
+                <TextBlock Grid.Row="3" Grid.Column="4" Text="{Binding HostComputerDisplay}" Classes="value" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Host Record 1:" Classes="label" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding HostLegacy1Display}" Classes="value" />
+
+                <TextBlock Grid.Row="4" Grid.Column="3" Text="Host Record 2:" Classes="label" />
+                <TextBlock Grid.Row="4" Grid.Column="4" Text="{Binding HostLegacy2Display}" Classes="value" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Host Record 3:" Classes="label" />
+                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding HostLegacy3Display}" Classes="value" />
             </Grid>
         </controls:MediaHeaderBar.Body>
 
