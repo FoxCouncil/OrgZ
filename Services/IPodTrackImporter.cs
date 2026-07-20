@@ -818,49 +818,68 @@ public static class IPodTrackImporter
         psi.ArgumentList.Add(output);
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
-        var stderrTask = proc.StandardError.ReadToEndAsync(ct);
-
-        string? line;
-        while ((line = await proc.StandardOutput.ReadLineAsync(ct)) != null)
+        try
         {
-            if (onProgress == null || durationMs <= 0)
+            var stderrTask = proc.StandardError.ReadToEndAsync(ct);
+
+            string? line;
+            while ((line = await proc.StandardOutput.ReadLineAsync(ct)) != null)
             {
-                continue;   // draining only
+                if (onProgress == null || durationMs <= 0)
+                {
+                    continue;   // draining only
+                }
+                if ((line.StartsWith("out_time_us=", StringComparison.Ordinal) || line.StartsWith("out_time_ms=", StringComparison.Ordinal))
+                    && long.TryParse(line.AsSpan(line.IndexOf('=') + 1), out var us) && us > 0)
+                {
+                    onProgress(Math.Clamp(us / 1000.0 / durationMs, 0, 1));
+                }
             }
-            if ((line.StartsWith("out_time_us=", StringComparison.Ordinal) || line.StartsWith("out_time_ms=", StringComparison.Ordinal))
-                && long.TryParse(line.AsSpan(line.IndexOf('=') + 1), out var us) && us > 0)
+
+            var stderr = await stderrTask;
+            await proc.WaitForExitAsync(ct);
+            if (proc.ExitCode != 0)
             {
-                onProgress(Math.Clamp(us / 1000.0 / durationMs, 0, 1));
+                var tail = stderr.Length > 800 ? stderr[^800..] : stderr;
+                throw new InvalidOperationException($"ffmpeg exited {proc.ExitCode}: {tail}");
             }
         }
-
-        var stderr = await stderrTask;
-        await proc.WaitForExitAsync(ct);
-        if (proc.ExitCode != 0)
+        catch (OperationCanceledException)
         {
-            var tail = stderr.Length > 800 ? stderr[^800..] : stderr;
-            throw new InvalidOperationException($"ffmpeg exited {proc.ExitCode}: {tail}");
+            // Cancelled mid-encode: kill ffmpeg and remove its partial output.
+            try { proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            try { File.Delete(output); } catch { /* best effort */ }
+            throw;
         }
     }
 
     /// <summary>Chunked file copy with byte-accurate progress - the device write is the slow phase on
-    /// USB-1.1-era iPods, and File.Copy gives no feedback at all.</summary>
+    /// USB-1.1-era iPods, and File.Copy gives no feedback at all. A cancelled copy deletes its torn
+    /// destination before rethrowing: no half-files left on the device.</summary>
     internal static async Task CopyFileWithProgressAsync(string source, string dest, Action<double>? onProgress, CancellationToken ct)
     {
-        const int BufSize = 1 << 20;
-        await using var src = File.OpenRead(source);
-        await using var dst = File.Create(dest);
-        var buf = new byte[BufSize];
-        long total = src.Length, done = 0;
-        int read;
-        while ((read = await src.ReadAsync(buf, ct)) > 0)
+        try
         {
-            await dst.WriteAsync(buf.AsMemory(0, read), ct);
-            done += read;
-            if (total > 0)
+            const int BufSize = 1 << 20;
+            await using var src = File.OpenRead(source);
+            await using var dst = File.Create(dest);
+            var buf = new byte[BufSize];
+            long total = src.Length, done = 0;
+            int read;
+            while ((read = await src.ReadAsync(buf, ct)) > 0)
             {
-                onProgress?.Invoke((double)done / total);
+                await dst.WriteAsync(buf.AsMemory(0, read), ct);
+                done += read;
+                if (total > 0)
+                {
+                    onProgress?.Invoke((double)done / total);
+                }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            try { File.Delete(dest); } catch { /* best effort - the stream is closed by now */ }
+            throw;
         }
     }
 
