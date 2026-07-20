@@ -689,16 +689,16 @@ public sealed class RockboxIPod : IPodDevice
 /// <summary>
 /// iPod Shuffle: screenless, no iTunesDB - audio files live under <c>iPod_Control/Music/F00</c> and
 /// the play order is the <c>iTunesSD</c> track list (big-endian classic on 1G/2G, little-endian
-/// "bdhs" on 3G/4G). Podcasts and playlists ARE offered, they just fold into the single track
-/// list: episodes sync as plain tracks (no grouping to show), and syncing a playlist replaces the
-/// device's whole list - which is what a Shuffle is.
+/// "bdhs" on 3G/4G). The hardware has no playlist concept, so <see cref="SupportsPlaylists"/> is
+/// false - a playlist sync just appends its tracks to the one list - and podcasts fold in as plain
+/// tracks. Drag-reorder of the device grid IS the ordering tool (<see cref="SupportsReorder"/>).
 /// </summary>
 public sealed class ShuffleIPod : IPodDevice
 {
     public ShuffleIPod(ConnectedDevice device) : base(device) { }
 
     public override bool SupportsDatabaseWrite => true;
-    public override bool SupportsPlaylists => true;    // the playlist BECOMES the device's one list
+    public override bool SupportsPlaylists => false;   // the hardware has NO playlist concept - a playlist sync delivers its tracks (appended), nothing more
     public override bool SupportsPodcasts => true;     // episodes land as plain tracks
     public override bool SupportsArtwork => false;
     public override bool SupportsReorder => true;      // the iTunesSD list IS the play order
@@ -902,18 +902,6 @@ public sealed class ShuffleIPod : IPodDevice
             }
             WriteSd(list);
             return added;
-        }, ct);
-
-    public override Task CreatePlaylistAsync(string name, IReadOnlyList<MediaItem> deviceTracks, CancellationToken ct = default)
-        => Task.Run(() =>
-        {
-            // A Shuffle has one track list - the sync order - so a "playlist" write just sets iTunesSD to
-            // exactly these tracks (the name has nowhere to live on a screenless device).
-            var list = deviceTracks
-                .Where(t => !string.IsNullOrEmpty(t.FilePath))
-                .Select(t => new ShuffleSdTrack(ToIpodPath(t.FilePath!), ShuffleSdWriter.FileTypeFor(t.FilePath!)))
-                .ToList();
-            WriteSd(list);
         }, ct);
 
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
