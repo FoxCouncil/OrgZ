@@ -539,11 +539,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // current disc (cancelling a half-written disc just makes a coaster).
     private CancellationTokenSource? _burnCts;
 
+    // Active device-sync cancellation source - the same LCD Cancel X trips this. Created by the
+    // OUTERMOST sync gesture and reused by nested syncs (see BeginSyncScope), so one press stops
+    // the whole gesture: the in-flight transcode/copy aborts, its torn output is deleted, and no
+    // half-added track joins the view.
+    private CancellationTokenSource? _deviceSyncCts;
+
     [RelayCommand]
     private void CancelRip()
     {
         _ripCts?.Cancel();
         _burnCts?.Cancel();
+        _deviceSyncCts?.Cancel();
     }
 
     // LCD "pages": the now-playing display has multiple modes the user cycles
@@ -3828,22 +3835,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var ipod = IPodDevice.For(device);
         using var batch = ipod.BeginBatchWrite();
-        // Top row: the operation + device. Second row: what's happening to WHICH media - phase and
-        // track title (the device is already named above).
-        var busyTitle = item.Title ?? item.FileName ?? "track";
-        BeginLcdBusy($"Syncing to {device.Name}", ipod.WillTranscode(item) ? $"Transcoding “{busyTitle}”…" : $"Copying “{busyTitle}”…");
+        var (ct, owns) = BeginSyncScope();
+        BeginLcdBusy($"Syncing to {device.Name}");
         try
         {
-            // Live per-phase progress on the LCD: the detail row names the phase and the bar is that
-            // phase's own 0..1 (ffmpeg position over duration, then bytes written over file size).
-            var deviceItem = await ipod.AddTrackAsync(item, ffmpeg ?? "ffmpeg",
-                (stage, f) => SetLcdBusy(stage == "transcode" ? $"Transcoding “{busyTitle}”…" : $"Copying “{busyTitle}”…", f));
-            _allItems.Add(deviceItem);
+            var deviceItem = await AddTrackToDeviceCoreAsync(ipod, item, ffmpeg ?? "ffmpeg", ct);
             IPodArtworkReader.Invalidate(device.MountPath);
             device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
-            AddToLiveView(deviceItem);
             _log.Information("Synced “{Title}” to {Device}", item.Title, device.MountPath);
             UpdateMainStatus($"Synced “{item.Title}” to {device.Name}.");
+        }
+        catch (OperationCanceledException)
+        {
+            if (!owns)
+            {
+                throw;   // the outer gesture owns the cancelled-messaging
+            }
+            UpdateMainStatus($"Sync to {device.Name} cancelled.");
         }
         catch (Exception ex)
         {
@@ -3852,7 +3860,54 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            EndSyncScope(owns);
             EndLcdBusy();
+        }
+    }
+
+    /// <summary>
+    /// THE one way a track's bytes land on a device - drag-drop, right-click Sync, playlist sync,
+    /// full device sync, and audiobook sync all funnel here so the gestures can never diverge again.
+    /// The LCD detail row shows the live phase + track title ("Transcoding “X”…" / "Copying “X”…")
+    /// with that phase's true 0..1 bar; batch callers pass index/count for a "(i/N) " prefix - the
+    /// ONLY textual difference between a single add and a batch. Cancellation-aware end to end: the
+    /// LCD Cancel X trips the token, the tier aborts mid-transcode/mid-copy and deletes its torn
+    /// output, and nothing joins the live view.
+    /// </summary>
+    private async Task<MediaItem> AddTrackToDeviceCoreAsync(IPodDevice ipod, MediaItem track, string ffmpeg, CancellationToken ct, int index = 0, int count = 1)
+    {
+        var prefix = count > 1 ? $"({index}/{count}) " : string.Empty;
+        var title = track.Title ?? track.FileName ?? "track";
+        SetLcdBusy(prefix + (ipod.WillTranscode(track) ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), 0);
+        var deviceItem = await ipod.AddTrackAsync(track, ffmpeg,
+            (stage, f) => SetLcdBusy(prefix + (stage == "transcode" ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), f), ct);
+        _allItems.Add(deviceItem);
+        AddToLiveView(deviceItem);
+        return deviceItem;
+    }
+
+    /// <summary>
+    /// Cancellation scope for a sync gesture. The OUTERMOST caller creates the token (owns = true)
+    /// and clears it in <see cref="EndSyncScope"/>; nested syncs (a full device sync running its
+    /// playlists) reuse it - so one press of the LCD Cancel X stops the whole gesture, not just the
+    /// sub-sync that happened to be running.
+    /// </summary>
+    private (CancellationToken Token, bool Owns) BeginSyncScope()
+    {
+        if (_deviceSyncCts != null)
+        {
+            return (_deviceSyncCts.Token, false);
+        }
+        _deviceSyncCts = new CancellationTokenSource();
+        return (_deviceSyncCts.Token, true);
+    }
+
+    private void EndSyncScope(bool owns)
+    {
+        if (owns)
+        {
+            _deviceSyncCts?.Dispose();
+            _deviceSyncCts = null;
         }
     }
 
@@ -6372,6 +6427,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // One batch scope around the whole sync: tiers with deferrable per-write work (the Nano 5G's
         // full-CDB regeneration) rebuild once at the end instead of once per track.
         using var batch = ipod.BeginBatchWrite();
+        var (ct, owns) = BeginSyncScope();
         var deviceSource = $"device:{device.MountPath}";
         var deviceByAT = _allItems
             .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
@@ -6386,6 +6442,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             for (int i = 0; i < tracks.Count; i++)
             {
+                ct.ThrowIfCancellationRequested();
                 var t = tracks[i];
                 var key = NormalizeMatchKey(t.Artist, t.Title);
                 if (!string.IsNullOrEmpty(key) && deviceByAT.TryGetValue(key, out var existing))
@@ -6401,15 +6458,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
                 try
                 {
-                    SetLcdBusy($"Adding “{t.Title}” ({i + 1}/{tracks.Count})", (double)i / tracks.Count);
-                    var deviceItem = await ipod.AddTrackAsync(t, ffmpeg ?? "ffmpeg");
-                    _allItems.Add(deviceItem);
+                    var deviceItem = await AddTrackToDeviceCoreAsync(ipod, t, ffmpeg ?? "ffmpeg", ct, i + 1, tracks.Count);
                     playlistItems.Add(deviceItem);
                     added++;
                 }
                 catch (Services.Nano5gNotSeededException)
                 {
                     throw;   // no track will ever write - surface it once, don't tally 100 "failed"s
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;   // cancellation stops the gesture - never counts as a per-track failure
                 }
                 catch (Exception ex)
                 {
@@ -6442,6 +6501,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _log.Warning("Sync to {Device} skipped: {Reason}", device.Name, ex.Message);
             UpdateMainStatus(ex.Message);
         }
+        catch (OperationCanceledException)
+        {
+            if (!owns)
+            {
+                throw;   // a full device sync owns this gesture - let it stop everything
+            }
+            _log.Information("Sync of {Name} to {Device} cancelled after {Added} added", name, device.MountPath, added);
+            UpdateMainStatus($"Sync cancelled — {added} track(s) made it to {device.Name}.");
+        }
         catch (Exception ex)
         {
             _log.Error(ex, "Sync to {Device} failed", device.Name);
@@ -6449,6 +6517,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            EndSyncScope(owns);
             EndLcdBusy();
         }
     }
@@ -6548,6 +6617,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var ipod = IPodDevice.For(dev);
+        var (ct, owns) = BeginSyncScope();   // one Cancel X press stops the WHOLE plan, not one sub-sync
 
         try
         {
@@ -6568,11 +6638,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     await SyncPodcastsToDeviceAsync(dev, ipod);
                 }
 
+                ct.ThrowIfCancellationRequested();
                 if (plan.Audiobooks && ipod.SupportsAudiobooks)
                 {
                     await SyncAudiobooksToDeviceAsync(dev, ipod);
                 }
 
+                ct.ThrowIfCancellationRequested();
                 if (plan.Favorites && ipod.SupportsPlaylists)
                 {
                     var favorites = _allItems
@@ -6607,6 +6679,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             UpdateMainStatus($"Sync to {dev.Name} complete.");
         }
+        catch (OperationCanceledException)
+        {
+            _log.Information("Sync plan for {Device} cancelled", dev.MountPath);
+            UpdateMainStatus($"Sync to {dev.Name} cancelled.");
+        }
         catch (Exception ex) when (!DeviceStillConnected(dev))
         {
             // The cable came out mid-sync - the writes now hit a dead mount and throw. Stop
@@ -6618,6 +6695,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _log.Error(ex, "Sync to {Device} failed", dev.MountPath);
             UpdateMainStatus($"Sync to {dev.Name} failed: {ex.Message}");
+        }
+        finally
+        {
+            EndSyncScope(owns);
         }
     }
 
@@ -6794,11 +6875,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         BeginLcdBusy($"Syncing audiobooks to {dev.Name}");
+        var (ct, owns) = BeginSyncScope();
         int added = 0, skipped = 0, failed = 0;
         try
         {
             for (int i = 0; i < books.Count; i++)
             {
+                ct.ThrowIfCancellationRequested();
                 var b = books[i];
                 if (present.Contains(NormalizeMatchKey(b.Artist, b.Title)))
                 {
@@ -6812,10 +6895,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
                 try
                 {
-                    SetLcdBusy($"Adding “{b.Title}” ({i + 1}/{books.Count})", (double)i / books.Count);
-                    var deviceItem = await ipod.AddTrackAsync(b, ffmpeg ?? "ffmpeg");
-                    _allItems.Add(deviceItem);
+                    await AddTrackToDeviceCoreAsync(ipod, b, ffmpeg ?? "ffmpeg", ct, i + 1, books.Count);
                     added++;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -6830,8 +6915,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _log.Information("Synced audiobooks to {Device}: added={Added} skipped={Skipped} failed={Failed}", dev.MountPath, added, skipped, failed);
             UpdateMainStatus($"Synced audiobooks to {dev.Name} — {added} new, {skipped} already there.");
         }
+        catch (OperationCanceledException)
+        {
+            if (!owns)
+            {
+                throw;
+            }
+            UpdateMainStatus($"Audiobook sync cancelled — {added} made it to {dev.Name}.");
+        }
         finally
         {
+            EndSyncScope(owns);
             EndLcdBusy();
         }
     }
