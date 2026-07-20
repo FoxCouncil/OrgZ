@@ -64,6 +64,7 @@ public class ShuffleIPodTests
             var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, IpodGeneration = generation, Name = "Shuffle" };
             var ipod = IPodDevice.For(device);
             Assert.IsType<ShuffleIPod>(ipod);
+            Assert.False(ipod.HasKindSubViews);   // one flat list - no Podcasts/Audiobooks sidebar children
 
             var source = new MediaItem { Id = songSrc, FilePath = songSrc, FileName = "song.mp3", Title = "Song", Kind = MediaKind.Music };
 

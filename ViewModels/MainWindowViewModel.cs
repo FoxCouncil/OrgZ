@@ -7106,29 +7106,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // The device row itself IS the music view (its ViewConfigKey = "Device:{mount}"). The
         // Podcasts / Audiobooks children are device-scoped sub-views, enabled per the model's
-        // capability (via IPodDevice). They list the device's content of that kind once its library
-        // is read kind-aware (today the reader tags everything Music, so they're empty for now).
+        // capability (via IPodDevice) - and skipped entirely for one-list devices (Shuffles), where
+        // pushed episodes fold into the single track list and the sub-views could only ever be empty.
         var ipod = IPodDevice.For(device);
-        ListViewConfigs.Register($"{viewKey}:{MediaKind.Podcast}", ListViewConfigs.BuildDeviceKindConfig(device.MountPath, MediaKind.Podcast));
-        ListViewConfigs.Register($"{viewKey}:{MediaKind.Audiobook}", ListViewConfigs.BuildDeviceKindConfig(device.MountPath, MediaKind.Audiobook));
-
-        var podcastsChild = new SidebarItem
-        {
-            Name = "Podcasts",
-            Icon = "fa-solid fa-podcast",
-            Category = "DEVICE",
-            IsEnabled = ipod.SupportsPodcasts,
-            ViewConfigKey = $"{viewKey}:{MediaKind.Podcast}",
-        };
-
-        var audiobooksChild = new SidebarItem
-        {
-            Name = "Audiobooks",
-            Icon = "fa-solid fa-headphones",
-            Category = "DEVICE",
-            IsEnabled = ipod.SupportsAudiobooks,
-            ViewConfigKey = $"{viewKey}:{MediaKind.Audiobook}",
-        };
 
         var sidebarItem = new SidebarItem
         {
@@ -7138,8 +7118,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Category = "DEVICES",
             IsEnabled = true,
             ViewConfigKey = viewKey,
-            Children = { podcastsChild, audiobooksChild },
         };
+
+        if (ipod.HasKindSubViews)
+        {
+            ListViewConfigs.Register($"{viewKey}:{MediaKind.Podcast}", ListViewConfigs.BuildDeviceKindConfig(device.MountPath, MediaKind.Podcast));
+            ListViewConfigs.Register($"{viewKey}:{MediaKind.Audiobook}", ListViewConfigs.BuildDeviceKindConfig(device.MountPath, MediaKind.Audiobook));
+
+            sidebarItem.Children.Add(new SidebarItem
+            {
+                Name = "Podcasts",
+                Icon = "fa-solid fa-podcast",
+                Category = "DEVICE",
+                IsEnabled = ipod.SupportsPodcasts,
+                ViewConfigKey = $"{viewKey}:{MediaKind.Podcast}",
+            });
+
+            sidebarItem.Children.Add(new SidebarItem
+            {
+                Name = "Audiobooks",
+                Icon = "fa-solid fa-headphones",
+                Category = "DEVICE",
+                IsEnabled = ipod.SupportsAudiobooks,
+                ViewConfigKey = $"{viewKey}:{MediaKind.Audiobook}",
+            });
+        }
+
         DeviceItems.Add(sidebarItem);
 
         BeginLcdBusy($"Scanning {device.Name}");
