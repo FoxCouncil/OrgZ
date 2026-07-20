@@ -456,6 +456,44 @@ public static class ITunesDbWriter
         mhlp?.WriteHeaderInt32(0x08, playlists.Children.Count(c => c.Magic == "mhyp"));
     }
 
+    /// <summary>Reorders every master/library playlist's entries to the given track-id order (ids
+    /// not listed keep their relative order after the listed ones). Each MHIP chunk survives intact -
+    /// only its position MHOD is re-stamped - so iTunes-written extras ride along. Callers
+    /// Normalize + Serialize after.</summary>
+    public static void ReorderMasterPlaylists(ITunesDbDocument doc, IReadOnlyList<uint> orderedTrackIds)
+    {
+        var rank = new Dictionary<uint, int>();
+        for (int i = 0; i < orderedTrackIds.Count; i++)
+        {
+            rank.TryAdd(orderedTrackIds[i], i);
+        }
+
+        foreach (var master in MasterPlaylists(doc))
+        {
+            var others = master.Children.Where(c => c.Magic != "mhip").ToList();
+            var sorted = master.Children
+                .Where(c => c.Magic == "mhip")
+                .Select((m, idx) => (Chunk: m, Idx: idx, TrackId: (uint)m.ReadHeaderInt32(0x18)))
+                .OrderBy(x => rank.TryGetValue(x.TrackId, out var r) ? r : int.MaxValue)
+                .ThenBy(x => x.Idx)
+                .Select(x => x.Chunk)
+                .ToList();
+
+            master.Children.Clear();
+            foreach (var o in others)
+            {
+                master.Children.Add(o);
+            }
+            int pos = 0;
+            foreach (var m in sorted)
+            {
+                m.Children.RemoveAll(c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 100);
+                m.Children.Add(BuildPlaylistPositionMhod(pos++));
+                master.Children.Add(m);
+            }
+        }
+    }
+
     /// <summary>Renames every master/library playlist (both dataset mirrors). iTunes displays the
     /// master's name as the DEVICE name for screenless iPods, so a device rename that skips it
     /// leaves iTunes showing the old identity forever. Callers Normalize + Serialize after.</summary>
