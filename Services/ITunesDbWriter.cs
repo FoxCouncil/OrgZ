@@ -456,6 +456,22 @@ public static class ITunesDbWriter
         mhlp?.WriteHeaderInt32(0x08, playlists.Children.Count(c => c.Magic == "mhyp"));
     }
 
+    /// <summary>Renames every master/library playlist (both dataset mirrors). iTunes displays the
+    /// master's name as the DEVICE name for screenless iPods, so a device rename that skips it
+    /// leaves iTunes showing the old identity forever. Callers Normalize + Serialize after.</summary>
+    public static void RenameMasterPlaylists(ITunesDbDocument doc, string name)
+    {
+        foreach (var master in MasterPlaylists(doc))
+        {
+            var titles = master.Children.Where(c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 1).ToList();
+            foreach (var t in titles)
+            {
+                master.Children.Remove(t);
+            }
+            master.Children.Insert(0, BuildStringMhod(1, name));
+        }
+    }
+
     /// <summary>Removes every non-master playlist whose name MHOD equals <paramref name="name"/>
     /// from both playlist datasets, so a re-sync replaces rather than duplicates - and a mirror sync
     /// can prune an orphaned playlist. The master/Library list is always left intact.</summary>

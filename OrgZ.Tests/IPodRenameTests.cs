@@ -72,6 +72,24 @@ public class IPodRenameTests
     }
 
     [Fact]
+    public void Renaming_master_playlists_changes_what_iTunes_shows_as_the_device_name()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "orgz-mplren-" + Guid.NewGuid().ToString("N") + ".itunesdb");
+        try
+        {
+            var doc = ITunesDbWriter.CreateEmpty();
+            ITunesDbWriter.RenameMasterPlaylists(doc, "foxShuffle");
+            ITunesDbChunkTree.Normalize(doc.Root);
+            File.WriteAllBytes(path, ITunesDbChunkTree.Serialize(doc));
+            Assert.Equal("foxShuffle", ITunesDbReader.TryReadDeviceName(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Track_only_database_reads_as_no_device_name()
     {
         // The bripod fixture is a tracks-only envelope (mhsd type 1, no playlist dataset).
