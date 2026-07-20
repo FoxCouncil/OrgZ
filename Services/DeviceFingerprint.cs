@@ -73,6 +73,13 @@ public static class DeviceFingerprint
             Name = ResolveVolumeName(drive, root),
         };
 
+        // iTunes stores the user's iPod name in DeviceInfo (UTF-16, unclipped) - prefer it over the
+        // volume label, which FAT32 truncates at 11 chars ("DEBBIE'S IPOD" mounts as "DEBBIE'S IP").
+        if (hasIPodControl && IPodRename.TryReadName(root) is { } deviceInfoName)
+        {
+            device.Name = deviceInfoName;
+        }
+
         // Read the on-device /.orgz/device record first - it's the authoritative cache
         // that travels with the iPod. Any field it supplies becomes the initial baseline;
         // live detection below only overwrites a field when it actually finds new data.

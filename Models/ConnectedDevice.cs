@@ -23,6 +23,12 @@ public partial class ConnectedDevice : ObservableObject
 
     public string Name { get; set; } = "Device";
 
+    /// <summary>Whether the device's tier has Podcasts/Audiobooks sub-views (set from
+    /// <c>IPodDevice.HasKindSubViews</c> on connect). A one-list device (Shuffle) hides both its
+    /// sidebar children and the Podcasts segment of the capacity legend.</summary>
+    [ObservableProperty]
+    private bool _hasKindSubViews = true;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelDisplay), nameof(ModelLabelDisplay), nameof(DisplayName))]
     private string? _model;

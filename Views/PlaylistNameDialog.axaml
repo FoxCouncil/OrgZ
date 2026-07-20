@@ -9,7 +9,7 @@
 		WindowStartupLocation="CenterOwner"
 		Classes="orgzDialog">
 	<StackPanel Margin="16" Spacing="12">
-		<TextBlock Text="Playlist name:" />
+		<TextBlock x:Name="PromptText" Text="Playlist name:" />
 		<TextBox x:Name="NameInput" Watermark="My Playlist" />
 		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
 			<Button Content="OK" Width="70" Click="OkButton_Click" />

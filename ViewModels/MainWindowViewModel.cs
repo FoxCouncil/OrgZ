@@ -3892,6 +3892,48 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Right-click "Rename…" on a device: writes the new name the iTunes way - DeviceInfo file on a
+    /// stock iPod (the authoritative, unclipped name) plus the volume label as a mirror (FAT32 clips
+    /// it at 11 chars) - then re-fingerprints so the sidebar and info bar pick it up live.
+    /// </summary>
+    internal async Task RenameDeviceAsync(SidebarItem? item)
+    {
+        var dev = DeviceForSidebarItem(item);
+        if (dev is null || item is null)
+        {
+            return;
+        }
+
+        var dialog = new Views.PlaylistNameDialog(dev.Name, title: "Rename Device", prompt: "Device name:");
+        var result = await dialog.ShowDialog<string?>(_window);
+        if (string.IsNullOrWhiteSpace(result) || result.Trim() == dev.Name)
+        {
+            return;
+        }
+        var name = result.Trim();
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (dev.DeviceType == DeviceType.StockIPod)
+                {
+                    IPodRename.WriteName(dev.MountPath, name);
+                }
+                IPodRename.TrySetVolumeLabel(dev.MountPath, name);
+            });
+            _log.Information("Renamed device {Mount} to {Name}", dev.MountPath, name);
+            UpdateMainStatus($"Renamed to “{name}”.");
+            RefreshDeviceInfo(item);
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Rename failed for {Mount}", dev.MountPath);
+            UpdateMainStatus($"Couldn't rename {dev.Name} — {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Drag-onto-device import: delegates to <see cref="SyncItemToDeviceAsync"/> so a drop and the
     /// right-click "Sync > (device)" are ONE code path - same duplicate check, same batch write,
     /// same space accounting, same progress surface. They diverged once (drag skipped the duplicate
@@ -7109,6 +7151,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // capability (via IPodDevice) - and skipped entirely for one-list devices (Shuffles), where
         // pushed episodes fold into the single track list and the sub-views could only ever be empty.
         var ipod = IPodDevice.For(device);
+        device.HasKindSubViews = ipod.HasKindSubViews;
 
         var sidebarItem = new SidebarItem
         {

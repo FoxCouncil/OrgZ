@@ -180,7 +180,8 @@
                             <TextBlock Text="{Binding AudioSpaceLabel}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <!-- Hidden on one-list devices (Shuffles): no podcast concept, the segment could only read 0 B. -->
+                        <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasKindSubViews}">
                             <Border Width="10" Height="10" CornerRadius="1" VerticalAlignment="Center">
                                 <Border.Background>
                                     <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
