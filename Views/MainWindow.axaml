@@ -44,6 +44,7 @@
 			</NativeMenuItem>
 			<NativeMenuItem Header="Help">
 				<NativeMenu>
+					<NativeMenuItem Header="OrgZ Manual" Command="{Binding OpenManualCommand}" />
 					<NativeMenuItem Header="Report a Bug" Command="{Binding ReportBugCommand}" />
 					<NativeMenuItem Header="OrgZ on GitHub" Command="{Binding OpenGitHubCommand}" />
 					<NativeMenuItemSeparator />

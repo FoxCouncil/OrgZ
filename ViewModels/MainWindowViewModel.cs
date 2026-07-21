@@ -1937,6 +1937,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private const string GitHubUrl = "https://github.com/FoxCouncil/OrgZ";
 
+    /// <summary>The manual for THIS build. Docs deploy versioned (mike) alongside every release, so
+    /// an installed app links to its own version's pages forever - never a newer release's docs.</summary>
+    internal static string ManualUrl =>
+        typeof(MainWindowViewModel).Assembly.GetName().Version is { } v
+            ? $"https://foxcouncil.github.io/OrgZ/{v.Major}.{v.Minor}.{v.Build}/"
+            : "https://foxcouncil.github.io/OrgZ/latest/";
+
+    [RelayCommand]
+    private void OpenManual() => HtmlInlinesBuilder.OpenUrl(ManualUrl);
+
     [RelayCommand]
     private void OpenGitHub() => HtmlInlinesBuilder.OpenUrl(GitHubUrl);
 
