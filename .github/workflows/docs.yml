@@ -7,6 +7,7 @@ on:
       - 'docs/**'
       - 'docs-landing/**'
       - 'mkdocs.yml'
+      - 'OrgZ.csproj'   # a version bump must republish the docs under the new version
   workflow_dispatch:
 
 permissions:

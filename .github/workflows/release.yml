@@ -85,6 +85,33 @@ jobs:
           name: release-${{ matrix.rid }}
           path: releases/
 
+  # Docs follow the release cycle: every tag publishes its own docs version (mike), so an
+  # installed app's Help > Manual link resolves to ITS version's pages forever. Independent of
+  # the push-triggered docs workflow, which can be path-filtered away on a tag push.
+  docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install mkdocs-material mike
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy versioned docs
+        run: mike deploy --push --update-aliases "${GITHUB_REF_NAME#v}" latest
+
   release:
     needs: build
     runs-on: ubuntu-latest
