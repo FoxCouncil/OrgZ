@@ -218,6 +218,26 @@ public partial class MediaInfoDialog : Window
         SummaryR4C0Value.Text = !string.IsNullOrEmpty(item.EncoderSettings) ? item.EncoderSettings : "-";
         SummaryR4C2Label.Text = "Codec:";
         SummaryR4C2Value.Text = !string.IsNullOrEmpty(item.CodecDescription) ? item.CodecDescription : "-";
+
+        // Items scanned before BitDepth existed have null here - probe the
+        // file once on dialog open so the field fills without a full rescan.
+        if (item.BitDepth is null && !string.IsNullOrEmpty(item.FilePath))
+        {
+            try
+            {
+                using var f = TagLib.File.Create(item.FilePath);
+                item.BitDepth = f.Properties.BitsPerSample > 0 ? f.Properties.BitsPerSample : null;
+            }
+            catch
+            {
+                // Unreadable file - leave the dash.
+            }
+        }
+
+        SummaryR5C0Label.Text = "Bit Depth:";
+        SummaryR5C0Value.Text = item.BitDepth is > 0 ? $"{item.BitDepth}-bit" : "-";
+        SummaryR5C2Label.Text = "";
+        SummaryR5C2Value.Text = "";
     }
 
     private void LoadRadioSummary(MediaItem item)
@@ -241,6 +261,15 @@ public partial class MediaInfoDialog : Window
         SummaryR4C0Value.Text = "";
         SummaryR4C2Label.Text = "";
         SummaryR4C2Value.Text = "";
+        ClearSummaryRow5();
+    }
+
+    private void ClearSummaryRow5()
+    {
+        SummaryR5C0Label.Text = "";
+        SummaryR5C0Value.Text = "";
+        SummaryR5C2Label.Text = "";
+        SummaryR5C2Value.Text = "";
     }
 
     /// <summary>
@@ -280,6 +309,7 @@ public partial class MediaInfoDialog : Window
         SummaryR4C0Value.Text = "";
         SummaryR4C2Label.Text = "";
         SummaryR4C2Value.Text = "";
+        ClearSummaryRow5();
     }
 
     #endregion

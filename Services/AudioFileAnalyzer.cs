@@ -36,6 +36,7 @@ public class AudioFileAnalyzer
 
             item.AudioBitrate = file.Properties.AudioBitrate;
             item.SampleRate = file.Properties.AudioSampleRate;
+            item.BitDepth = file.Properties.BitsPerSample > 0 ? file.Properties.BitsPerSample : null;
             item.AudioChannels = file.Properties.AudioChannels;
 
             // ReplayGain track gain (TagLib returns NaN when the file carries none). Playback reads

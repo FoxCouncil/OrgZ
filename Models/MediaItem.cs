@@ -158,6 +158,9 @@ public partial class MediaItem : ObservableObject
 
     public int? SampleRate { get; set; }
 
+    /// <summary>Bits per sample for lossless sources (16/24/32); null for lossy codecs where bit depth isn't meaningful.</summary>
+    public int? BitDepth { get; set; }
+
     public int? AudioChannels { get; set; }
 
     public string? EncoderSettings { get; set; }
