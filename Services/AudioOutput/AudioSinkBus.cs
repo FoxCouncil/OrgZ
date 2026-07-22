@@ -24,9 +24,27 @@ namespace OrgZ.Services.AudioOutput;
 /// master volume lives on the bus and is applied via sample scaling here
 /// before fan-out - that way even sinks without native gain support honor it.
 /// </para>
+/// <para>
+/// The bus aggregates incoming PCM to at least <see cref="AggregateTargetMs"/>
+/// per fan-out.  LibVLC's audio callback delivers whatever block size its
+/// decode chain produces: 44.1 kHz FLAC arrives in comfortable 4096-frame
+/// (~93 ms) blocks, but hi-res sources (24-bit/192 kHz) come out of VLC's
+/// resampler as 264-frame (~6 ms) slivers.  Platform sinks size their
+/// hardware queues in buffers, not milliseconds - waveOut's 4-slot ring held
+/// a mere 24 ms of audio for such slivers and underran into audible garbage.
+/// Aggregating here makes sink queue depth independent of the source's
+/// chunking, for every platform sink at once.
+/// </para>
 /// </remarks>
 public sealed class AudioSinkBus : IDisposable
 {
+    /// <summary>
+    /// Minimum audio per fan-out, in milliseconds.  Blocks at or above this
+    /// size pass through unbuffered (44.1 kHz FLAC's ~93 ms blocks behave
+    /// exactly as before); smaller blocks accumulate until they add up to it.
+    /// </summary>
+    public const int AggregateTargetMs = 50;
+
     private static readonly ILogger _log = Logging.For("AudioSinkBus");
 
     private readonly object _lock = new();
@@ -35,6 +53,14 @@ public sealed class AudioSinkBus : IDisposable
     private float _masterVolume = 1f;
     private float _normalizationGain = 1f;
     private bool _disposed;
+
+    // PCM aggregation state.  Write is called from LibVLC's single audio
+    // worker thread; SetFormat / FlushAll can arrive from other threads, so
+    // the accumulator has its own lock (never held across sink writes).
+    private readonly object _accumLock = new();
+    private byte[] _accum = [];
+    private int _accumFill;
+    private int _accumTarget;
 
     /// <summary>
     /// Master volume applied to all sinks in [0, 1].  Values above 1 are
@@ -68,6 +94,18 @@ public sealed class AudioSinkBus : IDisposable
 
     public void SetFormat(AudioFormat format)
     {
+        lock (_accumLock)
+        {
+            var target = format.BytesPerSecond * AggregateTargetMs / 1000;
+            target -= target % format.BytesPerFrame;
+            _accumTarget = Math.Max(target, format.BytesPerFrame);
+            if (_accum.Length < _accumTarget * 2)
+            {
+                _accum = new byte[_accumTarget * 2];
+            }
+            _accumFill = 0;
+        }
+
         lock (_lock)
         {
             _format = format;
@@ -135,8 +173,46 @@ public sealed class AudioSinkBus : IDisposable
     /// <summary>
     /// Flushes every active sink's queued audio - called on seek / track
     /// change so the listener doesn't hear the tail of the previous position.
+    /// Also drops any PCM still accumulating toward the next fan-out.
     /// </summary>
-    public void FlushAll() => ForEachSink(s => s.Flush());
+    public void FlushAll()
+    {
+        lock (_accumLock)
+        {
+            _accumFill = 0;
+        }
+        ForEachSink(s => s.Flush());
+    }
+
+    /// <summary>
+    /// Plays out every sink's queued audio - the natural end-of-track
+    /// counterpart to <see cref="FlushAll"/>.  Any PCM still accumulating
+    /// toward the next fan-out is written first (it's the very end of the
+    /// track), then each sink blocks until its hardware queue has actually
+    /// reached the speakers.  Called from LibVLC's drain callback, which
+    /// expects this to block until playback is audibly finished.
+    /// </summary>
+    public void DrainAll()
+    {
+        byte[]? tail = null;
+        int tailLength = 0;
+        lock (_accumLock)
+        {
+            if (_accumFill > 0)
+            {
+                tail = _accum;
+                tailLength = _accumFill;
+                _accumFill = 0;
+            }
+        }
+
+        if (tail != null)
+        {
+            FanOut(tail.AsSpan(0, tailLength));
+        }
+
+        ForEachSink(s => s.Drain());
+    }
 
     private void ForEachSink(Action<IAudioSink> action)
     {
@@ -179,10 +255,11 @@ public sealed class AudioSinkBus : IDisposable
     }
 
     /// <summary>
-    /// Fans <paramref name="pcm"/> out to every active sink.  Returns quickly
-    /// - sinks queue the buffer internally for their own playback thread.
-    /// A master-volume scaling pass is applied into a scratch buffer when
-    /// <see cref="MasterVolume"/> &lt; 1 so sinks see the attenuated bytes.
+    /// Queues <paramref name="pcm"/> for fan-out to every active sink.
+    /// Blocks of at least <see cref="AggregateTargetMs"/> fan out immediately;
+    /// smaller blocks accumulate until they add up to it, so sinks always see
+    /// hardware-queue-friendly buffer sizes regardless of how the decoder
+    /// chunked the stream.
     /// </summary>
     public void Write(ReadOnlySpan<byte> pcm)
     {
@@ -191,6 +268,43 @@ public sealed class AudioSinkBus : IDisposable
             return;
         }
 
+        byte[]? aggregated = null;
+        int aggregatedLength = 0;
+        lock (_accumLock)
+        {
+            // _accumTarget == 0 means Write before SetFormat - pass through.
+            // A block already at/above target with nothing pending skips the
+            // copy entirely (the pre-aggregation fast path).
+            if (_accumTarget > 0 && (pcm.Length < _accumTarget || _accumFill > 0))
+            {
+                var needed = _accumFill + pcm.Length;
+                if (_accum.Length < needed)
+                {
+                    Array.Resize(ref _accum, needed);
+                }
+                pcm.CopyTo(_accum.AsSpan(_accumFill));
+                _accumFill = needed;
+                if (_accumFill < _accumTarget)
+                {
+                    return;
+                }
+                aggregated = _accum;
+                aggregatedLength = _accumFill;
+                _accumFill = 0;
+            }
+        }
+
+        FanOut(aggregated != null ? aggregated.AsSpan(0, aggregatedLength) : pcm);
+    }
+
+    /// <summary>
+    /// Fans <paramref name="pcm"/> out to every active sink.  Returns quickly
+    /// - sinks queue the buffer internally for their own playback thread.
+    /// A master-volume scaling pass is applied into a scratch buffer when
+    /// <see cref="MasterVolume"/> &lt; 1 so sinks see the attenuated bytes.
+    /// </summary>
+    private void FanOut(ReadOnlySpan<byte> pcm)
+    {
         // Snapshot the sink list so we don't hold the lock across the
         // potentially-slow sink writes.
         IAudioSink[] sinks;

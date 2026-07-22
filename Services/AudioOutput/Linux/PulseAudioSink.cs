@@ -211,6 +211,25 @@ internal sealed class PulseAudioSink : IAudioSink
         }
     }
 
+    public void Drain()
+    {
+        // pa_simple_drain blocks until the server has played everything we
+        // wrote - exactly the end-of-track semantic. Hold _lifecycle for the
+        // same freed-stream race as Write.
+        lock (_lifecycle)
+        {
+            if (_disposed || _stream == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (PulseNative.pa_simple_drain(_stream, out var err) < 0)
+            {
+                _log.Warning("pa_simple_drain failed: pa error {Error}", err);
+            }
+        }
+    }
+
     public void Close()
     {
         lock (_lifecycle)

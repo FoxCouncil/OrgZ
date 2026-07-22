@@ -60,6 +60,9 @@ internal static class PulseNative
     [DllImport("libpulse-simple.so.0", EntryPoint = "pa_simple_flush")]
     public static extern int pa_simple_flush(IntPtr p, out int error);
 
+    [DllImport("libpulse-simple.so.0", EntryPoint = "pa_simple_drain")]
+    public static extern int pa_simple_drain(IntPtr p, out int error);
+
     // -- async API (used only for sink enumeration) --------------------
 
     [DllImport("libpulse.so.0", EntryPoint = "pa_threaded_mainloop_new")]
