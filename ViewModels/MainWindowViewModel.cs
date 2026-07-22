@@ -45,6 +45,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal readonly OrgZ.Services.AudioOutput.AudioOutputManager _audioOutput = new();
     private OrgZ.Services.AudioVisualization.AudioTap _audioTap = null!;
 
+    // Bit-perfect playback for local FLAC: bypasses libvlc (whose amem output
+    // is 16-bit only) and decodes at native bit depth / sample rate. Null in
+    // headless construction, same as _player.
+    private FlacPlaybackEngine? _flacEngine;
+
+    /// <summary>True while the bit-perfect engine owns playback (playing or paused).</summary>
+    private bool EngineActive => _flacEngine?.IsActive == true;
+
 #if WINDOWS
     private TaskbarThumbBarService? _thumbBarService;
 #endif
@@ -1412,6 +1420,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioOutput.LoadAndApplyPersistedSelections();
         UpdateMasterVolume();
 
+        // Bit-perfect FLAC engine shares the tap (VU/visualizers) and sink bus
+        // with the VLC path; its events funnel into the same handlers.
+        _flacEngine = new FlacPlaybackEngine(_audioOutput.Bus, _audioTap);
+        _flacEngine.TimeChanged += ms => UI(() => HandlePlaybackTime(ms, (long)(CurrentPlayingItem?.Duration?.TotalMilliseconds ?? 0)));
+        _flacEngine.EndReached += () => UI(HandlePlaybackEnded);
+        _flacEngine.EncounteredError += msg => UI(() =>
+        {
+            IsPlaybackLoading = false;
+            _log.Warning("FlacPlaybackEngine error: {Message}", msg);
+            UpdateMainStatus("Couldn't play this — the media source couldn't be opened.");
+        });
+
         // First-audio signal: libvlc fires Playing as soon as it thinks it has
         // a Media to play -- often before any PCM has actually reached the tap.
         // Hook the audio path itself so the loading-state indicator and the
@@ -1435,128 +1455,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         });
 
-        _player.EndReached += (s, e) => UI(() =>
-        {
-            // A finished audiobook starts from the top next time - clear its resume point (the
-            // throttle only gets within ~5s of the end; this is the authoritative reset).
-            if (CurrentPlayingItem is { Kind: MediaKind.Audiobook, Source: null } finishedBook)
-            {
-                finishedBook.LastPositionMs = 0;
-                var finishedId = finishedBook.Id;
-                _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(finishedId, 0));
-            }
+        _player.EndReached += (s, e) => UI(HandlePlaybackEnded);
 
-            if (CurrentStation != null)
-            {
-                ClearPlayback();
-                UpdateMainStatus("Stream ended");
-                return;
-            }
+        _player.Paused += (s, e) => UI(UiShowPaused);
 
-            if (_playbackContext != null && _playbackContext.HasNext)
-            {
-                var next = _playbackContext.MoveNext()!;
-                ExecutePlayItem(next);
-                return;
-            }
+        // Don't clear IsPlaybackLoading on Playing -- libvlc fires it the
+        // instant it has a Media, which can be well before actual audio
+        // reaches the tap. AudioTap.AudioStarted is the precise signal.
+        _player.Playing += (s, e) => UI(UiShowPlaying);
 
-            ClearPlayback();
-            UpdateMainStatus("Finished");
-        });
-
-        _player.Paused += (s, e) => UI(() =>
-        {
-            ButtonPlayPauseIcon = ICON_PLAY;
-            ButtonPlayPausePadding = ICON_PLAY_PADDING;
-
-#if WINDOWS
-            _thumbBarService?.SetPlayingState(false);
-#endif
-            _nowPlaying?.SetPlaybackStatus("Paused");
-
-            UpdateMainStatus("Paused");
-        });
-
-        _player.Playing += (s, e) => UI(() =>
-        {
-            // Don't clear IsPlaybackLoading here -- libvlc fires Playing the
-            // instant it has a Media, which can be well before actual audio
-            // reaches the tap. AudioTap.AudioStarted is the precise signal.
-            ButtonPlayPauseIcon = ICON_PAUSE;
-            ButtonPlayPausePadding = ICON_PAUSE_PADDING;
-
-#if WINDOWS
-            _thumbBarService?.SetPlayingState(true);
-#endif
-            _nowPlaying?.SetPlaybackStatus("Playing");
-
-            UpdateMainStatus("Playing");
-        });
-
-        long _lastMacNowPlayingPushMs = long.MinValue;
-        _player.TimeChanged += (s, e) => UI(() =>
-        {
-            CurrentTrackTime = FormatHelper.FormatDurationCompact(e.Time);
-            if (!isSeeking)
-            {
-                CurrentTrackTimeNumber = e.Time;
-            }
-
-            // Persist the podcast resume position, throttled to ~5s of movement (also
-            // catches seeks). Runs off the UI thread; UpdateListenPosition opens its own
-            // connection, so it's safe.
-            if (_currentPodcastStream is { } ps && e.Time > 0 && Math.Abs(e.Time - _lastPodcastSaveMs) >= 5000)
-            {
-                _lastPodcastSaveMs = e.Time;
-                var episodeId = ps.Episode.Id;
-                var posMs = e.Time;
-                var len = _player.Length;
-                var completed = len > 0 && posMs >= len - 15000;
-                _ = Task.Run(() => Services.Podcast.PodcastCache.UpdateListenPosition(episodeId, posMs, completed));
-            }
-
-            // Audiobook resume position, same ~5s throttle (Math.Abs also catches seeks). Within
-            // the last 15s counts as finished - the resume point resets so the next play starts
-            // from the top instead of the credits.
-            if (CurrentPlayingItem is { Kind: MediaKind.Audiobook, Source: null } book && e.Time > 0 && Math.Abs(e.Time - _lastAudiobookSaveMs) >= 5000)
-            {
-                _lastAudiobookSaveMs = e.Time;
-                var len = _player.Length;
-                var pos = len > 0 && e.Time >= len - 15000 ? 0 : e.Time;
-                book.LastPositionMs = pos;
-                var bookId = book.Id;
-                _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(bookId, pos));
-            }
-
-            // Push pivots to macOS Now Playing: the very first TimeChanged (so
-            // the widget locks onto libvlc's clock instead of extrapolating from
-            // 0), every 5 s as a re-sync against any drift, and on a rewind
-            // (track change → e.Time resets to 0). The widget extrapolates
-            // smoothly between pivots at rate=1, which matches OrgZ's display
-            // much better than flooding macOS with 4 Hz updates - the widget
-            // appeared to coalesce / lag those, ending up several seconds behind.
-            if (_nowPlaying is not null)
-            {
-                bool firstPush = _lastMacNowPlayingPushMs == long.MinValue;
-                bool rewound = e.Time < _lastMacNowPlayingPushMs;
-                bool resyncDue = e.Time - _lastMacNowPlayingPushMs >= 5000;
-                if (firstPush || rewound || resyncDue)
-                {
-                    _lastMacNowPlayingPushMs = e.Time;
-                    _nowPlaying.SetPlaybackPosition(TimeSpan.FromMilliseconds(e.Time), 1.0);
-                }
-            }
-
-            // Stop time check for per-track options
-            var playing = CurrentPlayingItem;
-            if (playing is { UseStopTime: true, StopTime: not null })
-            {
-                if (e.Time >= (long)playing.StopTime.Value.TotalMilliseconds)
-                {
-                    ButtonNextTrack();
-                }
-            }
-        });
+        _player.TimeChanged += (s, e) => UI(() => HandlePlaybackTime(e.Time, _player.Length));
 
         _player.Stopped += (s, e) => UI(() =>
         {
@@ -1568,16 +1476,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            IsPlaybackLoading = false;
-            ButtonPlayPauseIcon = ICON_PLAY;
-            ButtonPlayPausePadding = ICON_PLAY_PADDING;
+            // The engine stopping VLC as it takes over must not repaint the
+            // stopped UI over the track the engine is about to play.
+            if (EngineActive)
+            {
+                return;
+            }
 
-#if WINDOWS
-            _thumbBarService?.SetPlayingState(false);
-#endif
-            _nowPlaying?.SetPlaybackStatus("Stopped");
-
-            UpdateMainStatus("Stopped");
+            UiShowStopped();
         });
 
         // libvlc reports open/decode failures asynchronously on this event rather
@@ -1845,7 +1751,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             // Anything playing - music, CD, device track, or podcast - pauses. No exceptions,
             // no view checks. This is the line that must never be skipped.
-            if (_player.IsPlaying)
+            if (EngineActive ? _flacEngine!.IsPlaying : _player.IsPlaying)
             {
                 Pause();
                 return;
@@ -1853,6 +1759,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             // Paused or stopped with a track still loaded - resume / restart it.
             if (_player.State == LibVLCSharp.Shared.VLCState.Paused
+                || _flacEngine?.IsPaused == true
                 || _currentPodcastStream != null
                 || CurrentFileItem != null
                 || CurrentPlayingItem != null)
@@ -2324,6 +2231,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal void CurrentTrackTimeNumberPointerReleased()
     {
         isSeeking = false;
+        if (EngineActive)
+        {
+            _flacEngine!.SeekMs(CurrentTrackTimeNumber);
+            return;
+        }
         _player.Time = CurrentTrackTimeNumber;
     }
 
@@ -2519,24 +2431,91 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var previousMedia = _currentMedia;
         var previousHandler = _currentMediaMetaHandler;
         _currentMediaMetaHandler = null;
-        _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
-        ApplyVisualizerOption(_currentMedia);
+
         SetupNormalization(file);
 
-        // Local file - opens instantly, so skip the barber pole.
-        NewPlaybackEpoch();
-        BeginPlayback(showLoading: false);
+        // Bit-perfect route: local FLAC decodes at native bit depth / sample
+        // rate through the engine. VLC keeps the track when a per-track EQ
+        // preset or the VLC visualizer window is in play - both are VLC-side
+        // DSP that the bit-exact path by definition bypasses.
+        var useEngine = _flacEngine != null
+            && FlacPlaybackEngine.CanPlay(file)
+            && string.IsNullOrEmpty(file.EqPreset)
+            && !Settings.Get("OrgZ.Visualizer.Enabled", false);
 
-        // Audiobooks resume where they left off - same applied-once-audio-starts machinery as
-        // podcast resume. Skip a barely-started position (re-seeking to 0:04 is noise, not resume).
-        if (file.Kind == MediaKind.Audiobook && file.Source == null && file.LastPositionMs > 10_000)
+        // The engine parses the decoder's raw output with the file's exact
+        // bit depth / rate / channel count - guessing corrupts audio. Items
+        // scanned before BitDepth existed get a quick TagLib probe here; if
+        // the numbers can't be established, VLC keeps the track.
+        if (useEngine && (file.BitDepth is null or 0 || file.SampleRate is null or 0 || file.AudioChannels is null or 0))
         {
-            _pendingResumeMs = file.LastPositionMs;
+            try
+            {
+                using var probe = TagLib.File.Create(file.FilePath!);
+                file.SampleRate = probe.Properties.AudioSampleRate;
+                file.BitDepth = probe.Properties.BitsPerSample > 0 ? probe.Properties.BitsPerSample : null;
+                file.AudioChannels = probe.Properties.AudioChannels;
+            }
+            catch
+            {
+                useEngine = false;
+            }
         }
-        _lastAudiobookSaveMs = 0;
+        if (useEngine && (file.BitDepth is not (16 or 24 or 32) || file.SampleRate is null or 0 || file.AudioChannels is not (1 or 2)))
+        {
+            useEngine = false;
+        }
 
-        _ = _player.Play(_currentMedia);
-        DeferDispose(previousMedia, previousHandler, previousRadio);
+        if (useEngine)
+        {
+            NewPlaybackEpoch();
+            BeginPlayback(showLoading: false);
+            _lastAudiobookSaveMs = 0;
+
+            // VLC hands over: stop it quietly so its Stopped event doesn't
+            // repaint the UI over the incoming track.
+            _currentMedia = null;
+            if (_player.State is VLCState.Opening or VLCState.Buffering or VLCState.Playing or VLCState.Paused)
+            {
+                _suppressStoppedLoadingClear = true;
+                _ = ThreadPool.QueueUserWorkItem(_ => _player.Stop());
+            }
+
+            long resumeMs = file.Kind == MediaKind.Audiobook && file.Source == null && file.LastPositionMs > 10_000 ? file.LastPositionMs : 0;
+
+            // The MediaChanged handler never fires on this path - set the LCD
+            // and duration directly from the item's scanned metadata.
+            IsSeekEnabled = true;
+            _pendingDurationMs = file.Duration is { } dur && dur.TotalMilliseconds > 0 ? (long)dur.TotalMilliseconds : null;
+            ApplyPendingDuration();
+            CurrentTrackLine1 = file.Title ?? "Unknown Title";
+            var engineArtist = file.Artist ?? "Unknown Artist";
+            CurrentTrackLine2 = string.IsNullOrWhiteSpace(file.Album) ? engineArtist : $"{engineArtist} — {file.Album}";
+
+            _flacEngine!.Play(file.FilePath!, file.SampleRate!.Value, file.AudioChannels!.Value, file.BitDepth!.Value, resumeMs);
+            UiShowPlaying();
+            DeferDispose(previousMedia, previousHandler, previousRadio);
+        }
+        else
+        {
+            _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
+            ApplyVisualizerOption(_currentMedia);
+
+            // Local file - opens instantly, so skip the barber pole.
+            NewPlaybackEpoch();
+            BeginPlayback(showLoading: false);
+
+            // Audiobooks resume where they left off - same applied-once-audio-starts machinery as
+            // podcast resume. Skip a barely-started position (re-seeking to 0:04 is noise, not resume).
+            if (file.Kind == MediaKind.Audiobook && file.Source == null && file.LastPositionMs > 10_000)
+            {
+                _pendingResumeMs = file.LastPositionMs;
+            }
+            _lastAudiobookSaveMs = 0;
+
+            _ = _player.Play(_currentMedia);
+            DeferDispose(previousMedia, previousHandler, previousRadio);
+        }
 
         ApplyPerTrackOptions(file);
 
@@ -2858,6 +2837,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Clear any stale resume target; podcast playback re-sets it right after this.
         _pendingResumeMs = null;
         _audioTap?.ResetAudioStartTracking();
+        // Whatever starts next owns the audio path - if the bit-perfect engine
+        // was playing, it stops here (its own Play() re-arms it when it's the
+        // one taking over).
+        _flacEngine?.Stop();
     }
 
     // Follows redirects ourselves so VLC gets the final URL. Podcast hosts stack
@@ -3167,6 +3150,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // so the Stop below never waits on a starved callback read.
         var radio = TakeRadioStream();
         NewPlaybackEpoch();
+        _flacEngine?.Stop();
         _playbackContext?.Release();
         _playbackContext = null;
         OnPropertyChanged(nameof(PlaybackContextUpcoming));
@@ -3214,17 +3198,179 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void Play()
     {
-        UI(() => _player?.Play());
+        UI(() =>
+        {
+            if (EngineActive)
+            {
+                _flacEngine!.Resume();
+                UiShowPlaying();
+                return;
+            }
+            _player?.Play();
+        });
     }
 
     internal void Pause()
     {
-        UI(() => _player?.Pause());
+        UI(() =>
+        {
+            if (EngineActive)
+            {
+                _flacEngine!.Pause();
+                UiShowPaused();
+                return;
+            }
+            _player?.Pause();
+        });
     }
 
     internal void Stop()
     {
+        if (EngineActive)
+        {
+            _flacEngine!.Stop();
+            UI(UiShowStopped);
+            return;
+        }
         _ = ThreadPool.QueueUserWorkItem(_ => _player?.Stop());
+    }
+
+    // -- Shared playback handlers ---------------------------------------
+    // One body for both engines: libvlc events and FlacPlaybackEngine events
+    // funnel here so end-of-track chaining, resume persistence, Now Playing
+    // pivots, and per-track stop times behave identically on either path.
+
+    private long _lastMacNowPlayingPushMs = long.MinValue;
+
+    private void HandlePlaybackEnded()
+    {
+        // A finished audiobook starts from the top next time - clear its resume point (the
+        // throttle only gets within ~5s of the end; this is the authoritative reset).
+        if (CurrentPlayingItem is { Kind: MediaKind.Audiobook, Source: null } finishedBook)
+        {
+            finishedBook.LastPositionMs = 0;
+            var finishedId = finishedBook.Id;
+            _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(finishedId, 0));
+        }
+
+        if (CurrentStation != null)
+        {
+            ClearPlayback();
+            UpdateMainStatus("Stream ended");
+            return;
+        }
+
+        if (_playbackContext != null && _playbackContext.HasNext)
+        {
+            var next = _playbackContext.MoveNext()!;
+            ExecutePlayItem(next);
+            return;
+        }
+
+        ClearPlayback();
+        UpdateMainStatus("Finished");
+    }
+
+    private void HandlePlaybackTime(long timeMs, long lengthMs)
+    {
+        CurrentTrackTime = FormatHelper.FormatDurationCompact(timeMs);
+        if (!isSeeking)
+        {
+            CurrentTrackTimeNumber = timeMs;
+        }
+
+        // Persist the podcast resume position, throttled to ~5s of movement (also
+        // catches seeks). Runs off the UI thread; UpdateListenPosition opens its own
+        // connection, so it's safe.
+        if (_currentPodcastStream is { } ps && timeMs > 0 && Math.Abs(timeMs - _lastPodcastSaveMs) >= 5000)
+        {
+            _lastPodcastSaveMs = timeMs;
+            var episodeId = ps.Episode.Id;
+            var posMs = timeMs;
+            var completed = lengthMs > 0 && posMs >= lengthMs - 15000;
+            _ = Task.Run(() => Services.Podcast.PodcastCache.UpdateListenPosition(episodeId, posMs, completed));
+        }
+
+        // Audiobook resume position, same ~5s throttle (Math.Abs also catches seeks). Within
+        // the last 15s counts as finished - the resume point resets so the next play starts
+        // from the top instead of the credits.
+        if (CurrentPlayingItem is { Kind: MediaKind.Audiobook, Source: null } book && timeMs > 0 && Math.Abs(timeMs - _lastAudiobookSaveMs) >= 5000)
+        {
+            _lastAudiobookSaveMs = timeMs;
+            var pos = lengthMs > 0 && timeMs >= lengthMs - 15000 ? 0 : timeMs;
+            book.LastPositionMs = pos;
+            var bookId = book.Id;
+            _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(bookId, pos));
+        }
+
+        // Push pivots to macOS Now Playing: the very first TimeChanged (so
+        // the widget locks onto the playback clock instead of extrapolating
+        // from 0), every 5 s as a re-sync against any drift, and on a rewind
+        // (track change → time resets to 0). The widget extrapolates
+        // smoothly between pivots at rate=1, which matches OrgZ's display
+        // much better than flooding macOS with 4 Hz updates - the widget
+        // appeared to coalesce / lag those, ending up several seconds behind.
+        if (_nowPlaying is not null)
+        {
+            bool firstPush = _lastMacNowPlayingPushMs == long.MinValue;
+            bool rewound = timeMs < _lastMacNowPlayingPushMs;
+            bool resyncDue = timeMs - _lastMacNowPlayingPushMs >= 5000;
+            if (firstPush || rewound || resyncDue)
+            {
+                _lastMacNowPlayingPushMs = timeMs;
+                _nowPlaying.SetPlaybackPosition(TimeSpan.FromMilliseconds(timeMs), 1.0);
+            }
+        }
+
+        // Stop time check for per-track options
+        var playing = CurrentPlayingItem;
+        if (playing is { UseStopTime: true, StopTime: not null })
+        {
+            if (timeMs >= (long)playing.StopTime.Value.TotalMilliseconds)
+            {
+                ButtonNextTrack();
+            }
+        }
+    }
+
+    private void UiShowPlaying()
+    {
+        ButtonPlayPauseIcon = ICON_PAUSE;
+        ButtonPlayPausePadding = ICON_PAUSE_PADDING;
+
+#if WINDOWS
+        _thumbBarService?.SetPlayingState(true);
+#endif
+        _nowPlaying?.SetPlaybackStatus("Playing");
+
+        UpdateMainStatus("Playing");
+    }
+
+    private void UiShowPaused()
+    {
+        ButtonPlayPauseIcon = ICON_PLAY;
+        ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+#if WINDOWS
+        _thumbBarService?.SetPlayingState(false);
+#endif
+        _nowPlaying?.SetPlaybackStatus("Paused");
+
+        UpdateMainStatus("Paused");
+    }
+
+    private void UiShowStopped()
+    {
+        IsPlaybackLoading = false;
+        ButtonPlayPauseIcon = ICON_PLAY;
+        ButtonPlayPausePadding = ICON_PLAY_PADDING;
+
+#if WINDOWS
+        _thumbBarService?.SetPlayingState(false);
+#endif
+        _nowPlaying?.SetPlaybackStatus("Stopped");
+
+        UpdateMainStatus("Stopped");
     }
 
     #endregion
@@ -5558,7 +5704,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _ = Task.Run(async () =>
             {
                 await Task.Delay(100);
-                if (_player.IsPlaying)
+                if (EngineActive)
+                {
+                    _flacEngine!.SeekMs((long)item.StartTime.Value.TotalMilliseconds);
+                }
+                else if (_player.IsPlaying)
                 {
                     _player.Time = (long)item.StartTime.Value.TotalMilliseconds;
                 }

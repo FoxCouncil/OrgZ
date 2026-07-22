@@ -324,10 +324,17 @@ public sealed class AudioSinkBus : IDisposable
         ReadOnlySpan<byte> buffer = pcm;
         byte[]? scratch = null;
         var effectiveGain = _masterVolume * _normalizationGain;
-        if (Math.Abs(effectiveGain - 1f) > 0.001f && _format is { BitsPerSample: 16, Encoding: AudioSampleEncoding.PcmSigned })
+        if (Math.Abs(effectiveGain - 1f) > 0.001f && _format is { Encoding: AudioSampleEncoding.PcmSigned, BitsPerSample: 16 or 32 })
         {
             scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(pcm.Length);
-            ScaleS16(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
+            if (_format is { BitsPerSample: 32 })
+            {
+                ScaleS32(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
+            }
+            else
+            {
+                ScaleS16(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
+            }
             buffer = scratch.AsSpan(0, pcm.Length);
         }
 
@@ -364,14 +371,34 @@ public sealed class AudioSinkBus : IDisposable
         }
     }
 
+    private static void ScaleS32(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
+    {
+        // Double math: float32's 24-bit mantissa can't hold a scaled 32-bit
+        // sample exactly; double keeps the hi-res path honest under gain.
+        var src = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(source);
+        var dst = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(dest);
+        for (int i = 0; i < src.Length; i++)
+        {
+            dst[i] = (int)Math.Clamp(src[i] * (double)gain, int.MinValue, int.MaxValue);
+        }
+    }
+
     private static void TryOpen(IAudioSink sink, AudioFormat format)
     {
         try
         {
-            if (!sink.IsOpen)
+            // Native-rate playback: the format changes per source (a 44.1 kHz
+            // CD rip followed by a 192 kHz master), so a sink open at the old
+            // rate must be reopened - devices can't change rate in place.
+            if (sink.IsOpen)
             {
-                sink.Open(format);
+                if (sink.CurrentFormat == format)
+                {
+                    return;
+                }
+                sink.Close();
             }
+            sink.Open(format);
         }
         catch (Exception ex)
         {

@@ -17,6 +17,7 @@ internal static class WaveNative
     public const uint MMSYSERR_NOERROR = 0;
     public const uint WHDR_DONE = 0x00000001;
     public const ushort WAVE_FORMAT_PCM = 1;
+    public const ushort WAVE_FORMAT_EXTENSIBLE = 0xFFFE;
     public const int MAXPNAMELEN = 32;
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -30,6 +31,26 @@ internal static class WaveNative
         public ushort wBitsPerSample;
         public ushort cbSize;
     }
+
+    /// <summary>
+    /// WAVEFORMATEXTENSIBLE - required for PCM above 16 bits per sample.
+    /// Plain WAVEFORMATEX with wBitsPerSample=24/32 is rejected by many
+    /// drivers; the extensible form with KSDATAFORMAT_SUBTYPE_PCM is the
+    /// documented route for hi-res output through waveOut.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct WAVEFORMATEXTENSIBLE
+    {
+        public WAVEFORMATEX Format;
+        public ushort wValidBitsPerSample;
+        public uint dwChannelMask;
+        public Guid SubFormat;
+    }
+
+    public static readonly Guid KSDATAFORMAT_SUBTYPE_PCM = new("00000001-0000-0010-8000-00aa00389b71");
+
+    public const uint SPEAKER_FRONT_LEFT = 0x1;
+    public const uint SPEAKER_FRONT_RIGHT = 0x2;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct WAVEHDR
@@ -60,6 +81,9 @@ internal static class WaveNative
 
     [DllImport("winmm.dll", SetLastError = true)]
     public static extern uint waveOutOpen(out IntPtr phwo, uint uDeviceID, ref WAVEFORMATEX pwfx, IntPtr dwCallback, IntPtr dwInstance, uint fdwOpen);
+
+    [DllImport("winmm.dll", SetLastError = true)]
+    public static extern uint waveOutOpen(out IntPtr phwo, uint uDeviceID, ref WAVEFORMATEXTENSIBLE pwfx, IntPtr dwCallback, IntPtr dwInstance, uint fdwOpen);
 
     [DllImport("winmm.dll", SetLastError = true)]
     public static extern uint waveOutPrepareHeader(IntPtr hwo, IntPtr pwh, uint cbwh);

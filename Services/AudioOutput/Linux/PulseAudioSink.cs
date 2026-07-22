@@ -80,7 +80,7 @@ internal sealed class PulseAudioSink : IAudioSink
 
             var spec = new PulseNative.pa_sample_spec
             {
-                format = PulseNative.PA_SAMPLE_S16LE,
+                format = format.BitsPerSample > 16 ? PulseNative.PA_SAMPLE_S32LE : PulseNative.PA_SAMPLE_S16LE,
                 rate = (uint)format.SampleRate,
                 channels = (byte)format.Channels,
             };
@@ -139,6 +139,10 @@ internal sealed class PulseAudioSink : IAudioSink
                 {
                     _scratch.AsSpan(0, pcm.Length).Clear();
                 }
+                else if (CurrentFormat is { BitsPerSample: > 16 })
+                {
+                    ScaleS32(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
+                }
                 else
                 {
                     ScaleS16(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
@@ -163,6 +167,16 @@ internal sealed class PulseAudioSink : IAudioSink
         for (int i = 0; i < src.Length; i++)
         {
             dst[i] = (short)Math.Clamp(src[i] * gain, short.MinValue, short.MaxValue);
+        }
+    }
+
+    private static void ScaleS32(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
+    {
+        var src = MemoryMarshal.Cast<byte, int>(source);
+        var dst = MemoryMarshal.Cast<byte, int>(dest);
+        for (int i = 0; i < src.Length; i++)
+        {
+            dst[i] = (int)Math.Clamp(src[i] * (double)gain, int.MinValue, int.MaxValue);
         }
     }
 

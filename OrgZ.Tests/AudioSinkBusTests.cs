@@ -28,9 +28,11 @@ public class AudioSinkBusTests
         public int ResumeCount { get; private set; }
         public int FlushCount { get; private set; }
         public int DrainCount { get; private set; }
+        public int OpenCount { get; private set; }
+        public int CloseCount { get; private set; }
 
-        public void Open(AudioFormat format) => CurrentFormat = format;
-        public void Close() => CurrentFormat = null;
+        public void Open(AudioFormat format) { CurrentFormat = format; OpenCount++; }
+        public void Close() { CurrentFormat = null; CloseCount++; }
         public void Dispose() { IsDisposed = true; Close(); }
 
         public void Pause() => PauseCount++;
@@ -207,6 +209,37 @@ public class AudioSinkBusTests
 
         Assert.True(a.IsOpen);
         Assert.Equal(44100, a.CurrentFormat!.Value.SampleRate);
+    }
+
+    [Fact]
+    public void SetFormat_Reopens_Sinks_When_Rate_Changes()
+    {
+        using var bus = new AudioSinkBus();
+        var sink = new FakeSink("hires");
+        bus.Add(sink);
+        bus.SetFormat(AudioFormat.CdDaStereo16);
+
+        // Native-rate playback: a 192 kHz master follows a CD rip - the sink
+        // must be closed and reopened at the new rate.
+        var hires = AudioFormat.CdDaStereo16 with { SampleRate = 192000 };
+        bus.SetFormat(hires);
+
+        Assert.Equal(192000, sink.CurrentFormat!.Value.SampleRate);
+        Assert.Equal(2, sink.OpenCount);
+        Assert.Equal(1, sink.CloseCount);
+    }
+
+    [Fact]
+    public void SetFormat_Same_Format_Does_Not_Reopen()
+    {
+        using var bus = new AudioSinkBus();
+        var sink = new FakeSink("steady");
+        bus.Add(sink);
+        bus.SetFormat(AudioFormat.CdDaStereo16);
+        bus.SetFormat(AudioFormat.CdDaStereo16);
+
+        Assert.Equal(1, sink.OpenCount);
+        Assert.Equal(0, sink.CloseCount);
     }
 
     [Fact]
