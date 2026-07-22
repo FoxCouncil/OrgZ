@@ -81,7 +81,7 @@ internal sealed class WaveOutSink : IAudioSink
 
             var fmt = new WaveNative.WAVEFORMATEX
             {
-                wFormatTag = WaveNative.WAVE_FORMAT_PCM,
+                wFormatTag = format.BitsPerSample > 16 ? WaveNative.WAVE_FORMAT_EXTENSIBLE : WaveNative.WAVE_FORMAT_PCM,
                 nChannels = (ushort)format.Channels,
                 nSamplesPerSec = (uint)format.SampleRate,
                 wBitsPerSample = (ushort)format.BitsPerSample,
@@ -90,7 +90,26 @@ internal sealed class WaveOutSink : IAudioSink
                 cbSize = 0,
             };
 
-            var rc = WaveNative.waveOutOpen(out _handle, _deviceId, ref fmt, IntPtr.Zero, IntPtr.Zero, WaveNative.CALLBACK_NULL);
+            uint rc;
+            if (format.BitsPerSample > 16)
+            {
+                // Hi-res PCM (the bit-perfect 24-in-32 path) needs the
+                // extensible form - plain PCM tags above 16 bits are rejected
+                // by many drivers.
+                fmt.cbSize = 22;
+                var ext = new WaveNative.WAVEFORMATEXTENSIBLE
+                {
+                    Format = fmt,
+                    wValidBitsPerSample = (ushort)format.BitsPerSample,
+                    dwChannelMask = WaveNative.SPEAKER_FRONT_LEFT | WaveNative.SPEAKER_FRONT_RIGHT,
+                    SubFormat = WaveNative.KSDATAFORMAT_SUBTYPE_PCM,
+                };
+                rc = WaveNative.waveOutOpen(out _handle, _deviceId, ref ext, IntPtr.Zero, IntPtr.Zero, WaveNative.CALLBACK_NULL);
+            }
+            else
+            {
+                rc = WaveNative.waveOutOpen(out _handle, _deviceId, ref fmt, IntPtr.Zero, IntPtr.Zero, WaveNative.CALLBACK_NULL);
+            }
             if (rc != WaveNative.MMSYSERR_NOERROR)
             {
                 _handle = IntPtr.Zero;
@@ -128,7 +147,11 @@ internal sealed class WaveOutSink : IAudioSink
             UnprepareSlot(slot);
         }
 
-        if (_buffers[slot] == null || _buffers[slot].Length < pcm.Length)
+        // The IsAllocated check matters after a Close/Open cycle (native-rate
+        // format change): Close frees the pinned handles, so a stale buffer
+        // must be re-pinned or AddrOfPinnedObject throws on every write -
+        // silent playback while the UI thinks the track is playing.
+        if (_buffers[slot] == null || _buffers[slot].Length < pcm.Length || !_bufferHandles[slot].IsAllocated)
         {
             if (_bufferHandles[slot].IsAllocated)
             {
@@ -267,7 +290,9 @@ internal sealed class WaveOutSink : IAudioSink
                 {
                     _bufferHandles[i].Free();
                 }
+                _buffers[i] = null!;
             }
+            _next = 0;
             WaveNative.waveOutClose(_handle);
             _handle = IntPtr.Zero;
             CurrentFormat = null;

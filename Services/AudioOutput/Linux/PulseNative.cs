@@ -14,6 +14,7 @@ internal static class PulseNative
 {
     public const int PA_STREAM_PLAYBACK = 1;
     public const int PA_SAMPLE_S16LE = 3;
+    public const int PA_SAMPLE_S32LE = 7;
 
     public const int PA_CONTEXT_READY = 4;
     public const int PA_CONTEXT_FAILED = 5;

@@ -21,10 +21,23 @@ namespace OrgZ.Services.AudioVisualization;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Sample format:</b> we ask LibVLC for <c>S16N</c> - signed-16-bit,
-/// native-endian, interleaved stereo at 44.1 kHz.  Most output sinks
-/// (waveOut, CoreAudio, PulseAudio) consume S16 directly without extra
-/// conversion; the FFT path pays a cheap divide-by-32768 to get floats.
+/// <b>Sample format:</b> native-rate S16.  The format callback accepts
+/// whatever sample rate the source decodes at (44.1 kHz CD rips through
+/// 192 kHz hi-res masters) so VLC never inserts its resampler - the OS
+/// audio stack gets the source's own timeline.  Sample format stays
+/// <c>S16N</c> because libvlc 3's amem output module rejects everything
+/// else; when a libvlc with S32N/FL32 amem support ships, widening the
+/// accepted format here (and letting <see cref="AudioFormat"/> carry it
+/// downstream) is the only change needed for bit-depth passthrough.
+/// The FFT path pays a cheap divide-by-32768 to get floats.
+/// </para>
+/// <para>
+/// <b>VU / visualizer feed:</b> the analyzer's band mapping is FFT-bin
+/// based and tuned for ~44.1 kHz input, so the tap decimates the analyzer
+/// feed by round(rate / 44100) - a 192 kHz source feeds every 4th frame
+/// and the meter behaves identically at every source rate.  Sinks always
+/// receive the full undecimated stream; <see cref="RawFrameAvailable"/>
+/// consumers get full-rate samples tagged with the true source rate.
 /// </para>
 /// <para>
 /// <b>Lifecycle:</b> delegates are held as fields because LibVLC stores
@@ -34,20 +47,29 @@ namespace OrgZ.Services.AudioVisualization;
 /// </remarks>
 public sealed class AudioTap : IAudioVisualizationSource, IDisposable
 {
-    public const uint TapSampleRate = 44100;
     public const uint TapChannels = 2;
-    private const string TapFormat = "S16N";
+    private const uint AnalyzerBaseRate = 44100;
 
     private static readonly ILogger _log = Logging.For("AudioTap");
 
     private readonly AudioAnalyzer _analyzer;
     private readonly AudioSinkBus _bus;
 
+    private readonly MediaPlayer.LibVLCAudioSetupCb _setupCb;
+    private readonly MediaPlayer.LibVLCAudioCleanupCb _cleanupCb;
     private readonly MediaPlayer.LibVLCAudioPlayCb _playCb;
     private readonly MediaPlayer.LibVLCAudioPauseCb _pauseCb;
     private readonly MediaPlayer.LibVLCAudioResumeCb _resumeCb;
     private readonly MediaPlayer.LibVLCAudioFlushCb _flushCb;
     private readonly MediaPlayer.LibVLCAudioDrainCb _drainCb;
+
+    // Negotiated per-source in OnAudioSetup (libvlc's aout open).  _sourceRate
+    // is what the sinks play at; the analyzer sees _sourceRate / _decimation
+    // (kept near 44.1 kHz so the meter's band mapping stays rate-independent).
+    private uint _sourceRate = AnalyzerBaseRate;
+    private int _decimation = 1;
+    private uint _analyzerRate = AnalyzerBaseRate;
+    private int _decimPhase;
 
     private MediaPlayer? _attachedPlayer;
     private bool _active;
@@ -101,6 +123,8 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         _snapLeft = new float[_analyzer.BandCount];
         _snapRight = new float[_analyzer.BandCount];
 
+        _setupCb = OnAudioSetup;
+        _cleanupCb = OnAudioCleanup;
         _playCb = OnAudioPlay;
         _pauseCb = OnAudioPause;
         _resumeCb = OnAudioResume;
@@ -183,18 +207,165 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
             return;
         }
 
-        player.SetAudioFormat(TapFormat, TapSampleRate, TapChannels);
+        player.SetAudioFormatCallback(_setupCb, _cleanupCb);
         player.SetAudioCallbacks(_playCb, _pauseCb, _resumeCb, _flushCb, _drainCb);
         _attachedPlayer = player;
+        // Sane default so sinks are open before the first setup callback;
+        // OnAudioSetup re-negotiates per source.
         _bus.SetFormat(AudioFormat.CdDaStereo16);
 
         _lastDrainTicks = Environment.TickCount64;
         _drainTimer ??= new System.Threading.Timer(OnDrainTick, null, DrainPeriodMs, DrainPeriodMs);
 
-        _log.Information("AudioTap attached to MediaPlayer (format={Format} rate={Rate} ch={Ch})", TapFormat, TapSampleRate, TapChannels);
+        _log.Information("AudioTap attached to MediaPlayer (S16N, native-rate via format callback)");
+    }
+
+    // -- Native-engine (non-VLC) feed -------------------------------------
+    // The bit-perfect FLAC engine bypasses libvlc entirely, so it announces
+    // its format and pushes decoded PCM here to drive the same analyzer /
+    // ring / AudioStarted machinery the VLC callbacks use.  The engine owns
+    // the sink bus writes; the tap only powers visualization + the
+    // audio-started signal on this path.
+
+    private int _externalBits = 16;
+
+    /// <summary>Arms the tap for PCM pushed by the native engine in <paramref name="format"/>.</summary>
+    public void BeginExternalSession(AudioFormat format)
+    {
+        _sourceRate = (uint)format.SampleRate;
+        _decimation = Math.Max(1, (int)Math.Round(format.SampleRate / (double)AnalyzerBaseRate));
+        _analyzerRate = (uint)(format.SampleRate / _decimation);
+        _externalBits = format.BitsPerSample;
+        ClearRing();
+        _analyzer.Reset();
+        _lastDrainTicks = Environment.TickCount64;
+        _log.Information("AudioTap external session: {Rate} Hz S{Bits} (analyzer feed {AnalyzerRate} Hz, decimation {Decimation})", format.SampleRate, format.BitsPerSample, _analyzerRate, _decimation);
+    }
+
+    /// <summary>Interleaved-stereo PCM from the native engine (S16 or S32 per the session format).</summary>
+    public void OnExternalAudio(ReadOnlySpan<byte> pcm, long pts)
+    {
+        if (pcm.Length == 0)
+        {
+            return;
+        }
+
+        if (System.Threading.Interlocked.Exchange(ref _audioStartedNotified, 1) == 0)
+        {
+            AudioStarted?.Invoke();
+        }
+        _active = true;
+
+        int frames;
+        int totalFloats;
+        if (_externalBits > 16)
+        {
+            var ints = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(pcm);
+            totalFloats = ints.Length;
+            frames = ints.Length / (int)TapChannels;
+            if (_floatScratch.Length < totalFloats)
+            {
+                _floatScratch = new float[totalFloats];
+            }
+            const float Inv2p31 = 1f / 2147483648f;
+            for (int i = 0; i < ints.Length; i++)
+            {
+                _floatScratch[i] = ints[i] * Inv2p31;
+            }
+        }
+        else
+        {
+            var shorts = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, short>(pcm);
+            totalFloats = shorts.Length;
+            frames = shorts.Length / (int)TapChannels;
+            if (_floatScratch.Length < totalFloats)
+            {
+                _floatScratch = new float[totalFloats];
+            }
+            const float Inv32k = 1f / 32768f;
+            for (int i = 0; i < shorts.Length; i++)
+            {
+                _floatScratch[i] = shorts[i] * Inv32k;
+            }
+        }
+
+        var floatSpan = new ReadOnlySpan<float>(_floatScratch, 0, totalFloats);
+        WriteToRing(floatSpan, frames);
+
+        var handler = RawFrameAvailable;
+        if (handler != null)
+        {
+            var frame = new AudioFrame(floatSpan, (int)_sourceRate, (int)TapChannels, pts);
+            handler(frame);
+        }
+    }
+
+    /// <summary>Pause/resume from the native engine - mirrors the VLC pause callback minus the bus control (the engine owns the bus).</summary>
+    public void SetExternalPaused(bool paused)
+    {
+        if (paused)
+        {
+            _active = false;
+            ClearRing();
+            _analyzer.Reset();
+        }
+        else
+        {
+            _active = true;
+            _lastDrainTicks = Environment.TickCount64;
+        }
+    }
+
+    /// <summary>Ends the native-engine session (stop / end-of-track) - VU decays to zero.</summary>
+    public void EndExternalSession()
+    {
+        _active = false;
+        ClearRing();
+        _analyzer.Reset();
     }
 
     // -- LibVLC callbacks ------------------------------------------------
+
+    /// <summary>
+    /// libvlc calls this when it opens the audio output for a source, proposing
+    /// the decoded format.  We accept the source's own sample rate - that is
+    /// the whole point of native-rate playback; VLC inserts no resampler - and
+    /// force stereo.  The format fourcc is left untouched: libvlc 3's amem
+    /// module proposes and only accepts <c>S16N</c>.
+    /// </summary>
+    private int OnAudioSetup(ref IntPtr opaque, ref IntPtr format, ref uint rate, ref uint channels)
+    {
+        if (rate == 0)
+        {
+            return -1;
+        }
+
+        channels = TapChannels;
+
+        _sourceRate = rate;
+        _decimation = Math.Max(1, (int)Math.Round(rate / (double)AnalyzerBaseRate));
+        _analyzerRate = rate / (uint)_decimation;
+        _decimPhase = 0;
+
+        ClearRing();
+        _analyzer.Reset();
+        _bus.SetFormat(new AudioFormat
+        {
+            SampleRate = (int)rate,
+            Channels = (int)TapChannels,
+            BitsPerSample = 16,
+            Encoding = AudioSampleEncoding.PcmSigned,
+        });
+
+        _log.Information("AudioTap negotiated native-rate output: {Rate} Hz S16 stereo (analyzer feed {AnalyzerRate} Hz, decimation {Decimation})", rate, _analyzerRate, _decimation);
+        return 0;
+    }
+
+    private void OnAudioCleanup(IntPtr opaque)
+    {
+        // Per-source aout teardown - nothing to release; the next setup
+        // callback re-negotiates everything.
+    }
 
     private unsafe void OnAudioPlay(IntPtr data, IntPtr samples, uint count, long pts)
     {
@@ -258,7 +429,7 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         var handler = RawFrameAvailable;
         if (handler != null)
         {
-            var frame = new AudioFrame(floatSpan, (int)TapSampleRate, (int)TapChannels, pts);
+            var frame = new AudioFrame(floatSpan, (int)_sourceRate, (int)TapChannels, pts);
             handler(frame);
         }
     }
@@ -272,15 +443,22 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
 
         lock (_ringLock)
         {
-            for (int i = 0; i < frames; i++)
+            // Decimate hi-res sources down to ~44.1 kHz for the analyzer -
+            // its band mapping is bin-based and expects that ballpark.  The
+            // phase carries across chunks so the kept-frame cadence is exact.
+            int stored = 0;
+            int i = _decimPhase;
+            for (; i < frames; i += _decimation)
             {
                 int dst = _ringWriteIdx * 2;
                 _ringInterleaved[dst]     = interleaved[i * 2];
                 _ringInterleaved[dst + 1] = interleaved[i * 2 + 1];
                 _ringWriteIdx = (_ringWriteIdx + 1) % RingCapacityFrames;
+                stored++;
             }
+            _decimPhase = i - frames;
 
-            _ringFillFrames = Math.Min(RingCapacityFrames, _ringFillFrames + frames);
+            _ringFillFrames = Math.Min(RingCapacityFrames, _ringFillFrames + stored);
         }
     }
 
@@ -311,10 +489,11 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
                 return;
             }
 
-            // Target frames = sample-rate * dt. Cap at one second of audio
-            // so a long system pause doesn't dump a giant block into the
-            // analyzer in one tick (which would model a discontinuity).
-            int targetFrames = (int)Math.Min(dtMs * TapSampleRate / 1000, TapSampleRate);
+            // Target frames = analyzer-feed rate * dt. Cap at one second of
+            // audio so a long system pause doesn't dump a giant block into
+            // the analyzer in one tick (which would model a discontinuity).
+            var analyzerRate = _analyzerRate;
+            int targetFrames = (int)Math.Min(dtMs * analyzerRate / 1000, analyzerRate);
 
             int frames;
             lock (_ringLock)
@@ -398,6 +577,7 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
         {
             _ringFillFrames = 0;
             _ringWriteIdx = 0;
+            _decimPhase = 0;
         }
     }
 
