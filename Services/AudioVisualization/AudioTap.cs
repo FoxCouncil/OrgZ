@@ -382,10 +382,14 @@ public sealed class AudioTap : IAudioVisualizationSource, IDisposable
 
     private void OnAudioDrain(IntPtr data)
     {
+        // Natural end-of-track: play out what's queued instead of flushing it.
+        // FlushAll here used to cut the last few hundred milliseconds of every
+        // song - the ring depth's worth of already-queued audio. libvlc's
+        // drain callback expects to block until playback is audibly finished.
         _active = false;
         ClearRing();
         _analyzer.Reset();
-        _bus.FlushAll();
+        _bus.DrainAll();
     }
 
     private void ClearRing()

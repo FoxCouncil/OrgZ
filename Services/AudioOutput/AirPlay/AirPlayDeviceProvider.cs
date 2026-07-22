@@ -328,6 +328,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         public void Pause() { }
         public void Resume() { }
         public void Flush() { }
+        public void Drain() { }
 
         public void Dispose()
         {

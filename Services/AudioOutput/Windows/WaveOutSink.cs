@@ -15,9 +15,12 @@ internal sealed class WaveOutSink : IAudioSink
 {
     private static readonly ILogger _log = Logging.For("WaveOutSink");
 
-    // 4 slots × ~25ms per LibVLC callback ≈ 100ms standing latency.  Smaller
-    // is better for pause/seek responsiveness, but we need enough headroom
-    // that occasional scheduler hiccups don't cause underruns.
+    // 4 slots × ≥50ms per bus fan-out (AudioSinkBus.AggregateTargetMs) ≥ 200ms
+    // standing latency.  Smaller is better for pause/seek responsiveness, but
+    // we need enough headroom that occasional scheduler hiccups don't cause
+    // underruns.  The bus-side aggregation is what makes the per-write size
+    // trustworthy - raw LibVLC callbacks can be as small as ~6ms for hi-res
+    // sources, which starved this ring and underran into audible garbage.
     private const int RingSize = 4;
 
     private readonly uint _deviceId;
@@ -220,6 +223,31 @@ internal sealed class WaveOutSink : IAudioSink
         // can reuse them without waiting.  The audio stops instantly at
         // the hardware level - this is what makes Pause / Seek feel crisp.
         WaveNative.waveOutReset(_handle);
+    }
+
+    public void Drain()
+    {
+        if (_handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // End-of-track: let every queued header finish playing instead of
+        // waveOutReset-ing it away (which cut the last ~ring-depth of audio).
+        // The ring holds well under a second; 2s is a generous stall ceiling.
+        var deadline = Environment.TickCount64 + 2000;
+        for (int i = 0; i < RingSize; i++)
+        {
+            while (!IsSlotDone(i))
+            {
+                if (Environment.TickCount64 > deadline)
+                {
+                    _log.Warning("WaveOutSink {Id}: drain timed out with audio still queued", Id);
+                    return;
+                }
+                System.Threading.Thread.Sleep(5);
+            }
+        }
     }
 
     public void Close()

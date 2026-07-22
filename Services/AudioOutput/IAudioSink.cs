@@ -83,4 +83,14 @@ public interface IAudioSink : IDisposable
     /// the previous position after jumping.
     /// </summary>
     void Flush();
+
+    /// <summary>
+    /// Plays out all queued audio before returning - the natural end-of-track
+    /// counterpart to <see cref="Flush"/>.  Blocks (bounded) until the queue
+    /// has reached the speakers so the last few hundred milliseconds of a
+    /// track aren't discarded.  Called from LibVLC's drain callback, which
+    /// expects exactly this blocking behavior.  The sink stays open and
+    /// usable for the next track.
+    /// </summary>
+    void Drain();
 }

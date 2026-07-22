@@ -375,6 +375,44 @@ internal sealed class CoreAudioSink : IAudioSink
         _started = false;
     }
 
+    public void Drain()
+    {
+        if (_queue == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // A short track can end before Write ever reached the 3-buffer
+        // pre-roll threshold - start the queue now or the tail never plays.
+        if (!_started && _bufferedSinceStart > 0)
+        {
+            _started = true;
+            CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
+        }
+
+        // AudioQueueFlush pushes any partially-filled internal buffer toward
+        // the hardware; then wait for OnBufferComplete to hand every pool
+        // buffer back, which means all enqueued audio has actually played.
+        CoreAudioNative.AudioQueueFlush(_queue);
+        var deadline = Environment.TickCount64 + 5000;
+        while (!_disposed)
+        {
+            lock (_poolLock)
+            {
+                if (_freeBuffers.Count >= _allBuffers.Count)
+                {
+                    return;
+                }
+            }
+            if (Environment.TickCount64 > deadline)
+            {
+                _log.Warning("CoreAudioSink {Id}: drain timed out with audio still queued", Id);
+                return;
+            }
+            System.Threading.Thread.Sleep(5);
+        }
+    }
+
     public void Close()
     {
         lock (_lifecycle)
