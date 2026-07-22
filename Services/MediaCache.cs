@@ -70,6 +70,7 @@ public static class MediaCache
                     BPM                     INTEGER,
                     AudioBitrate            INTEGER,
                     SampleRate              INTEGER,
+                    BitDepth                INTEGER,
                     AudioChannels           INTEGER,
                     EncoderSettings         TEXT,
                     CodecDescription        TEXT,
@@ -265,6 +266,7 @@ public static class MediaCache
             "BPM INTEGER",
             "AudioBitrate INTEGER",
             "SampleRate INTEGER",
+            "BitDepth INTEGER",
             "AudioChannels INTEGER",
             "EncoderSettings TEXT",
             "CodecDescription TEXT",
@@ -557,7 +559,7 @@ public static class MediaCache
                  FilePath, FileName, Extension, FileSize, LastModified,
                  Year, Track, TotalTracks, Disc, TotalDiscs, DiscId,
                  HasAlbumArt, FileNameMatchesHeaders, MimeType,
-                 Genre, Composer, Comment, BPM, AudioBitrate, SampleRate, AudioChannels,
+                 Genre, Composer, Comment, BPM, AudioBitrate, SampleRate, BitDepth, AudioChannels,
                  EncoderSettings, CodecDescription, ReplayGainTrackGain,
                  Issues,
                  StreamUrl, Source, SourceId, HomepageUrl, FaviconUrl,
@@ -570,7 +572,7 @@ public static class MediaCache
                  @FilePath, @FileName, @Extension, @FileSize, @LastModified,
                  @Year, @Track, @TotalTracks, @Disc, @TotalDiscs, @DiscId,
                  @HasAlbumArt, @FileNameMatchesHeaders, @MimeType,
-                 @Genre, @Composer, @Comment, @BPM, @AudioBitrate, @SampleRate, @AudioChannels,
+                 @Genre, @Composer, @Comment, @BPM, @AudioBitrate, @SampleRate, @BitDepth, @AudioChannels,
                  @EncoderSettings, @CodecDescription, @ReplayGainTrackGain,
                  @Issues,
                  @StreamUrl, @Source, @SourceId, @HomepageUrl, @FaviconUrl,
@@ -603,6 +605,7 @@ public static class MediaCache
                 BPM = excluded.BPM,
                 AudioBitrate = excluded.AudioBitrate,
                 SampleRate = excluded.SampleRate,
+                BitDepth = excluded.BitDepth,
                 AudioChannels = excluded.AudioChannels,
                 EncoderSettings = excluded.EncoderSettings,
                 CodecDescription = excluded.CodecDescription,
@@ -662,6 +665,7 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@BPM", item.Bpm.HasValue && item.Bpm.Value > 0 ? (object)(long)item.Bpm.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@AudioBitrate", item.AudioBitrate.HasValue ? (object)item.AudioBitrate.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@SampleRate", item.SampleRate.HasValue ? (object)item.SampleRate.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@BitDepth", item.BitDepth.HasValue ? (object)item.BitDepth.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@AudioChannels", item.AudioChannels.HasValue ? (object)item.AudioChannels.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("@EncoderSettings", (object?)item.EncoderSettings ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@CodecDescription", (object?)item.CodecDescription ?? DBNull.Value);
@@ -754,6 +758,7 @@ public static class MediaCache
         item.Bpm = GetNullableUint(reader, "BPM");
         item.AudioBitrate = GetNullableInt(reader, "AudioBitrate");
         item.SampleRate = GetNullableInt(reader, "SampleRate");
+        item.BitDepth = GetNullableInt(reader, "BitDepth");
         item.AudioChannels = GetNullableInt(reader, "AudioChannels");
         item.EncoderSettings = GetNullableString(reader, "EncoderSettings");
         item.CodecDescription = GetNullableString(reader, "CodecDescription");

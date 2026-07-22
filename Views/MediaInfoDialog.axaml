@@ -41,7 +41,7 @@
 						</Grid>
 
 						<!-- Metadata grid: 4 columns for short values -->
-						<Grid ColumnDefinitions="120,130,120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="4,0,0,0">
+						<Grid ColumnDefinitions="120,130,120,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" Margin="4,0,0,0">
 							<TextBlock Grid.Row="0" Grid.Column="0" Text="Kind:" Opacity="0.6" />
 							<TextBlock Grid.Row="0" Grid.Column="1" x:Name="SummaryMediaKind" />
 							<TextBlock Grid.Row="0" Grid.Column="2" Text="Play Count:" Opacity="0.6" />
@@ -66,6 +66,11 @@
 							<TextBlock Grid.Row="4" Grid.Column="1" x:Name="SummaryR4C0Value" TextWrapping="Wrap" />
 							<TextBlock Grid.Row="4" Grid.Column="2" x:Name="SummaryR4C2Label" Opacity="0.6" />
 							<TextBlock Grid.Row="4" Grid.Column="3" x:Name="SummaryR4C2Value" TextWrapping="Wrap" />
+
+							<TextBlock Grid.Row="5" Grid.Column="0" x:Name="SummaryR5C0Label" Opacity="0.6" />
+							<TextBlock Grid.Row="5" Grid.Column="1" x:Name="SummaryR5C0Value" />
+							<TextBlock Grid.Row="5" Grid.Column="2" x:Name="SummaryR5C2Label" Opacity="0.6" />
+							<TextBlock Grid.Row="5" Grid.Column="3" x:Name="SummaryR5C2Value" />
 						</Grid>
 
 						<!-- Dates: Played, Added, Modified -->
