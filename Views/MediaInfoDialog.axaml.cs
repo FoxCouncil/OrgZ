@@ -205,20 +205,6 @@ public partial class MediaInfoDialog : Window
         SummaryR1C2Label.Text = "Channels:";
         SummaryR1C2Value.Text = !string.IsNullOrEmpty(item.ChannelsLabel) ? item.ChannelsLabel : "-";
 
-        SummaryR2C0Label.Text = "Bit Rate:";
-        SummaryR2C0Value.Text = item.AudioBitrate is > 0 ? $"{item.AudioBitrate} kbps" : "-";
-        SummaryR2C2Label.Text = "Genre:";
-        SummaryR2C2Value.Text = !string.IsNullOrEmpty(item.Genre) ? item.Genre : "-";
-
-        SummaryR3C0Label.Text = "Sample Rate:";
-        SummaryR3C0Value.Text = item.SampleRate is > 0 ? $"{item.SampleRate:N0} Hz" : "-";
-        SummaryKind.Text = item.KindLabel;
-
-        SummaryR4C0Label.Text = "Encoded with:";
-        SummaryR4C0Value.Text = !string.IsNullOrEmpty(item.EncoderSettings) ? item.EncoderSettings : "-";
-        SummaryR4C2Label.Text = "Codec:";
-        SummaryR4C2Value.Text = !string.IsNullOrEmpty(item.CodecDescription) ? item.CodecDescription : "-";
-
         // Items scanned before BitDepth existed have null here - probe the
         // file once on dialog open so the field fills without a full rescan.
         if (item.BitDepth is null && !string.IsNullOrEmpty(item.FilePath))
@@ -234,8 +220,22 @@ public partial class MediaInfoDialog : Window
             }
         }
 
-        SummaryR5C0Label.Text = "Bit Depth:";
-        SummaryR5C0Value.Text = item.BitDepth is > 0 ? $"{item.BitDepth}-bit" : "-";
+        SummaryR2C0Label.Text = "Bit Depth:";
+        SummaryR2C0Value.Text = item.BitDepth is > 0 ? $"{item.BitDepth}-bit" : "-";
+        SummaryR2C2Label.Text = "Genre:";
+        SummaryR2C2Value.Text = !string.IsNullOrEmpty(item.Genre) ? item.Genre : "-";
+
+        SummaryR3C0Label.Text = "Bit Rate:";
+        SummaryR3C0Value.Text = item.AudioBitrate is > 0 ? $"{item.AudioBitrate} kbps" : "-";
+        SummaryKind.Text = item.KindLabel;
+
+        SummaryR4C0Label.Text = "Sample Rate:";
+        SummaryR4C0Value.Text = item.SampleRate is > 0 ? $"{item.SampleRate:N0} Hz" : "-";
+        SummaryR4C2Label.Text = "Codec:";
+        SummaryR4C2Value.Text = !string.IsNullOrEmpty(item.CodecDescription) ? item.CodecDescription : "-";
+
+        SummaryR5C0Label.Text = "Encoded with:";
+        SummaryR5C0Value.Text = !string.IsNullOrEmpty(item.EncoderSettings) ? item.EncoderSettings : "-";
         SummaryR5C2Label.Text = "";
         SummaryR5C2Value.Text = "";
     }
