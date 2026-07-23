@@ -1,0 +1,52 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OrgZ.Views.BurnDiscDialog"
+        x:CompileBindings="False"
+        Title="Burn Disc"
+        MinWidth="340" MinHeight="180"
+        SizeToContent="WidthAndHeight"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Classes="orgzDialog">
+    <StackPanel Margin="16" Spacing="12">
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto">
+            <TextBlock Grid.Column="0" Text="Drive:" VerticalAlignment="Center" />
+            <ComboBox x:Name="DriveCombo" Grid.Column="1" IsVisible="False" />
+            <TextBlock x:Name="DriveText" Grid.Column="1" VerticalAlignment="Center" />
+        </Grid>
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto">
+            <TextBlock Grid.Column="0" Text="Tracks:" VerticalAlignment="Center" />
+            <TextBlock x:Name="TracksText" Grid.Column="1" VerticalAlignment="Center" />
+        </Grid>
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto">
+            <TextBlock Grid.Column="0" Text="Length:" VerticalAlignment="Center" />
+            <TextBlock x:Name="LengthText" Grid.Column="1" VerticalAlignment="Center" />
+        </Grid>
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto">
+            <TextBlock Grid.Column="0" Text="Speed:" VerticalAlignment="Center" />
+            <ComboBox x:Name="SpeedCombo" Grid.Column="1">
+                <ComboBoxItem Content="Maximum" Tag="" />
+                <ComboBoxItem Content="24x" Tag="4234" />
+                <ComboBoxItem Content="16x" Tag="2824" />
+                <ComboBoxItem Content="8x" Tag="1412" />
+                <ComboBoxItem Content="4x" Tag="706" />
+            </ComboBox>
+        </Grid>
+
+        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto">
+            <TextBlock Grid.Column="0" Text="Disc Title:" VerticalAlignment="Center" />
+            <TextBox x:Name="TitleInput" Grid.Column="1" />
+        </Grid>
+
+        <CheckBox x:Name="TestWriteCheck" Content="Test write (laser off)" Margin="100,0,0,0" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,4,0,0">
+            <Button Content="Burn" Width="80" IsDefault="True" Click="BurnButton_Click" />
+            <Button Content="Cancel" Width="80" IsCancel="True" Click="CancelButton_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

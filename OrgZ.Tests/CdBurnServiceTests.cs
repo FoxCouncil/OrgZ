@@ -120,4 +120,35 @@ public class CdBurnServiceTests
         using var fs = new MemoryStream(new byte[100]);
         Assert.Throws<ArgumentOutOfRangeException>(() => new CdBurnService.SubStream(fs, 50, 100));
     }
+
+    [Fact]
+    public async Task BurnAsync_Rejects_More_Than_99_Tracks()
+    {
+        var tracks = Enumerable.Range(1, 100)
+            .Select(i => new CdBurnTrack { WavFilePath = $"missing-{i}.wav" })
+            .ToList();
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => CdBurnService.BurnAsync(@"\\.\CDROM_none", tracks));
+        Assert.Contains("99", ex.Message);
+    }
+
+    [Fact]
+    public async Task BurnAsync_Rejects_Track_Under_Four_Seconds()
+    {
+        // 10 sectors = 0.13 s of audio, well under the 300-sector Red Book floor.
+        // The source scan runs before the drive is opened, so no hardware is touched.
+        var wavPath = Path.Combine(Path.GetTempPath(), $"orgz-shorttrack-{Guid.NewGuid():N}.wav");
+        try
+        {
+            File.WriteAllBytes(wavPath, BuildCdAudioWav(2352 * 10));
+            var tracks = new List<CdBurnTrack> { new() { WavFilePath = wavPath } };
+
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(() => CdBurnService.BurnAsync(@"\\.\CDROM_none", tracks));
+            Assert.Contains("4 seconds", ex.Message);
+        }
+        finally
+        {
+            File.Delete(wavPath);
+        }
+    }
 }

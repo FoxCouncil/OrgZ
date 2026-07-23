@@ -44,6 +44,7 @@ public class CdHelperSerializationTests
             DiscTitle = "Roadtrip Mix",
             DiscPerformer = "Fox",
             TestWrite = true,
+            WriteSpeedKBps = 1412,
             Tracks =
             [
                 new CdHelperTrack { TrackNumber = 1, WavFilePath = @"C:\tmp\01.wav", Title = "A", Artist = "X" },
@@ -57,6 +58,7 @@ public class CdHelperSerializationTests
         Assert.Equal("burn", back.Operation);
         Assert.True(back.TestWrite);
         Assert.Equal("Roadtrip Mix", back.DiscTitle);
+        Assert.Equal(1412, back.WriteSpeedKBps);
         Assert.Equal(@"C:\tmp\01.wav", back.Tracks![0].WavFilePath);
     }
 

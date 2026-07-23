@@ -86,7 +86,7 @@
                 </Button>
                 <Button Padding="12,6" Cursor="Hand"
                         ToolTip.Tip="Burn this playlist to an audio CD"
-                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).IsBurnerPresent, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).ShowBurnButton, RelativeSource={RelativeSource AncestorType=Window}}"
                         Command="{Binding ((vm:MainWindowViewModel)DataContext).BurnCurrentViewCommand, RelativeSource={RelativeSource AncestorType=Window}}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <i:Icon Value="fa-solid fa-circle-radiation" FontSize="13" VerticalAlignment="Center" />

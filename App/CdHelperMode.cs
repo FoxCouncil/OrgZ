@@ -185,15 +185,21 @@ internal static class CdHelperMode
             TotalSectorsWritten = p.TotalSectorsWritten,
         }));
 
-        CdBurnService.BurnAsync(
+        var warnings = CdBurnService.BurnAsync(
             spec.DrivePath!,
             burnTracks,
             burnProgress,
             spec.DiscTitle,
             spec.DiscPerformer,
-            spec.TestWrite)
+            spec.TestWrite,
+            spec.WriteSpeedKBps)
             .GetAwaiter()
             .GetResult();
+
+        foreach (var warning in warnings)
+        {
+            progress.WriteEvent(new CdHelperEvent { Type = "warning", Message = warning });
+        }
 
         progress.WriteEvent(new CdHelperEvent { Type = "burn-done" });
         log.Information("cd-helper: burn done");
@@ -305,6 +311,8 @@ internal sealed class CdHelperSpec
     public string? DiscTitle { get; set; }
     public string? DiscPerformer { get; set; }
     public bool TestWrite { get; set; }
+    /// <summary>Burn speed in kB/s (176 = 1x audio); null leaves the drive at max.</summary>
+    public int? WriteSpeedKBps { get; set; }
     public List<CdHelperTrack>? Tracks { get; set; }
 
     /// <summary>

@@ -43,6 +43,12 @@ public static class CdBurnService
     private const int RedbookChannels = 2;
     private const int RedbookBitsPerSample = 16;
 
+    /// <summary>Red Book caps a disc at 99 tracks.</summary>
+    public const int MaxRedbookTracks = 99;
+
+    /// <summary>Red Book minimum track length: 4 seconds = 300 sectors.</summary>
+    public const int MinRedbookTrackSectors = 4 * 75;
+
     private static readonly ILogger _log = Logging.For("CdBurn");
 
     /// <summary>Result of <see cref="CheckBurnMedia"/>.</summary>
@@ -60,13 +66,23 @@ public static class CdBurnService
         DriveError,
     }
 
+    /// <summary>Media pre-flight result: status plus the blank disc's writable capacity when the drive reports one.</summary>
+    public readonly record struct BurnMediaInfo
+    {
+        public required BurnMediaStatus Status { get; init; }
+
+        /// <summary>Writable capacity in CD sectors (1/75 s each), from READ DISC INFORMATION's
+        /// Last Possible Lead-Out Start Address. Null when the drive doesn't report it.</summary>
+        public long? CapacitySectors { get; init; }
+    }
+
     /// <summary>
     /// Un-elevated pre-flight before a burn: opens <paramref name="drivePath"/> and checks a
     /// blank, writable disc is loaded - the same SCSI passthrough as the recorder probe, so no
     /// UAC. Lets the GUI fail fast with a clear message instead of transcoding and prompting
     /// for elevation only to have the drive reject the burn.
     /// </summary>
-    public static BurnMediaStatus CheckBurnMedia(string drivePath)
+    public static BurnMediaInfo CheckBurnMedia(string drivePath)
     {
         ArgumentException.ThrowIfNullOrEmpty(drivePath);
 
@@ -75,34 +91,39 @@ public static class CdBurnService
             using var drive = OpticalDrive.Open(drivePath);
             if (drive is not IScsiTransport transport)
             {
-                return BurnMediaStatus.DriveError;
+                return new BurnMediaInfo { Status = BurnMediaStatus.DriveError };
             }
 
             var session = new BurnSession(transport);
 
             if (!session.SupportsDaoBurn())
             {
-                return BurnMediaStatus.NotWritable;
+                return new BurnMediaInfo { Status = BurnMediaStatus.NotWritable };
             }
 
             try
             {
                 var info = session.ReadDiscInfo();
-                return info.Status == DiscStatus.Blank ? BurnMediaStatus.Ready : BurnMediaStatus.NotBlank;
+                if (info.Status != DiscStatus.Blank)
+                {
+                    return new BurnMediaInfo { Status = BurnMediaStatus.NotBlank };
+                }
+
+                return new BurnMediaInfo { Status = BurnMediaStatus.Ready, CapacitySectors = info.CapacitySectors };
             }
             catch (MediaNotPresentException)
             {
-                return BurnMediaStatus.NoMedia;
+                return new BurnMediaInfo { Status = BurnMediaStatus.NoMedia };
             }
         }
         catch (MediaNotPresentException)
         {
-            return BurnMediaStatus.NoMedia;
+            return new BurnMediaInfo { Status = BurnMediaStatus.NoMedia };
         }
         catch (Exception ex)
         {
             _log.Warning(ex, "Burn media pre-flight failed for {Drive}", drivePath);
-            return BurnMediaStatus.DriveError;
+            return new BurnMediaInfo { Status = BurnMediaStatus.DriveError };
         }
     }
 
@@ -110,20 +131,21 @@ public static class CdBurnService
     /// Entry point used by the GUI.  On Windows, spawns an elevated copy of
     /// OrgZ.exe via <see cref="CdElevation"/> (UAC per operation); on other
     /// platforms, falls through to <see cref="BurnAsync"/> in-process.
+    /// Returns non-fatal warnings from the burn (e.g. CD-TEXT skipped).
     /// </summary>
-    public static async Task BurnWithElevationAsync(
+    public static async Task<IReadOnlyList<string>> BurnWithElevationAsync(
         string drivePath,
         IReadOnlyList<CdBurnTrack> tracks,
         IProgress<CdBurnProgress>? progress = null,
         string? discTitle = null,
         string? discPerformer = null,
         bool testWrite = false,
+        int? writeSpeedKBps = null,
         CancellationToken cancellationToken = default)
     {
         if (!CdElevation.RequiresElevation)
         {
-            await BurnAsync(drivePath, tracks, progress, discTitle, discPerformer, testWrite, cancellationToken);
-            return;
+            return await BurnAsync(drivePath, tracks, progress, discTitle, discPerformer, testWrite, writeSpeedKBps, cancellationToken);
         }
 
         var spec = new CdHelperSpec
@@ -133,6 +155,7 @@ public static class CdBurnService
             DiscTitle = discTitle,
             DiscPerformer = discPerformer,
             TestWrite = testWrite,
+            WriteSpeedKBps = writeSpeedKBps,
             Tracks = tracks.Select((t, i) => new CdHelperTrack
             {
                 TrackNumber = i + 1,
@@ -143,6 +166,7 @@ public static class CdBurnService
         };
 
         string? error = null;
+        var warnings = new List<string>();
 
         var exitCode = await CdElevation.RunElevatedAsync(spec, evt =>
         {
@@ -161,6 +185,14 @@ public static class CdBurnService
                     });
                     break;
                 }
+                case "warning":
+                {
+                    if (evt.Message is { } warning)
+                    {
+                        warnings.Add(warning);
+                    }
+                    break;
+                }
                 case "error":
                 {
                     error = evt.Message;
@@ -173,18 +205,22 @@ public static class CdBurnService
         {
             throw new InvalidOperationException(error ?? $"Elevated burn helper exited with code {exitCode}.");
         }
+
+        return warnings;
     }
 
     /// <summary>
     /// Burns a list of WAV files to a blank CD-R/CD-RW in disc-at-once mode.
+    /// Returns non-fatal warnings from the burn (e.g. CD-TEXT skipped).
     /// </summary>
-    public static async Task BurnAsync(
+    public static async Task<IReadOnlyList<string>> BurnAsync(
         string drivePath,
         IReadOnlyList<CdBurnTrack> tracks,
         IProgress<CdBurnProgress>? progress = null,
         string? discTitle = null,
         string? discPerformer = null,
         bool testWrite = false,
+        int? writeSpeedKBps = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(drivePath);
@@ -193,6 +229,11 @@ public static class CdBurnService
         if (tracks.Count == 0)
         {
             throw new ArgumentException("At least one track is required.", nameof(tracks));
+        }
+
+        if (tracks.Count > MaxRedbookTracks)
+        {
+            throw new ArgumentException($"Audio CDs hold at most {MaxRedbookTracks} tracks; {tracks.Count} were supplied.", nameof(tracks));
         }
 
         // Validate all sources up front - a burn that starts and aborts halfway is
@@ -220,6 +261,11 @@ public static class CdBurnService
                     throw new InvalidDataException($"Track {i + 1} ({track.WavFilePath}) PCM length {dataLength} is not a multiple of 2352 bytes (one CD sector).");
                 }
 
+                if (dataLength / BytesPerSector < MinRedbookTrackSectors)
+                {
+                    throw new InvalidDataException($"Track {i + 1} ({track.WavFilePath}) is {dataLength / BytesPerSector} sectors ({dataLength / BytesPerSector / 75.0:F1}s); Red Book requires at least 4 seconds ({MinRedbookTrackSectors} sectors) per track.");
+                }
+
                 audioSources.Add(new AudioTrackSource
                 {
                     Pcm = new SubStream(fs, dataOffset, dataLength),
@@ -245,6 +291,7 @@ public static class CdBurnService
                     BufferUnderrunProtection = true,
                     DiscTitle = discTitle,
                     DiscPerformer = discPerformer,
+                    WriteSpeedKBps = writeSpeedKBps,
                 };
 
                 var session = new BurnSession(transport, options);
@@ -265,7 +312,13 @@ public static class CdBurnService
 
                 await session.BurnAsync(audioSources, rawProgress, cancellationToken);
 
+                foreach (var warning in session.Warnings)
+                {
+                    _log.Warning("Burn warning for {Drive}: {Warning}", drivePath, warning);
+                }
+
                 _log.Information("Burn complete: {Count} tracks to {Drive}", tracks.Count, drivePath);
+                return session.Warnings.ToList();
             }
         }
         finally
