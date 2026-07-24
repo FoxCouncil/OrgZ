@@ -16,6 +16,17 @@ Each connected iPod becomes a collapsible parent (expander chevron) over its sub
 Podcasts, Audiobooks, Playlists - so multiple connected devices don't flood the DEVICES section.
 Expansion state remembered per device; auto-expand on first connect of a session.
 
+### Multi-select in media grids
+Extended selection (shift/ctrl click, ctrl+A) everywhere songs move around: add-to-playlist,
+sync-to-device, burn, remove, and drag-drop all operate on the selection, not just the focused
+row. Context menus pluralize with the count. Lands cleanest with (or right after) shared media
+grid v1 so it's built once.
+
+### Go to current song
+iTunes-style: an explicit jump (Ctrl+L, plus clicking the LCD track line) scrolls the playing
+song into view, centered vertically - never an automatic follow that fights the user's scroll
+position. Optional "follow playback" toggle later if wanted; default off, like iTunes.
+
 ## Architecture
 
 ### Shared media grid v1
@@ -29,13 +40,28 @@ The device Playlists node is (by spec) a navigation container today. A real mast
 playlists (name, tracks, duration), double-click navigates - needs a playlist row type, which
 arrives naturally with shared media grid v1.
 
-### iPod device service
-Bundled signed USB filter driver + LocalSystem service for UAC-free device operations (USB
-control-transfer version reads, raw SCSI, sync) - the way iTunes does it.
-macOS flavor: a privileged helper (SMAppService) for the same reads - Serial (SCSI INQUIRY
-VPD 0x80) and Software Version (firmware-partition osos / USB vendor control transfer) are
-unreachable from an unprivileged process there, so a blank-SysInfo classic shows "-" for
-both today (macOS only surfaces the USB iSerial, which is the FireWire GUID).
+### OrgZ background service
+One installed service (Windows service / macOS SMAppService daemon / Linux systemd unit)
+hosting everything that outgrows the GUI process:
+- **Elevation, once**: raw SCSI for burning + erasing and iPod device operations (USB
+  control-transfer version reads, firmware-partition reads, sync) without per-operation UAC -
+  the way iTunes does it. Windows eventually adds the bundled signed USB filter driver.
+  macOS flavor: privileged helper for the reads unreachable unprivileged - Serial (SCSI INQUIRY
+  VPD 0x80) and Software Version (firmware-partition osos / USB vendor control transfer);
+  a blank-SysInfo classic shows "-" for both today (macOS only surfaces the USB iSerial,
+  which is the FireWire GUID).
+- **Work that survives the GUI**: burning, iPod sync, and network sharing keep running when
+  the OrgZ window closes; which ones stay alive is user-configurable (Settings > Services,
+  per-feature toggles). GUI reconnects to in-flight jobs on relaunch.
+- IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
+
+### Library sharing over mDNS
+Open your library read-only on the LAN: the service advertises _orgz._tcp via mDNS/DNS-SD and
+serves a read-only catalogue + range-streamed audio; other OrgZ instances discover it and mount
+it in the sidebar like a device (browse, search, play - no edits, no deletes). Spiritually DAAP
+(iTunes sharing) without the dead protocol: JSON catalogue + plain HTTP streams. Auth: none on
+trusted LAN to start, PIN pairing later. Hosting lives in the background service so a closed
+GUI doesn't take the library off the air.
 
 ## Identity read - reference-verification matrix (slice A)
 Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope
