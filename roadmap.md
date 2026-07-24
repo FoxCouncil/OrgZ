@@ -66,13 +66,18 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   handed-off job completes headless and the next device scan shows the result).
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 
-### Library sharing over mDNS — SERVER SHIPPED 0.9.9
+### Library sharing over mDNS — SHIPPED 0.9.9 (server) + 0.9.10 (client)
+Client: a 30 s browse reconciles a SHARED LIBRARIES sidebar section - new shares mount
+(catalogue → streamable MediaItems, namespaced per share so ids never collide), vanished ones
+unmount and surrender the view; our own share is filtered out. Share views carry a playback-only
+context menu because there is nothing on a remote library to mutate.
 The service hosts it (share-start / share-stop / share-status ops, so a closed GUI doesn't take
 the library off the air): hand-rolled mDNS/DNS-SD advertising _orgz._tcp (no new dependency -
 PTR/SRV/TXT/A encode+decode, hostile-packet hardened), and an HttpListener serving GET/HEAD only
 - /catalogue (JSON) and /stream/{id} (Range-capable). Read-only by construction.
-REMAINING: the client side (discover + mount in the sidebar, task #7); a Settings > Services
-toggle to actually start the share; PIN pairing beyond the trusted-LAN default.
+REMAINING: a Settings > Services toggle to actually start hosting the share (the ops exist;
+nothing calls share-start yet); PIN pairing beyond the trusted-LAN default; artwork in the
+catalogue; share playlists.
 
 ## Identity read - reference-verification matrix (slice A)
 Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope

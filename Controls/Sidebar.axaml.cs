@@ -292,6 +292,30 @@ public partial class Sidebar : UserControl
             _suppressSelectionChange = true;
             DeviceTreeView.SelectedItem = null;
             PlaylistListBox.SelectedItem = null;
+            ShareListBox.SelectedItem = null;
+            _suppressSelectionChange = false;
+
+            if (DataContext is MainWindowViewModel vm)
+            {
+                vm.SelectedSidebarItem = item;
+            }
+        }
+    }
+
+    /// <summary>A shared library was picked: it owns the selection, like any other section.</summary>
+    private void ShareListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionChange)
+        {
+            return;
+        }
+
+        if (ShareListBox.SelectedItem is SidebarItem item)
+        {
+            _suppressSelectionChange = true;
+            LibraryListBox.SelectedItem = null;
+            DeviceTreeView.SelectedItem = null;
+            PlaylistListBox.SelectedItem = null;
             _suppressSelectionChange = false;
 
             if (DataContext is MainWindowViewModel vm)
@@ -337,6 +361,7 @@ public partial class Sidebar : UserControl
         _suppressSelectionChange = true;
         LibraryListBox.SelectedItem = null;
         PlaylistListBox.SelectedItem = null;
+        ShareListBox.SelectedItem = null;
         _suppressSelectionChange = false;
 
         if (DataContext is MainWindowViewModel vm)
@@ -370,6 +395,7 @@ public partial class Sidebar : UserControl
             _suppressSelectionChange = true;
             LibraryListBox.SelectedItem = null;
             DeviceTreeView.SelectedItem = null;
+            ShareListBox.SelectedItem = null;
             _suppressSelectionChange = false;
 
             if (DataContext is MainWindowViewModel vm)

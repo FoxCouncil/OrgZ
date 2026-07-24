@@ -193,6 +193,34 @@ public static class ListViewConfigs
     }
 
     /// <summary>
+    /// A remote OrgZ library share, mounted read-only. Same columns as Music so it reads
+    /// identically, but the context menu carries only playback verbs - a share offers no
+    /// files to edit, sync, or delete, and the menu must not imply otherwise.
+    /// </summary>
+    public static ListViewConfig BuildShareConfig(string shareKey)
+    {
+        var source = $"share:{shareKey}";
+
+        return new ListViewConfig
+        {
+            Key = $"Share:{shareKey}",
+            Columns = MusicColumns(),
+            BaseFilter = item => item.Source == source,
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildShareContextMenu(),
+        };
+    }
+
+    /// <summary>Playback only - a read-only share has nothing to mutate.</summary>
+    private static List<ContextMenuItemDef> BuildShareContextMenu() => Menu(
+        Header(withArtist: true),
+        Items(Cmd("Play", "Play"), Cmd("Play Next", "PlayNext"), Cmd("Add to Queue", "AddToQueue")),
+        Items(Cmd("Get Info", "GetInfo")));
+
+    /// <summary>
     /// Device sub-view filtered to one media kind (the Podcasts / Audiobooks nodes under a device).
     /// Populated for real now that both readers tag tracks by kind (binary MHIT media_type at 0xD0 +
     /// Nano 5G media_kind). The Podcasts node groups episodes into one collapsible header per show

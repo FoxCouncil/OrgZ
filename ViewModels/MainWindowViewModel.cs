@@ -273,6 +273,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal ObservableCollection<SidebarItem> DeviceItems { get; } = [];
 
+    /// <summary>Read-only OrgZ libraries discovered on the LAN (the SHARED LIBRARIES section).</summary>
+    internal ObservableCollection<SidebarItem> ShareItems { get; } = [];
+
+    // Share key -> the tracks currently mounted from it, so a vanished share can be
+    // withdrawn from the live list without disturbing anything else.
+    private readonly Dictionary<string, List<MediaItem>> _shareTracks = new(StringComparer.OrdinalIgnoreCase);
+    private bool _shareScanning;
+    private Avalonia.Threading.DispatcherTimer? _shareScanTimer;
+
     /// <summary>
     public PodcastsViewModel Podcasts { get; private set; } = null!;
 
@@ -4155,6 +4164,103 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Browses the LAN for OrgZ shares and reconciles the sidebar: newly-seen shares mount
+    /// (catalogue fetched, tracks joined to the live list), vanished ones unmount cleanly.
+    /// Best-effort and quiet - a LAN with no shares must cost nothing visible.
+    /// </summary>
+    internal async Task ScanForSharesAsync()
+    {
+        if (_shareScanning)
+        {
+            return;
+        }
+
+        _shareScanning = true;
+        try
+        {
+            var found = await Services.Sharing.ShareDiscovery.BrowseAsync(TimeSpan.FromSeconds(2));
+
+            // Never mount our own share back into our own sidebar.
+            var mine = Services.Sharing.MdnsAdvertiser.LocalIPv4();
+            found.RemoveAll(s => s.Address is { } a && mine is { } m && a == m);
+
+            var live = found.Select(s => s.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var goneKey in _shareTracks.Keys.Where(k => !live.Contains(k)).ToList())
+            {
+                UnmountShare(goneKey);
+            }
+
+            foreach (var share in found.Where(s => !_shareTracks.ContainsKey(s.Key)))
+            {
+                var tracks = await Services.Sharing.ShareDiscovery.FetchCatalogueAsync(share);
+                if (tracks.Count == 0)
+                {
+                    continue;
+                }
+
+                MountShare(share, tracks);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "share scan failed");
+        }
+        finally
+        {
+            _shareScanning = false;
+        }
+    }
+
+    private void MountShare(Services.Sharing.DiscoveredShare share, List<MediaItem> tracks)
+    {
+        var viewKey = $"Share:{share.Key}";
+        ListViewConfigs.Register(viewKey, ListViewConfigs.BuildShareConfig(share.Key));
+
+        _shareTracks[share.Key] = tracks;
+        _allItems.AddRange(tracks);
+
+        ShareItems.Add(new SidebarItem
+        {
+            Name = share.Name,
+            Icon = "fa-solid fa-network-wired",
+            Category = "SHARES",
+            IsEnabled = true,
+            ViewConfigKey = viewKey,
+        });
+
+        _log.Information("Mounted share \"{Name}\" ({Key}) with {Count} track(s)", share.Name, share.Key, tracks.Count);
+        ApplyFilter();
+    }
+
+    private void UnmountShare(string shareKey)
+    {
+        if (_shareTracks.Remove(shareKey, out var tracks))
+        {
+            foreach (var track in tracks)
+            {
+                _allItems.Remove(track);
+            }
+        }
+
+        var viewKey = $"Share:{shareKey}";
+        if (ShareItems.FirstOrDefault(i => i.ViewConfigKey == viewKey) is { } item)
+        {
+            ShareItems.Remove(item);
+        }
+
+        // Viewing the share that just vanished? Fall back to the library rather than
+        // leaving a dead view selected.
+        if (SelectedSidebarItem?.ViewConfigKey == viewKey && LibraryItems.Count > 0)
+        {
+            SelectedSidebarItem = LibraryItems[0];
+        }
+
+        _log.Information("Unmounted share {Key}", shareKey);
+        ApplyFilter();
+    }
+
+    /// <summary>
     /// Offers a multi-track sync to the background service, which owns the work from
     /// there - it keeps running if the GUI closes. Opt-in via Settings > Services
     /// (OrgZ.Services.KeepAlive.IPodSync, read by the caller and passed in - keeps this
@@ -5272,6 +5378,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             UpdateMainStatus($"iTunes ejected {name} — replug it to reconnect (enable “disk use” in iTunes to stop the auto-eject)."));
         _deviceDetection.CdDriveEvent += () => UI(() => _ = ScanForCdAsync());
         _deviceDetection.Start();
+
+        // LAN share discovery: one browse at startup, then every 30 s. Shares come and
+        // go with other people's apps, so the sidebar reconciles rather than assuming.
+        _ = ScanForSharesAsync();
+        _shareScanTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _shareScanTimer.Tick += (_, _) => _ = ScanForSharesAsync();
+        _shareScanTimer.Start();
     }
 
     /// <summary>

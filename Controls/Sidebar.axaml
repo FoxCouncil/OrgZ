@@ -144,6 +144,30 @@
                        Margin="34,2,0,4"
                        IsVisible="{Binding !DeviceItems.Count}" />
 
+            <!-- SHARES: read-only OrgZ libraries discovered on the LAN over mDNS.
+                 Whole section hides when nothing is being shared, so a solo user
+                 never sees an empty heading. -->
+            <StackPanel DockPanel.Dock="Top" IsVisible="{Binding ShareItems.Count}">
+                <Separator Background="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
+                           Height="1"
+                           Margin="12,4" />
+                <TextBlock Text="SHARED LIBRARIES"
+                           FontFamily="{StaticResource OrgZMonoFont}"
+                           FontSize="11"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
+                           Margin="16,8,0,4" />
+                <ListBox x:Name="ShareListBox"
+                         ItemsSource="{Binding ShareItems}"
+                         SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="0"
+                         ItemTemplate="{StaticResource SidebarItemTemplate}"
+                         ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
+                         SelectionChanged="ShareListBox_SelectionChanged" />
+            </StackPanel>
+
             <!-- Separator -->
             <Separator DockPanel.Dock="Top"
                        Background="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
