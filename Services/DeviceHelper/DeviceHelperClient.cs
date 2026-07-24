@@ -107,6 +107,25 @@ public static class DeviceHelperClient
         }
     }
 
+    /// <summary>
+    /// Asks the service what work is in flight, so a relaunched GUI can reattach to a
+    /// burn or sync that outlived it. Empty when nothing is running or unreachable.
+    /// </summary>
+    public static async Task<List<JobsServiceOps.RunningJob>> RunningJobsAsync()
+    {
+        try
+        {
+            var resp = await ExchangeAsync(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, JobsServiceOps.OpJobs, MountPath: "", Generation: null));
+            return resp is { Ok: true } ? JobsServiceOps.ParseJobs(resp.ResultJson) : [];
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Service unavailable for jobs");
+            return [];
+        }
+    }
+
     /// <summary>What the service reports about the hosted library share.</summary>
     public sealed record ShareState(bool Sharing, string? Name, int Port);
 

@@ -62,8 +62,9 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   both jobs once handed over, so closing the window doesn't kill them. Sync is opt-in via
   Settings > Services and hands only library IDs across (the service shares the library DB,
   re-fingerprints the device, and runs the normal AddTrackAsync import). Sharing follows.
-  STILL TO DO: the GUI reattaching to an in-flight job's progress file on relaunch (today a
-  handed-off job completes headless and the next device scan shows the result).
+  Reattach shipped 0.9.14: a "jobs" op reports in-flight work (kind, progress file, target)
+  and the GUI follows it at startup, so relaunching mid-burn picks the LCD back up instead of
+  showing an idle window over a live operation.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 
 ### Library sharing over mDNS — SHIPPED 0.9.9 (server) + 0.9.10 (client)

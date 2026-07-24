@@ -39,6 +39,7 @@ internal class Program
                 // Feature ops must be on the registry before the daemon serves.
                 Services.DeviceHelper.CdServiceOps.RegisterAll();
                 Services.DeviceHelper.SyncServiceOps.RegisterAll();
+                Services.DeviceHelper.JobsServiceOps.RegisterAll();
                 Services.Sharing.ShareServiceOps.RegisterAll();
 
 #if WINDOWS

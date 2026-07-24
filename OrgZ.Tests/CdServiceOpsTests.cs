@@ -10,6 +10,7 @@ namespace OrgZ.Tests;
 /// proves accept/execute/complete; adversarial cases attack garbage payloads, missing
 /// specs, and the single-job gate (two concurrent disc jobs = a coaster factory).
 /// </summary>
+[Collection(ServiceOpsCollection.Name)]
 public class CdServiceOpsTests
 {
     private static DeviceHelperProtocol.Request CdRun(string? payload)

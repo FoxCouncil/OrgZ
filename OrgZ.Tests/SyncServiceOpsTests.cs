@@ -10,6 +10,7 @@ namespace OrgZ.Tests;
 /// accept/execute; adversarial cases attack hostile payloads, the single-sync gate
 /// (concurrent writers corrupt an iPod database), and the opt-in gate.
 /// </summary>
+[Collection(ServiceOpsCollection.Name)]
 public class SyncServiceOpsTests
 {
     private static DeviceHelperProtocol.Request SyncRun(string? payload)

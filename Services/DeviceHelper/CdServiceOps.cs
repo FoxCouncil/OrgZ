@@ -25,6 +25,13 @@ public static class CdServiceOps
     // coaster factory. 0 = idle, 1 = running.
     private static int _busy;
 
+    // The job currently running, so a relaunched GUI can find its progress file and
+    // reattach instead of showing nothing while a burn is still going.
+    private static CdRunPayload? _current;
+
+    /// <summary>The in-flight disc job, or null when idle.</summary>
+    internal static CdRunPayload? CurrentJob => Volatile.Read(ref _current);
+
     /// <summary>Test seam: the spec runner (default: the real CdHelperMode core).</summary>
     internal static Func<string, string, int> Runner = CdHelperMode.RunSpec;
 
@@ -76,6 +83,8 @@ public static class CdServiceOps
             return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, "a disc operation is already running");
         }
 
+        Volatile.Write(ref _current, payload);
+
         _ = Task.Run(() =>
         {
             try
@@ -89,6 +98,7 @@ public static class CdServiceOps
             }
             finally
             {
+                Volatile.Write(ref _current, null);
                 Interlocked.Exchange(ref _busy, 0);
             }
         });

@@ -25,6 +25,12 @@ public static class SyncServiceOps
     // One sync at a time: concurrent writers on one iPod database corrupt it.
     private static int _busy;
 
+    // The sync currently running, so a relaunched GUI can reattach to its progress.
+    private static SyncRunPayload? _current;
+
+    /// <summary>The in-flight sync, or null when idle.</summary>
+    internal static SyncRunPayload? CurrentJob => Volatile.Read(ref _current);
+
     /// <summary>Test seam: performs the sync (default: the real device import loop).</summary>
     internal static Func<SyncRunPayload, Task> Runner = RunSyncAsync;
 
@@ -73,6 +79,8 @@ public static class SyncServiceOps
             return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, "a device sync is already running");
         }
 
+        Volatile.Write(ref _current, payload);
+
         _ = Task.Run(async () =>
         {
             try
@@ -85,6 +93,7 @@ public static class SyncServiceOps
             }
             finally
             {
+                Volatile.Write(ref _current, null);
                 Interlocked.Exchange(ref _busy, 0);
             }
         });

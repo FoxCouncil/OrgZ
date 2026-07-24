@@ -4164,6 +4164,104 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// The LCD title for a job the service was already running when we launched. Pure so
+    /// the wording is tested; unknown kinds still read as something rather than crashing
+    /// a startup path.
+    /// </summary>
+    internal static string DescribeResumedJob(Services.DeviceHelper.JobsServiceOps.RunningJob job) => job.Kind switch
+    {
+        "disc" => "Burning (in progress)",
+        "sync" => job.Target is { Length: > 0 } mount ? $"Syncing {mount} (in progress)" : "Syncing (in progress)",
+        _ => "Working (in progress)",
+    };
+
+    /// <summary>
+    /// Reattaches to work the background service kept running while OrgZ was closed: asks
+    /// what's in flight, then follows the job's progress file so the LCD picks the
+    /// operation back up mid-stream instead of showing an idle window over a live burn.
+    /// </summary>
+    internal async Task ReattachToServiceJobsAsync()
+    {
+        try
+        {
+            var jobs = await Services.DeviceHelper.DeviceHelperClient.RunningJobsAsync();
+            if (jobs.Count == 0)
+            {
+                return;
+            }
+
+            // One LCD, so follow the first job; a second running job is rare (the service
+            // gates disc and sync to one each) and its result still lands on the device.
+            var job = jobs[0];
+            _log.Information("Reattaching to service job: {Kind} ({Progress})", job.Kind, job.ProgressPath);
+
+            BeginLcdBusy(DescribeResumedJob(job), "Reconnected");
+            _burnWritePhase = job.Kind == "disc";   // a running burn is still uncancellable
+
+            await FollowJobProgressAsync(job);
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "reattach to service jobs failed");
+        }
+        finally
+        {
+            _burnWritePhase = false;
+            EndLcdBusy();
+        }
+    }
+
+    private async Task FollowJobProgressAsync(Services.DeviceHelper.JobsServiceOps.RunningJob job)
+    {
+        if (!File.Exists(job.ProgressPath))
+        {
+            return;
+        }
+
+        using var fs = new FileStream(job.ProgressPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(fs);
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line is null)
+            {
+                // Caught up: the job is still going, so wait for more. Stop once the
+                // service says it's idle - that's the authoritative end signal.
+                var stillRunning = await Services.DeviceHelper.DeviceHelperClient.RunningJobsAsync();
+                if (!stillRunning.Any(j => j.ProgressPath == job.ProgressPath))
+                {
+                    UpdateMainStatus(job.Kind == "disc" ? "Disc operation finished." : "Sync finished.");
+                    return;
+                }
+
+                await Task.Delay(500);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                var evt = System.Text.Json.JsonSerializer.Deserialize(line, CdHelperJsonContext.Default.CdHelperEvent);
+                if (evt is { Type: "burn-progress" } && evt.TotalDiscSectors > 0)
+                {
+                    var pct = (double)evt.TotalSectorsWritten / evt.TotalDiscSectors;
+                    SetLcdBusy($"Track {evt.TrackNumber}/{evt.TrackCount} — {(int)(pct * 100)}%", pct);
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // A sync job writes a different event shape; the reattach still shows
+                // its LCD title and completion, just without a percentage.
+            }
+        }
+    }
+
+    /// <summary>
     /// Browses the LAN for OrgZ shares and reconciles the sidebar: newly-seen shares mount
     /// (catalogue fetched, tracks joined to the live list), vanished ones unmount cleanly.
     /// Best-effort and quiet - a LAN with no shares must cost nothing visible.
@@ -5378,6 +5476,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             UpdateMainStatus($"iTunes ejected {name} — replug it to reconnect (enable “disk use” in iTunes to stop the auto-eject)."));
         _deviceDetection.CdDriveEvent += () => UI(() => _ = ScanForCdAsync());
         _deviceDetection.Start();
+
+        // Work the service kept running while we were closed - pick it back up before
+        // anything else claims the LCD.
+        _ = ReattachToServiceJobsAsync();
 
         // LAN share discovery: one browse at startup, then every 30 s. Shares come and
         // go with other people's apps, so the sidebar reconciles rather than assuming.
