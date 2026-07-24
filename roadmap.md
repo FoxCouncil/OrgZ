@@ -279,8 +279,11 @@ them against metal:
   the writes; the menus need metal
 
 ## Release
-- Velopack must bundle flac + lame + ffmpeg on Windows before release (rip + burn + iPod transcode
-  all shell out to them)
+- Velopack encoder bundling (0.9.6): win-x64 ffmpeg/flac/lame vendored - real SHA-256s in
+  scripts/encoders.json, assets staged in scripts/staged/, ffmpeg placed in tools/win-x64 for
+  dev builds. REMAINING: create the 'encoders-1' GitHub release and upload scripts/staged/*
+  (until then CI fetch skips and packages ship without encoders); vendor linux-x64 from a
+  linux host (Windows tar chokes on the .tar.xz) and osx-arm64 via scripts/build-ffmpeg-mac.sh
 - CI now gates every push (Tests workflow) and every commit (pre-commit hook, `git config
   core.hooksPath .githooks` per clone)
 

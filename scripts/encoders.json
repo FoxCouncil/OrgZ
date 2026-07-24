@@ -15,17 +15,72 @@
   "release": "encoders-1",
   "tools": {
     "win-x64": [
-      { "out": "ffmpeg.exe",     "asset": "ffmpeg-win-x64.exe",   "sha256": "PENDING", "license": "LGPL-2.1", "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip", "archive": "zip",  "entry": "ffmpeg.exe" },
-      { "out": "flac.exe",       "asset": "flac-win-x64.exe",     "sha256": "PENDING", "license": "BSD",      "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",                                    "archive": "zip",  "entry": "flac-1.4.3-win/Win64/flac.exe" },
-      { "out": "libFLAC.dll",    "asset": "libFLAC-win-x64.dll",  "sha256": "PENDING", "license": "BSD",      "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",                                    "archive": "zip",  "entry": "flac-1.4.3-win/Win64/libFLAC.dll" },
-      { "out": "libFLAC++.dll",  "asset": "libFLACpp-win-x64.dll","sha256": "PENDING", "license": "BSD",      "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",                                    "archive": "zip",  "entry": "flac-1.4.3-win/Win64/libFLAC++.dll" },
-      { "out": "lame.exe",       "asset": "lame-win-x64.exe",     "sha256": "PENDING", "license": "LGPL-2.0", "upstreamUrl": "https://www.rarewares.org/files/mp3/lame3.100.1-x64.zip",                                        "archive": "zip",  "entry": "lame.exe", "referer": "https://www.rarewares.org/mp3-lame-bundle.php" }
+      {
+        "out": "ffmpeg.exe",
+        "asset": "ffmpeg-win-x64.exe",
+        "sha256": "b1253f2a453ebb48b1b5e537b27f13f299514532829b68b9a7586a5183bf8e00",
+        "license": "LGPL-2.1",
+        "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip",
+        "archive": "zip",
+        "entry": "ffmpeg.exe"
+      },
+      {
+        "out": "flac.exe",
+        "asset": "flac-win-x64.exe",
+        "sha256": "d80c96700d17ac08bf8cc517147a62dd12241544ced0315a1e5832c436d69264",
+        "license": "BSD",
+        "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",
+        "archive": "zip",
+        "entry": "flac-1.4.3-win/Win64/flac.exe"
+      },
+      {
+        "out": "libFLAC.dll",
+        "asset": "libFLAC-win-x64.dll",
+        "sha256": "9f46d67fe71b59a8cfc83046c2802dca88ee92bfd97017330944db577ad58f4d",
+        "license": "BSD",
+        "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",
+        "archive": "zip",
+        "entry": "flac-1.4.3-win/Win64/libFLAC.dll"
+      },
+      {
+        "out": "libFLAC++.dll",
+        "asset": "libFLACpp-win-x64.dll",
+        "sha256": "30c07adc9f6df46b5845e765bf6274c4c4f883ed5c838b6857dd830150b629f8",
+        "license": "BSD",
+        "upstreamUrl": "https://downloads.xiph.org/releases/flac/flac-1.4.3-win.zip",
+        "archive": "zip",
+        "entry": "flac-1.4.3-win/Win64/libFLAC++.dll"
+      },
+      {
+        "out": "lame.exe",
+        "asset": "lame-win-x64.exe",
+        "sha256": "cdee20466ac2d1b6442fe83ede488586683bbacac0fc653900637292e735b97b",
+        "license": "LGPL-2.0",
+        "upstreamUrl": "https://www.rarewares.org/files/mp3/lame3.100.1-x64.zip",
+        "archive": "zip",
+        "entry": "lame.exe",
+        "referer": "https://www.rarewares.org/mp3-lame-bundle.php"
+      }
     ],
     "linux-x64": [
-      { "out": "ffmpeg", "asset": "ffmpeg-linux-x64", "sha256": "PENDING", "license": "LGPL-2.1", "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz", "archive": "tar.xz", "entry": "*/bin/ffmpeg" }
+      {
+        "out": "ffmpeg",
+        "asset": "ffmpeg-linux-x64",
+        "sha256": "PENDING",
+        "license": "LGPL-2.1",
+        "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz",
+        "archive": "tar.xz",
+        "entry": "*/bin/ffmpeg"
+      }
     ],
     "osx-arm64": [
-      { "out": "ffmpeg", "asset": "ffmpeg-osx-arm64", "sha256": "PENDING", "license": "LGPL-2.1", "builtFrom": "ffmpeg.org source via scripts/build-ffmpeg-mac.sh" }
+      {
+        "out": "ffmpeg",
+        "asset": "ffmpeg-osx-arm64",
+        "sha256": "PENDING",
+        "license": "LGPL-2.1",
+        "builtFrom": "ffmpeg.org source via scripts/build-ffmpeg-mac.sh"
+      }
     ]
   }
 }
