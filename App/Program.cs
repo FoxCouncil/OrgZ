@@ -36,6 +36,9 @@ internal class Program
             Logging.Initialize();
             try
             {
+                // Feature ops must be on the registry before the daemon serves.
+                Services.DeviceHelper.CdServiceOps.RegisterAll();
+
 #if WINDOWS
                 // Launched by the SCM (no interactive session) → run under ServiceBase so the
                 // control-dispatcher handshake happens and `sc start` succeeds. A developer

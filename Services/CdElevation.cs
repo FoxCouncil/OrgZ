@@ -53,6 +53,14 @@ internal static class CdElevation
             var specJson = JsonSerializer.Serialize(spec, CdHelperJsonContext.Default.CdHelperSpec);
             await File.WriteAllTextAsync(specPath, specJson, cancellationToken);
 
+            // The installed background service runs disc ops with ZERO prompts and keeps a
+            // started disc going even if the GUI exits - prefer it. Any refusal (not
+            // installed, busy, old protocol) quietly falls through to the per-op UAC helper.
+            if (await TryRunViaServiceAsync(specPath, progressPath, onEvent, cancellationToken) is int serviceExit)
+            {
+                return serviceExit;
+            }
+
             var psi = new ProcessStartInfo
             {
                 FileName = exePath,
@@ -97,6 +105,113 @@ internal static class CdElevation
         {
             TryDelete(specPath);
             TryDelete(progressPath);
+        }
+    }
+
+    /// <summary>
+    /// Runs the spec through the background service. Returns the exit code when the
+    /// service accepted and finished the job, or null when the service is unreachable
+    /// or refused (caller falls back to the UAC helper).
+    /// </summary>
+    private static async Task<int?> TryRunViaServiceAsync(
+        string specPath,
+        string progressPath,
+        Action<CdHelperEvent> onEvent,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var accepted = await DeviceHelper.DeviceHelperClient.RunCdSpecAsync(specPath, progressPath);
+            if (!accepted)
+            {
+                return null;
+            }
+
+            _log.Information("Disc operation handed to the background service (spec {Spec})", specPath);
+
+            // No process handle to watch - the job ends when a terminal event lands.
+            var terminal = await TailProgressUntilTerminalAsync(progressPath, onEvent, cancellationToken);
+            return terminal is null ? 1 : ExitCodeFor(terminal);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Background service unavailable for disc op - using the UAC helper");
+            return null;
+        }
+    }
+
+    /// <summary>Events that end a helper job. The service tail stops on these.</summary>
+    internal static bool IsTerminalEvent(string? type) => type
+        is "burn-done" or "rip-done" or "erase-done" or "error" or "ipod-firmware-result";
+
+    /// <summary>Exit code a terminal event implies - mirrors the helper process's codes.</summary>
+    internal static int ExitCodeFor(CdHelperEvent evt) => evt.Type switch
+    {
+        "error" => 1,
+        "ipod-firmware-result" => evt.OsosVersion != null ? 0 : 3,
+        _ => 0,
+    };
+
+    private static async Task<CdHelperEvent?> TailProgressUntilTerminalAsync(
+        string progressPath,
+        Action<CdHelperEvent> onEvent,
+        CancellationToken cancellationToken)
+    {
+        var waitForFile = TimeSpan.FromSeconds(10);
+        var startWait = DateTime.UtcNow;
+
+        while (!File.Exists(progressPath))
+        {
+            if (DateTime.UtcNow - startWait > waitForFile)
+            {
+                _log.Warning("Service did not create progress file within {Seconds}s", waitForFile.TotalSeconds);
+                return null;
+            }
+
+            await Task.Delay(PollInterval, cancellationToken);
+        }
+
+        using var fs = new FileStream(progressPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(fs);
+
+        while (true)
+        {
+            string? line;
+            while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                CdHelperEvent? evt;
+                try
+                {
+                    evt = JsonSerializer.Deserialize(line, CdHelperJsonContext.Default.CdHelperEvent);
+                }
+                catch (JsonException ex)
+                {
+                    _log.Warning(ex, "Malformed progress line: {Line}", line);
+                    continue;
+                }
+
+                if (evt == null)
+                {
+                    continue;
+                }
+
+                onEvent(evt);
+                if (IsTerminalEvent(evt.Type))
+                {
+                    return evt;
+                }
+            }
+
+            await Task.Delay(PollInterval, cancellationToken);
         }
     }
 

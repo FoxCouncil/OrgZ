@@ -57,6 +57,23 @@ internal static class CdHelperMode
         }
 
         Logging.Initialize();
+        try
+        {
+            return RunSpec(specPath, progressPath);
+        }
+        finally
+        {
+            Logging.Shutdown();
+        }
+    }
+
+    /// <summary>
+    /// Core spec execution, shared by the UAC-elevated helper process (via <see cref="Run"/>)
+    /// and the background service's cd-run op - same spec file in, same progress events out.
+    /// The caller owns logging lifetime.
+    /// </summary>
+    public static int RunSpec(string specPath, string progressPath)
+    {
         var log = Logging.For("CdHelper");
 
         using var progressWriter = new ProgressWriter(progressPath);
@@ -83,10 +100,6 @@ internal static class CdHelperMode
             log.Error(ex, "cd-helper fatal");
             progressWriter.WriteEvent(new CdHelperEvent { Type = "error", Message = ex.Message });
             return 1;
-        }
-        finally
-        {
-            Logging.Shutdown();
         }
     }
 

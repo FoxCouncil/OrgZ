@@ -57,6 +57,31 @@ public static class DeviceHelperClient
         }
     }
 
+    /// <summary>
+    /// Hands a disc-operation spec to the service's cd-run op. True when the service
+    /// accepted the job (progress then flows through the spec's progress file); false
+    /// when it's unreachable or refused (not installed, busy, version mismatch).
+    /// </summary>
+    public static async Task<bool> RunCdSpecAsync(string specPath, string progressPath)
+    {
+        try
+        {
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { specPath, progressPath });
+            var resp = await ExchangeAsync(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, "cd-run", MountPath: "", Generation: null, PayloadJson: payload));
+            if (resp is { Ok: false })
+            {
+                _log.Debug("Service refused cd-run: {Error}", resp.Error);
+            }
+            return resp is { Ok: true };
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Service unavailable for cd-run");
+            return false;
+        }
+    }
+
     private static async Task<DeviceHelperProtocol.Response?> ExchangeAsync(DeviceHelperProtocol.Request request)
     {
         using var cts = new CancellationTokenSource(CallTimeout);

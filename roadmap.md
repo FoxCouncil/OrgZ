@@ -48,9 +48,12 @@ fields, capability-discovery "status" op, polite version-mismatch refusal), an o
 features plug privileged ops into (duplicate names throw, handler crashes answer as failures),
 and Settings > Services (install/uninstall/status + per-feature keep-alive toggles under
 OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
-- **Elevation, once**: raw SCSI for burning + erasing and iPod device operations (USB
-  control-transfer version reads, firmware-partition reads, sync) without per-operation UAC -
-  the way iTunes does it. Windows eventually adds the bundled signed USB filter driver.
+- **Elevation, once — CD OPS SHIPPED 0.9.7**: burn / burn-data / erase / rip / firmware
+  reads route through the service's cd-run op when it's installed (same spec + progress-file
+  contract, terminal-event tail, single-job gate) with the per-op UAC helper as automatic
+  fallback; a started disc finishes even if the GUI exits. iPod device operations (USB
+  control-transfer version reads, firmware-partition reads, sync) remain to move over.
+  Windows eventually adds the bundled signed USB filter driver.
   macOS flavor: privileged helper for the reads unreachable unprivileged - Serial (SCSI INQUIRY
   VPD 0x80) and Software Version (firmware-partition osos / USB vendor control transfer);
   a blank-SysInfo classic shows "-" for both today (macOS only surfaces the USB iSerial,
