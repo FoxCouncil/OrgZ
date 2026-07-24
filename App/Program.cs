@@ -38,6 +38,7 @@ internal class Program
             {
                 // Feature ops must be on the registry before the daemon serves.
                 Services.DeviceHelper.CdServiceOps.RegisterAll();
+                Services.DeviceHelper.SyncServiceOps.RegisterAll();
 
 #if WINDOWS
                 // Launched by the SCM (no interactive session) → run under ServiceBase so the

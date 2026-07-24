@@ -58,9 +58,12 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   VPD 0x80) and Software Version (firmware-partition osos / USB vendor control transfer);
   a blank-SysInfo classic shows "-" for both today (macOS only surfaces the USB iSerial,
   which is the FireWire GUID).
-- **Work that survives the GUI**: burning, iPod sync, and network sharing keep running when
-  the OrgZ window closes; which ones stay alive is user-configurable (Settings > Services,
-  per-feature toggles). GUI reconnects to in-flight jobs on relaunch.
+- **Work that survives the GUI** — burn (0.9.7) + iPod sync (0.9.8) done: the service owns
+  both jobs once handed over, so closing the window doesn't kill them. Sync is opt-in via
+  Settings > Services and hands only library IDs across (the service shares the library DB,
+  re-fingerprints the device, and runs the normal AddTrackAsync import). Sharing follows.
+  STILL TO DO: the GUI reattaching to an in-flight job's progress file on relaunch (today a
+  handed-off job completes headless and the next device scan shows the result).
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 
 ### Library sharing over mDNS

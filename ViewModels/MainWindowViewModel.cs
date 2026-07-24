@@ -4155,6 +4155,29 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Offers a multi-track sync to the background service, which owns the work from
+    /// there - it keeps running if the GUI closes. Opt-in via Settings > Services
+    /// (OrgZ.Services.KeepAlive.IPodSync, read by the caller and passed in - keeps this
+    /// free of global state); any refusal returns false and the caller syncs in-process
+    /// exactly as before.
+    /// </summary>
+    internal static async Task<bool> TryHandOffSyncToServiceAsync(string mountPath, IReadOnlyList<MediaItem> tracks, Func<string, IReadOnlyList<string>, Task<bool>> handOff, bool keepAliveEnabled)
+    {
+        if (!keepAliveEnabled)
+        {
+            return false;
+        }
+
+        var ids = tracks.Select(t => t.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
+        if (ids.Count == 0)
+        {
+            return false;
+        }
+
+        return await handOff(mountPath, ids);
+    }
+
+    /// <summary>
     /// Cancellation scope for a sync gesture. The OUTERMOST caller creates the token (owns = true)
     /// and clears it in <see cref="EndSyncScope"/>; nested syncs (a full device sync running its
     /// playlists) reuse it - so one press of the LCD Cancel X stops the whole gesture, not just the

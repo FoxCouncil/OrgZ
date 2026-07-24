@@ -82,6 +82,31 @@ public static class DeviceHelperClient
         }
     }
 
+    /// <summary>
+    /// Hands a device sync to the service so it survives the GUI closing. True when
+    /// the service accepted it (progress then flows through the progress file);
+    /// false when unreachable, busy, or refused - caller syncs in-process instead.
+    /// </summary>
+    public static async Task<bool> RunSyncAsync(string mountPath, string progressPath, IReadOnlyList<string> mediaIds)
+    {
+        try
+        {
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { mountPath, progressPath, mediaIds });
+            var resp = await ExchangeAsync(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, SyncServiceOps.OpSyncRun, mountPath, Generation: null, PayloadJson: payload));
+            if (resp is { Ok: false })
+            {
+                _log.Debug("Service refused sync-run: {Error}", resp.Error);
+            }
+            return resp is { Ok: true };
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Service unavailable for sync-run");
+            return false;
+        }
+    }
+
     private static async Task<DeviceHelperProtocol.Response?> ExchangeAsync(DeviceHelperProtocol.Request request)
     {
         using var cts = new CancellationTokenSource(CallTimeout);
