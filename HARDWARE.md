@@ -40,4 +40,29 @@ iPod Touch and iPhone are out of scope
 
 | Drive | Connection | External power | Tested |
 |---|---|---|---|
-| Pioneer BD-RW BDR-XS07U | USB 3.2 Gen 1, USB-C port on the drive | Not required - USB bus-powered | ✅ CD rip + DAO audio burn |
+| Pioneer BD-RW BDR-XS07U | USB 3.2 Gen 1, USB-C port on the drive | Not required - USB bus-powered | ✅ CD rip + DAO audio burn (incl. CD-TEXT) |
+
+### Burn validation pass
+
+Six `Burn Test N` playlists live in the library for this. Test 1 is ✅ done: burned on the
+BDR-XS07U with CD-TEXT, verified in foobar2000 (disc title + per-track titles/artists read
+back off the disc), TOC sector-exact, plays. The rest need a person with ears and discs.
+
+Drive quirks this drive taught us, worth re-checking on any new recorder:
+- Cue sheet lead-in **and** lead-out entries must use Data Form `0x01` (device-generated);
+  `0x00` is rejected with 5/26/00 INVALID FIELD IN PARAMETER LIST.
+- CD-TEXT lead-in start comes from **READ ATIP**, not track 1's NWA (which reports −150, the
+  pregap). Announcing CD-TEXT in the cue and then not writing the lead-in hangs the burn.
+- WRITE(10) transfers must stay under the USB bridge's 64 KB cap (OrgZ uses 26 sectors).
+- SAO self-finalizes: no explicit CLOSE TRACK/SESSION (5/30/05 on an already-closed disc).
+
+| # | Playlist | What it proves | Result |
+|---|---|---|---|
+| 1 | Smoke (11 min) | End-to-end burn + CD-TEXT | ✅ verified in foobar2000 |
+| 2 | Track Boundaries (5×5 s + 2 songs, **burn at Gap 0**) | Skip-to-track lands on each song's first note; last track plays to the very end | ⬜ |
+| 3 | Hi-Res Downsample (one track per source rate incl. 192k) | Transcode to 44.1/16 without artefacts | ⬜ |
+| 4 | Unicode CD-TEXT (Japanese / emoji titles) | Latin-1 fallback renders `?` rather than failing the burn | ⬜ |
+| 5 | Near Capacity (77.9 min) | Fits; capacity line stays black; burn completes | ⬜ |
+| 6 | Overflow (90.2 min) | Burn button disabled, Discs row reads `2 × 79:57` — never reaches the drive | ⬜ |
+
+Tests 5 and 6 are dialog-level and cost no media (6 should never start a burn at all).
