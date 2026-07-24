@@ -254,6 +254,10 @@ them against metal:
   core.hooksPath .githooks` per clone)
 
 ## Polish backlog
+- Multi-disc burning: when a playlist overflows one disc (the burn dialog already shows the
+  "Discs: N × capacity" row and disables Burn), split the set across discs — audio by track
+  boundaries, data by files — with per-disc titles ("... (2/3)") and a swap-disc prompt between
+  burns
 - AirPlay: real RAOP/AirPlay audio streaming (outputs currently listed disabled, "coming soon")
 - Podcast store middle slot: design the feature behind the placeholder grid
 - Sidebar device context menu: wire or remove the disabled "Import Into Library..." / "Import Into
