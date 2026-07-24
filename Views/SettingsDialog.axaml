@@ -254,15 +254,25 @@
 						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="8">
 								<TextBlock Text="Library Overview" FontWeight="Bold" FontSize="13" />
-								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto" Margin="8,4,0,0">
-									<TextBlock Grid.Row="0" Grid.Column="0" Text="Music Tracks:" Opacity="0.6" />
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="8,4,0,0">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Music:" Opacity="0.6" />
 									<Button Grid.Row="0" Grid.Column="1" Classes="link" Click="LinkMusicCount_Click">
 										<TextBlock x:Name="StatMusicCount" Text="0" Foreground="{StaticResource OrgZAccentBlueBrush}" />
 									</Button>
 
-									<TextBlock Grid.Row="1" Grid.Column="0" Text="Radio Stations:" Opacity="0.6" />
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Radio:" Opacity="0.6" />
 									<Button Grid.Row="1" Grid.Column="1" Classes="link" Click="LinkRadioCount_Click">
 										<TextBlock x:Name="StatRadioCount" Text="0" Foreground="{StaticResource OrgZAccentBlueBrush}" />
+									</Button>
+
+									<TextBlock Grid.Row="2" Grid.Column="0" x:Name="OverviewPodcastLabel" Text="Podcasts:" Opacity="0.6" IsVisible="False" />
+									<Button Grid.Row="2" Grid.Column="1" x:Name="OverviewPodcastLink" Classes="link" Click="LinkPodcastCount_Click" IsVisible="False">
+										<TextBlock x:Name="StatPodcastCount" Text="0" Foreground="{StaticResource OrgZAccentBlueBrush}" />
+									</Button>
+
+									<TextBlock Grid.Row="3" Grid.Column="0" x:Name="OverviewAudiobookLabel" Text="Audiobooks:" Opacity="0.6" IsVisible="False" />
+									<Button Grid.Row="3" Grid.Column="1" x:Name="OverviewAudiobookLink" Classes="link" Click="LinkAudiobookCount_Click" IsVisible="False">
+										<TextBlock x:Name="StatAudiobookCount" Text="0" Foreground="{StaticResource OrgZAccentBlueBrush}" />
 									</Button>
 								</Grid>
 							</StackPanel>
@@ -320,6 +330,46 @@
 								<!-- Codecs inline -->
 								<TextBlock Text="Codecs" FontWeight="Bold" FontSize="12" Opacity="0.8" Margin="0,4,0,0" />
 								<StackPanel x:Name="RadioCodecsPanel" Spacing="2" Margin="8,0,0,0" />
+							</StackPanel>
+						</Border>
+
+						<!-- Podcast Stats (hidden until the library has subscriptions or downloads) -->
+						<Border x:Name="PodcastStatsSection" BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12" IsVisible="False">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Podcasts" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto" Margin="8,4,0,0">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Subscriptions:" Opacity="0.6" />
+									<TextBlock Grid.Row="0" Grid.Column="1" x:Name="StatPodcastSubs" Text="0" />
+
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Downloaded Episodes:" Opacity="0.6" />
+									<TextBlock Grid.Row="1" Grid.Column="1" x:Name="StatPodcastDownloaded" Text="…" />
+
+									<TextBlock Grid.Row="2" Grid.Column="0" Text="Space Used:" Opacity="0.6" />
+									<TextBlock Grid.Row="2" Grid.Column="1" x:Name="StatPodcastSpace" Text="…" />
+								</Grid>
+							</StackPanel>
+						</Border>
+
+						<!-- Audiobook Stats (hidden until the library owns any books) -->
+						<Border x:Name="AudiobookStatsSection" BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12" IsVisible="False">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Audiobooks" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="8,4,0,0">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Books:" Opacity="0.6" />
+									<TextBlock Grid.Row="0" Grid.Column="1" x:Name="StatBookCount" Text="0" />
+
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Authors:" Opacity="0.6" />
+									<TextBlock Grid.Row="1" Grid.Column="1" x:Name="StatBookAuthors" Text="0" />
+
+									<TextBlock Grid.Row="2" Grid.Column="0" Text="Chapter Files:" Opacity="0.6" />
+									<TextBlock Grid.Row="2" Grid.Column="1" x:Name="StatBookChapters" Text="0" />
+
+									<TextBlock Grid.Row="3" Grid.Column="0" Text="Total Duration:" Opacity="0.6" />
+									<TextBlock Grid.Row="3" Grid.Column="1" x:Name="StatBookDuration" Text="00:00:00:00" />
+
+									<TextBlock Grid.Row="4" Grid.Column="0" Text="Total File Size:" Opacity="0.6" />
+									<TextBlock Grid.Row="4" Grid.Column="1" x:Name="StatBookSize" Text="0 B" />
+								</Grid>
 							</StackPanel>
 						</Border>
 

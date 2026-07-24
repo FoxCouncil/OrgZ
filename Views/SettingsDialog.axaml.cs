@@ -3,6 +3,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using OrgZ.Services.Audiobooks;
 using OrgZ.Services.Podcast;
 using OrgZ.ViewModels;
 
@@ -339,6 +340,107 @@ public partial class SettingsDialog : Window
         {
             RadioCodecsPanel.Children.Add(CreateStatLabel("No codec data", 0.4));
         }
+
+        PopulatePodcastStats();
+        PopulateAudiobookStats();
+    }
+
+    /// <summary>
+    /// Podcast section + overview row. Subscriptions come from the cache; downloaded
+    /// episode count and size need a disk walk, so those fill in off the UI thread.
+    /// The whole section stays hidden for a library with no podcast footprint.
+    /// </summary>
+    private void PopulatePodcastStats()
+    {
+        var subscriptions = PodcastCache.GetSubscriptions().Count;
+        StatPodcastSubs.Text = subscriptions.ToString("N0");
+        StatPodcastCount.Text = subscriptions.ToString("N0");
+
+        var visible = subscriptions > 0;
+        PodcastStatsSection.IsVisible = visible;
+        OverviewPodcastLabel.IsVisible = visible;
+        OverviewPodcastLink.IsVisible = visible;
+
+        var root = App.FolderPath;
+        _ = Task.Run(() =>
+        {
+            var count = 0;
+            long bytes = 0;
+            var dir = PodcastSettings.DownloadDir(root);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
+                try
+                {
+                    // Only audio counts as an episode - the download root also holds
+                    // cached artwork (thousands of PNGs) and aborted .partial files.
+                    // Space Used stays all-files: it's the folder's real disk footprint.
+                    string[] episodeExtensions = [".mp3", ".m4a", ".ogg", ".flac"];
+                    foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                    {
+                        if (episodeExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                        {
+                            count++;
+                        }
+
+                        try
+                        {
+                            bytes += new FileInfo(file).Length;
+                        }
+                        catch (IOException) { }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Best-effort; the section just keeps its placeholder counts.
+                }
+            }
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                StatPodcastDownloaded.Text = count.ToString("N0");
+                StatPodcastSpace.Text = PodcastSettings.FormatBytes(bytes);
+
+                // Downloads with zero subscriptions still count as a podcast footprint.
+                if (count > 0 && !PodcastStatsSection.IsVisible)
+                {
+                    PodcastStatsSection.IsVisible = true;
+                    OverviewPodcastLabel.IsVisible = true;
+                    OverviewPodcastLink.IsVisible = true;
+                }
+            });
+        });
+    }
+
+    /// <summary>
+    /// Audiobook section + overview row, grouped the same way as the Audiobooks shelf
+    /// (whole books, not files - acquired-but-deleted books count too). Hidden for a
+    /// library with no books.
+    /// </summary>
+    private void PopulateAudiobookStats()
+    {
+        var audiobookItems = _allItems.Where(i => i.Kind == MediaKind.Audiobook).ToList();
+        var owned = AudiobookLibrary.AssembleOwned(App.FolderPath, audiobookItems);
+
+        var visible = owned.Count > 0;
+        AudiobookStatsSection.IsVisible = visible;
+        OverviewAudiobookLabel.IsVisible = visible;
+        OverviewAudiobookLink.IsVisible = visible;
+
+        if (!visible)
+        {
+            return;
+        }
+
+        var authors = owned.Where(b => !string.IsNullOrEmpty(b.Author)).Select(b => b.Author).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var totalDuration = TimeSpan.FromTicks(owned.Sum(b => b.TotalDuration.Ticks));
+        var totalBytes = audiobookItems.Sum(i => i.FileSize ?? 0);
+
+        StatAudiobookCount.Text = owned.Count.ToString("N0");
+        StatBookCount.Text = owned.Count.ToString("N0");
+        StatBookAuthors.Text = authors.ToString("N0");
+        StatBookChapters.Text = audiobookItems.Count.ToString("N0");
+        StatBookDuration.Text = totalDuration.ToString(@"dd\:hh\:mm\:ss");
+        StatBookSize.Text = FormatHelper.FormatFileSize(totalBytes);
     }
 
     private void ScrollToElement(Control target)
@@ -354,6 +456,16 @@ public partial class SettingsDialog : Window
     private void LinkRadioCount_Click(object? sender, RoutedEventArgs e)
     {
         ScrollToElement(RadioStatsSection);
+    }
+
+    private void LinkPodcastCount_Click(object? sender, RoutedEventArgs e)
+    {
+        ScrollToElement(PodcastStatsSection);
+    }
+
+    private void LinkAudiobookCount_Click(object? sender, RoutedEventArgs e)
+    {
+        ScrollToElement(AudiobookStatsSection);
     }
 
     private static Grid CreateBreakdownRow(string label, string count, string? size)
