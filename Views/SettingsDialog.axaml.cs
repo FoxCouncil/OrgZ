@@ -75,6 +75,10 @@ public partial class SettingsDialog : Window
         BurnCdTextCheck.IsChecked = Settings.Get("OrgZ.Burn.CdText", true);
 
         // Services
+        ShareNameInput.Text = Settings.Get("OrgZ.Services.Sharing.Name", $"{Environment.MachineName} Library");
+        ShareEnabledCheck.IsChecked = Settings.Get("OrgZ.Services.Sharing.Enabled", false);
+        _ = RefreshShareStatusAsync();
+
         ServiceKeepBurningCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Burning", false);
         ServiceKeepSyncCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false);
         ServiceKeepSharingCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Sharing", false);
@@ -558,6 +562,9 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.Burn.LossyQualityKbps", int.TryParse((BurnLossyQualityCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(), out var burnKbps) ? burnKbps : 256);
 
         // Services
+        Settings.Set("OrgZ.Services.Sharing.Enabled", ShareEnabledCheck.IsChecked == true);
+        Settings.Set("OrgZ.Services.Sharing.Name", string.IsNullOrWhiteSpace(ShareNameInput.Text) ? $"{Environment.MachineName} Library" : ShareNameInput.Text.Trim());
+
         Settings.Set("OrgZ.Services.KeepAlive.Burning", ServiceKeepBurningCheck.IsChecked == true);
         Settings.Set("OrgZ.Services.KeepAlive.IPodSync", ServiceKeepSyncCheck.IsChecked == true);
         Settings.Set("OrgZ.Services.KeepAlive.Sharing", ServiceKeepSharingCheck.IsChecked == true);
@@ -577,6 +584,59 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.Podcasts.Keep", keepTag);
 
         Settings.Save();
+    }
+
+    // ── Services tab: library sharing ────────────────────────
+
+    /// <summary>
+    /// The one line the Services tab shows for sharing. Pure so the wording is
+    /// tested rather than eyeballed: a share needs the background service, and
+    /// saying "on" while nothing is listening would be a lie.
+    /// </summary>
+    internal static string DescribeShareState(bool serviceAvailable, Services.DeviceHelper.DeviceHelperClient.ShareState? state)
+    {
+        if (!serviceAvailable)
+        {
+            return "Needs the background service — install it above";
+        }
+
+        if (state is not { Sharing: true })
+        {
+            return "Not sharing";
+        }
+
+        var name = string.IsNullOrWhiteSpace(state.Name) ? "This library" : state.Name;
+        return $"Sharing “{name}” on port {state.Port}";
+    }
+
+    private async Task RefreshShareStatusAsync()
+    {
+        var available = await Services.DeviceHelper.DeviceHelperClient.IsAvailableAsync();
+        var state = available ? await Services.DeviceHelper.DeviceHelperClient.ShareStatusAsync() : null;
+
+        ShareStatusText.Text = DescribeShareState(available, state);
+        ShareEnabledCheck.IsEnabled = available;
+        ShareEnabledCheck.IsChecked = state is { Sharing: true };
+    }
+
+    private async void ShareEnabled_Click(object? sender, RoutedEventArgs e)
+    {
+        var wantOn = ShareEnabledCheck.IsChecked == true;
+        ShareStatusText.Text = wantOn ? "Starting…" : "Stopping…";
+
+        var name = string.IsNullOrWhiteSpace(ShareNameInput.Text) ? $"{Environment.MachineName} Library" : ShareNameInput.Text.Trim();
+
+        var state = wantOn
+            ? await Services.DeviceHelper.DeviceHelperClient.StartShareAsync(name, Services.Sharing.ShareServiceOps.DefaultPort)
+            : await Services.DeviceHelper.DeviceHelperClient.StopShareAsync();
+
+        // Persist immediately: a share is a live network state, not a pending edit -
+        // the checkbox must not disagree with what the service is actually doing.
+        Settings.Set("OrgZ.Services.Sharing.Enabled", state is { Sharing: true });
+        Settings.Set("OrgZ.Services.Sharing.Name", name);
+        Settings.Save();
+
+        await RefreshShareStatusAsync();
     }
 
     // ── Services tab ─────────────────────────────────────────

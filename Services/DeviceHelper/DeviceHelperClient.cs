@@ -107,6 +107,64 @@ public static class DeviceHelperClient
         }
     }
 
+    /// <summary>What the service reports about the hosted library share.</summary>
+    public sealed record ShareState(bool Sharing, string? Name, int Port);
+
+    /// <summary>Starts hosting the library share. Null when the service is unreachable.</summary>
+    public static Task<ShareState?> StartShareAsync(string shareName, int port)
+        => ShareOpAsync(Sharing.ShareServiceOps.OpShareStart,
+            System.Text.Json.JsonSerializer.Serialize(new { shareName, port }));
+
+    public static Task<ShareState?> StopShareAsync()
+        => ShareOpAsync(Sharing.ShareServiceOps.OpShareStop, null);
+
+    public static Task<ShareState?> ShareStatusAsync()
+        => ShareOpAsync(Sharing.ShareServiceOps.OpShareStatus, null);
+
+    private static async Task<ShareState?> ShareOpAsync(string op, string? payload)
+    {
+        try
+        {
+            var resp = await ExchangeAsync(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, op, MountPath: "", Generation: null, PayloadJson: payload));
+            if (resp is not { Ok: true })
+            {
+                _log.Debug("Service refused {Op}: {Error}", op, resp?.Error);
+                return null;
+            }
+
+            return ParseShareState(resp.ResultJson);
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Service unavailable for {Op}", op);
+            return null;
+        }
+    }
+
+    /// <summary>Reads a share-op result. Malformed/absent JSON reads as "not sharing".</summary>
+    internal static ShareState ParseShareState(string? resultJson)
+    {
+        if (string.IsNullOrWhiteSpace(resultJson))
+        {
+            return new ShareState(false, null, 0);
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            var sharing = root.TryGetProperty("sharing", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.True;
+            var name = root.TryGetProperty("name", out var n) && n.ValueKind == System.Text.Json.JsonValueKind.String ? n.GetString() : null;
+            var port = root.TryGetProperty("port", out var p) && p.ValueKind == System.Text.Json.JsonValueKind.Number ? p.GetInt32() : 0;
+            return new ShareState(sharing, name, port);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new ShareState(false, null, 0);
+        }
+    }
+
     private static async Task<DeviceHelperProtocol.Response?> ExchangeAsync(DeviceHelperProtocol.Request request)
     {
         using var cts = new CancellationTokenSource(CallTimeout);

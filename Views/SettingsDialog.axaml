@@ -185,6 +185,20 @@
 							</StackPanel>
 						</Border>
 
+						<!-- Library sharing -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Share This Library" FontWeight="Bold" FontSize="13" />
+								<CheckBox x:Name="ShareEnabledCheck" Content="Share my library on this network (read-only)" Click="ShareEnabled_Click" />
+								<Grid ColumnDefinitions="200,240" RowDefinitions="Auto,Auto" RowSpacing="10">
+									<TextBlock Grid.Row="0" Grid.Column="0" Text="Share name" VerticalAlignment="Center" />
+									<TextBox Grid.Row="0" Grid.Column="1" x:Name="ShareNameInput" HorizontalAlignment="Stretch" />
+									<TextBlock Grid.Row="1" Grid.Column="0" Text="Status" VerticalAlignment="Center" />
+									<TextBlock Grid.Row="1" Grid.Column="1" x:Name="ShareStatusText" Text="Not sharing" VerticalAlignment="Center" />
+								</Grid>
+							</StackPanel>
+						</Border>
+
 						<!-- Keep-alive -->
 						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="10">

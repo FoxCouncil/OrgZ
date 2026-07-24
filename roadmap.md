@@ -75,9 +75,13 @@ The service hosts it (share-start / share-stop / share-status ops, so a closed G
 the library off the air): hand-rolled mDNS/DNS-SD advertising _orgz._tcp (no new dependency -
 PTR/SRV/TXT/A encode+decode, hostile-packet hardened), and an HttpListener serving GET/HEAD only
 - /catalogue (JSON) and /stream/{id} (Range-capable). Read-only by construction.
-REMAINING: a Settings > Services toggle to actually start hosting the share (the ops exist;
-nothing calls share-start yet); PIN pairing beyond the trusted-LAN default; artwork in the
-catalogue; share playlists.
+Hosting is reachable as of 0.9.13: Settings > Services > Share This Library toggles it live
+(name editable, status line reports the actual service state and refuses to claim sharing when
+the service isn't installed).
+REMAINING: prove playback end-to-end against a real remote share (LibVLC accepting the stream
+URL + seeking through Range is UNVERIFIED - the client and server have only been tested
+separately); PIN pairing beyond the trusted-LAN default; artwork in the catalogue; share
+playlists.
 
 ## Identity read - reference-verification matrix (slice A)
 Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope
