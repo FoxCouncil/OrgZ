@@ -74,6 +74,12 @@ public partial class SettingsDialog : Window
         BurnAudioGapCombo.SelectedIndex = Settings.Get("OrgZ.Burn.AudioGapSeconds", 2) == 0 ? 0 : 1;
         BurnCdTextCheck.IsChecked = Settings.Get("OrgZ.Burn.CdText", true);
 
+        // Services
+        ServiceKeepBurningCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Burning", false);
+        ServiceKeepSyncCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false);
+        ServiceKeepSharingCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Sharing", false);
+        _ = RefreshServiceStatusAsync();
+
         BurnDataFormatCombo.SelectedIndex = Settings.Get("OrgZ.Burn.DataFormat", "original") switch
         {
             "original" => 0,
@@ -551,6 +557,11 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.Burn.DataFormat", (BurnDataFormatCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "original");
         Settings.Set("OrgZ.Burn.LossyQualityKbps", int.TryParse((BurnLossyQualityCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(), out var burnKbps) ? burnKbps : 256);
 
+        // Services
+        Settings.Set("OrgZ.Services.KeepAlive.Burning", ServiceKeepBurningCheck.IsChecked == true);
+        Settings.Set("OrgZ.Services.KeepAlive.IPodSync", ServiceKeepSyncCheck.IsChecked == true);
+        Settings.Set("OrgZ.Services.KeepAlive.Sharing", ServiceKeepSharingCheck.IsChecked == true);
+
         // Playback → Mini-Player
         var miniMode = MiniPlayerModeSideBySide.IsChecked == true ? MiniPlayerMode.SideBySide : MiniPlayerMode.Replace;
         MainWindowViewModel.SaveMiniPlayerMode(miniMode);
@@ -566,6 +577,52 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.Podcasts.Keep", keepTag);
 
         Settings.Save();
+    }
+
+    // ── Services tab ─────────────────────────────────────────
+
+    private async Task RefreshServiceStatusAsync()
+    {
+        ServiceStatusText.Text = "Checking…";
+        ServiceInstallButton.IsEnabled = false;
+        ServiceUninstallButton.IsEnabled = false;
+
+        var running = await Services.DeviceHelper.DeviceHelperClient.IsAvailableAsync();
+
+        ServiceStatusText.Text = running ? "Running" : "Not running";
+        ServiceInstallButton.IsEnabled = !running;
+        ServiceUninstallButton.IsEnabled = running;
+    }
+
+    private async void ServiceRefresh_Click(object? sender, RoutedEventArgs e)
+    {
+        await RefreshServiceStatusAsync();
+    }
+
+    private async void ServiceInstall_Click(object? sender, RoutedEventArgs e)
+    {
+        ServiceStatusText.Text = "Installing…";
+        var result = await Services.DeviceHelper.DeviceHelperInstaller.InstallAsync();
+        if (!result.Ok)
+        {
+            ServiceStatusText.Text = $"Install failed: {result.Detail}";
+            ServiceInstallButton.IsEnabled = true;
+            return;
+        }
+
+        await RefreshServiceStatusAsync();
+    }
+
+    private async void ServiceUninstall_Click(object? sender, RoutedEventArgs e)
+    {
+        ServiceStatusText.Text = "Uninstalling…";
+        var result = await Services.DeviceHelper.DeviceHelperInstaller.UninstallAsync();
+        if (!result.Ok)
+        {
+            ServiceStatusText.Text = $"Uninstall failed: {result.Detail}";
+        }
+
+        await RefreshServiceStatusAsync();
     }
 
     private async void ChangeFolderButton_Click(object? sender, RoutedEventArgs e)

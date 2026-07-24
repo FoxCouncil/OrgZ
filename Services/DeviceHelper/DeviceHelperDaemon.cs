@@ -262,45 +262,82 @@ public static class DeviceHelperDaemon
         }
     }
 
-    private static DeviceHelperProtocol.Response Handle(DeviceHelperProtocol.Request request)
+    // ── Op registry ──────────────────────────────────────────
+    // The service host: features contribute privileged ops here (CD burn/erase, iPod
+    // sync, library sharing arrive as their own registrations) instead of growing a
+    // switch. Built-ins cover liveness, capability discovery, and identity reads.
+    // Registration is process-local and must happen before RunAsync starts serving.
+    private static readonly Dictionary<string, Func<DeviceHelperProtocol.Request, DeviceHelperProtocol.Response>> _ops = new(StringComparer.Ordinal)
+    {
+        [DeviceHelperProtocol.OpPing] = _ => Ok(),
+        [DeviceHelperProtocol.OpReload] = _ => Ok(),
+        [DeviceHelperProtocol.OpStatus] = HandleStatus,
+        [DeviceHelperProtocol.OpReadIdentity] = HandleReadIdentity,
+    };
+
+    internal static IReadOnlyCollection<string> RegisteredOps => _ops.Keys;
+
+    /// <summary>Registers a privileged op. Duplicate names throw - two features silently
+    /// fighting over one op is a bug, not a configuration.</summary>
+    internal static void RegisterOp(string op, Func<DeviceHelperProtocol.Request, DeviceHelperProtocol.Response> handler)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(op);
+        ArgumentNullException.ThrowIfNull(handler);
+        if (!_ops.TryAdd(op, handler))
+        {
+            throw new InvalidOperationException($"Device helper op '{op}' is already registered.");
+        }
+    }
+
+    private static DeviceHelperProtocol.Response Ok(string? resultJson = null)
+        => new(DeviceHelperProtocol.Version, Ok: true, null, null, null, null, resultJson);
+
+    private static DeviceHelperProtocol.Response Fail(string error)
+        => new(DeviceHelperProtocol.Version, Ok: false, null, null, null, error);
+
+    internal static DeviceHelperProtocol.Response Handle(DeviceHelperProtocol.Request request)
     {
         if (request.Version != DeviceHelperProtocol.Version)
         {
-            return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, $"protocol version mismatch (service {DeviceHelperProtocol.Version}, client {request.Version})");
+            return Fail($"protocol version mismatch (service {DeviceHelperProtocol.Version}, client {request.Version})");
         }
 
-        switch (request.Op)
+        if (!_ops.TryGetValue(request.Op, out var handler))
         {
-            case DeviceHelperProtocol.OpPing:
-            case DeviceHelperProtocol.OpReload:
-            {
-                return new(DeviceHelperProtocol.Version, Ok: true, null, null, null, null);
-            }
-
-            case DeviceHelperProtocol.OpReadIdentity:
-            {
-                try
-                {
-                    var id = IPodFirmwarePartition.ReadIdentityElevated(request.MountPath, request.Generation);
-                    var ok = id.Serial != null || id.Version != null || id.ModelNumber != null;
-                    _log.Information("read-identity {MountPath}: ok={Ok} serial={Serial} version={Version}", request.MountPath, ok, id.Serial, id.Version);
-                    // On failure ship the diagnostic tail back so the miss can be diagnosed
-                    // without root access to the daemon's own log file.
-                    var diagTail = id.Diagnostic.Length > 1500 ? id.Diagnostic[^1500..] : id.Diagnostic;
-                    return new(DeviceHelperProtocol.Version, ok, id.Serial, id.Version, id.ModelNumber, ok ? null : diagTail);
-                }
-                catch (Exception ex)
-                {
-                    _log.Warning(ex, "read-identity failed for {MountPath}", request.MountPath);
-                    return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, ex.Message);
-                }
-            }
-
-            default:
-            {
-                return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, $"unknown op '{request.Op}'");
-            }
+            return Fail($"unknown op '{request.Op}'");
         }
+
+        try
+        {
+            return handler(request);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "op {Op} failed for {MountPath}", request.Op, request.MountPath);
+            return Fail(ex.Message);
+        }
+    }
+
+    private static DeviceHelperProtocol.Response HandleStatus(DeviceHelperProtocol.Request request)
+    {
+        var status = new
+        {
+            protocol = DeviceHelperProtocol.Version,
+            service = typeof(DeviceHelperDaemon).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
+            ops = _ops.Keys.Order().ToArray(),
+        };
+        return Ok(System.Text.Json.JsonSerializer.Serialize(status));
+    }
+
+    private static DeviceHelperProtocol.Response HandleReadIdentity(DeviceHelperProtocol.Request request)
+    {
+        var id = IPodFirmwarePartition.ReadIdentityElevated(request.MountPath, request.Generation);
+        var ok = id.Serial != null || id.Version != null || id.ModelNumber != null;
+        _log.Information("read-identity {MountPath}: ok={Ok} serial={Serial} version={Version}", request.MountPath, ok, id.Serial, id.Version);
+        // On failure ship the diagnostic tail back so the miss can be diagnosed
+        // without root access to the daemon's own log file.
+        var diagTail = id.Diagnostic.Length > 1500 ? id.Diagnostic[^1500..] : id.Diagnostic;
+        return new(DeviceHelperProtocol.Version, ok, id.Serial, id.Version, id.ModelNumber, ok ? null : diagTail);
     }
 
     [DllImport("libc", SetLastError = true, EntryPoint = "chmod")]

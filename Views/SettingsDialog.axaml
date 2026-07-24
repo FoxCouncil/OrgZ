@@ -164,6 +164,41 @@
 				</ScrollViewer>
 			</TabItem>
 
+			<!-- ===== Services Tab ===== -->
+			<TabItem Header="Services">
+				<ScrollViewer Padding="0,0,12,0">
+					<StackPanel Margin="8,12" Spacing="16">
+
+						<!-- Background service -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="OrgZ Background Service" FontWeight="Bold" FontSize="13" />
+								<Grid ColumnDefinitions="200,240" RowDefinitions="Auto">
+									<TextBlock Grid.Column="0" Text="Status" VerticalAlignment="Center" />
+									<TextBlock Grid.Column="1" x:Name="ServiceStatusText" Text="Checking…" VerticalAlignment="Center" />
+								</Grid>
+								<StackPanel Orientation="Horizontal" Spacing="8">
+									<Button x:Name="ServiceInstallButton" Content="Install Service…" Click="ServiceInstall_Click" IsEnabled="False" />
+									<Button x:Name="ServiceUninstallButton" Content="Uninstall" Click="ServiceUninstall_Click" IsEnabled="False" />
+									<Button x:Name="ServiceRefreshButton" Content="Refresh" Click="ServiceRefresh_Click" />
+								</StackPanel>
+							</StackPanel>
+						</Border>
+
+						<!-- Keep-alive -->
+						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
+							<StackPanel Spacing="10">
+								<TextBlock Text="Keep Running After OrgZ Closes" FontWeight="Bold" FontSize="13" />
+								<CheckBox x:Name="ServiceKeepBurningCheck" Content="Disc burning" />
+								<CheckBox x:Name="ServiceKeepSyncCheck" Content="iPod sync" />
+								<CheckBox x:Name="ServiceKeepSharingCheck" Content="Library sharing" />
+							</StackPanel>
+						</Border>
+
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
 			<!-- ===== Podcasts Tab =====
 			     Global defaults for every subscription (refresh cadence, what to do with new
 			     episodes, retention) plus the download location / storage controls. Each combo

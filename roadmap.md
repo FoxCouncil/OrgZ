@@ -41,9 +41,12 @@ The device Playlists node is (by spec) a navigation container today. A real mast
 playlists (name, tracks, duration), double-click navigates - needs a playlist row type, which
 arrives naturally with shared media grid v1.
 
-### OrgZ background service
-One installed service (Windows service / macOS SMAppService daemon / Linux systemd unit)
-hosting everything that outgrows the GUI process:
+### OrgZ background service — HOST SHIPPED 0.9.3
+The device-helper grew into the general service host: protocol v2 (generic payload/result
+fields, capability-discovery "status" op, polite version-mismatch refusal), an op registry
+features plug privileged ops into (duplicate names throw, handler crashes answer as failures),
+and Settings > Services (install/uninstall/status + per-feature keep-alive toggles under
+OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
 - **Elevation, once**: raw SCSI for burning + erasing and iPod device operations (USB
   control-transfer version reads, firmware-partition reads, sync) without per-operation UAC -
   the way iTunes does it. Windows eventually adds the bundled signed USB filter driver.

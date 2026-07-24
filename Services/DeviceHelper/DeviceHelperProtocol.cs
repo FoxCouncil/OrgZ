@@ -15,7 +15,10 @@ namespace OrgZ.Services.DeviceHelper;
 /// </summary>
 public static class DeviceHelperProtocol
 {
-    public const int Version = 1;
+    // v2: generic PayloadJson/ResultJson fields + the "status" capability op, turning the
+    // identity-only helper into the general OrgZ service host (burn/sync/sharing ops
+    // register against the same wire). Mismatched versions still refuse politely.
+    public const int Version = 2;
 
     /// <summary>Named pipe (Windows) / unix-socket file (macOS, Linux) the service listens on.
     /// Deliberately under root-owned /var/run, NOT /tmp: /tmp is world-writable, so a local
@@ -25,12 +28,14 @@ public static class DeviceHelperProtocol
         ? "orgz-devicehelper"
         : "/var/run/orgz-devicehelper.sock";
 
-    public sealed record Request(int Version, string Op, string MountPath, string? Generation);
+    public sealed record Request(int Version, string Op, string MountPath, string? Generation, string? PayloadJson = null);
 
-    public sealed record Response(int Version, bool Ok, string? Serial, string? FirmwareVersion, string? ModelNumber, string? Error);
+    public sealed record Response(int Version, bool Ok, string? Serial, string? FirmwareVersion, string? ModelNumber, string? Error, string? ResultJson = null);
 
     public const string OpReadIdentity = "read-identity";
     public const string OpPing = "ping";
+    /// <summary>Capability discovery: ResultJson lists the protocol version and every registered op.</summary>
+    public const string OpStatus = "status";
     // Asks the daemon to exit; launchd's KeepAlive immediately relaunches it, picking up an
     // updated on-disk binary. Lets development iterate the helper without re-running the
     // (elevation-prompting) installer each time.
