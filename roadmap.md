@@ -66,13 +66,13 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   handed-off job completes headless and the next device scan shows the result).
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 
-### Library sharing over mDNS
-Open your library read-only on the LAN: the service advertises _orgz._tcp via mDNS/DNS-SD and
-serves a read-only catalogue + range-streamed audio; other OrgZ instances discover it and mount
-it in the sidebar like a device (browse, search, play - no edits, no deletes). Spiritually DAAP
-(iTunes sharing) without the dead protocol: JSON catalogue + plain HTTP streams. Auth: none on
-trusted LAN to start, PIN pairing later. Hosting lives in the background service so a closed
-GUI doesn't take the library off the air.
+### Library sharing over mDNS — SERVER SHIPPED 0.9.9
+The service hosts it (share-start / share-stop / share-status ops, so a closed GUI doesn't take
+the library off the air): hand-rolled mDNS/DNS-SD advertising _orgz._tcp (no new dependency -
+PTR/SRV/TXT/A encode+decode, hostile-packet hardened), and an HttpListener serving GET/HEAD only
+- /catalogue (JSON) and /stream/{id} (Range-capable). Read-only by construction.
+REMAINING: the client side (discover + mount in the sidebar, task #7); a Settings > Services
+toggle to actually start the share; PIN pairing beyond the trusted-LAN default.
 
 ## Identity read - reference-verification matrix (slice A)
 Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope
