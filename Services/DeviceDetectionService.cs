@@ -270,30 +270,55 @@ public sealed class DeviceDetectionService : IDisposable
 
     private void EnumerateExistingDrives()
     {
-        bool sawCdDrive = false;
-        foreach (var drive in DriveInfo.GetDrives())
+        // Every step here does volume I/O - DriveType, fingerprint reads - and a wedged
+        // drive (an optical mid-write, a dead network mount) blocks those calls for
+        // MINUTES. The startup scan therefore runs entirely on the pool: enumerate and
+        // fingerprint off-thread, then hop to the UI thread only to register each found
+        // device, so handlers keep their thread expectations. Seen live: a mid-write
+        // optical froze the whole app 7 s after launch when this ran on the UI thread.
+        _ = Task.Run(() =>
         {
-            if (drive.DriveType == DriveType.CDRom)
+            bool sawCdDrive = false;
+
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                try
+                {
+                    if (drive.DriveType == DriveType.CDRom)
+                    {
+                        sawCdDrive = true;
+                        continue;
+                    }
+
+                    var device = DeviceFingerprint.Identify(drive);
+                    if (device == null)
+                    {
+                        _log.Verbose("Drive {DriveName} did not fingerprint as a known device", drive.Name);
+                        continue;
+                    }
+
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => RegisterIdentifiedDevice(device));
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Skipping unreadable drive {DriveName} during startup enumeration", drive.Name);
+                }
+            }
+
+            // DriveInfo doesn't expose Linux optical drives (they're block devices,
+            // not mount points), so consult the CD service directly there.
+            if (!sawCdDrive && OperatingSystem.IsLinux() && CdAudioService.GetAllCdDrives().Count > 0)
             {
                 sawCdDrive = true;
-                continue;
             }
-            TryAddDrive(drive);
-        }
 
-        // DriveInfo doesn't expose Linux optical drives (they're block devices,
-        // not mount points), so consult the CD service directly there.
-        if (!sawCdDrive && OperatingSystem.IsLinux() && CdAudioService.GetAllCdDrives().Count > 0)
-        {
-            sawCdDrive = true;
-        }
-
-        // Trigger one CD scan at startup if the machine has any CD drives.
-        // The scan itself figures out which drives actually contain audio media.
-        if (sawCdDrive)
-        {
-            CdDriveEvent?.Invoke();
-        }
+            // Trigger one CD scan at startup if the machine has any CD drives.
+            // The scan itself figures out which drives actually contain audio media.
+            if (sawCdDrive)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => CdDriveEvent?.Invoke());
+            }
+        });
     }
 
     private void TryAddDrive(DriveInfo drive)
