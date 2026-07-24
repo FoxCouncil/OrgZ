@@ -46,7 +46,6 @@ public class EmptyViewStateTests
         Assert.Contains("favorites", MainWindowViewModel.DescribeEmptyView(View("Favorites", favorites: true)));
         Assert.Contains("No audio tracks", MainWindowViewModel.DescribeEmptyView(View("CdAudio")));
         Assert.Contains("stations", MainWindowViewModel.DescribeEmptyView(View("Radio")));
-        Assert.Contains("Nothing is hidden", MainWindowViewModel.DescribeEmptyView(View("Ignored")));
     }
 
     [Fact]

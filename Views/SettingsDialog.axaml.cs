@@ -38,7 +38,6 @@ public partial class SettingsDialog : Window
         FolderPathText.Text = string.IsNullOrEmpty(App.FolderPath) ? "(No folder selected)" : App.FolderPath;
         MinimizeToTrayCheck.IsChecked = Settings.Get("OrgZ.MinimizeToTray", false);
         RememberLastTrackCheck.IsChecked = Settings.Get("OrgZ.RememberLastTrack", false);
-        ShowIgnoredCheck.IsChecked = Settings.Get("OrgZ.ShowIgnored", false);
 
         BadFormatShowCheck.IsChecked = Settings.Get("OrgZ.BadFormat.ShowInSidebar", false);
         BadFormatNoTitleCheck.IsChecked = Settings.Get("OrgZ.BadFormat.NoTitle", true);
@@ -531,7 +530,6 @@ public partial class SettingsDialog : Window
 
         Settings.Set("OrgZ.MinimizeToTray", MinimizeToTrayCheck.IsChecked == true);
         Settings.Set("OrgZ.RememberLastTrack", RememberLastTrackCheck.IsChecked == true);
-        Settings.Set("OrgZ.ShowIgnored", ShowIgnoredCheck.IsChecked == true);
 
         Settings.Set("OrgZ.BadFormat.ShowInSidebar", BadFormatShowCheck.IsChecked == true);
         Settings.Set("OrgZ.BadFormat.NoTitle", BadFormatNoTitleCheck.IsChecked == true);

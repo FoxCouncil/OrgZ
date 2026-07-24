@@ -271,12 +271,15 @@ public class ListViewConfigsGapTests
     }
 
     [Fact]
-    public void IgnoredConfig_SearchFilter_matches_filename()
+    public void MusicConfig_SearchFilter_matches_filename_even_when_unticked()
     {
-        var cfg = ListViewConfigs.Get("Ignored")!;
+        // Was the Ignored view's test; unticked tracks now live in the Music view, so
+        // search must still reach them by filename.
+        var cfg = ListViewConfigs.Get("Music")!;
         var track = Music("t1", title: null, artist: null, album: null, fileName: "weird-track.mp3");
-        track.IsIgnored = true;
+        track.IsChecked = false;
 
+        Assert.True(cfg.BaseFilter(track));
         Assert.True(cfg.SearchFilter(track, "weird"));
         Assert.False(cfg.SearchFilter(track, "missing"));
     }

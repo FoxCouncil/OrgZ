@@ -186,36 +186,53 @@ public class ListViewConfigTests
         Assert.Null(ListViewConfigs.Get(null));
     }
 
-    // -- Ignored view --
+    // -- The iTunes row tick (replaced the Ignored view) --
 
     [Fact]
-    public void IgnoredConfig_BaseFilter_AcceptsIgnoredOnly()
+    public void IgnoredView_IsGone()
     {
-        var config = ListViewConfigs.Get("Ignored")!;
-
-        Assert.True(config.BaseFilter(new MediaItem { Id = "a", Kind = MediaKind.Music, IsIgnored = true }));
-        Assert.False(config.BaseFilter(new MediaItem { Id = "b", Kind = MediaKind.Music, IsIgnored = false }));
+        // Its job is now the per-row checkbox: unticked tracks stay visible and
+        // skippable rather than vanishing into a separate view.
+        Assert.Null(ListViewConfigs.Get("Ignored"));
     }
 
     [Fact]
-    public void IgnoredConfig_IncludeIgnoredIsTrue()
+    public void Library_views_carry_the_checked_column()
     {
-        Assert.True(ListViewConfigs.Get("Ignored")!.IncludeIgnored);
+        foreach (var key in new[] { "Music", "Favorites" })
+        {
+            var config = ListViewConfigs.Get(key)!;
+            Assert.True(config.ShowCheckedColumn, $"{key} should show the tick");
+            Assert.Contains(config.Columns, c => c.BindingPath == "IsChecked");
+        }
+
+        var playlist = ListViewConfigs.BuildPlaylistConfig(1, ["a"]);
+        Assert.True(playlist.ShowCheckedColumn);
+        Assert.Contains(playlist.Columns, c => c.BindingPath == "IsChecked");
     }
 
     [Fact]
-    public void NormalViews_DoNotIncludeIgnoredByDefault()
+    public void Device_and_share_views_do_not_offer_the_tick()
     {
-        Assert.False(ListViewConfigs.Get("Music")!.IncludeIgnored);
-        Assert.False(ListViewConfigs.Get("Radio")!.IncludeIgnored);
-        Assert.False(ListViewConfigs.Get("Favorites")!.IncludeIgnored);
+        // Their contents aren't ours to include or exclude from OUR playback and sync.
+        var device = ListViewConfigs.BuildDeviceConfig(@"E:\");
+        var share = ListViewConfigs.BuildShareConfig("192.168.1.50:7391");
+
+        Assert.False(device.ShowCheckedColumn);
+        Assert.DoesNotContain(device.Columns, c => c.BindingPath == "IsChecked");
+        Assert.False(share.ShowCheckedColumn);
+        Assert.DoesNotContain(share.Columns, c => c.BindingPath == "IsChecked");
     }
 
     [Fact]
-    public void BuildPlaylistConfig_DoesNotIncludeIgnored()
+    public void Unticked_tracks_are_still_listed_by_library_views()
     {
-        var config = ListViewConfigs.BuildPlaylistConfig(1, ["a"]);
-        Assert.False(config.IncludeIgnored);
+        // The whole point of replacing the Ignored view: they stay where you can see
+        // (and re-tick) them.
+        var music = ListViewConfigs.Get("Music")!;
+        var unticked = new MediaItem { Id = "a", Kind = MediaKind.Music, IsChecked = false };
+
+        Assert.True(music.BaseFilter(unticked));
     }
 
     // -- Bad Format view --

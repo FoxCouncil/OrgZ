@@ -39,10 +39,11 @@ public record ListViewConfig
     public int? PlaylistId { get; init; }
 
     /// <summary>
-    /// When false (default), ApplyFilter strips out items where IsIgnored is true.
-    /// The Ignored view sets this to true to do the opposite.
+    /// Whether this view shows an editable "checked" box per row (iTunes' include-in-
+    /// playback/sync tick). Library-ish views want it; device, CD, and share views
+    /// don't - their contents aren't ours to include or exclude.
     /// </summary>
-    public bool IncludeIgnored { get; init; }
+    public bool ShowCheckedColumn { get; init; }
 
     /// <summary>
     /// When set, the view wraps FilteredItems in a DataGridCollectionView grouped by this property path.
@@ -61,7 +62,6 @@ public static class ListViewConfigs
         ["Music"] = BuildMusicConfig(),
         ["Radio"] = BuildRadioConfig(),
         ["Favorites"] = BuildFavoritesConfig(),
-        ["Ignored"] = BuildIgnoredConfig(),
         ["BadFormat"] = BuildBadFormatConfig(),
         ["CdAudio"] = BuildCdAudioConfig(),
         ["Podcasts"] = BuildPodcastsConfig(),
@@ -348,8 +348,10 @@ public static class ListViewConfigs
         {
             Key = $"Playlist:{playlistId}",
             PlaylistId = playlistId,
+            ShowCheckedColumn = true,
             Columns =
             [
+                CheckedColumn(),
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
@@ -371,8 +373,20 @@ public static class ListViewConfigs
     /// device (iPod) track view so they read identically. Returns fresh ColumnDef instances
     /// each call - per-view column visibility/width prefs mutate these and must not be shared.
     /// </summary>
-    private static List<ColumnDef> MusicColumns() =>
+    /// <summary>
+    /// The iTunes row tick: included in play-through and sync when checked. Editable,
+    /// unsortable, and pinned narrow at the front like iTunes had it.
+    /// </summary>
+    internal static ColumnDef CheckedColumn() =>
+        new() { Header = "", BindingPath = "IsChecked", Type = ColumnType.CheckBox, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 32, CanUserSort = false, CanUserResize = false, CanUserReorder = false };
+
+    /// <param name="withChecked">
+    /// Library-ish views (Music, Favorites, playlists) get the iTunes tick; device, CD,
+    /// and share views don't - their contents aren't ours to include or exclude.
+    /// </param>
+    private static List<ColumnDef> MusicColumns(bool withChecked = false) =>
     [
+        .. withChecked ? new[] { CheckedColumn() } : [],
         new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
         new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
         new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
@@ -392,7 +406,8 @@ public static class ListViewConfigs
         return new ListViewConfig
         {
             Key = "Music",
-            Columns = MusicColumns(),
+            Columns = MusicColumns(withChecked: true),
+            ShowCheckedColumn = true,
             // Local library view - must NOT include CD-audio tracks (Source="cdda")
             // or connected-device tracks (Source="device:{mountPath}").  Those have
             // their own sidebar entries and their own views.  Without this, typing
@@ -439,34 +454,6 @@ public static class ListViewConfigs
             Host = ViewHost.GroupedGrid,
         };
     }
-
-    private static ListViewConfig BuildIgnoredConfig()
-    {
-        return new ListViewConfig
-        {
-            Key = "Ignored",
-            IncludeIgnored = true,
-            Columns =
-            [
-                new ColumnDef { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "File Name", BindingPath = "FileName", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-            ],
-            BaseFilter = item => item.IsIgnored,
-            SearchFilter = (item, search) =>
-                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (item.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
-            ContextMenuItems = BuildIgnoredContextMenu(),
-        };
-    }
-
-    private static List<ContextMenuItemDef> BuildIgnoredContextMenu() => Menu(
-        Header(),
-        Info(),
-        Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Restore to Library", "RestoreFromIgnored")));
 
     private static ListViewConfig BuildBadFormatConfig()
     {
@@ -523,8 +510,10 @@ public static class ListViewConfigs
         return new ListViewConfig
         {
             Key = "Favorites",
+            ShowCheckedColumn = true,
             Columns =
             [
+                CheckedColumn(),
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
                 new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
@@ -546,6 +535,7 @@ public static class ListViewConfigs
         Playback(),
         Info(ratable: true),
         Organize(),
+        Items(Cmd("Check", "Check"), Cmd("Uncheck", "Uncheck")),
         Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Burn to CD…", "BurnToCd"), Cmd("Remove from Library", "RemoveFromLibrary")));
 
     private static List<ContextMenuItemDef> BuildRadioContextMenu() => Menu(
@@ -559,6 +549,7 @@ public static class ListViewConfigs
         Playback(),
         Info(ratable: true),
         Organize(),
+        Items(Cmd("Check", "Check"), Cmd("Uncheck", "Uncheck")),
         Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Remove from Playlist", "RemoveFromPlaylist"), Cmd("Remove from Library", "RemoveFromLibrary")));
 
     // --- shared context-menu vocabulary ---------------------------------------------------

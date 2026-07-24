@@ -338,7 +338,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Rebuilds the LibraryItems list. Called on startup and when settings like "Show Ignored in sidebar" change.
+    /// Rebuilds the LibraryItems list. Called on startup and when sidebar-affecting settings change.
     /// </summary>
     internal void RebuildLibraryItems()
     {
@@ -351,11 +351,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // No Kind on purpose: the footer uses the generic item-count stats (the Music footer's
         // song totals don't fit books), keyed by the "Audiobooks" label mapping.
         LibraryItems.Add(new() { Name = "Audiobooks", Icon = "fa-solid fa-headphones",      Category = "LIBRARY", IsEnabled = true,  ViewConfigKey = "Audiobooks" });
-
-        if (Settings.Get("OrgZ.ShowIgnored", false))
-        {
-            LibraryItems.Add(new() { Name = "Ignored", Icon = "fa-solid fa-eye-slash", Category = "LIBRARY", IsEnabled = true, ViewConfigKey = "Ignored" });
-        }
 
         if (Settings.Get("OrgZ.BadFormat.ShowInSidebar", false))
         {
@@ -733,7 +728,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             "CdAudio" => "No audio tracks on this disc.",
             "Radio" => "No stations match the current filters.",
-            "Ignored" => "Nothing is hidden.",
             "Music" => "Your library is empty — add a folder in Settings to get started.",
             _ => "Nothing to show here.",
         };
@@ -1329,11 +1323,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var snapshot = _allItems.ToArray();
             IEnumerable<MediaItem> items = snapshot.Where(_activeViewConfig.BaseFilter);
 
-            // Global ignore filter - hide ignored items from every view except the Ignored view itself
-            if (!_activeViewConfig.IncludeIgnored)
-            {
-                items = items.Where(i => !i.IsIgnored);
-            }
+            // Unchecked tracks are NOT hidden - iTunes leaves them in place, greyed by their
+            // empty tick, so you can see and re-check them. They're skipped by play-through
+            // and sync instead (see PlaybackContext and the sync gates).
 
             // Radio-specific filters
             if (_activeViewConfig.ShowRadioFilterPanel)
@@ -2159,7 +2151,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Sidebar composition depends on OrgZ.ShowIgnored - refresh in case it was toggled
+        // Sidebar composition depends on settings - refresh in case one was toggled
         RebuildLibraryItems();
 
         // Sound Check (OrgZ.NormalizeVolume) may have just been toggled - re-apply loudness
@@ -4859,11 +4851,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Prompts the user to confirm, then marks the item as ignored.
-    /// The file is never touched. The item is also removed from any playlists it belongs to.
-    /// Shows a restore-capable "Ignored" view in the sidebar (if enabled in Settings).
-    /// </summary>
-    /// <summary>
     /// Deletes an audiobook from disk, with confirmation. A book in the managed
     /// .audiobooks/{Author}/{Title}/ layout deletes as a whole - every chapter/part file, however
     /// many rows it spans - because that's the unit the user thinks in; a loose audiobook file
@@ -5053,11 +5040,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// Clears the ignored flag on the item. It re-appears in its natural view (Music, Favorites, etc.).
     /// Playlist memberships are NOT restored - they were deleted at ignore time.
     /// </summary>
-    internal void RestoreFromIgnored(MediaItem item)
+    /// <summary>
+    /// Sets the iTunes tick on a whole selection and persists it. Mixed selections all
+    /// become <paramref name="isChecked"/> - the menu item says what it will do.
+    /// </summary>
+    internal void SetChecked(IReadOnlyList<MediaItem> items, bool isChecked)
     {
-        MediaCache.RestoreMedia(item.Id);
-        item.IsIgnored = false;
-        ApplyFilter();
+        foreach (var item in items)
+        {
+            item.IsChecked = isChecked;
+            MediaCache.SetIgnored(item.Id, !isChecked);
+        }
     }
 
     /// <summary>
@@ -5973,7 +5966,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var label = viewKey switch
         {
             "Favorites" => "songs",
-            "Ignored" => "ignored",
             "BadFormat" => "issues",
             "CdAudio" => "tracks",
             "Audiobooks" => "audiobooks",

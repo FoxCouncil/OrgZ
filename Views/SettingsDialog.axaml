@@ -44,7 +44,6 @@
 
 					<CheckBox x:Name="MinimizeToTrayCheck" Content="Minimize to system tray on close" />
 					<CheckBox x:Name="RememberLastTrackCheck" Content="Remember last played track" />
-					<CheckBox x:Name="ShowIgnoredCheck" Content="Show Ignored section in sidebar" />
 
 					<!-- Bad Format quality criteria -->
 					<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">

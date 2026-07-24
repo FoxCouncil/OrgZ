@@ -318,8 +318,10 @@ them against metal:
   it's distinct from the "no search results" overlay
 - Group-header count wording ("2 Items" → "2 episodes" / "50 stations") wants a custom header
   template - cheap once shared media grid v1 lands
-- The Ignored view has no producer (ignore-on-remove retired when Remove from Library became a
-  real delete) - an explicit Hide gesture, or fold the view
+- Ignored view — REPLACED 0.9.16 by the iTunes row tick: the view, its config, and the
+  ShowIgnored setting are gone; the flag now backs a per-row checkbox (Music, Favorites,
+  playlists). Unticked tracks stay visible but are skipped by play-through and sync.
+  Follow-up: honour the tick in the device sync gates (playback skipping is done)
 - Audiobook chapter atoms (m4b chapters) aren't parsed for in-app display - the book-detail
   Chapters card lists the file parts; on-device chapters work natively either way
 - Libro.fm token persistence off-Windows (per-session sign-in until a cross-platform keychain)

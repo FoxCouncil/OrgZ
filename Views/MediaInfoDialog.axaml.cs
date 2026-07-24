@@ -512,6 +512,63 @@ public partial class MediaInfoDialog : Window
         {
             ArtworkImage.Source = null;
         }
+
+        // Art lives in the file: no local file, nothing to edit.
+        var editable = item.Kind == MediaKind.Music && !string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath);
+        ArtworkAddButton.IsEnabled = editable;
+        ArtworkDeleteButton.IsEnabled = editable && ArtworkImage.Source is not null;
+        ArtworkStatusText.Text = editable ? string.Empty : "This track has no local file to store artwork in.";
+    }
+
+    private async void ArtworkAdd_Click(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_item.FilePath))
+        {
+            return;
+        }
+
+        var picked = await StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+        {
+            Title = "Choose Album Artwork",
+            AllowMultiple = false,
+            FileTypeFilter = [new Avalonia.Platform.Storage.FilePickerFileType("Images") { Patterns = ["*.jpg", "*.jpeg", "*.png"] }],
+        });
+
+        var path = picked?.Count > 0 ? picked[0].Path.LocalPath : null;
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        ApplyArtResult(Services.AlbumArtWriter.SetArtwork(_item.FilePath, path), "Artwork updated.");
+    }
+
+    private void ArtworkDelete_Click(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_item.FilePath))
+        {
+            return;
+        }
+
+        ApplyArtResult(Services.AlbumArtWriter.RemoveArtwork(_item.FilePath), "Artwork removed.");
+    }
+
+    /// <summary>
+    /// Reflects an artwork edit: reload from the file (so what's shown is what's stored,
+    /// never an optimistic guess), drop the cached art, and report the outcome.
+    /// </summary>
+    private void ApplyArtResult(Services.AlbumArtWriter.ArtResult result, string successMessage)
+    {
+        if (!result.Ok)
+        {
+            ArtworkStatusText.Text = result.Error;
+            return;
+        }
+
+        // Art is read straight from the file, so re-reading IS the invalidation.
+        LoadArtwork(_item);
+        ArtworkStatusText.Text = successMessage;
+        ItemChanged = true;
     }
 
     #endregion

@@ -135,7 +135,8 @@ public partial class MainWindow : Window
             ["ShowInExplorer"] = ContextMenu_ShowInExplorer,
             ["RemoveFromLibrary"] = ContextMenu_RemoveFromLibrary,
             ["RemoveFromDevice"] = ContextMenu_RemoveFromDevice,
-            ["RestoreFromIgnored"] = ContextMenu_RestoreFromIgnored,
+            ["Check"] = (_, _) => _viewModel.SetChecked(SelectedTracks(), true),
+            ["Uncheck"] = (_, _) => _viewModel.SetChecked(SelectedTracks(), false),
             ["RipTrack"] = async (s, e) => await _viewModel.RipSelectedCdTrackAsync(),
             ["RipCd"] = async (s, e) => await _viewModel.RipCurrentCdAsync(),
             ["BurnToCd"] = ContextMenu_BurnToCd,
@@ -1368,13 +1369,6 @@ public partial class MainWindow : Window
         await _viewModel.RemoveFromDeviceAsync(SelectedTracks());
     }
 
-    private void ContextMenu_RestoreFromIgnored(object? sender, RoutedEventArgs e)
-    {
-        foreach (var item in SelectedTracks())
-        {
-            _viewModel.RestoreFromIgnored(item);
-        }
-    }
 
     private void ContextMenu_ShowInExplorer(object? sender, RoutedEventArgs e)
     {

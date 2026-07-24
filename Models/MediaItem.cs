@@ -57,8 +57,25 @@ public partial class MediaItem : ObservableObject
     public bool ShowRipping => RipStatus == RipState.Ripping && !IsPlaying;
     public bool ShowRipDone => RipStatus == RipState.Ripped && !IsPlaying;
 
+    /// <summary>
+    /// Storage for the iTunes-style row checkbox. Persisted (column name predates the
+    /// rename) but always read through <see cref="IsChecked"/> - the UI concept is
+    /// "checked to include", not "ignored".
+    /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsChecked))]
     private bool _isIgnored;
+
+    /// <summary>
+    /// iTunes' per-row checkbox: ticked (the default) means this track takes part -
+    /// it plays when the list plays through, and syncs with its playlist. Unticked
+    /// leaves it visible and individually playable but skipped by everything automatic.
+    /// </summary>
+    public bool IsChecked
+    {
+        get => !IsIgnored;
+        set => IsIgnored = !value;
+    }
 
     [ObservableProperty]
     private DateTime? _lastPlayed;

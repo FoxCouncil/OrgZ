@@ -81,19 +81,31 @@ public partial class PlaybackContext : ObservableObject
             return CurrentItem;
         }
 
-        if (CurrentIndex < _playOrder.Count - 1)
+        // Unticked tracks are skipped when the list plays THROUGH (iTunes' rule) - the
+        // user can still start one directly. Bounded by the list length so an entirely
+        // unticked list ends rather than spinning.
+        for (int skipped = 0; skipped < _playOrder.Count; skipped++)
         {
-            SetCurrentIndex(CurrentIndex + 1);
-            return CurrentItem;
+            if (CurrentIndex < _playOrder.Count - 1)
+            {
+                SetCurrentIndex(CurrentIndex + 1);
+            }
+            else if (RepeatMode == RepeatMode.All)
+            {
+                SetCurrentIndex(0);
+            }
+            else
+            {
+                return null;
+            }
+
+            if (CurrentItem?.IsChecked != false)
+            {
+                return CurrentItem;
+            }
         }
 
-        if (RepeatMode == RepeatMode.All)
-        {
-            SetCurrentIndex(0);
-            return CurrentItem;
-        }
-
-        return null;
+        return null;   // nothing ticked anywhere in the list
     }
 
     public MediaItem? MovePrevious()

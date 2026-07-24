@@ -475,6 +475,24 @@ public static class MediaCache
     }
 
     /// <summary>
+    /// Sets the iTunes-style checked flag (stored inverted in the legacy IsIgnored column).
+    /// Flag only: playlist memberships are untouched, because unticking a song means
+    /// "skip it for now", not "remove it from my playlists". Survives rescans, since
+    /// the scanner's UPSERT preserves the column.
+    /// </summary>
+    public static void SetIgnored(string id, bool ignored)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Media SET IsIgnored = @Ignored WHERE Id = @Id";
+        cmd.Parameters.AddWithValue("@Ignored", ignored ? 1 : 0);
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
     /// Marks a media item as ignored: it disappears from normal views, is removed from every
     /// playlist it was in, and will NOT be re-added by the scanner (UPSERT preserves IsIgnored).
     /// The file itself is never touched.
