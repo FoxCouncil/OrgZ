@@ -207,13 +207,38 @@ public static class CdAudioService
         // Once Developer ID signing is wired into Velopack pack this becomes
         // a non-issue for released builds.
         DiscInfo? discInfo;
+        ushort profile = 0;
         try
         {
-            discInfo = await Task.Run(() =>
+            (discInfo, profile) = await Task.Run(() =>
             {
                 using var optical = OpticalDrive.Open(openPath);
-                return optical.ReadDiscInfoAsync().GetAwaiter().GetResult();
+                var d = optical.ReadDiscInfoAsync().GetAwaiter().GetResult();
+
+                // Media profile distinguishes burned discs (CD-R 0x09 / CD-RW 0x0A)
+                // from pressed CD-ROMs. Read-class probe; failure just leaves 0.
+                ushort p = 0;
+                if (optical is IScsiTransport transport)
+                {
+                    try
+                    {
+                        p = new FoxOrangebook.DataBurnSession(transport).GetCurrentProfile();
+                    }
+                    catch
+                    {
+                        // Treated as pressed media.
+                    }
+                }
+
+                return (d, p);
             });
+        }
+        catch (OpticalDriveException ex) when (ex.Message.Contains("ASC 0x24", StringComparison.Ordinal))
+        {
+            // READ TOC answered 5/24/00 (INVALID FIELD IN CDB): there's no TOC to read.
+            // Routine for a blank disc (e.g. right after an erase), not a drive fault.
+            _log.Debug("No readable TOC in {DrivePath} - blank disc", drivePath);
+            return info;
         }
         catch (Exception ex)
         {
@@ -277,6 +302,47 @@ public static class CdAudioService
                 StreamUrl = streamUrl,
                 Source = "cdda",
             });
+        }
+
+        // A disc that carries its own CD-TEXT names itself - apply it as the baseline
+        // (pressed discs can still get MusicBrainz enrichment over it below).
+        if (discInfo.CdText is { } cdText)
+        {
+            if (!string.IsNullOrWhiteSpace(cdText.AlbumTitle))
+            {
+                label = cdText.AlbumTitle;
+            }
+
+            foreach (var item in info.Tracks)
+            {
+                var tt = cdText.Tracks.FirstOrDefault(t => item.Track is { } n && t.Number == (int)n);
+                item.Album = label;
+                if (!string.IsNullOrWhiteSpace(tt?.Title))
+                {
+                    item.Title = tt.Title;
+                }
+
+                var performer = !string.IsNullOrWhiteSpace(tt?.Performer) ? tt.Performer : cdText.AlbumPerformer;
+                if (!string.IsNullOrWhiteSpace(performer))
+                {
+                    item.Artist = performer;
+                }
+
+                if (string.IsNullOrWhiteSpace(item.Genre) && !string.IsNullOrWhiteSpace(cdText.Genre))
+                {
+                    item.Genre = cdText.Genre;
+                }
+            }
+
+            _log.Information("CD-TEXT read from {Drive}: “{Album}”, {TrackCount} titled track(s)", drivePath, label, cdText.Tracks.Count);
+        }
+
+        // Recordable media (CD-R / CD-RW) is a home-burned disc: its CD-TEXT - or the
+        // lack of it - is the truth. Never dress it in a pressed release's metadata.
+        if (profile is CdBurnService.ProfileCdR or CdBurnService.ProfileCdRw)
+        {
+            _log.Information("Recordable disc ({Media}) in {Drive}: CD-TEXT only, skipping MusicBrainz", CdBurnService.MediaLabelForProfile(profile), drivePath);
+            return info;
         }
 
         await EnrichFromMusicBrainzAsync(info);

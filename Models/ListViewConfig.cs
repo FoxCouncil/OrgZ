@@ -474,11 +474,13 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
                 new ColumnDef { Header = "#", BindingPath = "Track", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60 },
                 new ColumnDef { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
+                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new ColumnDef { Header = "Duration", BindingPath = "Duration", Type = ColumnType.Centered, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, StringFormat = "m\\:ss" },
             ],
             BaseFilter = item => item.Source == "cdda",
             SearchFilter = (item, search) =>
-                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildCdAudioContextMenu(),
         };
     }
