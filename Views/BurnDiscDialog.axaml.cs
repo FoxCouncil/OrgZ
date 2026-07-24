@@ -250,38 +250,20 @@ public partial class BurnDiscDialog : Window
 
         if (audio)
         {
-            // The gap burns as real pregap sectors between tracks, so it counts
-            // against the disc exactly like audio does.
-            var gap = TimeSpan.FromSeconds((double)(GapInput.Value ?? 0));
-            var effectiveLength = _totalLength + (_trackCount > 1 ? (_trackCount - 1) * gap : TimeSpan.Zero);
+            var plan = PlanAudioCapacity(_totalLength, _trackCount, (double)(GapInput.Value ?? 0), _media?.CapacitySectors);
 
-            var lengthStr = FormatCdLength(effectiveLength);
-            if (_media?.CapacitySectors is { } sectors)
+            LengthText.Text = plan.LengthText;
+            _overCapacity = plan.OverCapacity;
+
+            if (plan.OverCapacity)
             {
-                var capacity = TimeSpan.FromSeconds(sectors / 75.0);
-                if (effectiveLength > capacity)
-                {
-                    LengthText.Text = $"{lengthStr} — exceeds {FormatCdLength(capacity)}";
-                    LengthText.Foreground = OverCapacityBrush;
-                    _overCapacity = true;
-
-                    long discs = (effectiveLength.Ticks + capacity.Ticks - 1) / capacity.Ticks;
-                    DiscsText.Text = $"{discs} × {FormatCdLength(capacity)}";
-                    DiscsRow.IsVisible = true;
-                }
-                else
-                {
-                    LengthText.Text = $"{lengthStr} of {FormatCdLength(capacity)}";
-                }
+                LengthText.Foreground = OverCapacityBrush;
+                DiscsText.Text = plan.DiscsText;
+                DiscsRow.IsVisible = true;
             }
-            else if (effectiveLength > TimeSpan.FromMinutes(80))
+            else if (plan.NearCapacity)
             {
-                LengthText.Text = $"{lengthStr} — over 80:00";
                 LengthText.Foreground = NearCapacityBrush;
-            }
-            else
-            {
-                LengthText.Text = lengthStr;
             }
 
             return;
@@ -381,6 +363,51 @@ public partial class BurnDiscDialog : Window
 
         UpdateModeDependentUi();
         UpdateBurnGate();
+    }
+
+    /// <summary>How an audio burn measures up against the loaded disc.</summary>
+    internal readonly record struct AudioCapacityPlan(
+        TimeSpan EffectiveLength,
+        string LengthText,
+        bool OverCapacity,
+        bool NearCapacity,
+        long DiscsNeeded,
+        string DiscsText);
+
+    /// <summary>
+    /// The audio capacity gate, extracted whole so it can be tested without a window:
+    /// inter-track gaps burn as real pregap sectors, so they count against the disc
+    /// exactly like audio. Over capacity reports how many discs the set needs (the
+    /// multi-disc roadmap item's arithmetic); with no reported capacity we can only
+    /// warn past the 80-minute convention.
+    /// </summary>
+    internal static AudioCapacityPlan PlanAudioCapacity(TimeSpan totalLength, int trackCount, double gapSeconds, long? capacitySectors)
+    {
+        var gap = TimeSpan.FromSeconds(Math.Max(0, gapSeconds));
+        var effective = totalLength + (trackCount > 1 ? (trackCount - 1) * gap : TimeSpan.Zero);
+        var lengthStr = FormatCdLength(effective);
+
+        if (capacitySectors is { } sectors && sectors > 0)
+        {
+            var capacity = TimeSpan.FromSeconds(sectors / 75.0);
+            if (effective > capacity)
+            {
+                var discs = (effective.Ticks + capacity.Ticks - 1) / capacity.Ticks;
+                return new AudioCapacityPlan(
+                    effective,
+                    $"{lengthStr} — exceeds {FormatCdLength(capacity)}",
+                    OverCapacity: true,
+                    NearCapacity: false,
+                    discs,
+                    $"{discs} × {FormatCdLength(capacity)}");
+            }
+
+            return new AudioCapacityPlan(effective, $"{lengthStr} of {FormatCdLength(capacity)}", false, false, 1, string.Empty);
+        }
+
+        return effective > TimeSpan.FromMinutes(80)
+            ? new AudioCapacityPlan(effective, $"{lengthStr} — over 80:00", false, NearCapacity: true, 1, string.Empty)
+            : new AudioCapacityPlan(effective, lengthStr, false, false, 1, string.Empty);
     }
 
     /// <summary>CD-style minutes:seconds, minutes uncapped ("77:54").</summary>
