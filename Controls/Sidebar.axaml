@@ -42,11 +42,9 @@
             </StackPanel>
         </DataTemplate>
         <TreeDataTemplate x:Key="DeviceTreeTemplate" x:DataType="models:SidebarItem" ItemsSource="{Binding Children}">
-            <!-- ChevronContainer is collapsed out of layout by the container
-                 theme above; we then push the row by the ListBoxItem's
-                 16px-left padding so the icon sits in the same column as the
-                 LIBRARY rows. -->
-            <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,0,0">
+            <!-- The chevron column supplies the leading space now; no extra margin
+                 or the rows drift right of the LIBRARY column. -->
+            <StackPanel Orientation="Horizontal" Spacing="10" Margin="0">
                 <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
                     <Panel>
                         <Image Source="{Binding IconBitmap}"
@@ -67,14 +65,14 @@
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
         </ControlTheme>
         <ControlTheme x:Key="DeviceTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
-            <Setter Property="IsExpanded" Value="True" />
+            <!-- Collapsible devices: the chevron is back and drives the model's
+                 observable IsExpanded (session-remembered per device, auto-expand
+                 on first connect). The container's default 12px side margins are
+                 tightened so the device icon stays near the LIBRARY column. -->
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
-            <!-- Kill the entire chevron column. Hiding only the inner
-                 ToggleButton leaves the container's 12,0,12,0 margin in
-                 layout - that 24px reservation is what nudged the device
-                 icon out of alignment with the LIBRARY ListBox above. -->
             <Style Selector="^ /template/ Panel#PART_ExpandCollapseChevronContainer">
-                <Setter Property="IsVisible" Value="False" />
+                <Setter Property="Margin" Value="2,0,2,0" />
             </Style>
         </ControlTheme>
     </UserControl.Resources>

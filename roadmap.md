@@ -11,10 +11,11 @@ covered by argument/layout tests only. Wanted: an end-to-end burn against a rewr
 image-backed virtual recorder if one proves workable) validating the full transcode → layout →
 burn → verify chain, plus the no-media / not-blank / not-writable pre-flight paths on real drives.
 
-### Collapsible device rows in the sidebar
-Each connected iPod becomes a collapsible parent (expander chevron) over its sub-items - Music,
-Podcasts, Audiobooks, Playlists - so multiple connected devices don't flood the DEVICES section.
-Expansion state remembered per device; auto-expand on first connect of a session.
+### Collapsible device rows in the sidebar — SHIPPED 0.9.5
+Chevron restored on device parents, TwoWay-bound to observable expansion; per-device session
+memory keyed by serial (mount fallback) so a collapse survives reconnects and drive-letter
+moves; auto-expand on first connect of a session. Alignment vs the LIBRARY column may want a
+pixel-nudge pass after eyeballing.
 
 ### Multi-select in media grids — SHIPPED 0.9.2
 Extended selection in all three grids; every verb operates on the view-ordered selection

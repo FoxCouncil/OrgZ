@@ -133,6 +133,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private DeviceDetectionService? _deviceDetection;
     private readonly Dictionary<string, ConnectedDevice> _connectedDevices = new(StringComparer.OrdinalIgnoreCase);
 
+    // Sidebar expansion per device for this session: auto-expand on first connect,
+    // then whatever the user set survives reconnects. See DeviceExpansionMemory.
+    private readonly DeviceExpansionMemory _deviceExpansion = new();
+
     // One CTS per in-flight device library scan, keyed by mount path. HandleDeviceDisconnected cancels
     // it so a yanked (or hot-swapped) iPod's ReadLibraryAsync can't keep streaming batches into
     // _allItems after teardown - at a reused drive letter those rows would land in the NEXT iPod's view.
@@ -7960,6 +7964,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Category = "DEVICES",
             IsEnabled = true,
             ViewConfigKey = viewKey,
+            IsExpanded = _deviceExpansion.GetOrDefault(device.Serial, device.MountPath),
+        };
+
+        // Live-track the user's chevron toggles so a reconnect within the session
+        // restores whatever they left the device at.
+        sidebarItem.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(SidebarItem.IsExpanded))
+            {
+                _deviceExpansion.Remember(device.Serial, device.MountPath, sidebarItem.IsExpanded);
+            }
         };
 
         if (ipod.HasKindSubViews)
