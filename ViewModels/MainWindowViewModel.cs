@@ -226,7 +226,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private StatusBarViewModel _statusBar = new();
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod), nameof(CanSyncPodcasts), nameof(CanSyncToDevice))]
+    [NotifyPropertyChangedFor(nameof(IsCdViewActive), nameof(SearchPlaceholder), nameof(ShowNoSearchResults), nameof(ShowBurnButton), nameof(CanSyncToIPod), nameof(CanSyncPodcasts), nameof(CanSyncToDevice), nameof(ShowEmptyView), nameof(EmptyViewMessage))]
     private SidebarItem? _selectedSidebarItem;
 
     // Whether a recorder (writable optical drive) is present. Refreshed by
@@ -651,13 +651,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private MediaItem? _selectedItem;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowNoSearchResults), nameof(NoSearchResultsMessage))]
+    [NotifyPropertyChangedFor(nameof(ShowNoSearchResults), nameof(NoSearchResultsMessage), nameof(ShowEmptyView))]
     // Not persisted across app launches - search is always transient state.
     // Per-view search is stored in _searchTextByView and swapped on sidebar changes.
     private string _searchText = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowNoSearchResults))]
+    [NotifyPropertyChangedFor(nameof(ShowNoSearchResults), nameof(ShowEmptyView))]
     private List<MediaItem> _filteredItems = [];
 
     // The Podcasts view replaces the data grid with its own panel, which renders
@@ -671,6 +671,73 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         && SelectedSidebarItem?.ViewConfigKey != "Podcasts";
 
     public string NoSearchResultsMessage => $"No search results for \"{SearchText}\".";
+
+    /// <summary>
+    /// A view holding nothing with no search active - an empty device node, a fresh
+    /// playlist, a share still loading. Distinct from "no search results": there is
+    /// nothing to un-filter, so the line explains the emptiness instead.
+    /// </summary>
+    public bool ShowEmptyView =>
+        FilteredItems.Count == 0
+        && string.IsNullOrWhiteSpace(SearchText)
+        && SelectedSidebarItem is not null
+        && SelectedSidebarItem.ViewConfigKey is not ("Podcasts" or "Audiobooks");
+
+    public string EmptyViewMessage => DescribeEmptyView(SelectedSidebarItem);
+
+    /// <summary>
+    /// The quiet line an empty view shows. Pure so the wording is tested, and phrased
+    /// per view because "nothing here" is unhelpful when the reason differs - an empty
+    /// iPod wants a different sentence than an empty playlist.
+    /// </summary>
+    internal static string DescribeEmptyView(SidebarItem? view)
+    {
+        if (view is null)
+        {
+            return "Nothing to show here.";
+        }
+
+        var key = view.ViewConfigKey ?? string.Empty;
+
+        if (key.StartsWith("Share:", StringComparison.Ordinal))
+        {
+            return "This shared library is empty.";
+        }
+
+        if (key.EndsWith($":{MediaKind.Podcast}", StringComparison.Ordinal))
+        {
+            return "No podcasts on this device.";
+        }
+
+        if (key.EndsWith($":{MediaKind.Audiobook}", StringComparison.Ordinal))
+        {
+            return "No audiobooks on this device.";
+        }
+
+        if (key.StartsWith("Device:", StringComparison.Ordinal))
+        {
+            return "No music on this device yet — drag tracks here, or use Sync.";
+        }
+
+        if (key.StartsWith("Playlist:", StringComparison.Ordinal))
+        {
+            return "This playlist is empty — drag songs here to add them.";
+        }
+
+        if (view.IsFavorites)
+        {
+            return "No favorites yet — mark a song with the star to add it.";
+        }
+
+        return key switch
+        {
+            "CdAudio" => "No audio tracks on this disc.",
+            "Radio" => "No stations match the current filters.",
+            "Ignored" => "Nothing is hidden.",
+            "Music" => "Your library is empty — add a folder in Settings to get started.",
+            _ => "Nothing to show here.",
+        };
+    }
 
     /// <summary>
     /// DataGrid-bound view for the active UNGROUPED view (Music, Favorites, Playlists, ...),

@@ -371,6 +371,19 @@
 							           Opacity="0.6"
 							           IsHitTestVisible="False" />
 
+							<!-- Empty VIEW (no search active): explains why it's empty and what to do,
+							     rather than leaving a bare grid. -->
+							<TextBlock Text="{Binding EmptyViewMessage}"
+							           IsVisible="{Binding ShowEmptyView}"
+							           HorizontalAlignment="Center"
+							           VerticalAlignment="Center"
+							           FontSize="16"
+							           Opacity="0.6"
+							           TextWrapping="Wrap"
+							           MaxWidth="420"
+							           TextAlignment="Center"
+							           IsHitTestVisible="False" />
+
 							<!-- Podcasts panel: replaces the data grids entirely when the
 							     Podcasts sidebar item is active. Has its own internal store /
 							     subscriptions / feed-detail navigation. -->

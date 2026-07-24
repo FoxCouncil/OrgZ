@@ -310,9 +310,12 @@ them against metal:
   burns
 - AirPlay: real RAOP/AirPlay audio streaming (outputs currently listed disabled, "coming soon")
 - Podcast store middle slot: design the feature behind the placeholder grid
-- Sidebar device context menu: wire or remove the disabled "Import Into Library..." / "Import Into
-  iPod..." items; CD node's "Rip CD..." / "Eject" (both services exist)
-- Empty states for empty device nodes (blank grid → a quiet explanatory line)
+- Sidebar device context menu — DONE (0.9.15 audit): the "Import Into ..." items no longer
+  exist and the CD node's Rip/Eject are wired; the entry was stale. Still dead: the Artwork
+  tab's Add/Delete buttons (MediaInfoDialog), which need real embedded-art writing
+- Empty view states — SHIPPED 0.9.15: every grid-backed view explains its own emptiness
+  (empty iPod suggests Sync, empty playlist suggests dragging, a share blames neither), and
+  it's distinct from the "no search results" overlay
 - Group-header count wording ("2 Items" → "2 episodes" / "50 stations") wants a custom header
   template - cheap once shared media grid v1 lands
 - The Ignored view has no producer (ignore-on-remove retired when Remove from Library became a
