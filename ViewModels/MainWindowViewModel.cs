@@ -5776,6 +5776,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #region CD Audio
 
+    // Drives whose loaded disc was probed and had no audio tracks (blank CD-RW, data
+    // disc): skipped on later poll ticks until the media leaves the drive, so a blank
+    // disc isn't hit with a READ TOC every 3 seconds.
+    private readonly HashSet<string> _cdProbedNoAudio = new(StringComparer.OrdinalIgnoreCase);
+
     private async Task ScanForCdAsync()
     {
         if (_cdScanning)
@@ -5784,14 +5789,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // A rip, burn, or erase owns the drive: the scan's media checks and TOC probes
+        // would inject SCSI commands mid-write and stall against the busy drive.
+        if (IsBusy || _burnWritePhase)
+        {
+            return;
+        }
+
         _cdScanning = true;
 
         try
         {
-            var drives = CdAudioService.GetCdDrivesWithMedia();
-            var all = CdAudioService.GetAllCdDrives();
+            // Volume queries against optical drives (IsReady, media checks) block for
+            // seconds while a drive is busy - keep every one of them off the UI thread.
+            var (all, drives, readiness) = await Task.Run(() =>
+            {
+                var a = CdAudioService.GetAllCdDrives();
+                var w = CdAudioService.GetCdDrivesWithMedia();
+                return (a, w, string.Join(", ", a.Select(d => $"{d.Name}[ready={d.IsReady}]")));
+            });
             _log.Information("ScanForCdAsync: AllCdDrives={All} WithMedia={WithMedia} (paths: {Paths})",
-                all.Count, drives.Count, string.Join(", ", all.Select(d => $"{d.Name}[ready={d.IsReady}]")));
+                all.Count, drives.Count, readiness);
+
+            // A drive that lost its media forgets its no-audio memo so the next
+            // inserted disc gets probed fresh.
+            var mediaIds = drives.Select(d => d.Name.TrimEnd('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _cdProbedNoAudio.RemoveWhere(id => !mediaIds.Contains(id));
 
             // Probe each drive's write capability once (cached) so the Burn button only
             // shows for real recorders. Probing does SCSI I/O - run it off the UI thread,
@@ -5865,10 +5888,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
+                if (_cdProbedNoAudio.Contains(driveId))
+                {
+                    continue;
+                }
+
                 var discInfo = await CdAudioService.ReadDiscAsync(_vlc, drive);
 
                 if (discInfo.Tracks.Count == 0)
                 {
+                    _cdProbedNoAudio.Add(driveId);
                     continue;
                 }
 
@@ -6303,6 +6332,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // Pair Begin/End; all marshal to the UI thread so callers can drive them from a
     // background scan. (Single-slot: a second op started mid-rip would share the page.)
 
+    /// <summary>"1 track", "3 tracks" - regular English plural for user-facing counts.</summary>
+    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? string.Empty : "s")}";
+
     private void BeginLcdBusy(string title, string detail = "")
     {
         UI(() =>
@@ -6417,6 +6449,111 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Recorder discovery, then the dialog straight away: it probes the selected
+        // drive live (media label, blank state, capacity) and gates Audio/Data modes
+        // and test-write from what's actually in the tray - including empty drives.
+        var allDrives = await Task.Run(() => CdAudioService.GetAllCdDrives());
+        var burners = allDrives.Where(d => _burnerSupport.GetValueOrDefault(d.Name, false)).ToList();
+        if (burners.Count == 0)
+        {
+            burners = allDrives;
+        }
+
+        if (burners.Count == 0)
+        {
+            _log.Warning("Burn requested with no CD drive present");
+            await ShowBurnErrorAsync("No optical drive found to burn to.");
+            return;
+        }
+
+        var totalLength = TimeSpan.FromTicks(sources.Sum(t => t.Duration?.Ticks ?? 0));
+        var totalDataBytes = await Task.Run(() => sources.Sum(t =>
+        {
+            try { return new FileInfo(t.FilePath!).Length; }
+            catch { return 0L; }
+        }));
+
+        var dialog = new BurnDiscDialog(
+            burners.Select(d => d.Name.TrimEnd('\\', '/')).ToList(),
+            sources.Count,
+            totalLength,
+            totalDataBytes,
+            discTitle,
+            async path =>
+            {
+                EnsureCdDriveFree(path);
+                return await Task.Run(() => CdBurnService.CheckBurnMedia(path));
+            });
+        var choice = await dialog.ShowDialog<BurnDiscChoice?>(_window);
+        if (choice == null)
+        {
+            return;
+        }
+
+        var drivePath = choice.DrivePath;
+
+        // Re-probe the chosen drive; a used rewritable is one confirmed quick-blank away.
+        // No burn ever starts against anything but Ready media.
+        var media = await Task.Run(() => CdBurnService.CheckBurnMedia(drivePath));
+
+        if (media.Status == CdBurnService.BurnMediaStatus.NotBlank && media.Erasable)
+        {
+            var confirm = new ConfirmDialog(
+                "Erase Disc",
+                $"The disc in {drivePath} isn't blank.\n\nErase everything on it? This cannot be undone.",
+                "Erase");
+            if (!await confirm.ShowDialog<bool>(_window))
+            {
+                return;
+            }
+
+            BeginLcdBusy($"Erasing {drivePath}", "Quick erase");
+
+            // BusyPercent stays 0 so the LCD runs its barber pole; the detail line
+            // ticks elapsed time since the drive reports nothing until it's done.
+            var eraseClock = System.Diagnostics.Stopwatch.StartNew();
+            var eraseTicker = new System.Threading.Timer(_ => SetLcdBusy($"Quick erase — {(int)eraseClock.Elapsed.TotalMinutes}:{eraseClock.Elapsed.Seconds:D2}"), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+            try
+            {
+                await CdBurnService.EraseWithElevationAsync(drivePath);
+                media = await Task.Run(() => CdBurnService.CheckBurnMedia(drivePath));
+                _log.Information("Erased disc in {Drive} in {Elapsed:mm\\:ss}; post-erase status: {Status}", drivePath, eraseClock.Elapsed, media.Status);
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Erase failed for {Drive}", drivePath);
+                await ShowBurnErrorAsync($"The erase didn't finish: {ex.Message}");
+                return;
+            }
+            finally
+            {
+                await eraseTicker.DisposeAsync();
+                EndLcdBusy();
+            }
+        }
+
+        if (media.Status != CdBurnService.BurnMediaStatus.Ready)
+        {
+            _log.Information("Burn blocked post-dialog: {Status} on {Drive}", media.Status, drivePath);
+            await ShowBurnErrorAsync(media.Status switch
+            {
+                CdBurnService.BurnMediaStatus.NoMedia     => "Insert a disc to burn to.",
+                CdBurnService.BurnMediaStatus.NotBlank    => "The disc in the drive isn't blank.",
+                CdBurnService.BurnMediaStatus.NotWritable => "This drive can't write discs.",
+                CdBurnService.BurnMediaStatus.Busy        => "The drive is busy finishing a previous operation. Eject and reinsert the disc, then try again.",
+                _                                         => "Couldn't read the disc in the drive.",
+            });
+            return;
+        }
+
+        if (choice.Mode is BurnDiscMode.DataCd or BurnDiscMode.DataDvd)
+        {
+            await BurnDataDiscAsync(drivePath, sources, choice, media);
+            return;
+        }
+
+        // — Audio CD from here down —
+
         if (sources.Count > CdBurnService.MaxRedbookTracks)
         {
             await ShowBurnErrorAsync($"Audio CDs hold at most {CdBurnService.MaxRedbookTracks} tracks — this list has {sources.Count}.");
@@ -6433,22 +6570,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Prefer known recorders when several optical drives are present (e.g. a virtual
-        // CD-ROM alongside a real burner); fall back to every drive if none is cached yet.
-        var drives = CdAudioService.GetAllCdDrives();
-        var burners = drives.Where(d => _burnerSupport.GetValueOrDefault(d.Name, false)).ToList();
-        if (burners.Count == 0)
-        {
-            burners = drives;
-        }
-
-        if (burners.Count == 0)
-        {
-            _log.Warning("Burn requested with no CD drive present");
-            await ShowBurnErrorAsync("No optical drive found to burn to.");
-            return;
-        }
-
         // The drive only accepts CD-DA WAV (16-bit/44.1k/stereo); library tracks are
         // MP3/AAC/FLAC/ALAC, so each source is transcoded to a sector-aligned WAV first.
         var ffmpeg = ResolveFfmpeg();
@@ -6456,57 +6577,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             await ShowBurnErrorAsync("ffmpeg wasn't found — it's needed to convert audio for CD burning.");
             return;
-        }
-
-        // Fail fast (no transcode, no UAC) if there isn't a blank, writable disc loaded.
-        // The probe is un-elevated - same SCSI passthrough as the recorder detection - and
-        // also yields the blank disc's capacity for the dialog's length line.
-        async Task<CdBurnService.BurnMediaInfo?> PreflightAsync(string path)
-        {
-            EnsureCdDriveFree(path);
-            var m = await Task.Run(() => CdBurnService.CheckBurnMedia(path));
-            if (m.Status == CdBurnService.BurnMediaStatus.Ready)
-            {
-                return m;
-            }
-
-            _log.Information("Burn pre-flight blocked: {Status} on {Drive}", m.Status, path);
-            await ShowBurnErrorAsync(m.Status switch
-            {
-                CdBurnService.BurnMediaStatus.NoMedia     => "Insert a blank CD-R or CD-RW disc to burn to.",
-                CdBurnService.BurnMediaStatus.NotBlank    => "The disc in the drive isn't blank. Insert a blank disc, or erase a rewritable one first.",
-                CdBurnService.BurnMediaStatus.NotWritable => "This drive can't write discs.",
-                _                                         => "Couldn't read the disc in the drive.",
-            });
-            return null;
-        }
-
-        var drivePath = burners[0].Name.TrimEnd('\\', '/');
-        if (await PreflightAsync(drivePath) is not { } media)
-        {
-            return;
-        }
-
-        // Confirm before any work: target drive (picker when several recorders exist),
-        // track count, length vs the loaded disc's capacity, editable CD-TEXT disc
-        // title, and the drive's simulated-write mode for coaster-free dry runs.
-        var totalLength = TimeSpan.FromTicks(sources.Sum(t => t.Duration?.Ticks ?? 0));
-        var dialog = new BurnDiscDialog(burners.Select(d => d.Name.TrimEnd('\\', '/')).ToList(), sources.Count, totalLength, media.CapacitySectors, discTitle);
-        var choice = await dialog.ShowDialog<BurnDiscChoice?>(_window);
-        if (choice == null)
-        {
-            return;
-        }
-
-        if (!string.Equals(choice.DrivePath, drivePath, StringComparison.OrdinalIgnoreCase))
-        {
-            drivePath = choice.DrivePath;
-            if (await PreflightAsync(drivePath) is not { } picked)
-            {
-                return;
-            }
-
-            media = picked;
         }
 
         // CD-TEXT disc performer: the shared artist when every track agrees, else null.
@@ -6530,6 +6600,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         BeginLcdBusy($"Burning to {drivePath}");
         try
         {
+            var gapSectors = (int)Math.Round(choice.GapSeconds * 75);   // 75 sectors = 1 s
+
             var burnTracks = new List<CdBurnTrack>(sources.Count);
             long totalSectors = 150;   // track 1's mandatory 2-second pregap
             for (int i = 0; i < sources.Count; i++)
@@ -6540,6 +6612,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 var wav = Path.Combine(stagingDir, $"{i:D3}.wav");
                 await CdAudioTranscoder.ToCdAudioWavAsync(ffmpeg, t.FilePath!, wav, ct);
                 totalSectors += (new FileInfo(wav).Length - 44) / 2352;   // canonical 44-byte header, sector-aligned payload
+                if (i > 0)
+                {
+                    totalSectors += gapSectors;   // inter-track gap burns as pregap sectors
+                }
                 burnTracks.Add(new CdBurnTrack
                 {
                     WavFilePath = wav,
@@ -6556,11 +6632,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException($"the disc holds {BurnDiscDialog.FormatCdLength(TimeSpan.FromSeconds(capacity / 75.0))} but this list needs {BurnDiscDialog.FormatCdLength(TimeSpan.FromSeconds(totalSectors / 75.0))}.");
             }
 
-            SetLcdBusy($"Writing {burnTracks.Count} track(s)", 0);
+            SetLcdBusy($"Writing {Count(burnTracks.Count, "track")}", 0);
             var progress = new Progress<CdBurnProgress>(p =>
             {
                 var title = p.TrackNumber >= 1 && p.TrackNumber <= burnTracks.Count ? burnTracks[p.TrackNumber - 1].Title : null;
-                SetLcdBusy($"Track {p.TrackNumber}/{p.TrackCount} — {title ?? "…"}", p.DiscPercent);
+                // Live readout: track, percent, and elapsed/total audio time (sectors ÷ 75)
+                // so the line ticks continuously instead of only changing per track.
+                var pct = (int)Math.Round(p.DiscPercent * 100);
+                var done = BurnDiscDialog.FormatCdLength(TimeSpan.FromSeconds(p.TotalSectorsWritten / 75.0));
+                var total = BurnDiscDialog.FormatCdLength(TimeSpan.FromSeconds(p.TotalDiscSectors / 75.0));
+                SetLcdBusy($"Track {p.TrackNumber}/{p.TrackCount} — {title ?? "…"} · {pct}% · {done}/{total}", p.DiscPercent);
             });
 
             // A disc that's started writing must run to completion - aborting mid-write
@@ -6570,21 +6651,33 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _burnCts.Dispose();
             _burnCts = null;
 
-            var warnings = await CdBurnService.BurnWithElevationAsync(drivePath, burnTracks, progress, choice.DiscTitle, discPerformer, choice.TestWrite, choice.WriteSpeedKBps, CancellationToken.None);
+            // CD-Text unchecked: strip all metadata from the burn (no lead-in text packs
+            // get built) - burnTracks keeps its titles so the LCD still shows them.
+            var sendTracks = choice.WriteCdText ? (IReadOnlyList<CdBurnTrack>)burnTracks : burnTracks.Select(t => t with { Title = null, Performer = null }).ToList();
+
+            var warnings = await CdBurnService.BurnWithElevationAsync(drivePath, sendTracks, progress, choice.WriteCdText ? choice.DiscTitle : null, choice.WriteCdText ? discPerformer : null, choice.TestWrite, choice.WriteSpeedKBps, gapSectors, CancellationToken.None);
             _log.Information("Burned {Count} track(s) to {DrivePath} (title: {Title}, testWrite: {Test}, speed: {Speed})", burnTracks.Count, drivePath, choice.DiscTitle ?? "—", choice.TestWrite, choice.WriteSpeedKBps?.ToString() ?? "max");
 
             // Eject the finished disc (iTunes-style) so the OS re-reads the new TOC on
             // reinsertion. Un-elevated, same path as the CD view's Eject button; a
             // simulated test write leaves the still-blank disc in the drive.
-            if (!choice.TestWrite && !DeviceEjector.Eject(drivePath, out var ejectError))
+            if (!choice.TestWrite)
             {
-                _log.Warning("Post-burn eject failed for {Drive}: {Error}", drivePath, ejectError ?? "unknown");
+                var (ejected, ejectError) = await Task.Run(() =>
+                {
+                    var ok = DeviceEjector.Eject(drivePath, out var err);
+                    return (ok, err);
+                });
+                if (!ejected)
+                {
+                    _log.Warning("Post-burn eject failed for {Drive}: {Error}", drivePath, ejectError ?? "unknown");
+                }
             }
 
             var warningSuffix = warnings.Count > 0 ? $" ({warnings[0]})" : string.Empty;
             UpdateMainStatus(choice.TestWrite
                 ? $"Test write finished on {drivePath} — nothing was burned.{warningSuffix}"
-                : $"Burned {burnTracks.Count} track(s) to {drivePath}.{warningSuffix}");
+                : $"Burned {Count(burnTracks.Count, "track")} to {drivePath}.{warningSuffix}");
         }
         catch (OperationCanceledException)
         {
@@ -6617,6 +6710,114 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             await ShowBurnErrorAsync($"The burn didn't finish: {burnError}");
         }
+    }
+
+    /// <summary>
+    /// Burns the sources' files as an ISO 9660/Joliet/UDF data disc laid out
+    /// Artist/Album/file. CD-R/CD-RW burn TAO Mode 1; DVD+RW overwrites in place.
+    /// Like the audio path, the write is not cancelable once started.
+    /// </summary>
+    private async Task BurnDataDiscAsync(string drivePath, IReadOnlyList<MediaItem> sources, BurnDiscChoice choice, CdBurnService.BurnMediaInfo media)
+    {
+        var files = BuildDataFileList(sources);
+
+        // Approximate size gate for CD media (2048 bytes per Mode 1 sector; filesystem
+        // overhead comes on top, so the drive still has the final word). DVD+RW doesn't
+        // report a capacity - an oversize image is rejected by the drive itself.
+        if (choice.Mode == BurnDiscMode.DataCd && media.CapacitySectors is { } capSectors)
+        {
+            var capBytes = capSectors * 2048L;
+            var totalBytes = await Task.Run(() => files.Sum(f =>
+            {
+                try { return new FileInfo(f.SourcePath).Length; }
+                catch { return 0L; }
+            }));
+            if (totalBytes > capBytes)
+            {
+                await ShowBurnErrorAsync($"The disc holds {BurnDiscDialog.FormatDataSize(capBytes)} but these files need {BurnDiscDialog.FormatDataSize(totalBytes)}.");
+                return;
+            }
+        }
+
+        string? burnError = null;
+
+        _burnWritePhase = true;
+        BeginLcdBusy($"Burning to {drivePath}", "Preparing data disc");
+        try
+        {
+            var progress = new Progress<CdBurnProgress>(p => SetLcdBusy($"Writing data disc — {BurnDiscDialog.FormatDataSize(p.TotalSectorsWritten * 2048L)} of {BurnDiscDialog.FormatDataSize(p.TotalDiscSectors * 2048L)}", p.DiscPercent));
+
+            await CdBurnService.DataBurnWithElevationAsync(drivePath, files, choice.DiscTitle, progress, choice.TestWrite, CancellationToken.None);
+            _log.Information("Data-burned {Count} file(s) to {DrivePath} (label: {Label}, mode: {Mode}, testWrite: {Test})", files.Count, drivePath, choice.DiscTitle ?? "—", choice.Mode, choice.TestWrite);
+
+            if (!choice.TestWrite)
+            {
+                var (ejected, ejectError) = await Task.Run(() =>
+                {
+                    var ok = DeviceEjector.Eject(drivePath, out var err);
+                    return (ok, err);
+                });
+                if (!ejected)
+                {
+                    _log.Warning("Post-burn eject failed for {Drive}: {Error}", drivePath, ejectError ?? "unknown");
+                }
+            }
+
+            UpdateMainStatus(choice.TestWrite
+                ? $"Test write finished on {drivePath} — nothing was burned."
+                : $"Burned {Count(files.Count, "file")} to {drivePath}.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Data burn failed for {DrivePath}", drivePath);
+            burnError = ex.Message;
+        }
+        finally
+        {
+            _burnWritePhase = false;
+            EndLcdBusy();
+        }
+
+        if (burnError != null)
+        {
+            await ShowBurnErrorAsync($"The burn didn't finish: {burnError}");
+        }
+    }
+
+    /// <summary>
+    /// Lays the sources out as Artist/Album/filename on the disc, scrubbing path-hostile
+    /// characters and suffixing collisions ("song (2).mp3").
+    /// </summary>
+    internal static List<DataBurnFile> BuildDataFileList(IReadOnlyList<MediaItem> sources)
+    {
+        static string Clean(string? part, string fallback)
+        {
+            var s = string.IsNullOrWhiteSpace(part) ? fallback : part.Trim();
+            foreach (var c in Path.GetInvalidFileNameChars())
+            {
+                s = s.Replace(c, '_');
+            }
+
+            return s.Replace('/', '_').Replace('\\', '_');
+        }
+
+        var files = new List<DataBurnFile>(sources.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var t in sources)
+        {
+            var name = Clean(Path.GetFileName(t.FilePath), "track");
+            var dir = $"{Clean(t.Artist, "Unknown Artist")}/{Clean(t.Album, "Unknown Album")}";
+            var discPath = $"{dir}/{name}";
+            for (int n = 2; !seen.Add(discPath); n++)
+            {
+                discPath = $"{dir}/{Path.GetFileNameWithoutExtension(name)} ({n}){Path.GetExtension(name)}";
+            }
+
+            files.Add(new DataBurnFile { DiscPath = discPath, SourcePath = t.FilePath! });
+        }
+
+        return files;
     }
 
     /// <summary>Shows an OK-only error dialog for a burn that can't start or didn't finish.</summary>

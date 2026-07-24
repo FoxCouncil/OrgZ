@@ -107,6 +107,55 @@ public class CdHelperSerializationTests
     }
 
     [Fact]
+    public void DataBurn_Spec_Roundtrips_With_DiscPaths()
+    {
+        var spec = new CdHelperSpec
+        {
+            Operation = "burn-data",
+            DrivePath = "I:",
+            DiscTitle = "Burn Test 1",
+            Tracks =
+            [
+                new CdHelperTrack { TrackNumber = 1, SourcePath = @"X:\Music\A\B\01.mp3", DiscPath = "A/B/01.mp3" },
+                new CdHelperTrack { TrackNumber = 2, SourcePath = @"X:\Music\A\B\02.flac", DiscPath = "A/B/02.flac" },
+            ],
+        };
+
+        var json = JsonSerializer.Serialize(spec, CdHelperJsonContext.Default.CdHelperSpec);
+        var back = JsonSerializer.Deserialize(json, CdHelperJsonContext.Default.CdHelperSpec)!;
+
+        Assert.Equal("burn-data", back.Operation);
+        Assert.Equal("Burn Test 1", back.DiscTitle);
+        Assert.Equal(2, back.Tracks?.Count);
+        Assert.Equal(@"X:\Music\A\B\01.mp3", back.Tracks![0].SourcePath);
+        Assert.Equal("A/B/01.mp3", back.Tracks[0].DiscPath);
+        Assert.Null(back.Tracks[0].WavFilePath);
+    }
+
+    [Fact]
+    public void Erase_Spec_And_Done_Event_Roundtrip()
+    {
+        var spec = new CdHelperSpec
+        {
+            Operation = "erase",
+            DrivePath = @"\\.\I:",
+        };
+
+        var json = JsonSerializer.Serialize(spec, CdHelperJsonContext.Default.CdHelperSpec);
+        var back = JsonSerializer.Deserialize(json, CdHelperJsonContext.Default.CdHelperSpec)!;
+
+        Assert.Equal("erase", back.Operation);
+        Assert.Equal(@"\\.\I:", back.DrivePath);
+        Assert.Null(back.Tracks);
+
+        var evt = new CdHelperEvent { Type = "erase-done" };
+        var line = JsonSerializer.Serialize(evt, CdHelperJsonContext.Default.CdHelperEvent);
+        var backEvt = JsonSerializer.Deserialize(line, CdHelperJsonContext.Default.CdHelperEvent)!;
+
+        Assert.Equal("erase-done", backEvt.Type);
+    }
+
+    [Fact]
     public void Error_Event_Carries_Message()
     {
         var evt = new CdHelperEvent { Type = "error", Message = "Disc is not blank" };

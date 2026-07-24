@@ -72,7 +72,9 @@ internal static class CdElevation
 
             try
             {
-                proc = Process.Start(psi) ?? throw new InvalidOperationException("Process.Start returned null for the elevated helper.");
+                // ShellExecute with the runas verb blocks until the UAC prompt is
+                // answered - keep that wait off the caller's (UI) thread.
+                proc = await Task.Run(() => Process.Start(psi), cancellationToken) ?? throw new InvalidOperationException("Process.Start returned null for the elevated helper.");
             }
             catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorCancelled)
             {

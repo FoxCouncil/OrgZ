@@ -108,9 +108,14 @@ public static class CdAudioTranscoder
                 throw new InvalidDataException($"ffmpeg produced no PCM for '{inputPath}'.");
             }
 
-            using var pcm = new FileStream(pcmPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var wav = new FileStream(outputWavPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            WriteCdAudioWav(pcm, pcmLength, wav);
+            // The framing copy is synchronous stream I/O over the whole track - tens of
+            // megabytes - so it runs on the pool, never the caller's (UI) thread.
+            await Task.Run(() =>
+            {
+                using var pcm = new FileStream(pcmPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var wav = new FileStream(outputWavPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                WriteCdAudioWav(pcm, pcmLength, wav);
+            }, ct);
         }
         finally
         {

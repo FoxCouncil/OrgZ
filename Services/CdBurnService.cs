@@ -2,6 +2,7 @@
 
 using System.Buffers.Binary;
 using FoxOrangebook;
+using FoxOrangebook.FileSystem;
 using FoxRedbook;
 using Serilog;
 
@@ -12,6 +13,14 @@ public sealed record CdBurnTrack
     public required string WavFilePath { get; init; }
     public string? Title { get; init; }
     public string? Performer { get; init; }
+}
+
+/// <summary>One file on a data disc: where it lands on the disc and where its bytes come from.</summary>
+public sealed record DataBurnFile
+{
+    /// <summary>Destination path on the disc, e.g. <c>"Artist/Album/01 Song.mp3"</c>.</summary>
+    public required string DiscPath { get; init; }
+    public required string SourcePath { get; init; }
 }
 
 public readonly record struct CdBurnProgress
@@ -62,6 +71,10 @@ public static class CdBurnService
         NotBlank,
         /// <summary>The drive can't write discs (DAO unsupported).</summary>
         NotWritable,
+        /// <summary>The drive answered NOT READY - busy finishing a prior operation, or still
+        /// spinning up. Common after an aborted burn leaves a half-written disc (sense 02/04/07).
+        /// Ejecting and reinserting the disc clears it.</summary>
+        Busy,
         /// <summary>The drive couldn't be opened or queried.</summary>
         DriveError,
     }
@@ -74,7 +87,57 @@ public static class CdBurnService
         /// <summary>Writable capacity in CD sectors (1/75 s each), from READ DISC INFORMATION's
         /// Last Possible Lead-Out Start Address. Null when the drive doesn't report it.</summary>
         public long? CapacitySectors { get; init; }
+
+        /// <summary>True when the loaded disc is rewritable (READ DISC INFORMATION's Erasable
+        /// bit) - a <see cref="BurnMediaStatus.NotBlank"/> CD-RW can be blanked and reused.</summary>
+        public bool Erasable { get; init; }
+
+        /// <summary>MMC media profile from GET CONFIGURATION (0x0009 CD-R, 0x000A CD-RW,
+        /// 0x001A DVD+RW, ...). 0 when no disc is loaded or the drive couldn't say.</summary>
+        public ushort Profile { get; init; }
+
+        /// <summary>Human-readable media name derived from <see cref="Profile"/>.</summary>
+        public string MediaLabel => MediaLabelForProfile(Profile);
+
+        /// <summary>CD-class recordable media (CD-R / CD-RW) - eligible for Audio CD and Data CD burns.</summary>
+        public bool IsCdRecordable => Profile is ProfileCdR or ProfileCdRw;
+
+        /// <summary>Rewritable media. Also means no simulated (test) writes - MMC prohibits them on high-speed RW.</summary>
+        public bool IsRewritable => Profile is ProfileCdRw or ProfileDvdPlusRw or ProfileDvdMinusRwRo or ProfileDvdMinusRwSeq or ProfileDvdRam or ProfileBdRe;
+
+        /// <summary>DVD+RW - the one DVD profile FoxOrangebook data burns support today.</summary>
+        public bool IsDataDvdCapable => Profile == ProfileDvdPlusRw;
     }
+
+    // MMC media profiles (GET CONFIGURATION header bytes 6-7).
+    public const ushort ProfileCdR = 0x0009;
+    public const ushort ProfileCdRw = 0x000A;
+    public const ushort ProfileDvdRam = 0x0012;
+    public const ushort ProfileDvdMinusRwRo = 0x0013;
+    public const ushort ProfileDvdMinusRwSeq = 0x0014;
+    public const ushort ProfileDvdPlusRw = 0x001A;
+    public const ushort ProfileBdRe = 0x0043;
+
+    /// <summary>Friendly name for an MMC media profile ("CD-RW", "DVD+RW", ...).</summary>
+    public static string MediaLabelForProfile(ushort profile) => profile switch
+    {
+        0x0000 => "No disc",
+        0x0008 => "CD-ROM",
+        ProfileCdR => "CD-R",
+        ProfileCdRw => "CD-RW",
+        0x0010 => "DVD-ROM",
+        0x0011 => "DVD-R",
+        ProfileDvdRam => "DVD-RAM",
+        ProfileDvdMinusRwRo or ProfileDvdMinusRwSeq => "DVD-RW",
+        0x0015 or 0x0016 => "DVD-R DL",
+        ProfileDvdPlusRw => "DVD+RW",
+        0x001B => "DVD+R",
+        0x002B => "DVD+R DL",
+        0x0040 => "BD-ROM",
+        0x0041 or 0x0042 => "BD-R",
+        ProfileBdRe => "BD-RE",
+        _ => $"Unknown media (0x{profile:X4})",
+    };
 
     /// <summary>
     /// Un-elevated pre-flight before a burn: opens <paramref name="drivePath"/> and checks a
@@ -96,9 +159,21 @@ public static class CdBurnService
 
             var session = new BurnSession(transport);
 
+            // Media profile answers even with no disc loaded (profile 0) - it feeds the
+            // dialog's media line and its Audio/Data/DVD mode gating.
+            ushort profile = 0;
+            try
+            {
+                profile = new DataBurnSession(transport).GetCurrentProfile();
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "GET CONFIGURATION profile probe failed for {Drive}", drivePath);
+            }
+
             if (!session.SupportsDaoBurn())
             {
-                return new BurnMediaInfo { Status = BurnMediaStatus.NotWritable };
+                return new BurnMediaInfo { Status = BurnMediaStatus.NotWritable, Profile = profile };
             }
 
             try
@@ -106,19 +181,38 @@ public static class CdBurnService
                 var info = session.ReadDiscInfo();
                 if (info.Status != DiscStatus.Blank)
                 {
-                    return new BurnMediaInfo { Status = BurnMediaStatus.NotBlank };
+                    // A formatted DVD+RW never reads "blank" - data burns overwrite it in
+                    // place, so it's Ready as-is. Its READ DISC INFORMATION lead-out field
+                    // is CD-MSF-based and meaningless here, so no capacity is reported.
+                    if (profile == ProfileDvdPlusRw)
+                    {
+                        return new BurnMediaInfo { Status = BurnMediaStatus.Ready, Profile = profile, Erasable = info.Erasable };
+                    }
+
+                    return new BurnMediaInfo { Status = BurnMediaStatus.NotBlank, Erasable = info.Erasable, Profile = profile };
                 }
 
-                return new BurnMediaInfo { Status = BurnMediaStatus.Ready, CapacitySectors = info.CapacitySectors };
+                return new BurnMediaInfo { Status = BurnMediaStatus.Ready, CapacitySectors = info.CapacitySectors, Erasable = info.Erasable, Profile = profile };
             }
             catch (MediaNotPresentException)
             {
-                return new BurnMediaInfo { Status = BurnMediaStatus.NoMedia };
+                return new BurnMediaInfo { Status = BurnMediaStatus.NoMedia, Profile = profile };
+            }
+            catch (DriveNotReadyException)
+            {
+                // NOT READY with a disc present - typically "operation in progress" (sense
+                // 02/04/07) after an aborted burn left a half-written disc, or the drive is
+                // still spinning up. Distinct from a dead drive; an eject/reinsert clears it.
+                return new BurnMediaInfo { Status = BurnMediaStatus.Busy, Profile = profile };
             }
         }
         catch (MediaNotPresentException)
         {
             return new BurnMediaInfo { Status = BurnMediaStatus.NoMedia };
+        }
+        catch (DriveNotReadyException)
+        {
+            return new BurnMediaInfo { Status = BurnMediaStatus.Busy };
         }
         catch (Exception ex)
         {
@@ -141,11 +235,12 @@ public static class CdBurnService
         string? discPerformer = null,
         bool testWrite = false,
         int? writeSpeedKBps = null,
+        int gapSectors = 0,
         CancellationToken cancellationToken = default)
     {
         if (!CdElevation.RequiresElevation)
         {
-            return await BurnAsync(drivePath, tracks, progress, discTitle, discPerformer, testWrite, writeSpeedKBps, cancellationToken);
+            return await BurnAsync(drivePath, tracks, progress, discTitle, discPerformer, testWrite, writeSpeedKBps, gapSectors, cancellationToken);
         }
 
         var spec = new CdHelperSpec
@@ -156,6 +251,7 @@ public static class CdBurnService
             DiscPerformer = discPerformer,
             TestWrite = testWrite,
             WriteSpeedKBps = writeSpeedKBps,
+            GapSectors = gapSectors,
             Tracks = tracks.Select((t, i) => new CdHelperTrack
             {
                 TrackNumber = i + 1,
@@ -209,6 +305,253 @@ public static class CdBurnService
         return warnings;
     }
 
+    // MMC BLANK (0xA1) is issued here with IMMED=1 and completion polled via TEST UNIT
+    // READY: FoxOrangebook alpha.4's BurnSession.Blank() sends IMMED=0, which parks the
+    // drive inside a single SCSI command for the whole erase - longer than the transport's
+    // 30 s command timeout. Fold into FoxOrangebook once Blank() grows the immediate+poll shape.
+    private const byte OpBlank = 0xA1;
+
+    /// <summary>
+    /// Entry point used by the GUI. On Windows, spawns an elevated helper (the same
+    /// UAC path as a burn - BLANK needs write rights on the drive handle) to run
+    /// <see cref="EraseMediaAsync"/>; on other platforms, runs it in-process.
+    /// </summary>
+    public static async Task EraseWithElevationAsync(string drivePath, CancellationToken cancellationToken = default)
+    {
+        if (!CdElevation.RequiresElevation)
+        {
+            await EraseMediaAsync(drivePath, cancellationToken);
+            return;
+        }
+
+        var spec = new CdHelperSpec
+        {
+            Operation = "erase",
+            DrivePath = drivePath,
+        };
+
+        string? error = null;
+
+        var exitCode = await CdElevation.RunElevatedAsync(spec, evt =>
+        {
+            if (evt.Type == "error")
+            {
+                error = evt.Message;
+            }
+        }, cancellationToken);
+
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException(error ?? $"Elevated erase helper exited with code {exitCode}.");
+        }
+    }
+
+    /// <summary>
+    /// Quick-blanks (PMA/TOC/pregap only) the rewritable disc in <paramref name="drivePath"/>,
+    /// then polls the drive until the erase finishes - typically 1-2 minutes on CD-RW.
+    /// The disc reports <see cref="DiscStatus.Blank"/> afterwards and is ready to burn.
+    /// </summary>
+    public static async Task EraseMediaAsync(string drivePath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(drivePath);
+
+        var opticalDrive = OpticalDrive.Open(drivePath);
+        await using (opticalDrive)
+        {
+            if (opticalDrive is not IScsiTransport transport)
+            {
+                throw new InvalidOperationException($"Drive '{drivePath}' does not expose an IScsiTransport (required for erasing).");
+            }
+
+            _log.Information("Erasing disc in {Drive}: {Vendor} {Product} (fw {Rev})", drivePath, opticalDrive.Inquiry.Vendor, opticalDrive.Inquiry.Product, opticalDrive.Inquiry.Revision);
+
+            var blankCdb = new byte[12];
+            blankCdb[0] = OpBlank;
+            blankCdb[1] = 0x10 | 0x01;   // IMMED=1, blanking type 001b = minimal (PMA/TOC/pregap)
+            transport.Execute(blankCdb, Span<byte>.Empty, ScsiDirection.None);
+
+            // The drive answers TEST UNIT READY with NOT READY sense until the blank
+            // finishes. 10 minutes of headroom - a quick blank is 1-2 minutes, but slow
+            // or worn media can drag.
+            const int maxAttempts = 1200;
+            var turCdb = new byte[6];   // all-zero CDB = TEST UNIT READY
+
+            for (int attempt = 0; ; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    transport.Execute(turCdb, Span<byte>.Empty, ScsiDirection.None);
+                    break;
+                }
+                catch (DriveNotReadyException)
+                {
+                    if (attempt >= maxAttempts)
+                    {
+                        throw new InvalidOperationException("The drive didn't finish erasing within 10 minutes.");
+                    }
+
+                    await Task.Delay(500, cancellationToken);
+                }
+            }
+
+            _log.Information("Erase complete for {Drive}", drivePath);
+        }
+    }
+
+    /// <summary>
+    /// Entry point used by the GUI for data discs. On Windows, spawns the elevated
+    /// helper (same UAC path as an audio burn); elsewhere runs in-process.
+    /// </summary>
+    public static async Task DataBurnWithElevationAsync(
+        string drivePath,
+        IReadOnlyList<DataBurnFile> files,
+        string? volumeLabel,
+        IProgress<CdBurnProgress>? progress = null,
+        bool testWrite = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CdElevation.RequiresElevation)
+        {
+            await DataBurnAsync(drivePath, files, volumeLabel, progress, testWrite, cancellationToken);
+            return;
+        }
+
+        var spec = new CdHelperSpec
+        {
+            Operation = "burn-data",
+            DrivePath = drivePath,
+            DiscTitle = volumeLabel,
+            TestWrite = testWrite,
+            Tracks = files.Select((f, i) => new CdHelperTrack
+            {
+                TrackNumber = i + 1,
+                SourcePath = f.SourcePath,
+                DiscPath = f.DiscPath,
+            }).ToList(),
+        };
+
+        string? error = null;
+
+        var exitCode = await CdElevation.RunElevatedAsync(spec, evt =>
+        {
+            switch (evt.Type)
+            {
+                case "burn-progress":
+                {
+                    progress?.Report(new CdBurnProgress
+                    {
+                        TrackNumber = evt.TrackNumber,
+                        TrackCount = evt.TrackCount,
+                        TrackSectors = evt.TrackSectors,
+                        SectorsWritten = evt.SectorsWritten,
+                        TotalDiscSectors = evt.TotalDiscSectors,
+                        TotalSectorsWritten = evt.TotalSectorsWritten,
+                    });
+                    break;
+                }
+                case "error":
+                {
+                    error = evt.Message;
+                    break;
+                }
+            }
+        }, cancellationToken);
+
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException(error ?? $"Elevated data-burn helper exited with code {exitCode}.");
+        }
+    }
+
+    /// <summary>
+    /// Builds an ISO 9660/Joliet/UDF image over the given files (contents stream lazily
+    /// at write time - no staging copy) and burns it: TAO Mode 1 on CD-R/CD-RW,
+    /// in-place overwrite on DVD+RW.
+    /// </summary>
+    public static async Task DataBurnAsync(
+        string drivePath,
+        IReadOnlyList<DataBurnFile> files,
+        string? volumeLabel,
+        IProgress<CdBurnProgress>? progress = null,
+        bool testWrite = false,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(drivePath);
+        ArgumentNullException.ThrowIfNull(files);
+
+        if (files.Count == 0)
+        {
+            throw new ArgumentException("At least one file is required.", nameof(files));
+        }
+
+        var builder = new DiscImageBuilder(new DiscImageOptions
+        {
+            VolumeIdentifier = SanitizeVolumeLabel(volumeLabel),
+            ApplicationIdentifier = "ORGZ",
+        });
+
+        foreach (var f in files)
+        {
+            if (!File.Exists(f.SourcePath))
+            {
+                throw new FileNotFoundException("Data burn source missing.", f.SourcePath);
+            }
+
+            builder.AddFile(f.DiscPath, f.SourcePath);
+        }
+
+        var image = builder.Build();
+
+        var opticalDrive = OpticalDrive.Open(drivePath);
+        await using (opticalDrive)
+        {
+            if (opticalDrive is not IScsiTransport transport)
+            {
+                throw new InvalidOperationException($"Drive '{drivePath}' does not expose an IScsiTransport (required for burning).");
+            }
+
+            _log.Information("Data burn: {Count} file(s), {Sectors} sectors ({Bytes:N0} bytes) to {Drive}: {Vendor} {Product} (fw {Rev}) testWrite={Test}", files.Count, image.SectorCount, image.ByteLength, drivePath, opticalDrive.Inquiry.Vendor, opticalDrive.Inquiry.Product, opticalDrive.Inquiry.Revision, testWrite);
+
+            var session = new DataBurnSession(transport, new DataBurnOptions
+            {
+                TestWrite = testWrite,
+                BufferUnderrunProtection = true,
+            });
+
+            IProgress<BurnProgress>? rawProgress = null;
+            if (progress != null)
+            {
+                rawProgress = new Progress<BurnProgress>(p => progress.Report(new CdBurnProgress
+                {
+                    TrackNumber = 1,
+                    TrackCount = 1,
+                    TrackSectors = p.TrackSectors,
+                    SectorsWritten = p.SectorsWritten,
+                    TotalDiscSectors = p.TotalDiscSectors,
+                    TotalSectorsWritten = p.TotalSectorsWritten,
+                }));
+            }
+
+            await session.BurnAsync(image, rawProgress, cancellationToken);
+
+            _log.Information("Data burn complete: {Count} file(s) to {Drive}", files.Count, drivePath);
+        }
+    }
+
+    /// <summary>ISO volume identifiers cap at 16 Joliet characters; empty falls back to "ORGZ".</summary>
+    private static string SanitizeVolumeLabel(string? label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return "ORGZ";
+        }
+
+        var trimmed = label.Trim();
+        return trimmed.Length <= 16 ? trimmed : trimmed[..16];
+    }
+
     /// <summary>
     /// Burns a list of WAV files to a blank CD-R/CD-RW in disc-at-once mode.
     /// Returns non-fatal warnings from the burn (e.g. CD-TEXT skipped).
@@ -221,10 +564,12 @@ public static class CdBurnService
         string? discPerformer = null,
         bool testWrite = false,
         int? writeSpeedKBps = null,
+        int gapSectors = 0,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(drivePath);
         ArgumentNullException.ThrowIfNull(tracks);
+        ArgumentOutOfRangeException.ThrowIfNegative(gapSectors);
 
         if (tracks.Count == 0)
         {
@@ -266,10 +611,12 @@ public static class CdBurnService
                     throw new InvalidDataException($"Track {i + 1} ({track.WavFilePath}) is {dataLength / BytesPerSector} sectors ({dataLength / BytesPerSector / 75.0:F1}s); Red Book requires at least 4 seconds ({MinRedbookTrackSectors} sectors) per track.");
                 }
 
+                // Track 1's pregap is the mandatory Red Book 2 seconds; later tracks
+                // carry the user's inter-track gap (0 = gapless).
                 audioSources.Add(new AudioTrackSource
                 {
                     Pcm = new SubStream(fs, dataOffset, dataLength),
-                    PregapSectors = i == 0 ? 150 : 0,
+                    PregapSectors = i == 0 ? 150 : gapSectors,
                     Title = track.Title,
                     Performer = track.Performer,
                 });
@@ -292,6 +639,13 @@ public static class CdBurnService
                     DiscTitle = discTitle,
                     DiscPerformer = discPerformer,
                     WriteSpeedKBps = writeSpeedKBps,
+
+                    // 26 × 2352 = 61,152 bytes per WRITE (10). The library default (32 =
+                    // 75,264) exceeds the 64 KB SCSI pass-through transfer cap of common
+                    // USB Mass Storage adapters - DeviceIoControl rejects it with Win32
+                    // error 87 (seen on the Pioneer BDR-XS07U) before the drive ever
+                    // sees the command.
+                    SectorsPerWrite = 26,
                 };
 
                 var session = new BurnSession(transport, options);

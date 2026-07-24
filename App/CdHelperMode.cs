@@ -72,6 +72,8 @@ internal static class CdHelperMode
             {
                 "rip" => RunRip(spec, progressWriter, log),
                 "burn" => RunBurn(spec, progressWriter, log),
+                "burn-data" => RunDataBurn(spec, progressWriter, log),
+                "erase" => RunErase(spec, progressWriter, log),
                 "ipod-firmware-read" => RunIPodFirmwareRead(spec, progressWriter, log),
                 _ => FailWith(progressWriter, $"Unknown operation '{spec.Operation}'"),
             };
@@ -192,7 +194,8 @@ internal static class CdHelperMode
             spec.DiscTitle,
             spec.DiscPerformer,
             spec.TestWrite,
-            spec.WriteSpeedKBps)
+            spec.WriteSpeedKBps,
+            spec.GapSectors)
             .GetAwaiter()
             .GetResult();
 
@@ -203,6 +206,51 @@ internal static class CdHelperMode
 
         progress.WriteEvent(new CdHelperEvent { Type = "burn-done" });
         log.Information("cd-helper: burn done");
+        return 0;
+    }
+
+    private static int RunDataBurn(CdHelperSpec spec, ProgressWriter progress, ILogger log)
+    {
+        if (spec.Tracks == null || spec.Tracks.Count == 0)
+        {
+            return FailWith(progress, "No files in spec");
+        }
+
+        var files = spec.Tracks.Select(t => new DataBurnFile
+        {
+            DiscPath = t.DiscPath ?? throw new InvalidDataException($"Entry {t.TrackNumber}: discPath required for data burn"),
+            SourcePath = t.SourcePath ?? throw new InvalidDataException($"Entry {t.TrackNumber}: sourcePath required for data burn"),
+        }).ToList();
+
+        var burnProgress = new Progress<CdBurnProgress>(p => progress.WriteEvent(new CdHelperEvent
+        {
+            Type = "burn-progress",
+            TrackNumber = p.TrackNumber,
+            TrackCount = p.TrackCount,
+            TrackSectors = p.TrackSectors,
+            SectorsWritten = p.SectorsWritten,
+            TotalDiscSectors = p.TotalDiscSectors,
+            TotalSectorsWritten = p.TotalSectorsWritten,
+        }));
+
+        CdBurnService.DataBurnAsync(spec.DrivePath!, files, spec.DiscTitle, burnProgress, spec.TestWrite).GetAwaiter().GetResult();
+
+        progress.WriteEvent(new CdHelperEvent { Type = "burn-done" });
+        log.Information("cd-helper: data burn done");
+        return 0;
+    }
+
+    private static int RunErase(CdHelperSpec spec, ProgressWriter progress, ILogger log)
+    {
+        if (string.IsNullOrWhiteSpace(spec.DrivePath))
+        {
+            return FailWith(progress, "DrivePath required for erase");
+        }
+
+        CdBurnService.EraseMediaAsync(spec.DrivePath).GetAwaiter().GetResult();
+
+        progress.WriteEvent(new CdHelperEvent { Type = "erase-done" });
+        log.Information("cd-helper: erase done");
         return 0;
     }
 
@@ -313,6 +361,9 @@ internal sealed class CdHelperSpec
     public bool TestWrite { get; set; }
     /// <summary>Burn speed in kB/s (176 = 1x audio); null leaves the drive at max.</summary>
     public int? WriteSpeedKBps { get; set; }
+
+    /// <summary>Inter-track gap in sectors (75 = 1 s), burned as tracks 2..N's pregap. 0 = gapless.</summary>
+    public int GapSectors { get; set; }
     public List<CdHelperTrack>? Tracks { get; set; }
 
     /// <summary>
@@ -332,6 +383,12 @@ internal sealed class CdHelperTrack
     public string? Album { get; set; }
     public uint? Year { get; set; }
     public string? WavFilePath { get; set; }
+
+    /// <summary>Data-burn source file on the local filesystem. Null for rip/audio-burn.</summary>
+    public string? SourcePath { get; set; }
+
+    /// <summary>Data-burn destination path on the disc. Null for rip/audio-burn.</summary>
+    public string? DiscPath { get; set; }
 }
 
 internal sealed class CdHelperEvent
