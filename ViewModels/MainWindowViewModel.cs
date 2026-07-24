@@ -108,6 +108,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private PlaybackContext? _playbackContext;
 
+    // ViewConfigKey of the sidebar view a playback context was started from.
+    // NavigateToPlaying prefers it over the kind-based fallback, so "go to
+    // current song" returns to the playlist (or Favorites, device, CD view)
+    // the song is actually playing from - not just the Music tab.
+    private string? _playbackOriginViewKey;
+
     private readonly List<MediaItem> _cdTracks = [];
     // Drive key (from DrivePathFromCdTrackId) -> MusicBrainz DiscID of the loaded disc,
     // so a rip can record what it ripped and a re-insert can restore green checks.
@@ -283,6 +289,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var first = chapters[0];
         _playbackContext?.Release();
         _playbackContext = new PlaybackContext(chapters, first) { RepeatMode = RepeatMode };
+        _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
         OnPropertyChanged(nameof(PlaybackContextUpcoming));
         ExecutePlayMusic(first);
     }
@@ -981,30 +988,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        SidebarItem? target = null;
-
-        // Device tracks → find the matching device sidebar entry
-        if (item.Source?.StartsWith("device:") == true)
-        {
-            var viewKey = $"Device:{item.Source["device:".Length..]}";
-            target = DeviceItems.FirstOrDefault(i => i.ViewConfigKey == viewKey);
-        }
-        // CD tracks → find the CdAudio sidebar entry
-        else if (item.Source == "cdda")
-        {
-            target = DeviceItems.FirstOrDefault(i => i.ViewConfigKey == "CdAudio");
-        }
-        // Library tracks
-        else
-        {
-            target = item.Kind switch
-            {
-                MediaKind.Music => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Music),
-                MediaKind.Radio => LibraryItems.FirstOrDefault(i => i.Kind == MediaKind.Radio),
-                _ => null
-            };
-        }
-
+        var target = ResolveNavigationTarget(_playbackOriginViewKey, item, LibraryItems, PlaylistItems, DeviceItems);
         if (target == null)
         {
             return;
@@ -1015,6 +999,49 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectedSidebarItem = target;
         SelectedItem = item;
         ScrollToSelectedRequested?.Invoke();
+    }
+
+    /// <summary>
+    /// Pure target resolution for "go to current song". The view playback started
+    /// from (playlist, Favorites, device, CD) wins - the song in its context, like
+    /// iTunes - and the kind-based homes are fallbacks for when that view is gone
+    /// (deleted playlist, ejected device). Static so tests drive it directly.
+    /// </summary>
+    internal static SidebarItem? ResolveNavigationTarget(
+        string? originViewKey,
+        MediaItem item,
+        IReadOnlyList<SidebarItem> libraryItems,
+        IReadOnlyList<SidebarItem> playlistItems,
+        IReadOnlyList<SidebarItem> deviceItems)
+    {
+        if (!string.IsNullOrEmpty(originViewKey))
+        {
+            var origin = libraryItems.FirstOrDefault(i => i.ViewConfigKey == originViewKey)
+                ?? playlistItems.FirstOrDefault(i => i.ViewConfigKey == originViewKey)
+                ?? deviceItems.FirstOrDefault(i => i.ViewConfigKey == originViewKey);
+            if (origin != null)
+            {
+                return origin;
+            }
+        }
+
+        if (item.Source?.StartsWith("device:") == true)
+        {
+            var viewKey = $"Device:{item.Source["device:".Length..]}";
+            return deviceItems.FirstOrDefault(i => i.ViewConfigKey == viewKey);
+        }
+
+        if (item.Source == "cdda")
+        {
+            return deviceItems.FirstOrDefault(i => i.ViewConfigKey == "CdAudio");
+        }
+
+        return item.Kind switch
+        {
+            MediaKind.Music => libraryItems.FirstOrDefault(i => i.Kind == MediaKind.Music),
+            MediaKind.Radio => libraryItems.FirstOrDefault(i => i.Kind == MediaKind.Radio),
+            _ => null,
+        };
     }
 
     // Set true during RebuildRadioFilterOptions's bounce-assignment so the
@@ -2293,6 +2320,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             _playbackContext?.Release();
             _playbackContext = new PlaybackContext(FilteredItems, file, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+            _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
             OnPropertyChanged(nameof(PlaybackContextUpcoming));
             ExecutePlayMusic(file);
         });
@@ -2340,6 +2368,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                 _playbackContext?.Release();
                 _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+                _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
                 OnPropertyChanged(nameof(PlaybackContextUpcoming));
                 ExecutePlayRadio(station);
             });
@@ -5983,6 +6012,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _playbackContext?.Release();
             _playbackContext = new PlaybackContext(_cdTracks, track);
+            _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
             OnPropertyChanged(nameof(PlaybackContextUpcoming));
             ExecutePlayCd(track);
         });

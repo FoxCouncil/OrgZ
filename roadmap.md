@@ -22,10 +22,10 @@ sync-to-device, burn, remove, and drag-drop all operate on the selection, not ju
 row. Context menus pluralize with the count. Lands cleanest with (or right after) shared media
 grid v1 so it's built once.
 
-### Go to current song
-iTunes-style: an explicit jump (Ctrl+L, plus clicking the LCD track line) scrolls the playing
-song into view, centered vertically - never an automatic follow that fights the user's scroll
-position. Optional "follow playback" toggle later if wanted; default off, like iTunes.
+### Go to current song — SHIPPED 0.9.1
+Ctrl+L / album-art click / LCD double-click jump to the playing song in the view it's playing
+FROM (playlist, Favorites, device, CD - not just the Music tab), centered. Never auto-follows.
+Later maybe: opt-in "follow playback" toggle, foobar-style.
 
 ## Architecture
 

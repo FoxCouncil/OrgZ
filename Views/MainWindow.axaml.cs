@@ -1483,6 +1483,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Ctrl+L: go to current song (iTunes' shortcut) - jumps to the view the song
+        // is playing from and centers its row. Same path as the album-art click.
+        if (e.Key == Key.L && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            _viewModel.NavigateToPlaying();
+            e.Handled = true;
+            return;
+        }
+
         var focused = FocusManager?.GetFocusedElement();
         var focusedIsTextBox = focused is TextBox;
 
