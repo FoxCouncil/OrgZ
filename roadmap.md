@@ -16,11 +16,12 @@ Each connected iPod becomes a collapsible parent (expander chevron) over its sub
 Podcasts, Audiobooks, Playlists - so multiple connected devices don't flood the DEVICES section.
 Expansion state remembered per device; auto-expand on first connect of a session.
 
-### Multi-select in media grids
-Extended selection (shift/ctrl click, ctrl+A) everywhere songs move around: add-to-playlist,
-sync-to-device, burn, remove, and drag-drop all operate on the selection, not just the focused
-row. Context menus pluralize with the count. Lands cleanest with (or right after) shared media
-grid v1 so it's built once.
+### Multi-select in media grids — SHIPPED 0.9.2
+Extended selection in all three grids; every verb operates on the view-ordered selection
+(play next, queue, favorite, add-to-playlist, remove-from-playlist/library/device, restore,
+burn, drag to playlists/devices/external apps); selection-aware menu entries show "(N)".
+Revisit under shared media grid v1 to consolidate; bulk device-remove confirmation and
+multi-row reorder drags are follow-ups.
 
 ### Go to current song — SHIPPED 0.9.1
 Ctrl+L / album-art click / LCD double-click jump to the playing song in the view it's playing

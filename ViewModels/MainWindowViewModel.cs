@@ -919,6 +919,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    /// <summary>Queues a selection to play next, preserving its order (inserted in
+    /// reverse so the first selected track plays first).</summary>
+    internal void PlayNext(IReadOnlyList<MediaItem> items)
+    {
+        for (int i = items.Count - 1; i >= 0; i--)
+        {
+            PlayNext(items[i]);
+        }
+    }
+
+    /// <summary>Appends a selection to the queue in order.</summary>
+    internal void AddToQueue(IReadOnlyList<MediaItem> items)
+    {
+        foreach (var item in items)
+        {
+            AddToQueue(item);
+        }
+    }
+
     internal void PlayNext(MediaItem? item)
     {
         if (item == null)
@@ -1042,6 +1061,39 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             MediaKind.Radio => libraryItems.FirstOrDefault(i => i.Kind == MediaKind.Radio),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Orders a grid selection by its position in the current view. DataGrid selection
+    /// order is CLICK order - burning or queueing a shift-click-upward selection must
+    /// not come out backwards. Items absent from the view keep their selection order,
+    /// after the in-view ones. Static so tests drive it directly.
+    /// </summary>
+    internal static List<MediaItem> OrderSelectionByView(IEnumerable<MediaItem> selection, IReadOnlyList<MediaItem> viewOrder)
+    {
+        var indexByItem = new Dictionary<MediaItem, int>();
+        for (int i = 0; i < viewOrder.Count; i++)
+        {
+            indexByItem.TryAdd(viewOrder[i], i);
+        }
+
+        var inView = new List<MediaItem>();
+        var strays = new List<MediaItem>();
+        foreach (var item in selection)
+        {
+            if (indexByItem.ContainsKey(item))
+            {
+                inView.Add(item);
+            }
+            else
+            {
+                strays.Add(item);
+            }
+        }
+
+        inView.Sort((a, b) => indexByItem[a].CompareTo(indexByItem[b]));
+        inView.AddRange(strays);
+        return inView;
     }
 
     // Set true during RebuildRadioFilterOptions's bounce-assignment so the
@@ -4127,6 +4179,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// device via the per-tier backend (Nano 5G SQLite, binary iTunesDB, or Rockbox filesystem): its
     /// database rows and its audio file, then drops it from the live list. Reports loudly when a tier
     /// has no remove backend.</summary>
+    /// <summary>Removes a whole selection from the device, sequentially - each track keeps
+    /// the singular path's space accounting and per-track error reporting.</summary>
+    internal async Task RemoveFromDeviceAsync(IReadOnlyList<MediaItem> tracks)
+    {
+        foreach (var track in tracks)
+        {
+            await RemoveFromDeviceAsync(track);
+        }
+    }
+
     internal async Task RemoveFromDeviceAsync(MediaItem? track)
     {
         if (track is null)
@@ -4447,6 +4509,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         AddTrackToPlaylist(playlistId, SelectedItem);
     }
 
+    /// <summary>Adds a whole selection to a playlist in view order, refreshing the config once.</summary>
+    internal void AddTracksToPlaylist(int playlistId, IReadOnlyList<MediaItem> items)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < items.Count - 1; i++)
+        {
+            MediaCache.AddTrackToPlaylist(playlistId, items[i].Id);
+        }
+
+        // The last add goes through the singular path so the config refresh,
+        // view-cache invalidation, and live-view re-filter run exactly once.
+        AddTrackToPlaylist(playlistId, items[^1]);
+    }
+
     internal void AddTrackToPlaylist(int playlistId, MediaItem item)
     {
         MediaCache.AddTrackToPlaylist(playlistId, item.Id);
@@ -4548,6 +4628,78 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// ignore-based soft remove is retired (the Ignored view still shows and restores anything
     /// ignored before the change).
     /// </summary>
+    /// <summary>
+    /// Bulk remove: ONE confirmation for the whole selection, then per-file deletes and a
+    /// single cache/playlist/view refresh. Audiobooks are excluded from bulk (they're
+    /// folder-level deletions with their own flow) - a single-item selection still routes
+    /// through the singular path so its wording and audiobook handling stay intact.
+    /// </summary>
+    internal async Task RemoveFromLibraryAsync(IReadOnlyList<MediaItem> items)
+    {
+        var deletable = items.Where(IsLocalLibraryFile).ToList();
+        if (deletable.Count == 0)
+        {
+            return;
+        }
+
+        if (deletable.Count == 1)
+        {
+            await RemoveFromLibraryAsync(deletable[0]);
+            return;
+        }
+
+        deletable.RemoveAll(i => i.Kind == MediaKind.Audiobook);
+        if (deletable.Count == 0)
+        {
+            return;
+        }
+
+        var confirm = new Views.ConfirmDialog(
+            "Remove from Library",
+            $"Remove {Count(deletable.Count, "track")} from your library?\n\nThis permanently deletes the files from disk. It cannot be undone.",
+            "Delete");
+        if (!await confirm.ShowDialog<bool>(_window))
+        {
+            return;
+        }
+
+        var removedIds = new List<string>();
+        foreach (var item in deletable)
+        {
+            try
+            {
+                File.Delete(item.FilePath!);
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Library file delete failed for {Path}", item.FilePath);
+                continue;
+            }
+
+            _allItems.Remove(item);
+            removedIds.Add(item.Id);
+        }
+
+        if (removedIds.Count == 0)
+        {
+            UpdateMainStatus("Couldn't delete the selected tracks.");
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => MediaCache.RemoveLibraryFiles([.. removedIds]));
+            RefreshAllPlaylistConfigs();
+            ApplyFilter();
+            UpdateMainStatus($"Deleted {Count(removedIds.Count, "track")}.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error(ex, "Post-delete cleanup failed for bulk removal");
+            UpdateMainStatus($"Deleted {Count(removedIds.Count, "track")}, but library cleanup hit an error.");
+        }
+    }
+
     internal async Task RemoveFromLibraryAsync(MediaItem item)
     {
         if (!IsLocalLibraryFile(item))
@@ -4634,7 +4786,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     internal void RemoveFromPlaylist()
     {
-        if (SelectedItem == null || SelectedSidebarItem?.PlaylistId == null)
+        RemoveTracksFromPlaylist(SelectedItem is { } selected ? [selected] : []);
+    }
+
+    /// <summary>Removes a whole selection from the active playlist with one rebuild + re-filter.</summary>
+    internal void RemoveTracksFromPlaylist(IReadOnlyList<MediaItem> items)
+    {
+        if (items.Count == 0 || SelectedSidebarItem?.PlaylistId == null)
         {
             return;
         }
@@ -4642,7 +4800,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var playlistId = SelectedSidebarItem.PlaylistId.Value;
         var scroll = GetScrollOffset?.Invoke() ?? 0;
 
-        MediaCache.RemoveTrackFromPlaylist(playlistId, SelectedItem.Id);
+        foreach (var item in items)
+        {
+            MediaCache.RemoveTrackFromPlaylist(playlistId, item.Id);
+        }
 
         var key = $"Playlist:{playlistId}";
         var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);

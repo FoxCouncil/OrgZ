@@ -41,6 +41,10 @@ public partial class MainWindow : Window
     private DataGrid? _activeGroupedGrid;
 
     internal static MediaItem? DraggedMediaItem;
+
+    /// <summary>The full dragged selection, view-ordered. Single-row drags carry one
+    /// item; sidebar drop targets iterate this instead of the anchor.</summary>
+    internal static List<MediaItem> DraggedMediaItems = [];
     private static int _draggedPlaylistRowIndex = -1;
     private static readonly DataFormat<string> PlaylistRowDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.PlaylistRowIndex");
     private static readonly DataFormat<string> DeviceRowDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.DeviceRowIndex");
@@ -1056,10 +1060,33 @@ public partial class MainWindow : Window
         BuildContextMenuOn(MainDataGrid, defs);
     }
 
+    // Commands whose menu entry gets a live "(N)" count suffix when several rows are
+    // selected - every verb that operates on the whole selection.
+    private static readonly HashSet<string> _selectionAwareCommands =
+    [
+        "PlayNext", "AddToQueue", "Favorite", "RemoveFromPlaylist",
+        "RemoveFromLibrary", "RemoveFromDevice", "RestoreFromIgnored", "BurnToCd",
+    ];
+
     private void BuildContextMenuOn(DataGrid grid, List<ContextMenuItemDef> defs)
     {
         var menu = new ContextMenu();
         BuildMenuItems(menu.Items, defs);
+
+        // Selection-aware entries show the count on open: "Add to Queue (7)".
+        menu.Opened += (_, _) =>
+        {
+            var count = grid.SelectedItems?.OfType<MediaItem>().Count() ?? 0;
+            foreach (var obj in menu.Items)
+            {
+                if (obj is Avalonia.Controls.MenuItem { Tag: ContextMenuItemDef def } mi
+                    && def.CommandName != null && _selectionAwareCommands.Contains(def.CommandName))
+                {
+                    mi.Header = count > 1 ? $"{def.Header} ({count})" : def.Header;
+                }
+            }
+        };
+
         grid.ContextMenu = menu;
     }
 
@@ -1077,6 +1104,7 @@ public partial class MainWindow : Window
             {
                 IsEnabled = def.IsEnabled,
                 Header = def.Header,
+                Tag = def,   // lets the menu's Opened handler re-title selection-aware entries
             };
 
             if (def.IsHeader)
@@ -1251,7 +1279,13 @@ public partial class MainWindow : Window
 
         // Favorites is a pseudo-playlist and lives at the top; adding here never un-favorites.
         var favorites = new Avalonia.Controls.MenuItem { Header = "Favorites", IsEnabled = current?.IsFavorites != true };
-        favorites.Click += (_, _) => _viewModel.AddToFavorites(_viewModel.SelectedItem);
+        favorites.Click += (_, _) =>
+        {
+            foreach (var track in SelectedTracks())
+            {
+                _viewModel.AddToFavorites(track);
+            }
+        };
         parent.Items.Add(favorites);
 
         var playlists = _viewModel.PlaylistItems.Where(p => p.PlaylistId.HasValue).ToList();
@@ -1262,13 +1296,7 @@ public partial class MainWindow : Window
             {
                 var playlistId = p.PlaylistId!.Value;
                 var item = new Avalonia.Controls.MenuItem { Header = p.Name, IsEnabled = current?.PlaylistId != playlistId };
-                item.Click += (_, _) =>
-                {
-                    if (_viewModel.SelectedItem != null)
-                    {
-                        _viewModel.AddTrackToPlaylist(playlistId, _viewModel.SelectedItem);
-                    }
-                };
+                item.Click += (_, _) => _viewModel.AddTracksToPlaylist(playlistId, SelectedTracks());
                 parent.Items.Add(item);
             }
         }
@@ -1293,6 +1321,23 @@ public partial class MainWindow : Window
         _viewModel.CurrentVolumeChanged();
     }
 
+    /// <summary>
+    /// The active grid's full selection, ordered by view position (selection order is
+    /// click order - every plural verb wants row order). Falls back to the focused
+    /// item so single-select behavior is unchanged.
+    /// </summary>
+    private List<MediaItem> SelectedTracks()
+    {
+        var grid = GetActiveDataGrid();
+        var selection = grid.SelectedItems?.OfType<MediaItem>().ToList() ?? [];
+        if (selection.Count == 0 && _viewModel.SelectedItem != null)
+        {
+            selection.Add(_viewModel.SelectedItem);
+        }
+
+        return MainWindowViewModel.OrderSelectionByView(selection, _viewModel.FilteredItems);
+    }
+
     private void ContextMenu_Play(object? sender, RoutedEventArgs e)
     {
         _viewModel.DataGridRowDoubleClick();
@@ -1300,40 +1345,34 @@ public partial class MainWindow : Window
 
     private void ContextMenu_PlayNext(object? sender, RoutedEventArgs e)
     {
-        _viewModel.PlayNext(_viewModel.SelectedItem);
+        _viewModel.PlayNext(SelectedTracks());
     }
 
     private void ContextMenu_AddToQueue(object? sender, RoutedEventArgs e)
     {
-        _viewModel.AddToQueue(_viewModel.SelectedItem);
+        _viewModel.AddToQueue(SelectedTracks());
     }
 
     private void ContextMenu_RemoveFromPlaylist(object? sender, RoutedEventArgs e)
     {
-        _viewModel.RemoveFromPlaylist();
+        _viewModel.RemoveTracksFromPlaylist(SelectedTracks());
     }
 
     private async void ContextMenu_RemoveFromLibrary(object? sender, RoutedEventArgs e)
     {
-        if (_viewModel.SelectedItem != null)
-        {
-            await _viewModel.RemoveFromLibraryAsync(_viewModel.SelectedItem);
-        }
+        await _viewModel.RemoveFromLibraryAsync(SelectedTracks());
     }
 
     private async void ContextMenu_RemoveFromDevice(object? sender, RoutedEventArgs e)
     {
-        if (_viewModel.SelectedItem != null)
-        {
-            await _viewModel.RemoveFromDeviceAsync(_viewModel.SelectedItem);
-        }
+        await _viewModel.RemoveFromDeviceAsync(SelectedTracks());
     }
 
     private void ContextMenu_RestoreFromIgnored(object? sender, RoutedEventArgs e)
     {
-        if (_viewModel.SelectedItem != null)
+        foreach (var item in SelectedTracks())
         {
-            _viewModel.RestoreFromIgnored(_viewModel.SelectedItem);
+            _viewModel.RestoreFromIgnored(item);
         }
     }
 
@@ -1373,9 +1412,9 @@ public partial class MainWindow : Window
 
     private void ContextMenu_Favorite(object? sender, RoutedEventArgs e)
     {
-        if (_viewModel.SelectedItem != null)
+        foreach (var item in SelectedTracks())
         {
-            _viewModel.ToggleFavorite(_viewModel.SelectedItem);
+            _viewModel.ToggleFavorite(item);
         }
     }
 
@@ -1455,12 +1494,7 @@ public partial class MainWindow : Window
 
     private async void ContextMenu_BurnToCd(object? sender, RoutedEventArgs e)
     {
-        var tracks = MainDataGrid.SelectedItems?.OfType<MediaItem>().ToList() ?? [];
-        if (tracks.Count == 0 && _viewModel.SelectedItem != null)
-        {
-            tracks.Add(_viewModel.SelectedItem);
-        }
-
+        var tracks = SelectedTracks();
         if (tracks.Count == 0)
         {
             return;
@@ -1612,6 +1646,14 @@ public partial class MainWindow : Window
         DraggedMediaItem = _gridDragItem;
         _draggedPlaylistRowIndex = _gridDragRowIndex;
 
+        // Dragging a row that's part of a multi-selection drags the WHOLE selection
+        // (view-ordered); dragging an unselected row drags just that row - the
+        // Explorer/iTunes convention.
+        var selection = SelectedTracks();
+        DraggedMediaItems = _gridDragItem != null && selection.Contains(_gridDragItem)
+            ? selection
+            : _gridDragItem != null ? [_gridDragItem] : [];
+
         var data = new DataTransfer();
         data.Add(DataTransferItem.Create(Sidebar.MediaItemDragFormat, "media"));
 
@@ -1637,14 +1679,17 @@ public partial class MainWindow : Window
             BeginDragVisuals(_gridDragItem);
         }
 
-        // Include the actual file so external apps (Telegram, Explorer, etc.) receive it as a file drop
-        if (_gridDragItem?.FilePath != null && File.Exists(_gridDragItem.FilePath))
+        // Include the actual files so external apps (Telegram, Explorer, etc.) receive
+        // the whole dragged selection as a file drop.
+        foreach (var dragged in DraggedMediaItems)
         {
-            var storage = StorageProvider;
-            var file = await storage.TryGetFileFromPathAsync(new Uri(_gridDragItem.FilePath));
-            if (file != null)
+            if (dragged.FilePath != null && File.Exists(dragged.FilePath))
             {
-                data.Add(DataTransferItem.CreateFile(file));
+                var file = await StorageProvider.TryGetFileFromPathAsync(new Uri(dragged.FilePath));
+                if (file != null)
+                {
+                    data.Add(DataTransferItem.CreateFile(file));
+                }
             }
         }
 
@@ -1653,6 +1698,7 @@ public partial class MainWindow : Window
 
         await DragDrop.DoDragDropAsync(pressEvent, data, DragDropEffects.Move | DragDropEffects.Copy);
         DraggedMediaItem = null;
+        DraggedMediaItems = [];
         _draggedPlaylistRowIndex = -1;
         HideDragVisuals();
     }

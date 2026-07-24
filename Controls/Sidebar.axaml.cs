@@ -51,13 +51,21 @@ public partial class Sidebar : UserControl
         {
             return;
         }
-        var media = MainWindow.DraggedMediaItem;
+
+        // A multi-selection drag imports every dragged track; the anchor-only
+        // fallback covers a plain single-row drag.
+        List<MediaItem> media = MainWindow.DraggedMediaItems.Count > 0
+            ? MainWindow.DraggedMediaItems
+            : MainWindow.DraggedMediaItem is { } single ? [single] : [];
         if ((e.Source as Visual)?.FindAncestorOfType<TreeViewItem>()?.DataContext is SidebarItem sb
             && DataContext is MainWindowViewModel vm
-            && media is not null)
+            && media.Count > 0)
         {
             e.Handled = true;
-            await vm.ImportMediaToDeviceAsync(sb, media);
+            foreach (var track in media)
+            {
+                await vm.ImportMediaToDeviceAsync(sb, track);
+            }
         }
     }
 
@@ -250,8 +258,10 @@ public partial class Sidebar : UserControl
             return;
         }
 
-        var media = MainWindow.DraggedMediaItem;
-        if (media == null)
+        List<MediaItem> media = MainWindow.DraggedMediaItems.Count > 0
+            ? MainWindow.DraggedMediaItems
+            : MainWindow.DraggedMediaItem is { } single ? [single] : [];
+        if (media.Count == 0)
         {
             return;
         }
@@ -264,7 +274,7 @@ public partial class Sidebar : UserControl
 
         if (DataContext is MainWindowViewModel vm)
         {
-            vm.AddTrackToPlaylist(sb.PlaylistId.Value, media);
+            vm.AddTracksToPlaylist(sb.PlaylistId.Value, media);
         }
 
         e.Handled = true;
