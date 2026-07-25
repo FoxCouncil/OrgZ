@@ -59,21 +59,29 @@ public static class DeviceHelperProtocol
         try
         {
             await stream.ReadExactlyAsync(lenPrefix, ct);
+
+            var len = BitConverter.ToInt32(lenPrefix);
+            if (len is <= 0 or > 1_000_000)
+            {
+                return default;
+            }
+
+            var body = new byte[len];
+
+            // The body read is inside the same guard as the prefix on purpose: a peer that
+            // announces a frame and then vanishes is the same event as one that never spoke,
+            // and both mean "no message" rather than an exception the caller must catch.
+            await stream.ReadExactlyAsync(body, ct);
+            return JsonSerializer.Deserialize<T>(body, _json);
         }
         catch (EndOfStreamException)
         {
-            return default;   // peer closed before sending - treat as no message
+            return default;   // peer closed mid-message - treat as no message
         }
-
-        var len = BitConverter.ToInt32(lenPrefix);
-        if (len is <= 0 or > 1_000_000)
+        catch (JsonException)
         {
-            return default;
+            return default;   // a frame that isn't the JSON we expect is not a message either
         }
-
-        var body = new byte[len];
-        await stream.ReadExactlyAsync(body, ct);
-        return JsonSerializer.Deserialize<T>(body, _json);
     }
 
     /// <summary>Connects a client socket to the unix-domain endpoint (macOS/Linux).</summary>

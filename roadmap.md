@@ -120,9 +120,14 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   (`DeviceHelperInstallerTests`), which it wasn't before: this code registers a root daemon
   that issues raw SCSI, and a typo in it is a broken install found by a user under a UAC prompt.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
-  STILL UNTESTED: `IsAuthorizedPeer` / `PeerCredentials` — the check standing between any
-  local process and that daemon — and the transport itself; `ServiceHostTests` covers
-  dispatch and the frame codec but never opens a real pipe or socket.
+- **The gate and the wire — TESTED 0.9.20**: the peer-credential policy is now a pure
+  function (`IsPeerAllowed`) with the fail-closed rule pinned — an unreadable "who are you"
+  must never resolve to "come in", and only a legacy install with no recorded owner fails
+  open. The transport is exercised over a real named pipe rather than a MemoryStream:
+  round trip, capability discovery, a frame split byte-by-byte across writes, mid-frame
+  hangup, a 1.5 GB declared length, junk that isn't our JSON, and eight concurrent clients.
+  `ReadMessageAsync` was made symmetric while doing it — a peer vanishing mid-body is the
+  same event as one that never spoke, and now reads as "no message" instead of throwing.
 
 ### Library sharing over mDNS — SHIPPED 0.9.9 (server) + 0.9.10 (client)
 Client: a 30 s browse reconciles a SHARED LIBRARIES sidebar section - new shares mount

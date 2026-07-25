@@ -115,29 +115,49 @@ public static class DeviceHelperDaemon
         => uint.TryParse(Environment.GetEnvironmentVariable("ORGZ_HELPER_OWNER_UID"), out var uid) ? uid : null;
 
     /// <summary>
-    /// Gate on the kernel-verified peer UID: serve only the owner (root always allowed for
-    /// diagnostics). Fail CLOSED when an owner is configured but the creds can't be read;
-    /// fail OPEN only on a legacy install with no owner recorded, so it keeps working.
+    /// Reads the kernel-verified peer UID off the connection and applies
+    /// <see cref="IsPeerAllowed"/>. Split so the policy - the part that decides who may
+    /// drive a root daemon - is testable without standing up a socket pair.
     /// </summary>
     private static bool IsAuthorizedPeer(Socket conn, uint? ownerUid)
     {
-        if (!PeerCredentials.TryGetPeerUid(conn, out var peer))
+        var readable = PeerCredentials.TryGetPeerUid(conn, out var peer);
+        var allowed = IsPeerAllowed(ownerUid, readable, peer);
+
+        if (!allowed)
         {
-            if (ownerUid is not null)
+            if (readable)
+            {
+                _log.Warning("Refusing connection from uid {Peer}: not owner {Owner}", peer, ownerUid);
+            }
+            else
             {
                 _log.Warning("Refusing connection: peer credentials unreadable while an owner UID is enforced");
-                return false;
             }
-            return true;
         }
 
-        if (ownerUid is uint owner && peer != owner && peer != 0)
+        return allowed;
+    }
+
+    /// <summary>
+    /// Who may talk to the privileged daemon. Serve only the owner the installer recorded;
+    /// root is always allowed, since it can do everything this daemon does anyway and
+    /// locking it out only breaks diagnostics.
+    ///
+    /// Fail CLOSED when an owner is configured but the credentials can't be read - an
+    /// unanswerable "who are you" must not become "anyone". Fail OPEN only for a legacy
+    /// install that recorded no owner, so upgrading doesn't brick an existing setup;
+    /// there, the socket's 0666 mode is all that stands guard, which is why every install
+    /// path since has stamped an owner UID.
+    /// </summary>
+    internal static bool IsPeerAllowed(uint? ownerUid, bool credentialsReadable, uint peerUid)
+    {
+        if (!credentialsReadable)
         {
-            _log.Warning("Refusing connection from uid {Peer}: not owner {Owner}", peer, owner);
-            return false;
+            return ownerUid is null;
         }
 
-        return true;
+        return ownerUid is not uint owner || peerUid == owner || peerUid == 0;
     }
 
     /// <summary>
@@ -243,7 +263,12 @@ public static class DeviceHelperDaemon
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous, inBufferSize: 0, outBufferSize: 0, security);
     }
 
-    private static async Task ServeAsync(Stream stream, CancellationToken ct)
+    /// <summary>
+    /// Serves exactly one request/response on an already-accepted connection. Internal so
+    /// the transport can be exercised over a real pipe rather than only a MemoryStream.
+    /// NOTE for callers in tests: the reload op ends the process by design.
+    /// </summary>
+    internal static async Task ServeAsync(Stream stream, CancellationToken ct)
     {
         var request = await DeviceHelperProtocol.ReadMessageAsync<DeviceHelperProtocol.Request>(stream, ct);
         if (request == null)
