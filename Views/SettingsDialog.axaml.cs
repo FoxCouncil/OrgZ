@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using OrgZ.Services.Audiobooks;
+using OrgZ.Services.DeviceHelper;
 using OrgZ.Services.Podcast;
 using OrgZ.ViewModels;
 
@@ -639,17 +640,47 @@ public partial class SettingsDialog : Window
 
     // ── Services tab ─────────────────────────────────────────
 
+    /// <summary>Which of the four service buttons a given state allows.</summary>
+    internal readonly record struct ServiceButtons(bool Install, bool Start, bool Stop, bool Uninstall);
+
+    internal static ServiceButtons ButtonsFor(DeviceHelperInstaller.ServiceState state) => state switch
+    {
+        DeviceHelperInstaller.ServiceState.Running => new(Install: false, Start: false, Stop: true, Uninstall: true),
+        DeviceHelperInstaller.ServiceState.Stopped => new(Install: false, Start: true, Stop: false, Uninstall: true),
+        _ => new(Install: true, Start: false, Stop: false, Uninstall: false),
+    };
+
+    /// <summary>
+    /// The status line. It reports the OS's view of the service AND whether a helper is
+    /// actually answering on the socket, because those can disagree: a developer can run
+    /// <c>OrgZ --device-helper</c> by hand with nothing installed, and a status line
+    /// claiming "not installed" while sharing plainly works is a lie.
+    /// </summary>
+    internal static string DescribeServiceState(DeviceHelperInstaller.ServiceState state, bool answering) => state switch
+    {
+        DeviceHelperInstaller.ServiceState.Running => "Installed and running",
+        DeviceHelperInstaller.ServiceState.Stopped => answering ? "Stopped (a helper is answering separately)" : "Installed, stopped",
+        _ => answering ? "Running, not installed" : "Not installed",
+    };
+
     private async Task RefreshServiceStatusAsync()
     {
         ServiceStatusText.Text = "Checking…";
-        ServiceInstallButton.IsEnabled = false;
-        ServiceUninstallButton.IsEnabled = false;
+        SetServiceButtons(new ServiceButtons(false, false, false, false));
 
-        var running = await Services.DeviceHelper.DeviceHelperClient.IsAvailableAsync();
+        var state = await DeviceHelperInstaller.QueryStateAsync();
+        var answering = await Services.DeviceHelper.DeviceHelperClient.IsAvailableAsync();
 
-        ServiceStatusText.Text = running ? "Running" : "Not running";
-        ServiceInstallButton.IsEnabled = !running;
-        ServiceUninstallButton.IsEnabled = running;
+        ServiceStatusText.Text = DescribeServiceState(state, answering);
+        SetServiceButtons(ButtonsFor(state));
+    }
+
+    private void SetServiceButtons(ServiceButtons buttons)
+    {
+        ServiceInstallButton.IsEnabled = buttons.Install;
+        ServiceStartButton.IsEnabled = buttons.Start;
+        ServiceStopButton.IsEnabled = buttons.Stop;
+        ServiceUninstallButton.IsEnabled = buttons.Uninstall;
     }
 
     private async void ServiceRefresh_Click(object? sender, RoutedEventArgs e)
@@ -657,31 +688,36 @@ public partial class SettingsDialog : Window
         await RefreshServiceStatusAsync();
     }
 
-    private async void ServiceInstall_Click(object? sender, RoutedEventArgs e)
+    /// <summary>Runs one privileged service action, then re-reads the real state either way.</summary>
+    private async Task RunServiceActionAsync(string progress, string failurePrefix, Func<Task<DeviceHelperInstaller.InstallResult>> action)
     {
-        ServiceStatusText.Text = "Installing…";
-        var result = await Services.DeviceHelper.DeviceHelperInstaller.InstallAsync();
+        ServiceStatusText.Text = progress;
+        SetServiceButtons(new ServiceButtons(false, false, false, false));
+
+        var result = await action();
         if (!result.Ok)
         {
-            ServiceStatusText.Text = $"Install failed: {result.Detail}";
-            ServiceInstallButton.IsEnabled = true;
+            // Show why, then still re-read: a cancelled UAC prompt leaves the previous
+            // state intact and the buttons must come back.
+            ServiceStatusText.Text = $"{failurePrefix}: {result.Detail}";
+            SetServiceButtons(ButtonsFor(await DeviceHelperInstaller.QueryStateAsync()));
             return;
         }
 
         await RefreshServiceStatusAsync();
     }
 
-    private async void ServiceUninstall_Click(object? sender, RoutedEventArgs e)
-    {
-        ServiceStatusText.Text = "Uninstalling…";
-        var result = await Services.DeviceHelper.DeviceHelperInstaller.UninstallAsync();
-        if (!result.Ok)
-        {
-            ServiceStatusText.Text = $"Uninstall failed: {result.Detail}";
-        }
+    private async void ServiceInstall_Click(object? sender, RoutedEventArgs e)
+        => await RunServiceActionAsync("Installing…", "Install failed", DeviceHelperInstaller.InstallAsync);
 
-        await RefreshServiceStatusAsync();
-    }
+    private async void ServiceUninstall_Click(object? sender, RoutedEventArgs e)
+        => await RunServiceActionAsync("Uninstalling…", "Uninstall failed", DeviceHelperInstaller.UninstallAsync);
+
+    private async void ServiceStart_Click(object? sender, RoutedEventArgs e)
+        => await RunServiceActionAsync("Starting…", "Start failed", DeviceHelperInstaller.StartAsync);
+
+    private async void ServiceStop_Click(object? sender, RoutedEventArgs e)
+        => await RunServiceActionAsync("Stopping…", "Stop failed", DeviceHelperInstaller.StopAsync);
 
     private async void ChangeFolderButton_Click(object? sender, RoutedEventArgs e)
     {

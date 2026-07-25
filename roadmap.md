@@ -30,6 +30,10 @@ end to end, libvlc included), and a background service hosting the privileged wo
    0.9.7 disc ops, 0.9.8 sync, 0.9.13 sharing toggle, 0.9.14 job reattach) is unit-tested but
    has never run as a real Windows service. Install it from Settings > Services, then exercise
    a burn (expect zero UAC), a sync, and a relaunch mid-job to see the LCD reattach.
+   Installing from a *dev* build is now survivable (0.9.19): Start/Stop park the service
+   without uninstalling, which matters because a running one holds `OrgZ.exe` open and fails
+   the next rebuild. The install commands themselves are finally under test — but a test
+   asserting an `sc create` string is not a service that started, so this stays open.
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
@@ -105,7 +109,20 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   Reattach shipped 0.9.14: a "jobs" op reports in-flight work (kind, progress file, target)
   and the GUI follows it at startup, so relaunching mid-burn picks the LCD back up instead of
   showing an idle window over a live operation.
+- **Lifecycle from the app — SHIPPED 0.9.19**: Settings > Services now reads three states
+  (Not installed / Installed, stopped / Installed and running) and offers Start and Stop
+  beside Install and Uninstall. Stopped is a real place to be, and the reason is development:
+  a running service holds `OrgZ.exe` open and fails the next build, so uninstall-reinstall
+  used to be the only way back. The status line also reconciles the OS's view with whether a
+  helper is actually answering, since `OrgZ --device-helper` run by hand is a state the rest
+  of the app happily uses. Every install/uninstall/stop/start command — sc.exe arguments, the
+  LaunchDaemon plist, the systemd unit — is now a pure function under test
+  (`DeviceHelperInstallerTests`), which it wasn't before: this code registers a root daemon
+  that issues raw SCSI, and a typo in it is a broken install found by a user under a UAC prompt.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
+  STILL UNTESTED: `IsAuthorizedPeer` / `PeerCredentials` — the check standing between any
+  local process and that daemon — and the transport itself; `ServiceHostTests` covers
+  dispatch and the frame codec but never opens a real pipe or socket.
 
 ### Library sharing over mDNS — SHIPPED 0.9.9 (server) + 0.9.10 (client)
 Client: a 30 s browse reconciles a SHARED LIBRARIES sidebar section - new shares mount

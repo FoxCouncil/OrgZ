@@ -16,11 +16,26 @@ public static class DeviceHelperInstaller
 {
     private static readonly ILogger _log = Logging.For("DeviceHelperInstaller");
 
-    private const string MacLabel = "com.foxcouncil.orgz.devicehelper";
-    private const string LinuxUnit = "orgz-devicehelper";
-    private const string WindowsService = "OrgZDeviceHelper";
+    internal const string MacLabel = "com.foxcouncil.orgz.devicehelper";
+    internal const string LinuxUnit = "orgz-devicehelper";
+    internal const string WindowsService = "OrgZDeviceHelper";
+
+    internal const string MacPlistPath = $"/Library/LaunchDaemons/{MacLabel}.plist";
+    internal const string LinuxUnitPath = $"/etc/systemd/system/{LinuxUnit}.service";
 
     public sealed record InstallResult(bool Ok, string Detail);
+
+    /// <summary>
+    /// Three states, not two. "Installed but stopped" is a real place to be - it's where
+    /// you park the service while rebuilding, since a running one holds the executable
+    /// open - and a UI that only knows running/not-running cannot offer the way back.
+    /// </summary>
+    public enum ServiceState
+    {
+        NotInstalled,
+        Stopped,
+        Running,
+    }
 
     /// <summary>Path to the OrgZ executable the service should launch in helper mode.</summary>
     private static string ExePath => Environment.ProcessPath
@@ -51,89 +66,114 @@ public static class DeviceHelperInstaller
         }
     }
 
+    // ── Command construction (pure - these are what the tests pin) ─────────
+
+    /// <summary>
+    /// The LaunchDaemon plist. <paramref name="ownerUid"/> is captured while we are still
+    /// the invoking user (pre-elevation) so the root daemon can restrict its socket to
+    /// this UID and refuse every other local account.
+    /// </summary>
+    internal static string MacPlist(string exePath, string dotnetRoot, uint? ownerUid) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key><string>{MacLabel}</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>{exePath}</string>
+                <string>--device-helper</string>
+            </array>
+            <key>EnvironmentVariables</key>
+            <dict><key>DOTNET_ROOT</key><string>{dotnetRoot}</string><key>ORGZ_HELPER_OWNER_UID</key><string>{ownerUid}</string></dict>
+            <key>RunAtLoad</key><true/>
+            <key>KeepAlive</key><true/>
+        </dict>
+        </plist>
+        """;
+
+    /// <summary>
+    /// One privileged shell run via osascript → a single macOS auth dialog. It drops the
+    /// plist, fixes ownership (launchd refuses a non-root-owned daemon), and boots it.
+    /// </summary>
+    internal static string MacInstallScript(string stagedPlist) =>
+        $"cp '{stagedPlist}' '{MacPlistPath}' && chown root:wheel '{MacPlistPath}' && chmod 644 '{MacPlistPath}' && " +
+        $"launchctl bootout system/{MacLabel} 2>/dev/null; launchctl bootstrap system '{MacPlistPath}'";
+
+    internal static string MacUninstallScript() =>
+        $"launchctl bootout system/{MacLabel} 2>/dev/null; rm -f '{MacPlistPath}'";
+
+    /// <summary>Unloads the daemon but leaves the plist in place, so Start can boot it again.</summary>
+    internal static string MacStopScript() => $"launchctl bootout system/{MacLabel}";
+
+    internal static string MacStartScript() => $"launchctl bootstrap system '{MacPlistPath}'";
+
+    internal static string LinuxUnitFile(string exePath, uint? ownerUid) => $"""
+        [Unit]
+        Description=OrgZ device helper (privileged iPod identity reads)
+        After=multi-user.target
+
+        [Service]
+        Type=simple
+        ExecStart={exePath} --device-helper
+        Environment=ORGZ_HELPER_OWNER_UID={ownerUid}
+        Restart=on-failure
+        User=root
+
+        [Install]
+        WantedBy=multi-user.target
+        """;
+
+    internal static string LinuxInstallScript(string stagedUnit) =>
+        $"cp '{stagedUnit}' '{LinuxUnitPath}' && systemctl daemon-reload && systemctl enable --now {LinuxUnit}.service";
+
+    internal static string LinuxUninstallScript() =>
+        $"systemctl disable --now {LinuxUnit}.service; rm -f '{LinuxUnitPath}'; systemctl daemon-reload";
+
+    internal static string LinuxStopScript() => $"systemctl stop {LinuxUnit}.service";
+
+    internal static string LinuxStartScript() => $"systemctl start {LinuxUnit}.service";
+
+    /// <summary>
+    /// <c>sc create</c> needs the space after each '='; binPath is quoted so the
+    /// <c>--device-helper</c> argument rides along inside it. start=auto so the service
+    /// survives reboots, the way AppleMobileDeviceService does.
+    /// </summary>
+    internal static string WindowsInstallArguments(string exePath) =>
+        $"/c sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
+        $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\" " +
+        $"&& sc start {WindowsService}";
+
+    // '&' not '&&': delete must run even when the service was already stopped.
+    internal static string WindowsUninstallArguments() => $"/c sc stop {WindowsService} & sc delete {WindowsService}";
+
+    internal static string WindowsStopArguments() => $"/c sc stop {WindowsService}";
+
+    internal static string WindowsStartArguments() => $"/c sc start {WindowsService}";
+
     // ── macOS: LaunchDaemon in /Library/LaunchDaemons, loaded via launchctl bootstrap ──
     private static async Task<InstallResult> InstallMacAsync()
     {
-        var plistPath = $"/Library/LaunchDaemons/{MacLabel}.plist";
         var dotnetRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet");
-        // Captured here, while we're still the invoking user (pre-elevation), so the root
-        // daemon can restrict its socket to this UID and refuse every other local account.
-        var ownerUid = PeerCredentials.CurrentUid();
-        var plist = $"""
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-                <key>Label</key><string>{MacLabel}</string>
-                <key>ProgramArguments</key>
-                <array>
-                    <string>{ExePath}</string>
-                    <string>--device-helper</string>
-                </array>
-                <key>EnvironmentVariables</key>
-                <dict><key>DOTNET_ROOT</key><string>{dotnetRoot}</string><key>ORGZ_HELPER_OWNER_UID</key><string>{ownerUid}</string></dict>
-                <key>RunAtLoad</key><true/>
-                <key>KeepAlive</key><true/>
-            </dict>
-            </plist>
-            """;
-
-        // One privileged shell run via osascript → a single macOS auth dialog. It drops the
-        // plist, fixes ownership (launchd refuses a non-root-owned daemon), and boots it.
         var tmp = Path.Combine(Path.GetTempPath(), $"{MacLabel}.plist");
-        await File.WriteAllTextAsync(tmp, plist);
-        var script =
-            $"cp '{tmp}' '{plistPath}' && chown root:wheel '{plistPath}' && chmod 644 '{plistPath}' && " +
-            $"launchctl bootout system/{MacLabel} 2>/dev/null; launchctl bootstrap system '{plistPath}'";
+        await File.WriteAllTextAsync(tmp, MacPlist(ExePath, dotnetRoot, PeerCredentials.CurrentUid()));
 
-        return await RunElevatedMacAsync(script, "OrgZ needs to install its device helper so it can read iPods without asking each time.");
+        return await RunElevatedMacAsync(MacInstallScript(tmp), "OrgZ needs to install its device helper so it can read iPods without asking each time.");
     }
 
     // ── Linux: systemd unit in /etc/systemd/system, enabled + started via systemctl ──
     private static async Task<InstallResult> InstallLinuxAsync()
     {
-        var unitPath = $"/etc/systemd/system/{LinuxUnit}.service";
-        // Captured while we're still the invoking user (pre-elevation) so the root daemon can
-        // restrict its socket to this UID and refuse every other local account.
-        var ownerUid = PeerCredentials.CurrentUid();
-        var unit = $"""
-            [Unit]
-            Description=OrgZ device helper (privileged iPod identity reads)
-            After=multi-user.target
-
-            [Service]
-            Type=simple
-            ExecStart={ExePath} --device-helper
-            Environment=ORGZ_HELPER_OWNER_UID={ownerUid}
-            Restart=on-failure
-            User=root
-
-            [Install]
-            WantedBy=multi-user.target
-            """;
-
         var tmp = Path.Combine(Path.GetTempPath(), $"{LinuxUnit}.service");
-        await File.WriteAllTextAsync(tmp, unit);
-        var script =
-            $"cp '{tmp}' '{unitPath}' && systemctl daemon-reload && systemctl enable --now {LinuxUnit}.service";
+        await File.WriteAllTextAsync(tmp, LinuxUnitFile(ExePath, PeerCredentials.CurrentUid()));
 
         // pkexec surfaces the polkit auth dialog on a desktop session; fall back to sudo -n.
-        return await RunElevatedLinuxAsync(script);
+        return await RunElevatedLinuxAsync(LinuxInstallScript(tmp));
     }
 
     // ── Windows: a LocalSystem service via sc.exe, created under a UAC elevation ──
-    private static async Task<InstallResult> InstallWindowsAsync()
-    {
-        // sc create needs the space after each '='; binPath quoted so the --device-helper arg
-        // rides along. start=auto so it survives reboots, like AppleMobileDeviceService.
-        var binPath = $"\\\"{ExePath}\\\" --device-helper";
-        var args =
-            $"/c sc create {WindowsService} binPath= \"{binPath}\" start= auto DisplayName= \"OrgZ Device Helper\" " +
-            $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\" " +
-            $"&& sc start {WindowsService}";
-
-        return await RunElevatedWindowsAsync("cmd.exe", args);
-    }
+    private static Task<InstallResult> InstallWindowsAsync()
+        => RunElevatedWindowsAsync("cmd.exe", WindowsInstallArguments(ExePath));
 
     public static async Task<InstallResult> UninstallAsync()
     {
@@ -141,18 +181,15 @@ public static class DeviceHelperInstaller
         {
             if (OperatingSystem.IsMacOS())
             {
-                return await RunElevatedMacAsync(
-                    $"launchctl bootout system/{MacLabel} 2>/dev/null; rm -f '/Library/LaunchDaemons/{MacLabel}.plist'",
-                    "OrgZ is removing its device helper.");
+                return await RunElevatedMacAsync(MacUninstallScript(), "OrgZ is removing its device helper.");
             }
             if (OperatingSystem.IsLinux())
             {
-                return await RunElevatedLinuxAsync(
-                    $"systemctl disable --now {LinuxUnit}.service; rm -f '/etc/systemd/system/{LinuxUnit}.service'; systemctl daemon-reload");
+                return await RunElevatedLinuxAsync(LinuxUninstallScript());
             }
             if (OperatingSystem.IsWindows())
             {
-                return await RunElevatedWindowsAsync("cmd.exe", $"/c sc stop {WindowsService} & sc delete {WindowsService}");
+                return await RunElevatedWindowsAsync("cmd.exe", WindowsUninstallArguments());
             }
             return new(false, "unsupported platform");
         }
@@ -160,6 +197,171 @@ public static class DeviceHelperInstaller
         {
             return new(false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Stops the service without removing it. This is the escape hatch for developing
+    /// against an installed helper: a running service holds the OrgZ executable open, so
+    /// a rebuild fails on a file lock until it's parked.
+    /// </summary>
+    public static async Task<InstallResult> StopAsync()
+    {
+        try
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                return await RunElevatedMacAsync(MacStopScript(), "OrgZ is stopping its device helper.");
+            }
+            if (OperatingSystem.IsLinux())
+            {
+                return await RunElevatedLinuxAsync(LinuxStopScript());
+            }
+            if (OperatingSystem.IsWindows())
+            {
+                return await RunElevatedWindowsAsync("cmd.exe", WindowsStopArguments());
+            }
+            return new(false, "unsupported platform");
+        }
+        catch (Exception ex)
+        {
+            return new(false, ex.Message);
+        }
+    }
+
+    /// <summary>Starts an already-installed service back up.</summary>
+    public static async Task<InstallResult> StartAsync()
+    {
+        try
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                return await RunElevatedMacAsync(MacStartScript(), "OrgZ is starting its device helper.");
+            }
+            if (OperatingSystem.IsLinux())
+            {
+                return await RunElevatedLinuxAsync(LinuxStartScript());
+            }
+            if (OperatingSystem.IsWindows())
+            {
+                return await RunElevatedWindowsAsync("cmd.exe", WindowsStartArguments());
+            }
+            return new(false, "unsupported platform");
+        }
+        catch (Exception ex)
+        {
+            return new(false, ex.Message);
+        }
+    }
+
+    // ── State ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Asks the OS what it thinks of the service. Deliberately not the socket ping the
+    /// GUI uses elsewhere: a ping can only ever say "answering" or "not answering", which
+    /// collapses "stopped" and "never installed" into one useless state.
+    /// </summary>
+    public static async Task<ServiceState> QueryStateAsync()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var (code, stdout, _) = await CaptureAsync("sc.exe", ["query", WindowsService]);
+                return ParseWindowsQuery(code, stdout);
+            }
+            if (OperatingSystem.IsLinux())
+            {
+                if (!File.Exists(LinuxUnitPath))
+                {
+                    return ServiceState.NotInstalled;
+                }
+
+                var (_, stdout, _) = await CaptureAsync("/usr/bin/systemctl", ["is-active", $"{LinuxUnit}.service"]);
+                return ParseLinuxIsActive(stdout);
+            }
+            if (OperatingSystem.IsMacOS())
+            {
+                if (!File.Exists(MacPlistPath))
+                {
+                    return ServiceState.NotInstalled;
+                }
+
+                // launchctl print exits non-zero for a label that isn't bootstrapped.
+                var (code, _, _) = await CaptureAsync("/bin/launchctl", ["print", $"system/{MacLabel}"]);
+                return code == 0 ? ServiceState.Running : ServiceState.Stopped;
+            }
+        }
+        catch (Exception ex)
+        {
+            // A missing sc.exe / systemctl tells us nothing, so claim nothing.
+            _log.Debug(ex, "Service state query failed");
+        }
+
+        return ServiceState.NotInstalled;
+    }
+
+    /// <summary>
+    /// Reads <c>sc query</c>. A non-zero exit is the "service does not exist" path
+    /// (1060), so it means not installed rather than a state we failed to read.
+    /// </summary>
+    internal static ServiceState ParseWindowsQuery(int exitCode, string stdout)
+    {
+        if (exitCode != 0)
+        {
+            return ServiceState.NotInstalled;
+        }
+
+        foreach (var line in stdout.Split('\n'))
+        {
+            if (!line.Contains("STATE", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // A service on its way up is treated as running: the user asked for it, and
+            // offering Start again would be a no-op that looks like a failure.
+            return line.Contains("RUNNING", StringComparison.OrdinalIgnoreCase) || line.Contains("START_PENDING", StringComparison.OrdinalIgnoreCase)
+                ? ServiceState.Running
+                : ServiceState.Stopped;
+        }
+
+        // Installed enough to answer, but no STATE line we understood.
+        return ServiceState.Stopped;
+    }
+
+    /// <summary>Reads <c>systemctl is-active</c> for a unit file we already know exists.</summary>
+    internal static ServiceState ParseLinuxIsActive(string stdout)
+    {
+        var text = stdout.Trim();
+        return text is "active" or "activating" ? ServiceState.Running : ServiceState.Stopped;
+    }
+
+    /// <summary>What the Services tab says, and which buttons that implies.</summary>
+    internal static string DescribeState(ServiceState state) => state switch
+    {
+        ServiceState.Running => "Installed and running",
+        ServiceState.Stopped => "Installed, stopped",
+        _ => "Not installed",
+    };
+
+    private static async Task<(int ExitCode, string StdOut, string StdErr)> CaptureAsync(string fileName, string[] args)
+    {
+        var psi = new ProcessStartInfo { FileName = fileName, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+
+        using var p = Process.Start(psi);
+        if (p == null)
+        {
+            return (-1, string.Empty, $"failed to start {fileName}");
+        }
+
+        var stdout = await p.StandardOutput.ReadToEndAsync();
+        var stderr = await p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        return (p.ExitCode, stdout, stderr);
     }
 
     private static async Task<InstallResult> RunElevatedMacAsync(string shellScript, string prompt)
@@ -192,7 +394,7 @@ public static class DeviceHelperInstaller
                 return new(false, "failed to start elevated process");
             }
             await p.WaitForExitAsync();
-            return p.ExitCode == 0 ? new(true, "installed") : new(false, $"installer exited {p.ExitCode}");
+            return p.ExitCode == 0 ? new(true, "ok") : new(false, $"exited {p.ExitCode}");
         }
         catch (Exception ex)
         {
@@ -202,21 +404,9 @@ public static class DeviceHelperInstaller
 
     private static async Task<InstallResult> RunAsync(string fileName, string[] args)
     {
-        var psi = new ProcessStartInfo { FileName = fileName, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (var a in args)
-        {
-            psi.ArgumentList.Add(a);
-        }
+        var (code, stdout, stderr) = await CaptureAsync(fileName, args);
+        _log.Information("{File} exited {Code}: {Out} {Err}", fileName, code, stdout.Trim(), stderr.Trim());
 
-        using var p = Process.Start(psi);
-        if (p == null)
-        {
-            return new(false, $"failed to start {fileName}");
-        }
-        var stdout = await p.StandardOutput.ReadToEndAsync();
-        var stderr = await p.StandardError.ReadToEndAsync();
-        await p.WaitForExitAsync();
-        _log.Information("{File} exited {Code}: {Out} {Err}", fileName, p.ExitCode, stdout.Trim(), stderr.Trim());
-        return p.ExitCode == 0 ? new(true, "installed") : new(false, string.IsNullOrWhiteSpace(stderr) ? stdout.Trim() : stderr.Trim());
+        return code == 0 ? new(true, "ok") : new(false, string.IsNullOrWhiteSpace(stderr) ? stdout.Trim() : stderr.Trim());
     }
 }
