@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>0.9.16</Version>
+		<Version>0.9.17</Version>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -118,7 +118,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="FoxRedbook" Version="1.0.0-alpha.3" />
-		<PackageReference Include="FoxOrangebook" Version="1.0.0-alpha.10" />
+		<PackageReference Include="FoxOrangebook" Version="1.0.0-alpha.11" />
 	</ItemGroup>
 
 	<!-- Strip runtime-specific native payloads we never load on the current OS.

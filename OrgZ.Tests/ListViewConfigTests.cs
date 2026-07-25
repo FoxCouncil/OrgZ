@@ -197,6 +197,19 @@ public class ListViewConfigTests
     }
 
     [Fact]
+    public void The_row_tick_uses_the_centred_small_column_type()
+    {
+        // Not ColumnType.CheckBox - that renders a full-size box hard left, which
+        // reads as a form control instead of a row marker.
+        var tick = ListViewConfigs.Get("Music")!.Columns.Single(c => c.BindingPath == "IsChecked");
+
+        Assert.Equal(ColumnType.RowCheck, tick.Type);
+        Assert.False(tick.CanUserSort);
+        Assert.False(tick.CanUserResize);
+        Assert.False(tick.CanUserReorder);
+    }
+
+    [Fact]
     public void Library_views_carry_the_checked_column()
     {
         foreach (var key in new[] { "Music", "Favorites" })

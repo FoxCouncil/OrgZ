@@ -378,7 +378,7 @@ public static class ListViewConfigs
     /// unsortable, and pinned narrow at the front like iTunes had it.
     /// </summary>
     internal static ColumnDef CheckedColumn() =>
-        new() { Header = "", BindingPath = "IsChecked", Type = ColumnType.CheckBox, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 32, CanUserSort = false, CanUserResize = false, CanUserReorder = false };
+        new() { Header = "", BindingPath = "IsChecked", Type = ColumnType.RowCheck, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 28, CanUserSort = false, CanUserResize = false, CanUserReorder = false };
 
     /// <param name="withChecked">
     /// Library-ish views (Music, Favorites, playlists) get the iTunes tick; device, CD,

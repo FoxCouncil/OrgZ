@@ -66,10 +66,18 @@ a disc in a tray.
 | 1 | Smoke (11 min) | End-to-end burn + CD-TEXT | ✅ burned; CD-TEXT verified in foobar2000 |
 | 2 | Track Boundaries (5×5 s + 2 songs, **burn at Gap 0**) | Skip-to-track lands on each song's first note; last track plays to the end | ✅ sector layout automated (gapless starts, gap offsets, 4 s floor) · ⬜ **ear check** |
 | 3 | Hi-Res Downsample (192k / 96k / 48k sources) | Transcode to 44.1/16, sector-aligned | ✅ automated with real ffmpeg, validated by the burn path's own WAV parser · ⬜ optional listen for artefacts |
-| 4 | Unicode CD-TEXT (Japanese / emoji titles) | Latin-1 fallback renders `?` rather than failing the burn | ⬜ **burn + read back** (encoder lives in FoxOrangebook) |
+| 4 | Unicode CD-TEXT (Japanese / emoji titles) | Latin-1 fallback renders `?` rather than failing the burn | ✅ burned + read back in foobar2000: burn completes, CD-TEXT readable, non-Latin-1 → `?` as designed |
 | 5 | Near Capacity (77.9 min) | Fits; gaps charged against the disc; burn completes | ✅ automated (fits at Gap 0; gap arithmetic can push a set over) |
 | 6 | Overflow (90.2 min) | Burn refused, Discs row reads `2 × 79:57` — never reaches the drive | ✅ automated (refusal, `2 × 79:57`, round-up never undercounts) |
 
-Remaining human work: **Test 2's ear check** (the one thing no test can assert) and
-**Test 4** (needs a real disc read back on a CD-TEXT-capable player). Tests 5 and 6 consume
-no media at all - test 6 should never start a burn.
+Remaining human work: **Test 2's ear check** - the one thing no test can assert. Tests 5 and 6
+consume no media at all (test 6 should never start a burn).
+
+**Found by Test 4, fixed in FoxOrangebook alpha.11 (OrgZ 0.9.17):** the Latin-1 fallback also
+mangled ordinary typographic punctuation - a curly apostrophe read back as `Frankie?s`, an
+em-dash as `Burn Test 4 ?`. Those are Windows-1252/Unicode characters ISO-8859-1 cannot carry,
+and they are common throughout real metadata. They are now transliterated to ASCII before the
+encode (’→' —→- “”→" …→...), while accented Latin still passes through untouched and genuinely
+unrepresentable scripts (Japanese, emoji) still fall back to `?`. **Re-burn Test 4 to confirm
+on metal** - the expected read-back is `Frankie's First Affair` and `Burn Test 4 - Smoke`, with
+the Japanese titles still `?`.

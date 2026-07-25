@@ -8,6 +8,9 @@ public enum ColumnType
 {
     Text,
     CheckBox,
+    /// <summary>The editable iTunes row tick: small and centred, unlike the
+    /// default-sized read-only <see cref="CheckBox"/> column.</summary>
+    RowCheck,
     PlayIndicator,
     FavoriteTitle,
     Centered,

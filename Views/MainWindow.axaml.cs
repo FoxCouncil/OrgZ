@@ -695,6 +695,23 @@ public partial class MainWindow : Window
                     Header = def.Header,
                     Binding = new Binding(def.BindingPath),
                 },
+                // The iTunes tick: centred in its narrow column and scaled down - the
+                // stock DataGridCheckBoxColumn renders a full-size box hard against the
+                // left edge, which reads as a form control rather than a row marker.
+                ColumnType.RowCheck => new DataGridTemplateColumn
+                {
+                    Header = def.Header,
+                    CellTemplate = new FuncDataTemplate<MediaItem>((_, _) => new CheckBox
+                    {
+                        [!Avalonia.Controls.Primitives.ToggleButton.IsCheckedProperty] = new Binding(def.BindingPath) { Mode = BindingMode.TwoWay },
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Padding = new Thickness(0),
+                        MinWidth = 0,
+                        RenderTransform = new ScaleTransform(0.75, 0.75),
+                        RenderTransformOrigin = RelativePoint.Center,
+                    }),
+                },
                 ColumnType.PlayIndicator => new DataGridTemplateColumn
                 {
                     Header = def.Header,
