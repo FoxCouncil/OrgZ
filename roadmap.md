@@ -3,11 +3,12 @@
 Quality, beauty, and simplicity - in that order when they conflict. Tests reflect the finished
 product: nothing ships behind a capability flag without the conformance suite proving it.
 
-## v1 status (as of 0.9.17)
+## v1 status (as of 0.9.18)
 
 Working, verified: CD ripping and burning (audio + data, CD-TEXT read back off a real disc),
-iPod read/write across the tiers, podcasts, audiobooks, radio, library sharing (code paths),
-and a background service hosting the privileged work. Suite: 1768 green, gated per commit.
+iPod read/write across the tiers, podcasts, audiobooks, radio, library sharing (now proven
+end to end, libvlc included), and a background service hosting the privileged work. Suite:
+1813 green, gated per commit.
 
 **Closed blockers**
 - Encoders ship in the installer — `encoders-1` release exists; a cold `fetch-encoders.ps1`
@@ -15,17 +16,23 @@ and a background service hosting the privileged work. Suite: 1768 green, gated p
   produce packages that can rip/burn/transcode.
 - Burn Tests 3/4/5/6 done (3, 5, 6 automated in `BurnValidationTests`; 4 burned and read back
   in foobar2000).
+- **Share playback works** (0.9.18). `ShareEndToEndTests` runs a live server on a loopback
+  socket and walks the whole client journey — browse → catalogue → MediaItem → stream — with
+  a real HttpClient, and has libvlc open the resulting URL and report the right duration.
+  Verifying it turned up three real defects, all fixed: share rows were silently unplayable
+  (every play path guarded on `FilePath`, which a share track doesn't have), a mounted share
+  leaked its catalogue into Music and Bad Format, and the server's loopback bind fallback
+  threw `ObjectDisposedException` because `HttpListener.Start()` disposes itself on failure —
+  so a GUI-hosted share could never come up at all.
 
 **Open before v1 — highest risk first**
 1. **The background service has never been installed.** Five releases of work (0.9.3 host,
    0.9.7 disc ops, 0.9.8 sync, 0.9.13 sharing toggle, 0.9.14 job reattach) is unit-tested but
    has never run as a real Windows service. Install it from Settings > Services, then exercise
    a burn (expect zero UAC), a sync, and a relaunch mid-job to see the LCD reattach.
-2. **Share playback is an unproven pipe.** Server and client are each tested; they have never
-   spoken to each other. Host a share, point a second OrgZ at it, confirm LibVLC accepts
-   `http://host:port/stream/{id}` and that seeking works through the Range support. If LibVLC
-   rejects the URL shape or Range handling, sharing is hollow — it has bitten us before
-   (`cdda://` double-slash, podcast redirect cap).
+2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
+   mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
+   where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
 3. **Burn Test 2 ear check** — skip-to-track must land on each song's first note (burn at
    Gap 0). The sector layout is asserted in tests; only ears can confirm the drive honoured it.
 4. **Re-burn Test 4** to confirm the alpha.11 punctuation fix on metal: expect
@@ -112,10 +119,18 @@ PTR/SRV/TXT/A encode+decode, hostile-packet hardened), and an HttpListener servi
 Hosting is reachable as of 0.9.13: Settings > Services > Share This Library toggles it live
 (name editable, status line reports the actual service state and refuses to claim sharing when
 the service isn't installed).
-REMAINING: prove playback end-to-end against a real remote share (LibVLC accepting the stream
-URL + seeking through Range is UNVERIFIED - the client and server have only been tested
-separately); PIN pairing beyond the trusted-LAN default; artwork in the catalogue; share
-playlists.
+Playback proven 0.9.18. `ShareEndToEndTests` stands a real server on a loopback socket and
+walks the client's whole journey with a real HttpClient - catalogue → MediaItem → stream,
+byte-for-byte - then has libvlc open the URL and read back the right duration. Stream URLs now
+carry the file extension (libvlc picks a demuxer far more reliably when the location looks like
+a file) and cover art has its own `/art/{id}` route, fetched on play, since a share has no local
+file to read a tag out of. Three defects the separate unit tests could never have caught, all
+fixed: share rows were silently unplayable (`PlayMusicItem` bailed on the missing `FilePath`), a
+mounted share leaked its catalogue into Music and Bad Format (only CDs and devices were
+excluded), and the loopback bind fallback threw `ObjectDisposedException` - `HttpListener.Start()`
+disposes itself on failure, so a GUI-hosted share had never once come up.
+REMAINING: two real machines (mDNS on a LAN with a firewall, and 5353 possibly already held by
+Bonjour, is not mDNS on loopback); PIN pairing beyond the trusted-LAN default; share playlists.
 
 ## Identity read - reference-verification matrix (slice A)
 Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope

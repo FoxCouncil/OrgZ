@@ -89,6 +89,56 @@ public class ShareDiscoveryTests
         Assert.NotEqual(a.Source, b.Source);
     }
 
+    [Fact]
+    public void The_extension_rides_along_on_the_stream_url()
+    {
+        const string json = """{"tracks":[{"id":"abc","title":"T","kind":"Music","ext":".flac"}]}""";
+
+        var item = Assert.Single(ShareDiscovery.ParseCatalogue(json, Share));
+
+        // libvlc picks a demuxer far more reliably when the location looks like a file.
+        Assert.Equal("http://192.168.1.50:7391/stream/abc.flac", item.StreamUrl);
+        Assert.Equal(".flac", item.Extension);
+    }
+
+    [Fact]
+    public void A_catalogue_without_extensions_still_produces_a_usable_stream_url()
+    {
+        // An older sharing host, or a track whose format we don't serve.
+        const string json = """{"tracks":[{"id":"abc","title":"T","kind":"Music"},{"id":"d","title":"T","kind":"Music","ext":""}]}""";
+
+        var items = ShareDiscovery.ParseCatalogue(json, Share);
+
+        Assert.Equal("http://192.168.1.50:7391/stream/abc", items[0].StreamUrl);
+        Assert.Equal("http://192.168.1.50:7391/stream/d", items[1].StreamUrl);
+        Assert.All(items, i => Assert.Null(i.Extension));
+    }
+
+    // ── Art URLs ──────────────────────────────────────────────
+
+    [Fact]
+    public void Art_urls_are_rebuilt_from_the_namespaced_id_alone()
+    {
+        const string json = """{"tracks":[{"id":"a b/c","title":"T","kind":"Music","ext":".mp3"}]}""";
+
+        var item = Assert.Single(ShareDiscovery.ParseCatalogue(json, Share));
+
+        Assert.True(ShareDiscovery.IsShareItem(item));
+        Assert.Equal("http://192.168.1.50:7391/art/a%20b%2Fc", ShareDiscovery.ArtUrlFor(item));
+    }
+
+    [Fact]
+    public void Nothing_but_a_share_item_gets_an_art_url()
+    {
+        Assert.Null(ShareDiscovery.ArtUrlFor(new MediaItem { Id = "1", Kind = MediaKind.Music, FilePath = @"C:\a.mp3" }));
+        Assert.Null(ShareDiscovery.ArtUrlFor(new MediaItem { Id = "cd:D::3", Kind = MediaKind.Music, Source = "cdda" }));
+        Assert.Null(ShareDiscovery.ArtUrlFor(new MediaItem { Id = "x", Kind = MediaKind.Music, Source = "device:/mnt/ipod" }));
+
+        // A malformed share item (id not actually namespaced under its source) yields
+        // nothing rather than a URL pointing at the wrong thing.
+        Assert.Null(ShareDiscovery.ArtUrlFor(new MediaItem { Id = "share:h:1", Kind = MediaKind.Music, Source = "share:h:1" }));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not json")]

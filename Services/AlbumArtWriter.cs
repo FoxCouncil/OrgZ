@@ -141,6 +141,45 @@ public static class AlbumArtWriter
     }
 
     /// <summary>
+    /// Reads the embedded cover out of a file - front cover first, otherwise whatever
+    /// picture is there. Null when the file has no art, isn't readable, or carries a
+    /// picture in a format we wouldn't have written (so a caller can trust the mime type).
+    /// </summary>
+    public static (byte[] Data, string MimeType)? ReadArtwork(string audioPath)
+    {
+        if (string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var file = TagLib.File.Create(audioPath);
+            var pictures = file.Tag.Pictures;
+            if (pictures is null || pictures.Length == 0)
+            {
+                return null;
+            }
+
+            var picture = Array.Find(pictures, p => p.Type == TagLib.PictureType.FrontCover) ?? pictures[0];
+            var data = picture.Data?.Data;
+            if (data is null || data.Length == 0)
+            {
+                return null;
+            }
+
+            // Sniff rather than trust the tag's own MimeType - files in the wild carry
+            // "image/jpg", empty strings, and outright lies.
+            return MimeTypeFor(data) is { } mime ? (data, mime) : null;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Reading artwork failed for {Path}", audioPath);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Strips every embedded picture. Removing art from a file that has none is a
     /// no-op success - the caller asked for "no artwork", and that's the state.
     /// </summary>

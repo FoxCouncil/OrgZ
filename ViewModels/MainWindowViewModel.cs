@@ -2422,7 +2422,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (string.IsNullOrEmpty(file.FilePath))
+        // A mounted share's tracks have no FilePath at all - they play from the
+        // sharing host over HTTP. Everything downstream (queue, LCD, per-track
+        // options) is identical to a local file.
+        if (PlayableLocation(file) is null)
         {
             return;
         }
@@ -2585,7 +2588,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             artBytes = IPodArtworkReader.LoadThumbnail(file.Source["device:".Length..], dbid);
         }
-        artBytes ??= ExtractAlbumArtBytes(file.FilePath!);
+        artBytes ??= file.FilePath is { Length: > 0 } artPath ? ExtractAlbumArtBytes(artPath) : null;
         CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
 
         _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtUri: string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri, ArtBytes: artBytes));
@@ -2661,12 +2664,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         else
         {
-            _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
+            // A share's tracks live on another machine: open the HTTP location rather
+            // than a path, and give libvlc real buffer headroom - a LAN hop is not a
+            // disk read, and a busy host or a wifi dip must not stutter the track.
+            var fromShare = Services.Sharing.ShareDiscovery.IsShareItem(file);
+            if (fromShare)
+            {
+                _currentMedia = new Media(_vlc, file.StreamUrl!, FromType.FromLocation);
+                _currentMedia.AddOption(":network-caching=1500");
+            }
+            else
+            {
+                _currentMedia = new Media(_vlc, file.FilePath!, FromType.FromPath);
+            }
             ApplyVisualizerOption(_currentMedia);
 
-            // Local file - opens instantly, so skip the barber pole.
-            NewPlaybackEpoch();
-            BeginPlayback(showLoading: false);
+            // Local file - opens instantly, so skip the barber pole. A share has to
+            // reach across the LAN first, so it earns one.
+            var epoch = NewPlaybackEpoch();
+            BeginPlayback(showLoading: fromShare);
+
+            if (fromShare)
+            {
+                _ = LoadShareArtAsync(file, epoch);
+            }
 
             // Audiobooks resume where they left off - same applied-once-audio-starts machinery as
             // podcast resume. Skip a barely-started position (re-seeking to 0:04 is noise, not resume).
@@ -2688,6 +2709,49 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         MediaCache.IncrementPlayCount(file.Id);
 
         UpdateNavigationButtons();
+    }
+
+    /// <summary>
+    /// Where a track's audio actually comes from: a local path, or a share's HTTP stream
+    /// URL. Null means there's nothing to play - and a share track (no FilePath, StreamUrl
+    /// set) reading as unplayable is exactly what made mounted shares silent.
+    /// </summary>
+    internal static string? PlayableLocation(MediaItem item)
+    {
+        var location = Services.Sharing.ShareDiscovery.IsShareItem(item) ? item.StreamUrl : item.FilePath;
+        return string.IsNullOrEmpty(location) ? null : location;
+    }
+
+    /// <summary>
+    /// Pulls a shared track's cover from the sharing host and shows it if that track is
+    /// still the one playing. A miss is silent - plenty of files have no art, and a
+    /// missing cover is not an error worth telling anyone about.
+    /// </summary>
+    private async Task LoadShareArtAsync(MediaItem file, int epoch)
+    {
+        if (Services.Sharing.ShareDiscovery.ArtUrlFor(file) is not { } url)
+        {
+            return;
+        }
+
+        var bytes = await Services.Sharing.ShareDiscovery.FetchArtAsync(url);
+        if (bytes is null || bytes.Length == 0)
+        {
+            return;
+        }
+
+        UI(() =>
+        {
+            // The track can have changed while the art was in flight - never repaint
+            // the cover of a track that stopped playing.
+            if (epoch != _playbackEpoch || !ReferenceEquals(CurrentPlayingItem, file))
+            {
+                return;
+            }
+
+            CurrentAlbumArt = BitmapFromBytes(bytes);
+            _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtBytes: bytes));
+        });
     }
 
     private void ExecutePlayRadio(MediaItem station)

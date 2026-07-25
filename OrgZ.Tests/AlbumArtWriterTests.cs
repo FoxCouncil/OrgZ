@@ -88,6 +88,44 @@ public sealed class AlbumArtWriterTests : IDisposable
     }
 
     [Fact]
+    public void Reading_art_back_returns_the_bytes_and_a_sniffed_mime_type()
+    {
+        var audio = MakeAudioFile();
+        Assert.True(AlbumArtWriter.SetArtwork(audio, MakeImage("cover.jpg", TinyJpeg())).Ok);
+
+        var art = AlbumArtWriter.ReadArtwork(audio);
+
+        Assert.NotNull(art);
+        Assert.Equal(TinyJpeg(), art!.Value.Data);
+        Assert.Equal("image/jpeg", art.Value.MimeType);
+    }
+
+    [Fact]
+    public void Reading_art_that_is_not_there_is_null_rather_than_an_error()
+    {
+        Assert.Null(AlbumArtWriter.ReadArtwork(MakeAudioFile()));                            // untagged file
+        Assert.Null(AlbumArtWriter.ReadArtwork(Path.Combine(_dir, "ghost.mp3")));            // missing file
+        Assert.Null(AlbumArtWriter.ReadArtwork(MakeImage("notaudio.png", TinyPng())));       // not audio at all
+        Assert.Null(AlbumArtWriter.ReadArtwork(""));
+    }
+
+    [Fact]
+    public void A_picture_in_a_format_we_cannot_vouch_for_reads_as_no_art()
+    {
+        // Art the sniffer doesn't recognise (here: a BMP) would be served to a remote
+        // client with a mime type we'd be guessing at - better to report none.
+        var audio = MakeAudioFile();
+        using (var f = TagLib.File.Create(audio))
+        {
+            f.Tag.Pictures = [new TagLib.Picture(new TagLib.ByteVector([0x42, 0x4D, 0x00, 0x01])) { Type = TagLib.PictureType.FrontCover, MimeType = "image/bmp" }];
+            f.Save();
+        }
+
+        Assert.Equal(1, PictureCount(audio));
+        Assert.Null(AlbumArtWriter.ReadArtwork(audio));
+    }
+
+    [Fact]
     public void Jpeg_art_is_stored_with_the_right_mime_type()
     {
         var audio = MakeAudioFile();

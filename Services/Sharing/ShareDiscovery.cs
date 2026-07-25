@@ -109,6 +109,41 @@ public static class ShareDiscovery
         }
     }
 
+    /// <summary>True for a track mounted from a remote share - no local file, plays over HTTP.</summary>
+    public static bool IsShareItem(MediaItem item)
+        => item.Source?.StartsWith("share:", StringComparison.Ordinal) == true;
+
+    /// <summary>
+    /// The cover-art URL for a mounted share track, rebuilt from its namespaced id
+    /// (<c>share:{host}:{port}:{remoteId}</c>) - a share carries no local file to read a
+    /// tag out of, so art is a second fetch. Null for anything that isn't a share item.
+    /// </summary>
+    internal static string? ArtUrlFor(MediaItem item)
+    {
+        const string prefix = "share:";
+        if (!IsShareItem(item) || item.Source is not { } source || item.Id.Length <= source.Length + 1)
+        {
+            return null;
+        }
+
+        return $"http://{source[prefix.Length..]}/art/{Uri.EscapeDataString(item.Id[(source.Length + 1)..])}";
+    }
+
+    /// <summary>Fetches cover bytes from a share. Null for a 404, a timeout, or anything unreadable.</summary>
+    public static async Task<byte[]?> FetchArtAsync(string url, CancellationToken ct = default)
+    {
+        try
+        {
+            using var response = await _http.GetAsync(url, ct);
+            return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync(ct) : null;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "share art fetch failed for {Url}", url);
+            return null;
+        }
+    }
+
     /// <summary>Pure catalogue → MediaItem mapping. Malformed payloads yield an empty list.</summary>
     internal static List<MediaItem> ParseCatalogue(string json, DiscoveredShare share)
     {
@@ -147,7 +182,8 @@ public static class ShareDiscovery
                     Duration = ticks > 0 ? TimeSpan.FromTicks(ticks) : null,
                     Track = Number("track") is > 0 and var t ? (uint)t : null,
                     Year = Number("year") is > 0 and var y ? (uint)y : null,
-                    StreamUrl = $"{share.BaseUrl}/stream/{Uri.EscapeDataString(id)}",
+                    Extension = Text("ext") is { Length: > 0 } ext ? ext : null,
+                    StreamUrl = $"{share.BaseUrl}/stream/{Uri.EscapeDataString(id)}{Text("ext") ?? string.Empty}",
                     Source = $"share:{share.Key}",
                 });
             }

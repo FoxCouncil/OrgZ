@@ -18,7 +18,7 @@ public sealed class LibraryShareServer : IDisposable
 {
     private static readonly ILogger _log = Logging.For("LibraryShare");
 
-    private readonly HttpListener _listener = new();
+    private HttpListener _listener = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Func<List<MediaItem>> _loadLibrary;
     private MdnsAdvertiser? _advertiser;
@@ -32,32 +32,51 @@ public sealed class LibraryShareServer : IDisposable
         ShareName = string.IsNullOrWhiteSpace(shareName) ? "OrgZ Library" : shareName;
         Port = port;
         _loadLibrary = loadLibrary ?? MediaCache.LoadAll;
-        _listener.Prefixes.Add($"http://+:{port}/");
     }
 
-    public void Start()
+    public void Start() => Start(advertise: true);
+
+    /// <summary>
+    /// Serving and advertising are separate concerns: <paramref name="advertise"/> false
+    /// brings the HTTP side up without touching the mDNS multicast socket.
+    /// </summary>
+    internal void Start(bool advertise)
     {
         try
         {
-            _listener.Start();
+            _listener = Listen($"http://+:{Port}/");
         }
         catch (HttpListenerException ex)
         {
             // Binding "+" needs a URL ACL on Windows for a non-elevated process; the
             // service (LocalSystem) has it. Fall back to loopback so a GUI-hosted share
             // still works for local testing instead of dying outright.
+            //
+            // The fallback MUST build a fresh listener: HttpListener disposes itself
+            // when Start() fails, so reusing it throws ObjectDisposedException and takes
+            // the share down for real - which is what this path used to do, unnoticed,
+            // because nothing had ever exercised it.
             _log.Warning(ex, "Share bind on +:{Port} failed - falling back to localhost", Port);
-            _listener.Prefixes.Clear();
-            _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
-            _listener.Start();
+            _listener = Listen($"http://127.0.0.1:{Port}/");
         }
 
         _loop = Task.Run(() => AcceptLoopAsync(_cts.Token));
 
-        _advertiser = new MdnsAdvertiser(ShareName, (ushort)Port);
-        _advertiser.Start();
+        if (advertise)
+        {
+            _advertiser = new MdnsAdvertiser(ShareName, (ushort)Port);
+            _advertiser.Start();
+        }
 
         _log.Information("Library share \"{Name}\" listening on {Port}", ShareName, Port);
+    }
+
+    private static HttpListener Listen(string prefix)
+    {
+        var listener = new HttpListener();
+        listener.Prefixes.Add(prefix);
+        listener.Start();
+        return listener;
     }
 
     private async Task AcceptLoopAsync(CancellationToken ct)
@@ -108,9 +127,15 @@ public sealed class LibraryShareServer : IDisposable
                 return;
             }
 
-            if (TryParseStreamId(path, out var id))
+            if (TryParseSegment(path, "/stream/", out var streamId))
             {
-                await ServeStreamAsync(context, id);
+                await ServeStreamAsync(context, streamId);
+                return;
+            }
+
+            if (TryParseSegment(path, "/art/", out var artId))
+            {
+                await ServeArtAsync(context, artId);
                 return;
             }
 
@@ -124,9 +149,31 @@ public sealed class LibraryShareServer : IDisposable
         }
     }
 
+    private async Task ServeArtAsync(HttpListenerContext context, string id)
+    {
+        var track = ResolveTrack(_loadLibrary(), id);
+        if (track?.FilePath is null || AlbumArtWriter.ReadArtwork(track.FilePath) is not { } art)
+        {
+            // No art is a perfectly ordinary answer - the client shows the placeholder.
+            context.Response.StatusCode = 404;
+            context.Response.Close();
+            return;
+        }
+
+        context.Response.ContentType = art.MimeType;
+        context.Response.ContentLength64 = art.Data.Length;
+
+        if (context.Request.HttpMethod != "HEAD")
+        {
+            await context.Response.OutputStream.WriteAsync(art.Data);
+        }
+
+        context.Response.Close();
+    }
+
     private async Task ServeStreamAsync(HttpListenerContext context, string id)
     {
-        var track = _loadLibrary().FirstOrDefault(t => string.Equals(t.Id, id, StringComparison.Ordinal));
+        var track = ResolveTrack(_loadLibrary(), id);
         if (track?.FilePath is null || !File.Exists(track.FilePath))
         {
             context.Response.StatusCode = 404;
@@ -180,10 +227,12 @@ public sealed class LibraryShareServer : IDisposable
     // ── Pure helpers (unit-tested) ───────────────────────────
 
     /// <summary>Extracts the media id from <c>/stream/{id}</c>; false for any other path.</summary>
-    internal static bool TryParseStreamId(string path, out string id)
+    internal static bool TryParseStreamId(string path, out string id) => TryParseSegment(path, "/stream/", out id);
+
+    /// <summary>Extracts the id following a route prefix; false for any other path.</summary>
+    internal static bool TryParseSegment(string path, string prefix, out string id)
     {
         id = string.Empty;
-        const string prefix = "/stream/";
         if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || path.Length <= prefix.Length)
         {
             return false;
@@ -191,6 +240,46 @@ public sealed class LibraryShareServer : IDisposable
 
         id = Uri.UnescapeDataString(path[prefix.Length..]);
         return id.Length > 0;
+    }
+
+    /// <summary>Extensions we serve, and the only suffixes a stream URL may carry.</summary>
+    private static readonly HashSet<string> _audioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".m4a", ".m4b", ".aac", ".flac", ".ogg", ".opus", ".wav", ".wma",
+    };
+
+    /// <summary>
+    /// Finds the track a request is asking for. Clients append the file extension to the
+    /// stream URL - libvlc picks a demuxer far more reliably when the location looks like
+    /// a file - so a miss on the literal segment retries with a known audio suffix removed.
+    /// Exact match wins first, so an id that genuinely ends in ".mp3" is still reachable.
+    /// </summary>
+    internal static MediaItem? ResolveTrack(IReadOnlyList<MediaItem> library, string segment)
+    {
+        foreach (var track in library)
+        {
+            if (string.Equals(track.Id, segment, StringComparison.Ordinal))
+            {
+                return track;
+            }
+        }
+
+        var dot = segment.LastIndexOf('.');
+        if (dot <= 0 || !_audioExtensions.Contains(segment[dot..]))
+        {
+            return null;
+        }
+
+        var stripped = segment[..dot];
+        foreach (var track in library)
+        {
+            if (string.Equals(track.Id, stripped, StringComparison.Ordinal))
+            {
+                return track;
+            }
+        }
+
+        return null;
     }
 
     internal readonly record struct ByteRange(long Start, long End);
@@ -272,6 +361,9 @@ public sealed class LibraryShareServer : IDisposable
                 durationTicks = t.Duration?.Ticks ?? 0,
                 track = t.Track,
                 year = t.Year,
+                // The client hangs this off the stream URL so the remote player sees a
+                // file-shaped location instead of a bare id.
+                ext = ExtensionFor(t),
             })
             .ToList();
 
@@ -282,6 +374,13 @@ public sealed class LibraryShareServer : IDisposable
             count = tracks.Count,
             tracks,
         });
+    }
+
+    /// <summary>The track's audio extension, lowercased, or empty when it isn't one we serve.</summary>
+    internal static string ExtensionFor(MediaItem track)
+    {
+        var ext = track.Extension ?? (track.FilePath is { } path ? Path.GetExtension(path) : null);
+        return ext is not null && _audioExtensions.Contains(ext) ? ext.ToLowerInvariant() : string.Empty;
     }
 
     internal static string ContentTypeFor(string path) => Path.GetExtension(path).ToLowerInvariant() switch

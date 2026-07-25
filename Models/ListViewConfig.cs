@@ -94,9 +94,7 @@ public static class ListViewConfigs
             ],
             // Local library audiobooks only - a connected iPod's audiobooks belong to its own
             // device Audiobooks node, the same partition the Music view keeps.
-            BaseFilter = item => item.Kind == MediaKind.Audiobook
-                                 && item.Source != "cdda"
-                                 && (item.Source == null || !item.Source.StartsWith("device:", StringComparison.Ordinal)),
+            BaseFilter = item => item.Kind == MediaKind.Audiobook && IsLocalLibraryItem(item),
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
@@ -204,7 +202,7 @@ public static class ListViewConfigs
         return new ListViewConfig
         {
             Key = $"Share:{shareKey}",
-            Columns = MusicColumns(),
+            Columns = ShareColumns(),
             BaseFilter = item => item.Source == source,
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
@@ -401,6 +399,31 @@ public static class ListViewConfigs
         new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110, CanUserSort = false },
     ];
 
+    /// <summary>
+    /// Music's columns with the two interactive ones removed: a read-only share offers no
+    /// star to set and no rating to store, and a control that silently does nothing is
+    /// worse than no control at all.
+    /// </summary>
+    private static List<ColumnDef> ShareColumns() =>
+    [
+        .. MusicColumns()
+            .Where(c => c.Type != ColumnType.Rating)
+            .Select(c => c.Type != ColumnType.FavoriteTitle
+                ? c
+                : new ColumnDef { Header = c.Header, BindingPath = c.BindingPath, WidthType = c.WidthType, WidthValue = c.WidthValue }),
+    ];
+
+    /// <summary>
+    /// True for items that belong to THIS library - not a CD in the drive, not a connected
+    /// device, not a mounted network share. Every local view filters on it; without the
+    /// share clause a mounted share dumps its whole catalogue into Music and Bad Format.
+    /// </summary>
+    internal static bool IsLocalLibraryItem(MediaItem item)
+        => item.Source != "cdda"
+           && (item.Source == null
+               || (!item.Source.StartsWith("device:", StringComparison.Ordinal)
+                   && !item.Source.StartsWith("share:", StringComparison.Ordinal)));
+
     private static ListViewConfig BuildMusicConfig()
     {
         return new ListViewConfig
@@ -408,14 +431,13 @@ public static class ListViewConfigs
             Key = "Music",
             Columns = MusicColumns(withChecked: true),
             ShowCheckedColumn = true,
-            // Local library view - must NOT include CD-audio tracks (Source="cdda")
-            // or connected-device tracks (Source="device:{mountPath}").  Those have
-            // their own sidebar entries and their own views.  Without this, typing
-            // in the search box while the Music tab is selected also matches iPod
-            // tracks and leaks them into the local results list.
-            BaseFilter = item => item.Kind == MediaKind.Music
-                                 && item.Source != "cdda"
-                                 && (item.Source == null || !item.Source.StartsWith("device:", StringComparison.Ordinal)),
+            // Local library view - must NOT include CD-audio tracks (Source="cdda"),
+            // connected-device tracks (Source="device:{mountPath}"), or a mounted
+            // share's catalogue (Source="share:{host}:{port}").  Those have their own
+            // sidebar entries and their own views.  Without this, typing in the search
+            // box while the Music tab is selected also matches iPod tracks and leaks
+            // them into the local results list.
+            BaseFilter = item => item.Kind == MediaKind.Music && IsLocalLibraryItem(item),
             SearchFilter = (item, search) =>
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
@@ -469,7 +491,9 @@ public static class ListViewConfigs
                 new ColumnDef { Header = "Extension", BindingPath = "Extension", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 70 },
                 new ColumnDef { Header = "Reason", BindingPath = "FormatIssues", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
             ],
-            BaseFilter = item => item.Kind == MediaKind.Music && !string.IsNullOrEmpty(item.FormatIssues),
+            // Bad Format is a to-do list for files this library can actually fix - a
+            // device's or a share's tracks aren't ours to retag.
+            BaseFilter = item => item.Kind == MediaKind.Music && IsLocalLibraryItem(item) && !string.IsNullOrEmpty(item.FormatIssues),
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||

@@ -146,6 +146,52 @@ public class LibrarySharingTests
     }
 
     [Fact]
+    public void Catalogue_carries_the_extension_the_client_hangs_off_the_stream_url()
+    {
+        List<MediaItem> library =
+        [
+            new() { Id = "1", Kind = MediaKind.Music, Title = "Tagged", FilePath = @"C:\a.mp3", Extension = ".mp3" },
+            new() { Id = "2", Kind = MediaKind.Music, Title = "From path", FilePath = @"C:\b.FLAC" },   // no Extension set
+            new() { Id = "3", Kind = MediaKind.Music, Title = "Odd", FilePath = @"C:\c.xyz" },          // not one we serve
+        ];
+
+        using var doc = JsonDocument.Parse(LibraryShareServer.BuildCatalogueJson("Fox", library));
+        var exts = doc.RootElement.GetProperty("tracks").EnumerateArray().Select(t => t.GetProperty("ext").GetString()).ToList();
+
+        Assert.Equal([".mp3", ".flac", ""], exts);
+    }
+
+    [Fact]
+    public void Stream_ids_resolve_with_or_without_the_extension_suffix()
+    {
+        List<MediaItem> library =
+        [
+            new() { Id = "abc", Kind = MediaKind.Music, FilePath = @"C:\a.mp3" },
+            new() { Id = "abc.mp3", Kind = MediaKind.Music, FilePath = @"C:\literal.mp3" },
+        ];
+
+        // An exact id match always wins, so an id that genuinely ends in ".mp3" stays reachable.
+        Assert.Equal(@"C:\literal.mp3", LibraryShareServer.ResolveTrack(library, "abc.mp3")?.FilePath);
+        Assert.Equal(@"C:\a.mp3", LibraryShareServer.ResolveTrack(library, "abc")?.FilePath);
+
+        // Only with the literal id gone does the suffix get stripped.
+        Assert.Equal(@"C:\a.mp3", LibraryShareServer.ResolveTrack([library[0]], "abc.mp3")?.FilePath);
+    }
+
+    [Theory]
+    [InlineData("nope")]
+    [InlineData("abc.exe")]        // stripping only ever considers audio suffixes
+    [InlineData("abc.")]
+    [InlineData(".mp3")]
+    [InlineData("")]
+    public void Stream_ids_that_match_nothing_resolve_to_nothing(string segment)
+    {
+        List<MediaItem> library = [new() { Id = "abc", Kind = MediaKind.Music, FilePath = @"C:\a.mp3" }];
+
+        Assert.Null(LibraryShareServer.ResolveTrack(library, segment));
+    }
+
+    [Fact]
     public void Content_types_cover_the_formats_the_library_holds()
     {
         Assert.Equal("audio/mpeg", LibraryShareServer.ContentTypeFor("a.MP3"));
