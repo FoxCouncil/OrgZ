@@ -3,13 +3,46 @@
 Quality, beauty, and simplicity - in that order when they conflict. Tests reflect the finished
 product: nothing ships behind a capability flag without the conformance suite proving it.
 
+## v1 status (as of 0.9.17)
+
+Working, verified: CD ripping and burning (audio + data, CD-TEXT read back off a real disc),
+iPod read/write across the tiers, podcasts, audiobooks, radio, library sharing (code paths),
+and a background service hosting the privileged work. Suite: 1768 green, gated per commit.
+
+**Closed blockers**
+- Encoders ship in the installer — `encoders-1` release exists; a cold `fetch-encoders.ps1`
+  pulls all five win-x64 binaries, verifies every SHA-256, and they execute. CI will now
+  produce packages that can rip/burn/transcode.
+- Burn Tests 3/4/5/6 done (3, 5, 6 automated in `BurnValidationTests`; 4 burned and read back
+  in foobar2000).
+
+**Open before v1 — highest risk first**
+1. **The background service has never been installed.** Five releases of work (0.9.3 host,
+   0.9.7 disc ops, 0.9.8 sync, 0.9.13 sharing toggle, 0.9.14 job reattach) is unit-tested but
+   has never run as a real Windows service. Install it from Settings > Services, then exercise
+   a burn (expect zero UAC), a sync, and a relaunch mid-job to see the LCD reattach.
+2. **Share playback is an unproven pipe.** Server and client are each tested; they have never
+   spoken to each other. Host a share, point a second OrgZ at it, confirm LibVLC accepts
+   `http://host:port/stream/{id}` and that seeking works through the Range support. If LibVLC
+   rejects the URL shape or Range handling, sharing is hollow — it has bitten us before
+   (`cdda://` double-slash, podcast redirect cap).
+3. **Burn Test 2 ear check** — skip-to-track must land on each song's first note (burn at
+   Gap 0). The sector layout is asserted in tests; only ears can confirm the drive honoured it.
+4. **Re-burn Test 4** to confirm the alpha.11 punctuation fix on metal: expect
+   `Frankie's First Affair`, not `Frankie?s`.
+5. linux-x64 / osx-arm64 encoders still unvendored (Windows `tar` can't do the `.tar.xz`;
+   mac needs `scripts/build-ffmpeg-mac.sh`), so those packages ship without them.
+
+**Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
+build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).
+
 ## Now / Next
 
-### Testing burning e2e
-The CD burn pipeline (FoxOrangebook data-disc + audio burning, sector-padded WAV transcode) is
-covered by argument/layout tests only. Wanted: an end-to-end burn against a rewritable disc (or an
-image-backed virtual recorder if one proves workable) validating the full transcode → layout →
-burn → verify chain, plus the no-media / not-blank / not-writable pre-flight paths on real drives.
+### Testing burning e2e — LARGELY DONE
+`BurnValidationTests` automates the capacity/disc-count arithmetic, the track-boundary sector
+layout, and real-ffmpeg downsampling; real burns validated the rest on a Pioneer BDR-XS07U.
+Still wanted: the no-media / not-blank / not-writable pre-flight paths against real drives, and
+an image-backed virtual recorder if one proves workable.
 
 ### Collapsible device rows in the sidebar — SHIPPED 0.9.5
 Chevron restored on device parents, TwoWay-bound to observable expansion; per-device session
@@ -295,11 +328,17 @@ them against metal:
   the writes; the menus need metal
 
 ## Release
-- Velopack encoder bundling (0.9.6): win-x64 ffmpeg/flac/lame vendored - real SHA-256s in
-  scripts/encoders.json, assets staged in scripts/staged/, ffmpeg placed in tools/win-x64 for
-  dev builds. REMAINING: create the 'encoders-1' GitHub release and upload scripts/staged/*
-  (until then CI fetch skips and packages ship without encoders); vendor linux-x64 from a
-  linux host (Windows tar chokes on the .tar.xz) and osx-arm64 via scripts/build-ffmpeg-mac.sh
+- Encoder bundling — win-x64 DONE (0.9.6 vendored, release published 0.9.17). How it works:
+  `scripts/encoders.json` pins each tool's SHA-256 and points at the `encoders-1` GitHub
+  release; CI runs `scripts/fetch-encoders.ps1`, which downloads from OUR release (never the
+  upstream URL, which moves), verifies the hash, and drops the binaries in `tools/<rid>/`;
+  `BundleMediaToolsOnPublish` copies them into `publish/tools/` so Velopack ships them INSIDE
+  the installer. Users download once. Verified cold end-to-end on 2026-07-25.
+  REMAINING: vendor linux-x64 from a linux host (Windows tar chokes on the .tar.xz) and
+  osx-arm64 via scripts/build-ffmpeg-mac.sh — those packages ship without encoders today.
+- Slim ffmpeg (post-v1): the vendored win-x64 ffmpeg is 108.9 MB, ~98% of the payload, and is
+  a full build. A `--disable-everything` build carrying only the codecs OrgZ needs lands
+  ~10-20 MB. Deliberately deferred - fat is fine for v1.
 - CI now gates every push (Tests workflow) and every commit (pre-commit hook, `git config
   core.hooksPath .githooks` per clone)
 
