@@ -14,6 +14,80 @@ public class MultiSelectTests
 {
     private static MediaItem Track(string id) => new() { Id = id, Kind = MediaKind.Music, Title = id };
 
+    // ── What a drag carries ───────────────────────────────────
+
+    [Fact]
+    public void Dragging_a_selected_row_carries_the_whole_selection()
+    {
+        var a = Track("a"); var b = Track("b"); var c = Track("c");
+
+        // THE BUG: this used to arrive as one row. The press handler is on the tunnel
+        // route and runs BEFORE the DataGrid collapses the selection to the row under the
+        // cursor, so the drag has to resolve against the selection captured at press time
+        // - reading it later gets the collapsed one.
+        var payload = Views.MainWindow.DragPayload(b, [a, b, c]);
+
+        Assert.Equal(new[] { a, b, c }, payload);
+    }
+
+    [Fact]
+    public void Dragging_a_row_outside_the_selection_carries_only_that_row()
+    {
+        var a = Track("a"); var b = Track("b"); var c = Track("c");
+
+        // Explorer/iTunes: grabbing a row you hadn't selected moves THAT row, and does
+        // not drag your selection somewhere you didn't ask for.
+        Assert.Equal(new[] { c }, Views.MainWindow.DragPayload(c, [a, b]));
+    }
+
+    [Fact]
+    public void A_single_selected_row_still_drags_itself()
+    {
+        var a = Track("a");
+
+        Assert.Equal(new[] { a }, Views.MainWindow.DragPayload(a, [a]));
+    }
+
+    [Fact]
+    public void The_payload_keeps_the_view_order_it_was_given()
+    {
+        var a = Track("a"); var b = Track("b"); var c = Track("c");
+
+        // The captured selection is already view-ordered (SelectedTracks does that);
+        // the payload must not re-shuffle it into click order.
+        Assert.Equal(new[] { a, b, c }, Views.MainWindow.DragPayload(a, [a, b, c]));
+    }
+
+    [Fact]
+    public void A_drag_with_nothing_under_the_cursor_carries_nothing()
+    {
+        var a = Track("a");
+
+        Assert.Empty(Views.MainWindow.DragPayload(null, [a]));
+        Assert.Empty(Views.MainWindow.DragPayload(null, []));
+    }
+
+    [Fact]
+    public void An_empty_selection_falls_back_to_the_pressed_row()
+    {
+        var a = Track("a");
+
+        // Can happen when the press lands on a row the grid hasn't selected yet.
+        Assert.Equal(new[] { a }, Views.MainWindow.DragPayload(a, []));
+    }
+
+    [Fact]
+    public void The_payload_is_a_copy_so_later_selection_changes_cannot_rewrite_it()
+    {
+        var a = Track("a"); var b = Track("b");
+        List<MediaItem> selection = [a, b];
+
+        var payload = Views.MainWindow.DragPayload(a, selection);
+        selection.Clear();   // the grid collapsing the selection mid-drag
+
+        Assert.Equal(new[] { a, b }, payload);
+    }
+
     [Fact]
     public void Click_order_is_rewritten_to_view_order()
     {

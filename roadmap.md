@@ -65,7 +65,14 @@ memory keyed by serial (mount fallback) so a collapse survives reconnects and dr
 moves; auto-expand on first connect of a session. Alignment vs the LIBRARY column may want a
 pixel-nudge pass after eyeballing.
 
-### Multi-select in media grids — SHIPPED 0.9.2
+### Multi-select in media grids — SHIPPED 0.9.2, drag fixed 0.9.23
+**Fixed 0.9.23:** dragging a multi-selection collapsed to a single row. The press handler
+is on the TUNNEL route, so it runs before the DataGrid processes the same press and
+collapses the selection to the row under the cursor - by the time PointerMoved recognised
+a drag, the live selection was one row. The selection is now captured at press time (the
+last moment it's intact), the payload resolves against that, and the highlight is
+re-applied when the drag starts so every dragged row stays lit.
+
 Extended selection in all three grids; every verb operates on the view-ordered selection
 (play next, queue, favorite, add-to-playlist, remove-from-playlist/library/device, restore,
 burn, drag to playlists/devices/external apps); selection-aware menu entries show "(N)".

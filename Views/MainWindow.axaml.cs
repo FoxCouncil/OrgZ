@@ -53,6 +53,16 @@ public partial class MainWindow : Window
     private MediaItem? _gridDragItem;
     private int _gridDragRowIndex = -1;
 
+    /// <summary>
+    /// The selection as it stood when the mouse went down, captured because it won't
+    /// survive long enough to read later: our press handler is on the TUNNEL route, so it
+    /// runs before the DataGrid processes the same press and collapses the selection to
+    /// the single row under the cursor. By the time a drag is recognised in PointerMoved,
+    /// the live selection is one row - which is why dragging a multi-selection used to
+    /// carry (and show) only one track.
+    /// </summary>
+    private List<MediaItem> _gridPressSelection = [];
+
     // Set by the docs-screenshot harness via the internal ctor: skips the live
     // library load and OS-service init in Loaded so the window renders with
     // seeded data only.
@@ -1631,6 +1641,10 @@ public partial class MainWindow : Window
         _gridDragItem = item;
         _gridDragRowIndex = row.Index;
         _gridPressEvent = e;
+
+        // Read the selection NOW - see _gridPressSelection. This is the last moment it
+        // still holds every row the user picked.
+        _gridPressSelection = SelectedTracks();
     }
 
     private async void MainDataGrid_PointerMoved(object? sender, PointerEventArgs e)
@@ -1659,11 +1673,13 @@ public partial class MainWindow : Window
 
         // Dragging a row that's part of a multi-selection drags the WHOLE selection
         // (view-ordered); dragging an unselected row drags just that row - the
-        // Explorer/iTunes convention.
-        var selection = SelectedTracks();
-        DraggedMediaItems = _gridDragItem != null && selection.Contains(_gridDragItem)
-            ? selection
-            : _gridDragItem != null ? [_gridDragItem] : [];
+        // Explorer/iTunes convention. Resolved against the selection captured at press
+        // time, not the live one, which the grid has already collapsed by now.
+        DraggedMediaItems = DragPayload(_gridDragItem, _gridPressSelection);
+
+        // Put the highlight back so the whole payload reads as selected for the duration
+        // of the drag; the grid dropped it to one row on the press.
+        RestoreSelection(DraggedMediaItems);
 
         var data = new DataTransfer();
         data.Add(DataTransferItem.Create(Sidebar.MediaItemDragFormat, "media"));
@@ -1725,6 +1741,43 @@ public partial class MainWindow : Window
         _gridDragItem = null;
         _gridDragRowIndex = -1;
         _gridPressEvent = null;
+        _gridPressSelection = [];
+    }
+
+    /// <summary>
+    /// The rows a drag carries: the whole selection when the pressed row is part of it,
+    /// otherwise just the pressed row. That's the Explorer/iTunes convention - dragging a
+    /// row you hadn't selected moves that row, not your selection somewhere else.
+    /// </summary>
+    internal static List<MediaItem> DragPayload(MediaItem? pressed, IReadOnlyList<MediaItem> selectionAtPress)
+    {
+        if (pressed == null)
+        {
+            return [];
+        }
+
+        return selectionAtPress.Contains(pressed) ? [.. selectionAtPress] : [pressed];
+    }
+
+    /// <summary>Re-applies a selection to the active grid (rows the user is dragging stay lit).</summary>
+    private void RestoreSelection(IReadOnlyList<MediaItem> items)
+    {
+        if (items.Count < 2)
+        {
+            return;   // a single row is already the grid's own state - don't fight it
+        }
+
+        var grid = GetActiveDataGrid();
+        if (grid.SelectedItems is null)
+        {
+            return;
+        }
+
+        grid.SelectedItems.Clear();
+        foreach (var item in items)
+        {
+            grid.SelectedItems.Add(item);
+        }
     }
 
     // ── row-reorder drag visuals: insertion line + pointer ghost + edge auto-scroll ──
