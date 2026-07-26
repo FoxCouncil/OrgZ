@@ -14,8 +14,10 @@ end to end, libvlc included), and a background service hosting the privileged wo
 - Encoders ship in the installer — `encoders-1` release exists; a cold `fetch-encoders.ps1`
   pulls all five win-x64 binaries, verifies every SHA-256, and they execute. CI will now
   produce packages that can rip/burn/transcode.
-- Burn Tests 3/4/5/6 done (3, 5, 6 automated in `BurnValidationTests`; 4 burned and read back
-  in foobar2000).
+- **All six Burn Tests passed on real media (2026-07-25)**, ear checks included. 3, 5 and 6 are
+  automated in `BurnValidationTests`; 1, 2 and 4 were burned on the Pioneer BDR-XS07U and
+  listened to. Test 2 confirms skip-to-track lands on each song's first note at Gap 0, and
+  Test 4's re-burn confirms the alpha.11 punctuation fix on metal. Burn validation is closed.
 - **Share playback works** (0.9.18). `ShareEndToEndTests` runs a live server on a loopback
   socket and walks the whole client journey — browse → catalogue → MediaItem → stream — with
   a real HttpClient, and has libvlc open the resulting URL and report the right duration.
@@ -41,12 +43,10 @@ end to end, libvlc included), and a background service hosting the privileged wo
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
-3. **Burn Test 2 ear check** — skip-to-track must land on each song's first note (burn at
-   Gap 0). The sector layout is asserted in tests; only ears can confirm the drive honoured it.
-4. **Re-burn Test 4** to confirm the alpha.11 punctuation fix on metal: expect
-   `Frankie's First Affair`, not `Frankie?s`.
-5. linux-x64 / osx-arm64 encoders still unvendored (Windows `tar` can't do the `.tar.xz`;
-   mac needs `scripts/build-ffmpeg-mac.sh`), so those packages ship without them.
+3. linux-x64 / osx-arm64 encoders still unvendored, so those packages ship without them.
+   linux-x64 is now unblocked without a second machine: this dev box has WSL2 (Ubuntu, with
+   `tar`/`xz`/`curl`/`sha256sum`), which is all the `.tar.xz` needed. macOS still needs
+   `scripts/build-ffmpeg-mac.sh` run on the build-mac testbed.
 
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
 build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).
