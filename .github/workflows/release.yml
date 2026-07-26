@@ -72,18 +72,28 @@ jobs:
 
       - name: Pack with Velopack
         shell: bash
-        # Windows ships BOTH installers. Setup.exe is the per-user one-click install into
-        # %LocalAppData% that never elevates. The MSI (--instLocation PerMachine) installs
-        # to Program Files under HKLM and IS elevated, which is the only way OrgZ's
-        # after-install hook can register the LocalSystem background service - so the MSI
-        # is the install that gets silent disc/iPod access, and Setup.exe users stay on
-        # the per-operation UAC path. See Services/DeviceHelper/ServiceInstallHook.cs.
+        # Windows ships the MSI ONLY. It installs PerMachine (Program Files + HKLM) and is
+        # therefore elevated, which is the only way OrgZ's after-install hook can register
+        # the LocalSystem background service - so every Windows install gets silent disc
+        # and iPod access instead of a UAC prompt per operation.
+        #
+        # vpk always builds Setup.exe and generates the MSI inside that same step (see
+        # CreateSetupPackage in Velopack.Packaging.Windows), so --noInst would suppress
+        # BOTH. Build both and drop the one we don't publish. The auto-updater doesn't
+        # touch Setup.exe - it consumes the .nupkg + releases.json - so removing it only
+        # removes a second, weaker way to install.
         run: |
           WIN_FLAGS=""
           if [[ "${{ matrix.rid }}" == win-* ]]; then
             WIN_FLAGS="--icon Assets/app.ico --msi --instLocation PerMachine"
           fi
           vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $WIN_FLAGS
+
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            rm -f releases/OrgZ-win-Setup.exe
+            # A silently-missing MSI would ship a release whose Windows download 404s.
+            test -f releases/OrgZ-win.msi || { echo "::error::vpk did not produce OrgZ-win.msi"; ls -la releases/; exit 1; }
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -142,7 +152,7 @@ jobs:
 
           | Platform | Installer | Portable |
           |----------|-----------|----------|
-          | Windows (x64) | [OrgZ-win-Setup.exe](${BASE}/OrgZ-win-Setup.exe) | [OrgZ-win-Portable.zip](${BASE}/OrgZ-win-Portable.zip) |
+          | Windows (x64) | [OrgZ-win.msi](${BASE}/OrgZ-win.msi) | [OrgZ-win-Portable.zip](${BASE}/OrgZ-win-Portable.zip) |
           | macOS (Apple Silicon) | [OrgZ-osx-Setup.pkg](${BASE}/OrgZ-osx-Setup.pkg) | [OrgZ-osx-Portable.zip](${BASE}/OrgZ-osx-Portable.zip) |
           | Linux (x64) | [OrgZ.AppImage](${BASE}/OrgZ.AppImage) | - |
 

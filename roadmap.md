@@ -128,17 +128,19 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   lifecycle buttons past that point can only strand them somewhere broken, like installed-but-
   stopped wondering why burning started prompting again. The installer code stays compiled
   (the pre-commit suite runs in Release and its tests must build), just unreachable from the UI.
-- **Installed with the app — SHIPPED 0.9.22**: Windows now packs a PerMachine MSI alongside
-  Setup.exe (`vpk pack --msi --instLocation PerMachine`), and OrgZ's Velopack after-install
-  hook registers the background service from inside it. No button to find and no second
-  prompt: the MSI installs to Program Files under HKLM and is elevated by construction, so
-  the hook's `sc create` just works. `OnBeforeUninstallFastCallback` removes the service
-  again, so uninstalling OrgZ can't leave a LocalSystem service pointing at a deleted exe.
-  Velopack's *default* Setup.exe is per-user into `%LocalAppData%` and deliberately never
-  elevates - the hook detects that and declines silently, leaving those users on the per-op
-  UAC path exactly as before. (Velopack's Setup.exe cannot show a checkbox or a wizard by
-  design; velopack/velopack#30 requests exactly this and is open. The MSI is the supported
-  route to an elevated install.)
+- **Installed with the app — SHIPPED 0.9.22**: Windows ships the **MSI only**
+  (`vpk pack --msi --instLocation PerMachine`), and OrgZ's Velopack after-install hook
+  registers the background service from inside it. No button to find and no second prompt:
+  the MSI installs to Program Files under HKLM and is elevated by construction, so the
+  hook's `sc create` just works, and EVERY Windows install gets silent disc/iPod access.
+  `OnBeforeUninstallFastCallback` removes the service again, so uninstalling OrgZ can't
+  leave a LocalSystem service pointing at a deleted exe.
+  Velopack's default Setup.exe is per-user into `%LocalAppData%` and deliberately never
+  elevates, so it can't register a service - it is built (vpk generates the MSI inside the
+  same step, so `--noInst` would suppress both) and then deleted before upload. The hook
+  still declines silently when it finds itself unelevated, which covers a portable or
+  sideloaded copy. (Velopack's Setup.exe cannot show a checkbox or a wizard by design;
+  velopack/velopack#30 requests exactly this and is open.)
   UNVERIFIED: whether `Update.exe` can auto-update a PerMachine install without elevation -
   it writes into Program Files, which a non-elevated process cannot do. The docs say updates
   "work identically" but don't address elevation. Settle this on a real install before
