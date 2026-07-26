@@ -59,12 +59,16 @@ end to end, libvlc included), and a background service hosting the privileged wo
      first Apple-Silicon macOS): without it clang stamps the BUILD machine's OS, and the
      first ffmpeg came out `minos 26.0` - it would have failed to launch for anyone not on
      this year's macOS. Both scripts now assert the resulting minos rather than trust it.
-   Everything was verified by USE, not by filename: flac does a byte-identical lossless
-   round-trip, lame writes a real mp3, and ffmpeg does both the burn path (→ 44.1k/16/stereo
-   pcm_s16le) and the iPod path (ALAC) on each platform. linux-x64 additionally passed a
-   COLD `fetch-encoders.ps1` from the release with every SHA-256 matching.
-   REMAINING: upload `scripts/staged/ffmpeg-osx-arm64` to `encoders-1` (Fox's action), then
-   a cold fetch on the Mac closes it exactly as linux was closed.
+   All eleven assets are published on `encoders-1`, and **linux-x64 and osx-arm64 have both
+   passed a COLD fetch** - download from our release, every SHA-256 matched against the
+   committed manifest, then the fetched bytes (not the built ones) doing real work: flac a
+   lossless rip round-trip, lame a real mp3, ffmpeg the burn path (→ 44.1k/16/stereo
+   pcm_s16le) and the iPod path (ALAC).
+   One note for whoever writes the next such check: compare decoded PCM, not files. ffmpeg
+   writes a `LIST` metadata chunk into WAV that flac deliberately drops, so a naive `cmp` of
+   source vs decoded reports a 34-byte difference that looks like data loss and isn't - the
+   PCM hashes are identical. The build scripts sidestep it by generating their test WAV
+   without metadata.
 
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
 build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).
