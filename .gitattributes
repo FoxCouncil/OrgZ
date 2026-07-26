@@ -1,0 +1,13 @@
+# Shell scripts MUST keep LF endings in the working tree, on every OS.
+#
+# Without this, git's autocrlf hands a Windows checkout CRLF-terminated .sh files, and
+# copying one to a Mac or Linux box produces failures that read as anything but a line
+# ending: `set -euo pipefail` becomes `pipefail\r`, and bash reports "invalid option name"
+# - which sends you looking at the shell version instead of the file. That cost a build
+# cycle on the macOS ffmpeg script.
+*.sh text eol=lf
+
+# Same reasoning for the other things a non-Windows host executes or parses strictly.
+*.bash text eol=lf
+Dockerfile text eol=lf
+*.desktop text eol=lf

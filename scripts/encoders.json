@@ -91,9 +91,9 @@
       {
         "out": "ffmpeg",
         "asset": "ffmpeg-osx-arm64",
-        "sha256": "PENDING",
+        "sha256": "1f9aa874f238b0838f51c6017f3c35f2b28d2fad7b337b5574c5d42cf4058752",
         "license": "LGPL-2.1",
-        "builtFrom": "ffmpeg.org source via scripts/build-ffmpeg-mac.sh"
+        "builtFrom": "ffmpeg.org 7.1 source via scripts/build-ffmpeg-mac.sh (built on build-mac, Apple clang 17)"
       }
     ]
   }

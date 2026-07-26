@@ -43,18 +43,22 @@ end to end, libvlc included), and a background service hosting the privileged wo
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
-3. **linux-x64 is fully vendored: ffmpeg + flac + lame.** ffmpeg came from BtbN's LGPL build
-   via WSL2 (Windows' bsdtar can't read the `.tar.xz`, which is what had blocked it);
-   `flac` and `lame` are built from upstream source, statically linked, by the new
-   `scripts/build-encoders-linux.sh`. Static matters: an AppImage has NO dependency
-   mechanism - Velopack ships Linux as a single self-contained file - so "apt install flac
-   lame" isn't something we can express and isn't something a user should have to work out.
-   Uploaded to `encoders-1` and **verified cold end to end**: a clean `fetch-encoders.ps1
-   -Rid linux-x64` pulls all three from our release, every SHA-256 matches, and the fetched
-   copies then do real work on Linux - flac a byte-identical lossless round-trip, lame a
-   real mp3, ffmpeg both a 44.1k/16/stereo CD-audio transcode (the burn path) and an ALAC
-   encode (the iPod path). Linux is done. **Only osx-arm64 ffmpeg is left** - needs
-   `scripts/build-ffmpeg-mac.sh` on the build-mac testbed.
+3. ~~Encoders~~ **DONE on all three platforms - nothing is PENDING in `encoders.json`.**
+   - win-x64: ffmpeg, flac (+ libFLAC, libFLAC++), lame.
+   - linux-x64: ffmpeg from BtbN's LGPL build via WSL2 (Windows' bsdtar can't read the
+     `.tar.xz`, which is what had blocked it), plus `flac` and `lame` built from upstream
+     source and **statically linked** by `scripts/build-encoders-linux.sh`. Static matters:
+     an AppImage has NO dependency mechanism - Velopack ships Linux as a single
+     self-contained file - so "apt install flac lame" isn't something we can express and
+     isn't something a user should have to work out.
+   - osx-arm64: ffmpeg 7.1 built from ffmpeg.org source on build-mac (Apple clang 17),
+     LGPL-clean, with AudioToolbox alac/aac available alongside the native encoders.
+   Everything was verified by USE, not by filename: flac does a byte-identical lossless
+   round-trip, lame writes a real mp3, and ffmpeg does both the burn path (→ 44.1k/16/stereo
+   pcm_s16le) and the iPod path (ALAC) on each platform. linux-x64 additionally passed a
+   COLD `fetch-encoders.ps1` from the release with every SHA-256 matching.
+   REMAINING: upload `scripts/staged/ffmpeg-osx-arm64` to `encoders-1` (Fox's action), then
+   a cold fetch on the Mac closes it exactly as linux was closed.
 
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
 build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).
