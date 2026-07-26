@@ -43,14 +43,17 @@ end to end, libvlc included), and a background service hosting the privileged wo
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
-3. **linux-x64 ffmpeg is vendored and hashed** (done via WSL2 - Windows' bsdtar can't read the
-   `.tar.xz`, which is what had blocked it). Extracted, executed on Linux, and confirmed to
-   carry every codec OrgZ needs (aac, alac, flac, libmp3lame, pcm_s16le). REMAINING: the
-   staged `scripts/staged/ffmpeg-linux-x64` has to be uploaded to the `encoders-1` release -
-   Fox's action - before CI can fetch it. Note linux ripping still wants PATH `flac`/`lame`
-   binaries by design (RipEncoder shells out to them and already tells the user the apt
-   command); only ffmpeg is bundled. osx-arm64 still needs `scripts/build-ffmpeg-mac.sh` on
-   the build-mac testbed.
+3. **linux-x64 is fully vendored: ffmpeg + flac + lame.** ffmpeg came from BtbN's LGPL build
+   via WSL2 (Windows' bsdtar can't read the `.tar.xz`, which is what had blocked it);
+   `flac` and `lame` are built from upstream source, statically linked, by the new
+   `scripts/build-encoders-linux.sh`. Static matters: an AppImage has NO dependency
+   mechanism - Velopack ships Linux as a single self-contained file - so "apt install flac
+   lame" isn't something we can express and isn't something a user should have to work out.
+   All three were executed on Linux and verified functionally, not just by filename: flac
+   does a byte-identical lossless round-trip, lame encodes, ffmpeg reports aac/alac/flac/
+   libmp3lame/pcm_s16le. REMAINING: upload the three staged files to the `encoders-1`
+   release (Fox's action) before CI can fetch them. osx-arm64 still needs
+   `scripts/build-ffmpeg-mac.sh` on the build-mac testbed.
 
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
 build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).

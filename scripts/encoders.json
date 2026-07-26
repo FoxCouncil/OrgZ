@@ -71,6 +71,20 @@
         "upstreamUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz",
         "archive": "tar.xz",
         "entry": "*/bin/ffmpeg"
+      },
+      {
+        "out": "flac",
+        "asset": "flac-linux-x64",
+        "sha256": "0cd94c396d5209f53326a90592d41a9f411f282c90f95b022351b802618d24d9",
+        "license": "BSD",
+        "builtFrom": "xiph.org flac-1.4.3 source, statically linked, via scripts/build-encoders-linux.sh"
+      },
+      {
+        "out": "lame",
+        "asset": "lame-linux-x64",
+        "sha256": "5fd973f8da090551a1b751a08603cb972268c3eea1651eccfa0f827ed6308e88",
+        "license": "LGPL-2.0",
+        "builtFrom": "upstream lame-3.100 tarball (Debian pool; SourceForge 403s scripts), statically linked, via scripts/build-encoders-linux.sh"
       }
     ],
     "osx-arm64": [
