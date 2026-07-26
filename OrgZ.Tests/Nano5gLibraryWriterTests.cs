@@ -37,8 +37,7 @@ public class Nano5gLibraryWriterTests
     public void AddTrack_inserts_rows_and_resigns_cbk(string src)
     {
 
-        var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmp);
+        var tmp = NewDeviceDir();
         try
         {
             foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
@@ -82,7 +81,7 @@ public class Nano5gLibraryWriterTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(tmp, recursive: true);
+            CleanupDeviceDir(tmp);
         }
     }
 
@@ -150,8 +149,7 @@ public class Nano5gLibraryWriterTests
     public void AddTrack_then_RemoveTrack_returns_to_baseline(string src)
     {
 
-        var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmp);
+        var tmp = NewDeviceDir();
         try
         {
             foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
@@ -197,7 +195,7 @@ public class Nano5gLibraryWriterTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(tmp, recursive: true);
+            CleanupDeviceDir(tmp);
         }
     }
 
@@ -206,8 +204,7 @@ public class Nano5gLibraryWriterTests
     public void AddPodcast_then_RemovePodcast_round_trips_with_dedup_release_date_and_no_orphans(string src)
     {
 
-        var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmp);
+        var tmp = NewDeviceDir();
         try
         {
             foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
@@ -263,7 +260,7 @@ public class Nano5gLibraryWriterTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(tmp, recursive: true);
+            CleanupDeviceDir(tmp);
         }
     }
 
@@ -272,8 +269,7 @@ public class Nano5gLibraryWriterTests
     public void CreatePlaylist_is_visible_categorised_and_idempotent(string src)
     {
 
-        var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmp);
+        var tmp = NewDeviceDir();
         try
         {
             foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
@@ -319,7 +315,7 @@ public class Nano5gLibraryWriterTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(tmp, recursive: true);
+            CleanupDeviceDir(tmp);
         }
     }
 
@@ -328,8 +324,7 @@ public class Nano5gLibraryWriterTests
     public void WipeLibrary_empties_tracks_podcasts_locations_and_resigns_cbk(string src)
     {
 
-        var tmp = Path.Combine(Path.GetTempPath(), "orgz-nano5g-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tmp);
+        var tmp = NewDeviceDir();
         try
         {
             foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
@@ -372,8 +367,39 @@ public class Nano5gLibraryWriterTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(tmp, recursive: true);
+            CleanupDeviceDir(tmp);
         }
+    }
+
+    /// <summary>
+    /// A unique staging directory shaped like a real device:
+    /// <c>{root}\iPod_Control\iTunes\iTunes Library.itlp</c>.
+    ///
+    /// The shape is load-bearing, not decoration. <see cref="Nano5gLibraryWriter"/> derives
+    /// the iTunesCDB path from the .itlp directory's PARENT, exactly as the firmware lays it
+    /// out. Staging into a flat temp dir makes that parent <c>%TEMP%</c> itself, so every
+    /// test - and every concurrent test run on the machine - writes the same
+    /// <c>%TEMP%\iTunesCDB</c> and they fight over the handle. That produced an intermittent
+    /// "file is being used by another process" failure in the pre-commit suite, which is the
+    /// worst place for a flake: it makes a green gate a coin toss.
+    /// </summary>
+    private static string NewDeviceDir()
+    {
+        var itlp = Path.Combine(
+            Path.GetTempPath(),
+            "orgz-nano5g-" + Guid.NewGuid().ToString("N"),
+            "iPod_Control", "iTunes", "iTunes Library.itlp");
+
+        Directory.CreateDirectory(itlp);
+        return itlp;
+    }
+
+    /// <summary>Removes the whole staged tree, given the .itlp directory inside it.</summary>
+    private static void CleanupDeviceDir(string itlpDir)
+    {
+        // Up three: "iTunes Library.itlp" -> iTunes -> iPod_Control -> root.
+        var root = Path.GetFullPath(Path.Combine(itlpDir, "..", "..", ".."));
+        Directory.Delete(root, recursive: true);
     }
 
     private static SqliteConnection OpenRo(string path)

@@ -61,7 +61,11 @@ public class ITunesDbArtworkOracleTests
         var ithmb = new byte[Dim * Dim * 2];
         for (int i = 0; i < ithmb.Length; i += 2) { ithmb[i] = 0x00; ithmb[i + 1] = 0xF8; }
 
-        var mount = Path.Combine(AppContext.BaseDirectory, "artwork-out", subdir);
+        // Unique per call, not a fixed path under the build output: two test hosts sharing
+        // that directory - concurrent runs, or CI running jobs side by side - would write
+        // the same ArtworkDB and one would fail with "used by another process". A flake in
+        // the pre-commit gate turns a green suite into a coin toss. Caller deletes it.
+        var mount = Path.Combine(Path.GetTempPath(), $"orgz-artwork-{subdir}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "iTunes"));
         Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "Artwork"));
         Directory.CreateDirectory(Path.Combine(mount, "iPod_Control", "Device"));
@@ -75,9 +79,16 @@ public class ITunesDbArtworkOracleTests
     [Fact]
     public void Emit_reproduces_the_libgpod_blessed_artworkdb()
     {
-        var (_, artworkDb) = EmitArtwork("repro");
-        var blessed = File.ReadAllBytes(Path.Combine(FixtureDir, "orgz-emitted-artworkdb.bin"));
-        Assert.Equal(blessed, artworkDb);
+        var (mount, artworkDb) = EmitArtwork("repro");
+        try
+        {
+            var blessed = File.ReadAllBytes(Path.Combine(FixtureDir, "orgz-emitted-artworkdb.bin"));
+            Assert.Equal(blessed, artworkDb);
+        }
+        finally
+        {
+            Directory.Delete(mount, recursive: true);
+        }
     }
 
     [Fact]
@@ -90,26 +101,33 @@ public class ITunesDbArtworkOracleTests
         }
 
         var (mount, _) = EmitArtwork("oracle");
-        var psi = new ProcessStartInfo(oracle, $"\"{mount}\" MA446")
+        try
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        using var proc = Process.Start(psi)!;
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
+            var psi = new ProcessStartInfo(oracle, $"\"{mount}\" MA446")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var proc = Process.Start(psi)!;
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
 
-        Assert.True(proc.ExitCode == 0, $"artwork_dump failed ({proc.ExitCode}): {stderr}");
-        var line = stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                         .Single(l => l.Contains("\"id\":1,"));
+            Assert.True(proc.ExitCode == 0, $"artwork_dump failed ({proc.ExitCode}): {stderr}");
+            var line = stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                             .Single(l => l.Contains("\"id\":1,"));
 
-        // libgpod linked the ArtworkDB entry to the track by dbid, decoded the native dimensions, and the
-        // red thumbnail survived the RGB565 round-trip (0xF800 -> R=248).
-        Assert.Contains($"\"art_dbid\":{Dbid}", line);
-        Assert.Contains("\"w\":100,\"h\":100", line);
-        Assert.Matches(@"""px0"":\[2[0-5]\d,\d,\d\]", line);   // red: R in 200s, G and B tiny
+            // libgpod linked the ArtworkDB entry to the track by dbid, decoded the native dimensions, and the
+            // red thumbnail survived the RGB565 round-trip (0xF800 -> R=248).
+            Assert.Contains($"\"art_dbid\":{Dbid}", line);
+            Assert.Contains("\"w\":100,\"h\":100", line);
+            Assert.Matches(@"""px0"":\[2[0-5]\d,\d,\d\]", line);   // red: R in 200s, G and B tiny
+        }
+        finally
+        {
+            Directory.Delete(mount, recursive: true);
+        }
     }
 
     [Fact]

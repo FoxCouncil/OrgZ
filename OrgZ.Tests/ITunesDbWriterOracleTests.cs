@@ -39,7 +39,7 @@ public class ITunesDbWriterOracleTests
     public void Emit_reproduces_the_libgpod_blessed_bytes(string scenario, string fixture, string golden)
     {
         _ = golden;
-        var bytes = EmitScenario(scenario, out _);
+        var bytes = EmitScenario(scenario);
         var blessed = File.ReadAllBytes(Path.Combine(FixtureDir, fixture));
 
         // The committed fixture is the exact output libgpod parsed correctly. If the writer changes,
@@ -63,23 +63,29 @@ public class ITunesDbWriterOracleTests
         }
 
         EmitScenario(scenario, out var mountPoint);
-
-        var psi = new ProcessStartInfo(oracle, mountPoint)
+        try
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        using var proc = Process.Start(psi)!;
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
+            var psi = new ProcessStartInfo(oracle, mountPoint)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var proc = Process.Start(psi)!;
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
 
-        Assert.True(proc.ExitCode == 0, $"gpod_dump failed ({proc.ExitCode}): {stderr}");
+            Assert.True(proc.ExitCode == 0, $"gpod_dump failed ({proc.ExitCode}): {stderr}");
 
-        var actual = stdout.Replace("\r\n", "\n").Trim();
-        var goldenText = File.ReadAllText(Path.Combine(FixtureDir, golden)).Replace("\r\n", "\n").Trim();
-        Assert.Equal(goldenText, actual);
+            var actual = stdout.Replace("\r\n", "\n").Trim();
+            var goldenText = File.ReadAllText(Path.Combine(FixtureDir, golden)).Replace("\r\n", "\n").Trim();
+            Assert.Equal(goldenText, actual);
+        }
+        finally
+        {
+            Directory.Delete(mountPoint, recursive: true);
+        }
     }
 
     // ── scenarios ─────────────────────────────────────────────────────────────
@@ -109,7 +115,8 @@ public class ITunesDbWriterOracleTests
             c => c.Magic == "mhod" && c.ReadHeaderInt32(0x0C) == 100));                   // + membership MHOD
     }
 
-    internal static byte[] EmitScenario(string scenario, out string mountPoint)
+    /// <summary>The scenario's serialized bytes. No disk involved - most callers only compare bytes.</summary>
+    internal static byte[] EmitScenario(string scenario)
     {
         var doc = scenario switch
         {
@@ -120,9 +127,24 @@ public class ITunesDbWriterOracleTests
         };
 
         ITunesDbChunkTree.Normalize(doc.Root);
-        var bytes = ITunesDbChunkTree.Serialize(doc);
+        return ITunesDbChunkTree.Serialize(doc);
+    }
 
-        mountPoint = Path.Combine(AppContext.BaseDirectory, "oracle-out", scenario);
+    /// <summary>
+    /// Stages the scenario as a device tree for the libgpod oracle, which takes a mount
+    /// point on the command line. The caller owns <paramref name="mountPoint"/> and must
+    /// delete it.
+    ///
+    /// Unique per call, not a fixed path under the build output: two test hosts sharing
+    /// that directory - concurrent runs, or CI running jobs side by side - would write the
+    /// same iTunesDB and one would fail with "used by another process". A flake in the
+    /// pre-commit gate turns a green suite into a coin toss.
+    /// </summary>
+    internal static byte[] EmitScenario(string scenario, out string mountPoint)
+    {
+        var bytes = EmitScenario(scenario);
+
+        mountPoint = Path.Combine(Path.GetTempPath(), $"orgz-oracle-{scenario}-{Guid.NewGuid():N}");
         var dir = Path.Combine(mountPoint, "iPod_Control", "iTunes");
         Directory.CreateDirectory(dir);
         File.WriteAllBytes(Path.Combine(dir, "iTunesDB"), bytes);
