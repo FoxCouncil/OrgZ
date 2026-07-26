@@ -187,6 +187,55 @@ public class DeviceHelperInstallerTests
         Assert.Contains(DeviceHelperInstaller.LinuxUnit, DeviceHelperInstaller.LinuxUninstallScript(), StringComparison.Ordinal);
     }
 
+    // ── The install-time hook (PerMachine MSI) ────────────────
+
+    [Fact]
+    public void The_hook_registers_the_service_only_when_the_installer_is_already_elevated()
+    {
+        // The PerMachine MSI is elevated by construction, so the hook can just do it.
+        Assert.True(ServiceInstallHook.ShouldRegister(isWindows: true, isElevated: true));
+
+        // The per-user Setup.exe never elevates. Attempting sc create there only writes
+        // an access-denied error into the log of an install that actually succeeded, and
+        // that user keeps working exactly as they did before the service existed.
+        Assert.False(ServiceInstallHook.ShouldRegister(isWindows: true, isElevated: false));
+
+        // Velopack only fires these callbacks on Windows; the platform check is belt and braces.
+        Assert.False(ServiceInstallHook.ShouldRegister(isWindows: false, isElevated: true));
+        Assert.False(ServiceInstallHook.ShouldRegister(isWindows: false, isElevated: false));
+    }
+
+    [Fact]
+    public void The_hook_reuses_the_same_commands_the_manual_install_uses()
+    {
+        // One definition of "how OrgZ registers its service", not two that drift - the
+        // difference between the paths is only whether they raise UAC to run it.
+        var args = DeviceHelperInstaller.WindowsInstallArguments(@"C:\Program Files\FoxCouncil\OrgZ\OrgZ.exe");
+
+        Assert.Contains("sc create OrgZDeviceHelper", args, StringComparison.Ordinal);
+        Assert.Contains("--device-helper", args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_hook_gives_up_well_inside_velopacks_kill_timer()
+    {
+        // Velopack terminates the after-install callback at 30 s and the before-uninstall
+        // callback at 30 s. A half-run sc chain is worse than none, so the hook must stop
+        // with room to log rather than be killed mid-command.
+        Assert.True(DeviceHelperInstaller.HookTimeout < TimeSpan.FromSeconds(30), $"{DeviceHelperInstaller.HookTimeout} leaves no margin");
+        Assert.True(DeviceHelperInstaller.HookTimeout >= TimeSpan.FromSeconds(10), "too tight for sc create + start on a slow machine");
+    }
+
+    [Fact]
+    public void Uninstalling_orgz_takes_the_service_with_it()
+    {
+        // A LocalSystem service left pointing at a deleted executable fails to start
+        // forever and sits in services.msc as litter the user can't explain.
+        var args = DeviceHelperInstaller.WindowsUninstallArguments();
+
+        Assert.Contains("sc delete OrgZDeviceHelper", args, StringComparison.Ordinal);
+    }
+
     // ── Reading the state back ────────────────────────────────
 
     [Fact]

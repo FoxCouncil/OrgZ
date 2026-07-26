@@ -34,8 +34,10 @@ end to end, libvlc included), and a background service hosting the privileged wo
    without uninstalling, which matters because a running one holds `OrgZ.exe` open and fails
    the next rebuild. The install commands themselves are finally under test — but a test
    asserting an `sc create` string is not a service that started, so this stays open.
-   As of 0.9.21 the card is Debug-only, so this is now a *development* exercise: shipping
-   users get the per-op UAC path until the Velopack installer offers the service (see below).
+   As of 0.9.21 the card is Debug-only and 0.9.22 moved the shipping install into the
+   PerMachine MSI, so the thing to exercise is now the MSI itself: install from it, confirm
+   the service appears and starts, burn something and expect no UAC, then uninstall and
+   confirm the service is gone. That also settles the open `Update.exe`/Program Files question.
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
@@ -126,11 +128,21 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   lifecycle buttons past that point can only strand them somewhere broken, like installed-but-
   stopped wondering why burning started prompting again. The installer code stays compiled
   (the pre-commit suite runs in Release and its tests must build), just unreachable from the UI.
-- **CONSEQUENCE, open**: no Release path installs the service any more, so shipping users are
-  on the per-op UAC path unconditionally. The service needs an install route that isn't a
-  Settings button before any of the "elevation, once" work reaches a user - the natural home
-  is the Velopack installer offering it as a checkbox, the way iTunes installs
-  AppleMobileDeviceService. Until then the service is a development and testing feature.
+- **Installed with the app — SHIPPED 0.9.22**: Windows now packs a PerMachine MSI alongside
+  Setup.exe (`vpk pack --msi --instLocation PerMachine`), and OrgZ's Velopack after-install
+  hook registers the background service from inside it. No button to find and no second
+  prompt: the MSI installs to Program Files under HKLM and is elevated by construction, so
+  the hook's `sc create` just works. `OnBeforeUninstallFastCallback` removes the service
+  again, so uninstalling OrgZ can't leave a LocalSystem service pointing at a deleted exe.
+  Velopack's *default* Setup.exe is per-user into `%LocalAppData%` and deliberately never
+  elevates - the hook detects that and declines silently, leaving those users on the per-op
+  UAC path exactly as before. (Velopack's Setup.exe cannot show a checkbox or a wizard by
+  design; velopack/velopack#30 requests exactly this and is open. The MSI is the supported
+  route to an elevated install.)
+  UNVERIFIED: whether `Update.exe` can auto-update a PerMachine install without elevation -
+  it writes into Program Files, which a non-elevated process cannot do. The docs say updates
+  "work identically" but don't address elevation. Settle this on a real install before
+  treating the MSI as the primary Windows download.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 - **The gate and the wire — TESTED 0.9.20**: the peer-credential policy is now a pure
   function (`IsPeerAllowed`) with the fail-closed rule pinned — an unreadable "who are you"

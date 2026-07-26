@@ -253,6 +253,78 @@ public static class DeviceHelperInstaller
         }
     }
 
+    // ── Already-elevated paths (the PerMachine MSI's install hooks) ───────
+
+    /// <summary>
+    /// How long an install hook may take before we give up. Velopack terminates the
+    /// after-install callback at 30 s and the before-uninstall callback at 30 s, and a
+    /// half-run <c>sc</c> chain is worse than none - so stop well inside that.
+    /// </summary>
+    internal static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Registers the service from a process that ALREADY holds administrator rights -
+    /// the PerMachine MSI's post-install hook. Same commands as <see cref="InstallAsync"/>
+    /// but run directly rather than through a "runas" ShellExecute: raising UAC inside an
+    /// installer that the user already elevated would be a second prompt for nothing, and
+    /// a prompt is not something a fast callback can wait on anyway.
+    /// </summary>
+    public static Task<InstallResult> InstallElevatedAsync()
+        => RunShellAsync(WindowsInstallArguments(ExePath));
+
+    /// <summary>
+    /// Removes the service from an already-elevated uninstaller. Uninstalling OrgZ must
+    /// never leave a LocalSystem service behind pointing at an executable that no longer
+    /// exists - it would fail to start forever and sit in services.msc as litter.
+    /// </summary>
+    public static Task<InstallResult> UninstallElevatedAsync()
+        => RunShellAsync(WindowsUninstallArguments());
+
+    private static async Task<InstallResult> RunShellAsync(string arguments)
+    {
+        // cmd.exe with a chained command line: ArgumentList would quote the '&&' chain
+        // into a single literal argument, so this is one of the rare correct uses of
+        // ProcessStartInfo.Arguments.
+        var psi = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        try
+        {
+            using var p = Process.Start(psi);
+            if (p == null)
+            {
+                return new(false, "failed to start cmd.exe");
+            }
+
+            using var cts = new CancellationTokenSource(HookTimeout);
+            try
+            {
+                await p.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return new(false, $"timed out after {HookTimeout.TotalSeconds:0}s");
+            }
+
+            var stdout = await p.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var stderr = await p.StandardError.ReadToEndAsync(CancellationToken.None);
+            _log.Information("service command exited {Code}: {Out} {Err}", p.ExitCode, stdout.Trim(), stderr.Trim());
+
+            return p.ExitCode == 0 ? new(true, "ok") : new(false, $"exited {p.ExitCode}: {stderr.Trim()}{stdout.Trim()}");
+        }
+        catch (Exception ex)
+        {
+            return new(false, ex.Message);
+        }
+    }
+
     // ── State ─────────────────────────────────────────────────
 
     /// <summary>

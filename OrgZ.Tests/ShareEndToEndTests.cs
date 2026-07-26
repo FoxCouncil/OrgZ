@@ -46,7 +46,11 @@ public sealed class ShareEndToEndTests : IDisposable
 
     // ── Rig ───────────────────────────────────────────────────
 
-    /// <summary>An ephemeral port the OS just told us is free.</summary>
+    /// <summary>
+    /// A port the OS just told us was free. Inherently racy - HttpListener can't bind
+    /// port 0, so we have to probe, release, and rebind, and anything on the machine can
+    /// take it in between. <see cref="Host"/> retries rather than pretending otherwise.
+    /// </summary>
     private static int FreePort()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);
@@ -112,15 +116,32 @@ public sealed class ShareEndToEndTests : IDisposable
         Duration = TimeSpan.FromSeconds(2),
     };
 
-    /// <summary>Brings a share up on loopback (no mDNS) and hands back its base URL.</summary>
+    /// <summary>
+    /// Brings a share up on loopback (no mDNS) and hands back its base URL. Retries on a
+    /// lost port race: this suite stands up a dozen listeners and the machine is running
+    /// other things, so "the port I was promised got taken" is a normal event, not a
+    /// product failure - and a test that fails for that reason teaches nothing.
+    /// </summary>
     private (LibraryShareServer Server, DiscoveredShare Share) Host(params MediaItem[] library)
     {
-        var port = FreePort();
-        var server = new LibraryShareServer("Test Library", port, () => [.. library]);
-        server.Start(advertise: false);
-        _servers.Add(server);
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = FreePort();
+            var server = new LibraryShareServer("Test Library", port, () => [.. library]);
 
-        return (server, new DiscoveredShare("Test Library", "localhost", port, "127.0.0.1"));
+            try
+            {
+                server.Start(advertise: false);
+            }
+            catch (HttpListenerException) when (attempt < 5)
+            {
+                server.Dispose();
+                continue;
+            }
+
+            _servers.Add(server);
+            return (server, new DiscoveredShare("Test Library", "localhost", port, "127.0.0.1"));
+        }
     }
 
     // ── Verification: the whole client journey ────────────────
@@ -268,7 +289,10 @@ public sealed class ShareEndToEndTests : IDisposable
         using var vlc = new LibVLCSharp.Shared.LibVLC("--no-video", "--quiet");
         using var media = new LibVLCSharp.Shared.Media(vlc, $"{share.BaseUrl}/stream/t1.wav", LibVLCSharp.Shared.FromType.FromLocation);
 
-        var status = await media.Parse(LibVLCSharp.Shared.MediaParseOptions.ParseNetwork, timeout: 10_000, cancellationToken: Ct);
+        // Generous on purpose: this is a real decoder opening a real socket, and the
+        // suite runs on build machines under load. A tight timeout here would fail for
+        // being busy rather than for being broken.
+        var status = await media.Parse(LibVLCSharp.Shared.MediaParseOptions.ParseNetwork, timeout: 30_000, cancellationToken: Ct);
 
         Assert.Equal(LibVLCSharp.Shared.MediaParsedStatus.Done, status);
 

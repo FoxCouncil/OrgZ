@@ -72,12 +72,18 @@ jobs:
 
       - name: Pack with Velopack
         shell: bash
+        # Windows ships BOTH installers. Setup.exe is the per-user one-click install into
+        # %LocalAppData% that never elevates. The MSI (--instLocation PerMachine) installs
+        # to Program Files under HKLM and IS elevated, which is the only way OrgZ's
+        # after-install hook can register the LocalSystem background service - so the MSI
+        # is the install that gets silent disc/iPod access, and Setup.exe users stay on
+        # the per-operation UAC path. See Services/DeviceHelper/ServiceInstallHook.cs.
         run: |
-          ICON_FLAG=""
+          WIN_FLAGS=""
           if [[ "${{ matrix.rid }}" == win-* ]]; then
-            ICON_FLAG="--icon Assets/app.ico"
+            WIN_FLAGS="--icon Assets/app.ico --msi --instLocation PerMachine"
           fi
-          vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $ICON_FLAG
+          vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $WIN_FLAGS
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

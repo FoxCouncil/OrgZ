@@ -106,7 +106,16 @@ internal class Program
                 return 0;
             }
 
-            VelopackApp.Build().Run();
+            // The PerMachine MSI runs elevated, so its install hook can register the
+            // background service outright - no button to find, no second prompt. The
+            // per-user Setup.exe never elevates and the hook declines quietly there,
+            // leaving that user on the per-operation UAC path. Both callbacks are
+            // Windows-only in Velopack and both are hard-capped (30 s) before it
+            // terminates them, which is why they do one `sc` chain and nothing else.
+            VelopackApp.Build()
+                .OnAfterInstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnInstall())
+                .OnBeforeUninstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnUninstall())
+                .Run();
 
 #if WINDOWS
             SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");

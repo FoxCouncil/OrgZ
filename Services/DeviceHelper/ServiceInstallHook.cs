@@ -1,0 +1,102 @@
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
+
+using Serilog;
+
+namespace OrgZ.Services.DeviceHelper;
+
+/// <summary>
+/// Registers (and removes) the background service as part of installing OrgZ itself, so a
+/// user never has to find a button for it.
+///
+/// The route is Velopack's PerMachine MSI. The default Setup.exe installs per-user into
+/// %LocalAppData% and deliberately never elevates, which means <c>sc create</c> from its
+/// hook would die on access denied; the MSI built with <c>--instLocation PerMachine</c>
+/// installs to Program Files under HKLM and is elevated by construction, so the hook can
+/// register a LocalSystem service with no interaction beyond the one UAC the installer
+/// already raised.
+///
+/// Both installers ship. When OrgZ is installed the per-user way this hook declines
+/// quietly and that user simply keeps the per-operation UAC path - the same experience
+/// they had before the service existed. A failed registration must never fail the
+/// install: the app works either way, and the difference is only how often Windows asks.
+/// </summary>
+public static class ServiceInstallHook
+{
+    private static readonly ILogger _log = Logging.For("ServiceInstallHook");
+
+    /// <summary>
+    /// Whether the install hook should register the service.
+    ///
+    /// Velopack only fires these callbacks on Windows, so the platform check is belt and
+    /// braces. Elevation is the real gate: without it every <c>sc</c> command fails, and
+    /// attempting anyway would put an access-denied error in the log of an install that
+    /// actually succeeded.
+    /// </summary>
+    internal static bool ShouldRegister(bool isWindows, bool isElevated) => isWindows && isElevated;
+
+    /// <summary>True when this process can create a Windows service - i.e. is running as administrator.</summary>
+    internal static bool IsElevated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Could not determine elevation");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Velopack's after-install callback. Never throws: this runs inside the installer,
+    /// and an exception escaping here would surface as a failed installation of an app
+    /// that installed perfectly well.
+    /// </summary>
+    public static void OnInstall()
+    {
+        Run("install", static () => DeviceHelperInstaller.InstallElevatedAsync());
+    }
+
+    /// <summary>
+    /// Velopack's before-uninstall callback. Removing OrgZ must not leave a LocalSystem
+    /// service behind pointing at an executable that is about to be deleted.
+    /// </summary>
+    public static void OnUninstall()
+    {
+        Run("uninstall", static () => DeviceHelperInstaller.UninstallElevatedAsync());
+    }
+
+    private static void Run(string what, Func<Task<DeviceHelperInstaller.InstallResult>> action)
+    {
+        try
+        {
+            if (!ShouldRegister(OperatingSystem.IsWindows(), IsElevated()))
+            {
+                _log.Information("Skipping service {What}: installer is not elevated (per-user install)", what);
+                return;
+            }
+
+            var result = action().GetAwaiter().GetResult();
+            if (result.Ok)
+            {
+                _log.Information("Background service {What} succeeded during app {What}", what, what);
+            }
+            else
+            {
+                _log.Warning("Background service {What} failed during app {What}: {Detail}", what, what, result.Detail);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Background service {What} threw during app {What}", what, what);
+        }
+    }
+}
