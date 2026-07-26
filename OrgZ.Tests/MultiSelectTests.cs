@@ -88,6 +88,48 @@ public class MultiSelectTests
         Assert.Equal(new[] { a, b }, payload);
     }
 
+    // ── What the drag ghost says ──────────────────────────────
+
+    private static MediaItem Song(string title, string? artist = null, string? fileName = null)
+        => new() { Id = title, Kind = MediaKind.Music, Title = title, Artist = artist, FileName = fileName };
+
+    [Fact]
+    public void One_track_reads_as_itself()
+    {
+        Assert.Equal("Stop — Spice Girls", Views.MainWindow.DragGhostLabel([Song("Stop", "Spice Girls")]));
+    }
+
+    [Fact]
+    public void Several_tracks_read_as_a_count()
+    {
+        // Five titles stacked under the cursor is unreadable at pointer size; the number
+        // is what you check before letting go.
+        Assert.Equal("5 tracks", Views.MainWindow.DragGhostLabel([Song("a"), Song("b"), Song("c"), Song("d"), Song("e")]));
+        Assert.Equal("2 tracks", Views.MainWindow.DragGhostLabel([Song("a"), Song("b")]));
+    }
+
+    [Fact]
+    public void A_track_missing_metadata_still_says_something_useful()
+    {
+        Assert.Equal("Untitled", Views.MainWindow.DragGhostLabel([Song("Untitled")]));                       // no artist
+        Assert.Equal("track.mp3", Views.MainWindow.DragGhostLabel([Song(null!, "An Artist", "track.mp3")])); // no title
+        Assert.Equal("1 track", Views.MainWindow.DragGhostLabel([Song(null!)]));                             // nothing at all
+    }
+
+    [Fact]
+    public void Whitespace_metadata_is_treated_as_absent_not_rendered()
+    {
+        // A blank artist tag must not produce a dangling "Title — ".
+        Assert.Equal("Stop", Views.MainWindow.DragGhostLabel([Song("Stop", "   ")]));
+        Assert.Equal("fallback.mp3", Views.MainWindow.DragGhostLabel([Song("  ", "Someone", "fallback.mp3")]));
+    }
+
+    [Fact]
+    public void An_empty_drag_has_no_label()
+    {
+        Assert.Equal("", Views.MainWindow.DragGhostLabel([]));
+    }
+
     [Fact]
     public void Click_order_is_rewritten_to_view_order()
     {

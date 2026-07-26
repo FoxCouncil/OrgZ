@@ -73,6 +73,16 @@ a drag, the live selection was one row. The selection is now captured at press t
 last moment it's intact), the payload resolves against that, and the highlight is
 re-applied when the drag starts so every dragged row stays lit.
 
+**Drag ghost, 0.9.24:** the ghost used to name a single track and appear only for row
+reorders, because its overlay adorned MainDataGrid and couldn't paint anywhere else. It
+now adorns the window and follows the pointer over the sidebar too, shows on EVERY drag
+(playlist, device, external app - not just reorders), and reads the payload: one track by
+name, several as "N tracks". The insertion line stays reorder-only - it answers "the drop
+lands here", which is a question only a reorder asks - so leaving the grid retires the
+line but keeps the ghost.
+Still open: no per-row thumbnails in the ghost (a stack of album art, iTunes-style), and
+the ghost is window-bound, so dragging out to Explorer loses it at the window edge.
+
 Extended selection in all three grids; every verb operates on the view-ordered selection
 (play next, queue, favorite, add-to-playlist, remove-from-playlist/library/device, restore,
 burn, drag to playlists/devices/external apps); selection-aware menu entries show "(N)".

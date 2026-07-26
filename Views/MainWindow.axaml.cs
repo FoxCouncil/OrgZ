@@ -86,7 +86,15 @@ public partial class MainWindow : Window
         DragDrop.SetAllowDrop(MainDataGrid, true);
         MainDataGrid.AddHandler(DragDrop.DragOverEvent, MainDataGrid_DragOver);
         MainDataGrid.AddHandler(DragDrop.DropEvent, MainDataGrid_Drop);
-        MainDataGrid.AddHandler(DragDrop.DragLeaveEvent, (_, _) => HideDragVisuals());
+        // Leaving the grid retires the insertion line but NOT the ghost - the pointer is
+        // usually on its way to a sidebar playlist or device, where the ghost is the only
+        // feedback there is.
+        MainDataGrid.AddHandler(DragDrop.DragLeaveEvent, (_, _) => HideDropLine());
+
+        // The ghost follows the pointer anywhere in the window, so it's driven from the
+        // window (tunnel, so a handled DragOver deeper in the tree can't stop it).
+        AddHandler(DragDrop.DragOverEvent, (_, e) => UpdateDragGhost(e), RoutingStrategies.Tunnel);
+        AddHandler(DragDrop.DropEvent, (_, _) => HideDragVisuals(), RoutingStrategies.Tunnel);
 
         // Column-header context menu: right-click any header → toggle columns + persist.
         // Wired at the tunneling stage so the DataGrid doesn't eat the event first.
@@ -1684,11 +1692,9 @@ public partial class MainWindow : Window
         var data = new DataTransfer();
         data.Add(DataTransferItem.Create(Sidebar.MediaItemDragFormat, "media"));
 
-        bool reorderDrag = false;
         if (_viewModel.ActivePlaylistId.HasValue && _gridDragRowIndex >= 0)
         {
             data.Add(DataTransferItem.Create(PlaylistRowDragFormat, "row"));
-            reorderDrag = true;
         }
         else if (_gridDragRowIndex >= 0 && _viewModel.ActiveReorderableDevice != null
                  && _gridDragRowIndex < _viewModel.FilteredItems.Count && ReferenceEquals(_viewModel.FilteredItems[_gridDragRowIndex], DraggedMediaItem))
@@ -1698,13 +1704,12 @@ public partial class MainWindow : Window
             // row-identity check catches (the pressed row's item must sit at that same index in
             // FilteredItems).
             data.Add(DataTransferItem.Create(DeviceRowDragFormat, "row"));
-            reorderDrag = true;
         }
 
-        if (reorderDrag && _gridDragItem != null)
-        {
-            BeginDragVisuals(_gridDragItem);
-        }
+        // Every drag gets a ghost now - to a playlist, to a device, out to Explorer - not
+        // just row reorders. The insertion line stays reorder-only below, because it means
+        // "the drop lands HERE", which is a question only a reorder asks.
+        BeginDragVisuals(DraggedMediaItems);
 
         // Include the actual files so external apps (Telegram, Explorer, etc.) receive
         // the whole dragged selection as a file drop.
@@ -1786,6 +1791,7 @@ public partial class MainWindow : Window
     // MOVES - holding still at an edge must keep scrolling).
 
     private Canvas? _dragOverlay;
+    private Control? _dragOverlayHost;
     private Border? _dropLine;
     private Border? _dragGhost;
     private TextBlock? _dragGhostText;
@@ -1819,21 +1825,75 @@ public partial class MainWindow : Window
         _dragOverlay.Children.Add(_dropLine);
         _dragOverlay.Children.Add(_dragGhost);
 
-        var layer = Avalonia.Controls.Primitives.AdornerLayer.GetAdornerLayer(MainDataGrid);
+        // Adorn the WINDOW, not the grid. The ghost has to follow the pointer onto the
+        // sidebar (dropping on a playlist or a device) and out past the window edge, and
+        // an adorner scoped to MainDataGrid can only paint over the grid.
+        _dragOverlayHost = _dragOverlayHost ?? (Control?)this.GetVisualChildren().OfType<Control>().FirstOrDefault() ?? MainDataGrid;
+        var layer = Avalonia.Controls.Primitives.AdornerLayer.GetAdornerLayer(_dragOverlayHost);
         if (layer != null)
         {
-            Avalonia.Controls.Primitives.AdornerLayer.SetAdornedElement(_dragOverlay, MainDataGrid);
+            Avalonia.Controls.Primitives.AdornerLayer.SetAdornedElement(_dragOverlay, _dragOverlayHost);
             layer.Children.Add(_dragOverlay);
         }
     }
 
-    private void BeginDragVisuals(MediaItem item)
+    /// <summary>
+    /// The label riding under the cursor. One track reads as itself; several read as a
+    /// count, because five titles stacked up is unreadable at pointer size and the number
+    /// is the thing you actually need to confirm before letting go.
+    /// </summary>
+    internal static string DragGhostLabel(IReadOnlyList<MediaItem> items)
+    {
+        if (items.Count == 0)
+        {
+            return "";
+        }
+
+        if (items.Count > 1)
+        {
+            return $"{items.Count} tracks";
+        }
+
+        // Blank-but-present tags are common in real libraries, so whitespace counts as
+        // absent throughout - otherwise a track tagged with spaces renders as a dangling
+        // "Title — " or as an empty ghost.
+        var item = items[0];
+        var title = string.IsNullOrWhiteSpace(item.Title) ? null : item.Title;
+        var artist = string.IsNullOrWhiteSpace(item.Artist) ? null : item.Artist;
+        var fileName = string.IsNullOrWhiteSpace(item.FileName) ? null : item.FileName;
+
+        if (title != null && artist != null)
+        {
+            return $"{title} — {artist}";
+        }
+
+        return title ?? fileName ?? "1 track";
+    }
+
+    private void BeginDragVisuals(IReadOnlyList<MediaItem> items)
     {
         EnsureDragOverlay();
         if (_dragGhostText != null)
         {
-            _dragGhostText.Text = string.IsNullOrWhiteSpace(item.Artist) ? item.Title ?? item.FileName ?? "1 track" : $"{item.Title} — {item.Artist}";
+            _dragGhostText.Text = DragGhostLabel(items);
         }
+    }
+
+    /// <summary>
+    /// Moves the ghost to follow the pointer. Called for EVERY drag, from the window, so
+    /// it keeps up over the sidebar as well as the grid.
+    /// </summary>
+    private void UpdateDragGhost(DragEventArgs e)
+    {
+        if (_dragGhost == null || _dragOverlayHost == null || DraggedMediaItems.Count == 0)
+        {
+            return;
+        }
+
+        var pos = e.GetPosition(_dragOverlayHost);
+        Canvas.SetLeft(_dragGhost, pos.X + 14);
+        Canvas.SetTop(_dragGhost, pos.Y + 12);
+        _dragGhost.IsVisible = true;
     }
 
     private void UpdateDragVisuals(DragEventArgs e)
@@ -1841,20 +1901,19 @@ public partial class MainWindow : Window
         var pos = e.GetPosition(MainDataGrid);
         _lastDragPos = pos;
 
-        if (_dragGhost != null)
-        {
-            Canvas.SetLeft(_dragGhost, pos.X + 14);
-            Canvas.SetTop(_dragGhost, pos.Y + 12);
-            _dragGhost.IsVisible = true;
-        }
+        UpdateDragGhost(e);
+
+        // The insertion line is drawn in the window-wide overlay, so grid coordinates have
+        // to be translated up into it.
+        var gridOrigin = _dragOverlayHost != null ? MainDataGrid.TranslatePoint(new Point(0, 0), _dragOverlayHost) ?? new Point(0, 0) : new Point(0, 0);
 
         var row = (e.Source as Visual)?.FindAncestorOfType<DataGridRow>();
         if (row != null && _dropLine != null && row.TranslatePoint(new Point(0, 0), MainDataGrid) is { } rowTop)
         {
             bool before = e.GetPosition(row).Y < row.Bounds.Height / 2;
             _dropLine.Width = MainDataGrid.Bounds.Width;
-            Canvas.SetLeft(_dropLine, 0);
-            Canvas.SetTop(_dropLine, Math.Max(0, rowTop.Y + (before ? 0 : row.Bounds.Height) - 1));
+            Canvas.SetLeft(_dropLine, gridOrigin.X);
+            Canvas.SetTop(_dropLine, gridOrigin.Y + Math.Max(0, rowTop.Y + (before ? 0 : row.Bounds.Height) - 1));
             _dropLine.IsVisible = true;
         }
         else if (_dropLine != null)
@@ -1887,13 +1946,19 @@ public partial class MainWindow : Window
         _dragScrollTimer.Start();
     }
 
-    private void HideDragVisuals()
+    /// <summary>Retires the insertion line (and its auto-scroll) but leaves the ghost alone.</summary>
+    private void HideDropLine()
     {
         _dragScrollTimer?.Stop();
         if (_dropLine != null)
         {
             _dropLine.IsVisible = false;
         }
+    }
+
+    private void HideDragVisuals()
+    {
+        HideDropLine();
         if (_dragGhost != null)
         {
             _dragGhost.IsVisible = false;
