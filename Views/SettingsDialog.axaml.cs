@@ -84,12 +84,12 @@ public partial class SettingsDialog : Window
         ServiceKeepSharingCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Sharing", false);
 
         // Hidden in Release - and don't probe the service either, since nothing would
-        // read the answer.
+        // read the answer. The probe is #if'd rather than guarded on the const so the
+        // Release compile doesn't warn about code it can prove unreachable.
         ServiceLifecycleCard.IsVisible = ShowServiceLifecycle;
-        if (ShowServiceLifecycle)
-        {
-            _ = RefreshServiceStatusAsync();
-        }
+#if DEBUG
+        _ = RefreshServiceStatusAsync();
+#endif
 
         BurnDataFormatCombo.SelectedIndex = Settings.Get("OrgZ.Burn.DataFormat", "original") switch
         {
