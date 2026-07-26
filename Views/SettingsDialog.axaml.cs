@@ -82,7 +82,14 @@ public partial class SettingsDialog : Window
         ServiceKeepBurningCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Burning", false);
         ServiceKeepSyncCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false);
         ServiceKeepSharingCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Sharing", false);
-        _ = RefreshServiceStatusAsync();
+
+        // Hidden in Release - and don't probe the service either, since nothing would
+        // read the answer.
+        ServiceLifecycleCard.IsVisible = ShowServiceLifecycle;
+        if (ShowServiceLifecycle)
+        {
+            _ = RefreshServiceStatusAsync();
+        }
 
         BurnDataFormatCombo.SelectedIndex = Settings.Get("OrgZ.Burn.DataFormat", "original") switch
         {
@@ -639,6 +646,24 @@ public partial class SettingsDialog : Window
     }
 
     // ── Services tab ─────────────────────────────────────────
+
+    /// <summary>
+    /// Whether the background-service card appears at all. Development only: a shipping
+    /// user makes one choice - run OrgZ standalone (each privileged disc operation asks
+    /// for UAC) or with the service installed (asked once, then silent) - and lifecycle
+    /// buttons past that point can only put them somewhere broken, like installed-but-
+    /// stopped with no idea why burning started prompting again.
+    ///
+    /// The installer code itself stays compiled rather than being #if'd out: the
+    /// pre-commit suite runs in Release, and <c>DeviceHelperInstallerTests</c> has to
+    /// build there. It is simply unreachable in a Release UI.
+    /// </summary>
+    internal const bool ShowServiceLifecycle =
+#if DEBUG
+        true;
+#else
+        false;
+#endif
 
     /// <summary>Which of the four service buttons a given state allows.</summary>
     internal readonly record struct ServiceButtons(bool Install, bool Start, bool Stop, bool Uninstall);

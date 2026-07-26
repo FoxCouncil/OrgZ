@@ -285,6 +285,30 @@ public class DeviceHelperInstallerTests
     }
 
     [Fact]
+    public void The_lifecycle_card_ships_only_in_development_builds()
+    {
+        // A shipping user makes one choice - standalone (per-op UAC) or installed
+        // (asked once, then silent). Start/Stop/Uninstall past that point can only put
+        // them somewhere broken. The pre-commit suite runs in Release, so this assertion
+        // is what actually holds the shipped state - not a comment saying it should.
+#if DEBUG
+        Assert.True(SettingsDialog.ShowServiceLifecycle);
+#else
+        Assert.False(SettingsDialog.ShowServiceLifecycle);
+#endif
+    }
+
+    [Fact]
+    public void The_installer_stays_reachable_to_code_even_when_the_card_is_hidden()
+    {
+        // Not #if'd out of the build: these tests run in Release, and a future installer
+        // (Velopack post-install, a CLI switch) will want the same commands.
+        Assert.NotEmpty(DeviceHelperInstaller.WindowsInstallArguments(@"C:\OrgZ\OrgZ.exe"));
+        Assert.NotEmpty(DeviceHelperInstaller.LinuxUnitFile("/opt/orgz/OrgZ", 1000));
+        Assert.NotEmpty(DeviceHelperInstaller.MacPlist("/Applications/OrgZ", "/Users/fox/.dotnet", 501));
+    }
+
+    [Fact]
     public void The_status_line_never_contradicts_a_helper_that_is_plainly_answering()
     {
         // A developer running `OrgZ --device-helper` by hand with nothing installed: the

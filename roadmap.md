@@ -34,6 +34,8 @@ end to end, libvlc included), and a background service hosting the privileged wo
    without uninstalling, which matters because a running one holds `OrgZ.exe` open and fails
    the next rebuild. The install commands themselves are finally under test — but a test
    asserting an `sc create` string is not a service that started, so this stays open.
+   As of 0.9.21 the card is Debug-only, so this is now a *development* exercise: shipping
+   users get the per-op UAC path until the Velopack installer offers the service (see below).
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
@@ -109,7 +111,7 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   Reattach shipped 0.9.14: a "jobs" op reports in-flight work (kind, progress file, target)
   and the GUI follows it at startup, so relaunching mid-burn picks the LCD back up instead of
   showing an idle window over a live operation.
-- **Lifecycle from the app — SHIPPED 0.9.19**: Settings > Services now reads three states
+- **Lifecycle from the app — SHIPPED 0.9.19, DEBUG-ONLY as of 0.9.21**: Settings > Services reads three states
   (Not installed / Installed, stopped / Installed and running) and offers Start and Stop
   beside Install and Uninstall. Stopped is a real place to be, and the reason is development:
   a running service holds `OrgZ.exe` open and fails the next build, so uninstall-reinstall
@@ -119,6 +121,16 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   LaunchDaemon plist, the systemd unit — is now a pure function under test
   (`DeviceHelperInstallerTests`), which it wasn't before: this code registers a root daemon
   that issues raw SCSI, and a typo in it is a broken install found by a user under a UAC prompt.
+  The card is hidden in Release builds (0.9.21): a user makes one choice - standalone, where
+  each privileged disc operation asks for UAC, or installed, asked once and then silent - and
+  lifecycle buttons past that point can only strand them somewhere broken, like installed-but-
+  stopped wondering why burning started prompting again. The installer code stays compiled
+  (the pre-commit suite runs in Release and its tests must build), just unreachable from the UI.
+- **CONSEQUENCE, open**: no Release path installs the service any more, so shipping users are
+  on the per-op UAC path unconditionally. The service needs an install route that isn't a
+  Settings button before any of the "elevation, once" work reaches a user - the natural home
+  is the Velopack installer offering it as a checkbox, the way iTunes installs
+  AppleMobileDeviceService. Until then the service is a development and testing feature.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 - **The gate and the wire — TESTED 0.9.20**: the peer-credential policy is now a pure
   function (`IsPeerAllowed`) with the fail-closed rule pinned — an unreadable "who are you"
