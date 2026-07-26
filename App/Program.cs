@@ -112,10 +112,19 @@ internal class Program
             // leaving that user on the per-operation UAC path. Both callbacks are
             // Windows-only in Velopack and both are hard-capped (30 s) before it
             // terminates them, which is why they do one `sc` chain and nothing else.
-            VelopackApp.Build()
-                .OnAfterInstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnInstall())
-                .OnBeforeUninstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnUninstall())
-                .Run();
+            var velopack = VelopackApp.Build();
+#if WINDOWS
+            // #if keeps the callbacks out of the linux/osx publishes entirely; the runtime
+            // check is what the platform analyzer reads, since the TFM is plain net10.0
+            // and Velopack marks these hooks [SupportedOSPlatform("windows")].
+            if (OperatingSystem.IsWindows())
+            {
+                velopack = velopack
+                    .OnAfterInstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnInstall())
+                    .OnBeforeUninstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnUninstall());
+            }
+#endif
+            velopack.Run();
 
 #if WINDOWS
             SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
