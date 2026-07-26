@@ -51,8 +51,14 @@ end to end, libvlc included), and a background service hosting the privileged wo
      an AppImage has NO dependency mechanism - Velopack ships Linux as a single
      self-contained file - so "apt install flac lame" isn't something we can express and
      isn't something a user should have to work out.
-   - osx-arm64: ffmpeg 7.1 built from ffmpeg.org source on build-mac (Apple clang 17),
-     LGPL-clean, with AudioToolbox alac/aac available alongside the native encoders.
+   - osx-arm64: ffmpeg 7.1 (LGPL-clean, AudioToolbox alac/aac alongside the native
+     encoders) plus flac + lame, all built on build-mac by `build-ffmpeg-mac.sh` and the new
+     `build-encoders-mac.sh`. macOS can't statically link libSystem, so "portable" here
+     means our own libs are static and the only dynamic deps are Apple's - verified with
+     `otool -L`. **Both scripts now pin `MACOSX_DEPLOYMENT_TARGET=11.0`** (Big Sur, the
+     first Apple-Silicon macOS): without it clang stamps the BUILD machine's OS, and the
+     first ffmpeg came out `minos 26.0` - it would have failed to launch for anyone not on
+     this year's macOS. Both scripts now assert the resulting minos rather than trust it.
    Everything was verified by USE, not by filename: flac does a byte-identical lossless
    round-trip, lame writes a real mp3, and ffmpeg does both the burn path (→ 44.1k/16/stereo
    pcm_s16le) and the iPod path (ALAC) on each platform. linux-x64 additionally passed a
