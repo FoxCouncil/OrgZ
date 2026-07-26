@@ -141,10 +141,15 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   still declines silently when it finds itself unelevated, which covers a portable or
   sideloaded copy. (Velopack's Setup.exe cannot show a checkbox or a wizard by design;
   velopack/velopack#30 requests exactly this and is open.)
-  UNVERIFIED: whether `Update.exe` can auto-update a PerMachine install without elevation -
-  it writes into Program Files, which a non-elevated process cannot do. The docs say updates
-  "work identically" but don't address elevation. Settle this on a real install before
-  treating the MSI as the primary Windows download.
+  AUTO-UPDATE: works, at the cost of one UAC prompt per update. `apply_windows_impl.rs`
+  tests `is_directory_writable(root)`; when it isn't (Program Files) and the process isn't
+  already elevated, it re-launches `Update.exe` via `run_process_as_admin` and waits up to
+  ten minutes for it. Velopack ships localised strings for that prompt ("needs administrator
+  permission to install version X"), and `update_uninstall_entry` keeps the MSI's
+  Add/Remove Programs entry correct across updates (it detects the `.msi-installed` marker).
+  So the trade is: UAC moves from *every disc/iPod operation* to *once per update*. Older
+  docs claiming privileged directories are unsupported are stale - the current text offers
+  PerMachine without that caveat, and the code backs it.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 - **The gate and the wire — TESTED 0.9.20**: the peer-credential policy is now a pure
   function (`IsPeerAllowed`) with the fail-closed rule pinned — an unreadable "who are you"
