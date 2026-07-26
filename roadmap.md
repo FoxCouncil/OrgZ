@@ -43,10 +43,14 @@ end to end, libvlc included), and a background service hosting the privileged wo
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
-3. linux-x64 / osx-arm64 encoders still unvendored, so those packages ship without them.
-   linux-x64 is now unblocked without a second machine: this dev box has WSL2 (Ubuntu, with
-   `tar`/`xz`/`curl`/`sha256sum`), which is all the `.tar.xz` needed. macOS still needs
-   `scripts/build-ffmpeg-mac.sh` run on the build-mac testbed.
+3. **linux-x64 ffmpeg is vendored and hashed** (done via WSL2 - Windows' bsdtar can't read the
+   `.tar.xz`, which is what had blocked it). Extracted, executed on Linux, and confirmed to
+   carry every codec OrgZ needs (aac, alac, flac, libmp3lame, pcm_s16le). REMAINING: the
+   staged `scripts/staged/ffmpeg-linux-x64` has to be uploaded to the `encoders-1` release -
+   Fox's action - before CI can fetch it. Note linux ripping still wants PATH `flac`/`lame`
+   binaries by design (RipEncoder shells out to them and already tells the user the apt
+   command); only ffmpeg is bundled. osx-arm64 still needs `scripts/build-ffmpeg-mac.sh` on
+   the build-mac testbed.
 
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
 build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).
