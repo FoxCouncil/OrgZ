@@ -49,10 +49,11 @@ end to end, libvlc included), and a background service hosting the privileged wo
    `scripts/build-encoders-linux.sh`. Static matters: an AppImage has NO dependency
    mechanism - Velopack ships Linux as a single self-contained file - so "apt install flac
    lame" isn't something we can express and isn't something a user should have to work out.
-   All three were executed on Linux and verified functionally, not just by filename: flac
-   does a byte-identical lossless round-trip, lame encodes, ffmpeg reports aac/alac/flac/
-   libmp3lame/pcm_s16le. REMAINING: upload the three staged files to the `encoders-1`
-   release (Fox's action) before CI can fetch them. osx-arm64 still needs
+   Uploaded to `encoders-1` and **verified cold end to end**: a clean `fetch-encoders.ps1
+   -Rid linux-x64` pulls all three from our release, every SHA-256 matches, and the fetched
+   copies then do real work on Linux - flac a byte-identical lossless round-trip, lame a
+   real mp3, ffmpeg both a 44.1k/16/stereo CD-audio transcode (the burn path) and an ALAC
+   encode (the iPod path). Linux is done. **Only osx-arm64 ffmpeg is left** - needs
    `scripts/build-ffmpeg-mac.sh` on the build-mac testbed.
 
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
