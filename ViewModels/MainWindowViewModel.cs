@@ -2012,6 +2012,48 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             ? $"https://foxcouncil.github.io/OrgZ/{v.Major}.{v.Minor}.{v.Build}/"
             : "https://foxcouncil.github.io/OrgZ/latest/";
 
+    // ── Updates (Help menu) ───────────────────────────────────
+
+    private readonly UpdateService _updates = new();
+
+    /// <summary>
+    /// The Help-menu entry's text: "Check for Updates..." until a newer release is known,
+    /// then "There are updates...". Nothing downloads or elevates until the user picks it.
+    /// </summary>
+    [ObservableProperty]
+    private string _updateMenuHeader = UpdateService.CheckLabel;
+
+    /// <summary>Quiet startup check - no download, no prompt, just the menu label.</summary>
+    internal async Task RefreshUpdateStatusAsync()
+    {
+        var available = await _updates.CheckAsync();
+        UI(() => UpdateMenuHeader = UpdateService.MenuLabel(available));
+    }
+
+    [RelayCommand]
+    private async Task CheckForUpdates()
+    {
+        // Already found one: the user picking the menu IS the go-ahead. Download, apply,
+        // restart - and let Windows raise its own consent dialog for the elevated write
+        // into Program Files, which is the only prompt in the whole flow.
+        if (_updates.PendingVersion is { } pending)
+        {
+            UpdateMainStatus($"Downloading OrgZ {pending}...");
+            if (await _updates.ApplyAsync() is { } error)
+            {
+                UpdateMainStatus($"Update failed: {error}");
+            }
+            return;
+        }
+
+        UpdateMainStatus("Checking for updates...");
+        var available = await _updates.CheckAsync();
+        UpdateMenuHeader = UpdateService.MenuLabel(available);
+        UpdateMainStatus(available
+            ? $"OrgZ {_updates.PendingVersion} is available - choose \"{UpdateService.AvailableLabel}\" to install it."
+            : "OrgZ is up to date.");
+    }
+
     [RelayCommand]
     private void OpenManual() => HtmlInlinesBuilder.OpenUrl(ManualUrl);
 

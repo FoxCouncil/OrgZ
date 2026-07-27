@@ -36,8 +36,14 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # PINNED, deliberately. A bare `dotnet tool install -g vpk` takes whatever is newest,
+      # and 1.2.0 shipped a bug where a quiet MSI install ignored --instLocation and landed
+      # in C:\{packId} instead of Program Files (velopack@b894097b, fixed 2026-07-01). That
+      # directory carries an Authenticated-Users Modify ACE, so the LocalSystem service
+      # binary became writable by any standard user - a local privilege escalation we found
+      # by installing the thing in a VM. Unpinned build tooling is how it reached us.
       - name: Install Velopack CLI
-        run: dotnet tool install -g vpk
+        run: dotnet tool install -g vpk --version 1.2.110-ge826545
 
       # Pull OUR vetted, SHA-256-pinned ffmpeg/flac/lame from the encoders release (see
       # scripts/encoders.json) into tools/<rid>/ so the publish step bundles them. Tools not yet
@@ -85,7 +91,10 @@ jobs:
         run: |
           WIN_FLAGS=""
           if [[ "${{ matrix.rid }}" == win-* ]]; then
-            WIN_FLAGS="--icon Assets/app.ico --msi --instLocation PerMachine"
+            # --runtime is NOT optional here: vpk warns "defaulting to x86" without it, and
+            # the WiX template picks [ProgramFiles64Folder] vs [ProgramFilesFolder] off
+            # exactly that. Getting it wrong installs a 64-bit app into Program Files (x86).
+            WIN_FLAGS="--icon Assets/app.ico --msi --instLocation PerMachine --runtime ${{ matrix.rid }} --packAuthors FoxCouncil --packTitle OrgZ"
           fi
           vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $WIN_FLAGS
 

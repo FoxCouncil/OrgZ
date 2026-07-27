@@ -28,18 +28,12 @@ end to end, libvlc included), and a background service hosting the privileged wo
   so a GUI-hosted share could never come up at all.
 
 **Open before v1 — highest risk first**
-1. **The background service has never been installed.** Five releases of work (0.9.3 host,
-   0.9.7 disc ops, 0.9.8 sync, 0.9.13 sharing toggle, 0.9.14 job reattach) is unit-tested but
-   has never run as a real Windows service. Install it from Settings > Services, then exercise
-   a burn (expect zero UAC), a sync, and a relaunch mid-job to see the LCD reattach.
-   Installing from a *dev* build is now survivable (0.9.19): Start/Stop park the service
-   without uninstalling, which matters because a running one holds `OrgZ.exe` open and fails
-   the next rebuild. The install commands themselves are finally under test — but a test
-   asserting an `sc create` string is not a service that started, so this stays open.
-   As of 0.9.21 the card is Debug-only and 0.9.22 moved the shipping install into the
-   PerMachine MSI, so the thing to exercise is now the MSI itself: install from it, confirm
-   the service appears and starts, burn something and expect no UAC, then uninstall and
-   confirm the service is gone. That also settles the open `Update.exe`/Program Files question.
+1. **A burn THROUGH the installed service, on metal.** The service itself is now installed
+   and asserted from a real MSI (0.9.25, see the service section) - registered as
+   LocalSystem, Running, Automatic, and fully removed on uninstall. What a VM can't test is
+   the disc half: Hyper-V passes through no USB optical drive, so burning via the service
+   (expect zero UAC), an iPod sync, and a mid-job relaunch for the LCD reattach all still
+   need Fox's machine. This is the last piece of the "elevation, once" story.
 2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
    mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
    where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
@@ -180,15 +174,23 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   still declines silently when it finds itself unelevated, which covers a portable or
   sideloaded copy. (Velopack's Setup.exe cannot show a checkbox or a wizard by design;
   velopack/velopack#30 requests exactly this and is open.)
-  AUTO-UPDATE: works, at the cost of one UAC prompt per update. `apply_windows_impl.rs`
-  tests `is_directory_writable(root)`; when it isn't (Program Files) and the process isn't
-  already elevated, it re-launches `Update.exe` via `run_process_as_admin` and waits up to
-  ten minutes for it. Velopack ships localised strings for that prompt ("needs administrator
-  permission to install version X"), and `update_uninstall_entry` keeps the MSI's
-  Add/Remove Programs entry correct across updates (it detects the `.msi-installed` marker).
-  So the trade is: UAC moves from *every disc/iPod operation* to *once per update*. Older
-  docs claiming privileged directories are unsupported are stale - the current text offers
-  PerMachine without that caveat, and the code backs it.
+  VERIFIED ON METAL (0.9.25), in a Hyper-V VM, against a CI-equivalent MSI: installs to
+  `C:\Program Files\OrgZ`, registers `OrgZDeviceHelper` as LocalSystem, Running, Automatic,
+  launching `OrgZ.exe --device-helper`; uninstall removes the service completely.
+  **Two pipeline bugs found by doing it rather than reading about it:**
+  - `vpk` was unpinned, so CI took 1.2.0 - which has a bug where a QUIET MSI install ignores
+    `--instLocation` and lands in `C:\{packId}` (fixed upstream in velopack@b894097b,
+    2026-07-01, released in 1.2.110). That directory carries an Authenticated-Users Modify
+    ACE, which made the LocalSystem service binary writable by any standard user: a local
+    privilege escalation. Pinning to 1.2.110 puts it in Program Files, where the binary is
+    `Users:(RX)` and TrustedInstaller-owned. Never leave build tooling unpinned.
+  - `--runtime` was missing, so vpk warned "defaulting to x86" - and the WiX template picks
+    `[ProgramFiles64Folder]` vs `[ProgramFilesFolder]` from exactly that.
+  AUTO-UPDATE: Program Files isn't user-writable, so `apply_windows_impl.rs` re-launches
+  `Update.exe` elevated - one UAC per update. That's the deliberate trade: UAC moves from
+  *every disc/iPod operation* to *once per update*, and Windows' own consent dialog doubles
+  as the "install this update?" confirmation. Older docs claiming privileged directories are
+  unsupported are stale.
 - IPC groundwork already proven on the Mac testbed (device-helper daemon + client).
 - **The gate and the wire — TESTED 0.9.20**: the peer-credential policy is now a pure
   function (`IsPeerAllowed`) with the fail-closed rule pinned — an unreadable "who are you"

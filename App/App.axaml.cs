@@ -47,7 +47,12 @@ public partial class App : Application
             }
         }
 
-        _ = Task.Run(CheckForUpdatesAsync);
+        // Quiet check only: it sets the Help-menu label and does nothing else. No download,
+        // no elevation, no prompt - the user starts the install when they choose to.
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime { MainWindow.DataContext: MainWindowViewModel vm })
+        {
+            _ = vm.RefreshUpdateStatusAsync();
+        }
 
         base.OnFrameworkInitializationCompleted();
     }
@@ -83,30 +88,10 @@ public partial class App : Application
         UpdateTitle(window);
     }
 
-    private static async Task CheckForUpdatesAsync()
-    {
-        try
-        {
-            var source = new GithubSource("https://github.com/FoxCouncil/OrgZ", null, false, null);
-            var mgr = new UpdateManager(source, null, null);
-
-            if (!mgr.IsInstalled)
-            {
-                return;
-            }
-
-            var update = await mgr.CheckForUpdatesAsync();
-
-            if (update != null)
-            {
-                await mgr.DownloadUpdatesAsync(update, null, default);
-            }
-        }
-        catch
-        {
-            // Update failures should never crash the app
-        }
-    }
+    // Update checking now lives in UpdateService, reached from the Help menu. This used to
+    // download in the background and let Velopack apply on a later start - which, once the
+    // app installs to Program Files, means an unexplained UAC prompt at some future launch.
+    // The check is quiet; the user decides when to install.
 
     private async void AboutMenuItem_Click(object? sender, EventArgs e)
     {
