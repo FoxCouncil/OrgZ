@@ -121,12 +121,6 @@
 		<PackageReference Include="FoxOrangebook" Version="1.0.0-alpha.11" />
 	</ItemGroup>
 
-	<!-- Strip runtime-specific native payloads we never load on the current OS.
-	     dotnet build emits every RID a referenced package supports - ~500 MB of
-	     Windows + Linux + musl + wasm + maccatalyst variants we'll never touch
-	     on a macOS dev box, and vice versa. The strip is per-host (each OS keeps
-	     its own runtimes and the shared "unix" bucket) and runs after every
-	     build, so `bin/Debug` doesn't bloat to 600 MB every session. -->
 	<!-- Drop the libvlc plugin categories a MUSIC player never loads.
 	     Measured cost: `new LibVLC()` scans this directory to build its plugin cache, and on
 	     a first run - cold disk, every DLL virus-scanned as it's touched - that took TWENTY
@@ -155,6 +149,12 @@
 		<RemoveDir Directories="@(_UnusedVlcCategory->'$(PublishDir)libvlc\win-x64\plugins\%(Identity)')" ContinueOnError="true" />
 	</Target>
 
+	<!-- Strip runtime-specific native payloads we never load on the current OS.
+	     dotnet build emits every RID a referenced package supports - ~500 MB of
+	     Windows + Linux + musl + wasm + maccatalyst variants we'll never touch
+	     on a macOS dev box, and vice versa. The strip is per-host (each OS keeps
+	     its own runtimes and the shared "unix" bucket) and runs after every
+	     build, so `bin/Debug` doesn't bloat to 600 MB every session. -->
 	<Target Name="StripUnusedRuntimes" AfterTargets="Build" Condition="Exists('$(OutDir)runtimes')">
 		<Exec Condition="$([MSBuild]::IsOSPlatform('OSX'))"
 		      Command="find &quot;$(OutDir)runtimes&quot; -mindepth 1 -maxdepth 1 -type d ! -name 'osx*' ! -name 'unix' -exec rm -rf {} +"
