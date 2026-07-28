@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>0.9.29</Version>
+		<Version>0.9.30</Version>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -127,6 +127,34 @@
 	     on a macOS dev box, and vice versa. The strip is per-host (each OS keeps
 	     its own runtimes and the shared "unix" bucket) and runs after every
 	     build, so `bin/Debug` doesn't bloat to 600 MB every session. -->
+	<!-- Drop the libvlc plugin categories a MUSIC player never loads.
+	     Measured cost: `new LibVLC()` scans this directory to build its plugin cache, and on
+	     a first run - cold disk, every DLL virus-scanned as it's touched - that took TWENTY
+	     SECONDS on a clean Windows install, versus ~5 s for the whole rest of startup. The
+	     scan is per-file, so removing files is what makes it faster; the ~35 MB saved is a
+	     bonus.
+	     Mirrors the policy scripts/fetch-vlc-mac.sh already applies on macOS, so both
+	     platforms ship the same engine. Audio, access, demux, packetizer and codec all STAY -
+	     codec holds the audio decoders alongside the video ones and can't be dropped wholesale. -->
+	<Target Name="TrimVlcPluginsOnPublish"
+	        AfterTargets="Publish"
+	        Condition="'$(IsWindowsBuild)' == 'true' And Exists('$(PublishDir)libvlc')">
+		<ItemGroup>
+			<_VlcPluginRoot Include="$(PublishDir)libvlc\win-x64\plugins" />
+			<!-- Video rendering, subtitles, muxing and streaming out: OrgZ does none of it,
+			     and the VU meter is our own FFT rather than libvlc's visualizers. -->
+			<_UnusedVlcCategory Include="video_output;video_filter;video_chroma;video_splitter" />
+			<_UnusedVlcCategory Include="d3d11;d3d9" />
+			<_UnusedVlcCategory Include="visualization" />
+			<_UnusedVlcCategory Include="spu;text_renderer" />
+			<_UnusedVlcCategory Include="stream_out;mux;access_output" />
+			<_UnusedVlcFile Include="@(_UnusedVlcCategory->'$(PublishDir)libvlc\win-x64\plugins\%(Identity)\**\*')" />
+		</ItemGroup>
+		<Message Importance="high" Text="Trimming unused libvlc plugin categories: @(_UnusedVlcCategory, ', ')" />
+		<Delete Files="@(_UnusedVlcFile)" ContinueOnError="true" />
+		<RemoveDir Directories="@(_UnusedVlcCategory->'$(PublishDir)libvlc\win-x64\plugins\%(Identity)')" ContinueOnError="true" />
+	</Target>
+
 	<Target Name="StripUnusedRuntimes" AfterTargets="Build" Condition="Exists('$(OutDir)runtimes')">
 		<Exec Condition="$([MSBuild]::IsOSPlatform('OSX'))"
 		      Command="find &quot;$(OutDir)runtimes&quot; -mindepth 1 -maxdepth 1 -type d ! -name 'osx*' ! -name 'unix' -exec rm -rf {} +"

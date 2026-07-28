@@ -1516,7 +1516,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (!headless)
         {
-            InitializePlayback();
+            // OFF the constructor's critical path. `new LibVLC()` scans libvlc's plugin
+            // directory to build its cache, and on a first run - cold disk, every DLL
+            // getting virus-scanned as it's touched - that measured TWENTY SECONDS on a
+            // clean install, against about five for everything else in startup combined.
+            // Doing it here meant nothing was drawn until it finished, so a slow launch was
+            // indistinguishable from a hang. The window paints first now; playback comes up
+            // behind it, and anything that needs it waits via EnsurePlaybackReady().
+            _playbackInit = Task.Run(() =>
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                InitializePlayback();
+                _log.Information("startup: playback engine ready after {Ms} ms (background)", sw.ElapsedMilliseconds);
+            });
         }
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
@@ -1555,6 +1567,31 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var savedView = Settings.Get("OrgZ.ActiveView", "Music");
         SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
+    }
+
+    /// <summary>Runs while the window is already up; null until it finishes.</summary>
+    private Task? _playbackInit;
+
+    /// <summary>
+    /// Blocks until the playback engine exists. Every path that touches the player calls
+    /// this first, so deferring LibVLC can't turn into a null-reference race.
+    ///
+    /// In practice it returns instantly: the engine is ready long before a user has found
+    /// a track to double-click. It only ever actually waits on a cold first launch, where
+    /// the alternative was staring at nothing for twenty seconds anyway.
+    /// </summary>
+    private void EnsurePlaybackReady()
+    {
+        try
+        {
+            _playbackInit?.Wait();
+        }
+        catch (Exception ex)
+        {
+            // A failed engine must not take the app with it - playback stays dead, the
+            // rest of OrgZ (library, tagging, burning) keeps working.
+            _log.Error(ex, "Playback engine failed to initialize");
+        }
     }
 
     private void InitializePlayback()
@@ -1869,6 +1906,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void ButtonPreviousTrack()
     {
+        EnsurePlaybackReady();
         if (_playbackContext == null || !_playbackContext.HasPrevious)
         {
             return;
@@ -1881,6 +1919,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void ButtonPlayPause()
     {
+        EnsurePlaybackReady();
         UI(() =>
         {
             if (_player == null)
@@ -1958,6 +1997,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void ButtonNextTrack()
     {
+        EnsurePlaybackReady();
         if (_playbackContext == null || !_playbackContext.HasNext)
         {
             return;
@@ -2457,6 +2497,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayMusicItem(MediaItem? file)
     {
+        EnsurePlaybackReady();
+
         // Accepts Music, downloaded Podcast, and Audiobook files -- all local
         // paths libvlc opens via FromType.FromPath; the only difference is
         // metadata routing handled downstream.
@@ -2506,6 +2548,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayRadioStation(MediaItem? station)
     {
+        EnsurePlaybackReady();
         if (_player == null || station == null || station.Kind != MediaKind.Radio || string.IsNullOrEmpty(station.StreamUrl))
         {
             return;
@@ -3192,6 +3235,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayPodcastEpisode(Models.PodcastFeed feed, Models.PodcastEpisode episode, string? localPath = null)
     {
+        EnsurePlaybackReady();
         if (_player == null)
         {
             _log.Warning("PlayPodcastEpisode: player not initialized");
@@ -6580,6 +6624,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void PlayCdTrack(MediaItem track)
     {
+        EnsurePlaybackReady();
         if (track.StreamUrl == null)
         {
             return;
