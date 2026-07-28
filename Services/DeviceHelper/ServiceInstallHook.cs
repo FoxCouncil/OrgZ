@@ -62,6 +62,11 @@ public static class ServiceInstallHook
     /// </summary>
     public static void OnInstall()
     {
+        // Do this even when the service isn't going in: a per-user install doesn't need it,
+        // but a PerMachine one crashes on the first non-admin launch without it, and this
+        // hook is the only elevated moment we get. See PackagesDirFor.
+        DeviceHelperInstaller.EnsurePackagesDirectoryElevated();
+
         Run("install", static () => DeviceHelperInstaller.InstallElevatedAsync());
     }
 

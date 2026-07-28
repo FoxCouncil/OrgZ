@@ -135,6 +135,17 @@ public static class DeviceHelperInstaller
     internal static string LinuxStartScript() => $"systemctl start {LinuxUnit}.service";
 
     /// <summary>
+    /// Registers the service WITHOUT starting it. The installer path uses this and then
+    /// starts separately, because starting inside the MSI's own install sequence races the
+    /// file copy: the service comes up against a half-committed directory and dies with
+    /// 1067 (observed intermittently in the VM). Starting afterwards, with a retry, is the
+    /// difference between "usually works" and "works".
+    /// </summary>
+    internal static string WindowsCreateArguments(string exePath) =>
+        $"/c sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
+        $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\"";
+
+    /// <summary>
     /// <c>sc create</c> needs the space after each '='; binPath is quoted so the
     /// <c>--device-helper</c> argument rides along inside it. start=auto so the service
     /// survives reboots, the way AppleMobileDeviceService does.
@@ -269,8 +280,86 @@ public static class DeviceHelperInstaller
     /// installer that the user already elevated would be a second prompt for nothing, and
     /// a prompt is not something a fast callback can wait on anyway.
     /// </summary>
-    public static Task<InstallResult> InstallElevatedAsync()
-        => RunShellAsync(WindowsInstallArguments(ExePath));
+    public static async Task<InstallResult> InstallElevatedAsync()
+    {
+        var created = await RunShellAsync(WindowsCreateArguments(ExePath));
+        if (!created.Ok)
+        {
+            return created;
+        }
+
+        // Start separately and CONFIRM it stayed up. `sc start` returns the moment the
+        // service reports RUNNING, so a service that dies a second later still looks like
+        // a successful start - which is exactly how a broken install passes its own test.
+        return await StartAndVerifyAsync();
+    }
+
+    /// <summary>
+    /// Starts the service and verifies it is still running a moment later, retrying a few
+    /// times. The MSI is still committing files when the install hook runs, so an early
+    /// start can come up against a half-written directory and exit 1067; a retry a couple
+    /// of seconds later finds a settled install.
+    /// </summary>
+    private static async Task<InstallResult> StartAndVerifyAsync()
+    {
+        InstallResult last = new(false, "not attempted");
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            last = await RunShellAsync(WindowsStartArguments());
+
+            // Give it long enough to fall over if it is going to.
+            await Task.Delay(TimeSpan.FromSeconds(2));
+
+            if (await QueryStateAsync() == ServiceState.Running)
+            {
+                _log.Information("Device helper service running (attempt {Attempt})", attempt);
+                return new(true, "ok");
+            }
+
+            _log.Warning("Service did not stay running (attempt {Attempt}/3); retrying", attempt);
+            await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+
+        // start=auto, so a service that won't start now will be tried again at boot - by
+        // which point the install has certainly settled. Report the failure, don't fail
+        // the installation over it.
+        return new(false, $"service was registered but would not stay running ({last.Detail})");
+    }
+
+    /// <summary>
+    /// Creates Velopack's <c>packages</c> staging directory, which it otherwise creates
+    /// lazily on first launch.
+    ///
+    /// That lazy creation is fatal for a PerMachine install: the directory sits under
+    /// Program Files, so the FIRST person to open OrgZ crashes with
+    /// UnauthorizedAccessException out of <c>VelopackApp.Run()</c> unless they happen to be
+    /// an administrator. An admin launching once "fixes" it for everyone afterwards, which
+    /// is precisely why it survives testing on a developer's machine and breaks for a user.
+    ///
+    /// Made here, elevated, at install time. No ACL widening: Velopack only needs the
+    /// directory to EXIST at startup, and the update path that writes into it elevates.
+    /// </summary>
+    internal static string PackagesDirFor(string exePath)
+        => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(exePath) ?? ".", "..", "packages"));
+
+    public static void EnsurePackagesDirectoryElevated()
+    {
+        try
+        {
+            var dir = PackagesDirFor(ExePath);
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+                _log.Information("Created Velopack packages directory {Dir}", dir);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Never fail an install over this; it only costs the first-launch crash back.
+            _log.Warning(ex, "Could not pre-create the packages directory");
+        }
+    }
 
     /// <summary>
     /// Removes the service from an already-elevated uninstaller. Uninstalling OrgZ must

@@ -174,6 +174,22 @@ OrgZ.Services.KeepAlive.*). Remaining below - features moving onto the host:
   still declines silently when it finds itself unelevated, which covers a portable or
   sideloaded copy. (Velopack's Setup.exe cannot show a checkbox or a wizard by design;
   velopack/velopack#30 requests exactly this and is open.)
+  **Two install bugs found and fixed by actually installing it (0.9.27):**
+  - `VelopackApp.Run()` creates `{root}\packages` lazily on FIRST LAUNCH. Under a PerMachine
+    install that's in Program Files, so the first person to open OrgZ crashed with
+    `UnauthorizedAccessException` unless they were an administrator - and an admin launching
+    once fixes it for everyone after, which is exactly why it survives a dev machine and
+    breaks for a user. The install hook now creates it while elevated. No ACL widening:
+    Velopack only needs it to EXIST at startup, and the update path elevates anyway.
+  - Starting the service inside the MSI's own sequence raced the file copy; the daemon came
+    up against a half-committed directory and exited 1067, intermittently. Registration and
+    start are now separate, and the start RETRIES and verifies the service is still running
+    a beat later rather than trusting `sc start`'s return.
+  Both were masked by a bug in the test harness itself: `sc start` returns as soon as the
+  SCM reports RUNNING, so an immediate check certified a service that died two seconds
+  later. It now re-checks after 10 s. Likewise its "install dir is user-writable" probe
+  passed by running as an ADMIN; it reads the ACL now, and asserts the opposite - the
+  LocalSystem binary's directory must NOT be user-writable.
   VERIFIED ON METAL (0.9.25), in a Hyper-V VM, against a CI-equivalent MSI: installs to
   `C:\Program Files\OrgZ`, registers `OrgZDeviceHelper` as LocalSystem, Running, Automatic,
   launching `OrgZ.exe --device-helper`; uninstall removes the service completely.

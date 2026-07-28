@@ -236,6 +236,58 @@ public class DeviceHelperInstallerTests
         Assert.Contains("sc delete OrgZDeviceHelper", args, StringComparison.Ordinal);
     }
 
+    // ── The two things a real install taught us ───────────────
+
+    [Fact]
+    public void The_packages_directory_sits_beside_current_not_inside_it()
+    {
+        // Velopack's layout is {root}\current\OrgZ.exe and {root}\packages. Getting this
+        // path wrong means we create a directory nobody looks in and the first-launch
+        // crash comes straight back.
+        Assert.Equal(
+            @"C:\Program Files\OrgZ\packages",
+            DeviceHelperInstaller.PackagesDirFor(@"C:\Program Files\OrgZ\current\OrgZ.exe"));
+
+        Assert.Equal(
+            @"D:\Apps\OrgZ\packages",
+            DeviceHelperInstaller.PackagesDirFor(@"D:\Apps\OrgZ\current\OrgZ.exe"));
+    }
+
+    [Fact]
+    public void The_install_hook_registers_without_starting()
+    {
+        // Starting inside the MSI's own sequence races the file copy - the service comes up
+        // against a half-committed directory and exits 1067. Observed intermittently on a
+        // real install, which is the worst kind of bug to ship.
+        var create = DeviceHelperInstaller.WindowsCreateArguments(@"C:\Program Files\OrgZ\current\OrgZ.exe");
+
+        Assert.Contains("sc create OrgZDeviceHelper", create, StringComparison.Ordinal);
+        Assert.Contains("start= auto", create, StringComparison.Ordinal);
+        Assert.DoesNotContain("sc start", create, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_one_shot_install_command_still_starts_it()
+    {
+        // The self-elevating CLI path (--install-device-helper) has no MSI racing it, so it
+        // keeps doing everything in one go.
+        var oneShot = DeviceHelperInstaller.WindowsInstallArguments(@"C:\Program Files\OrgZ\current\OrgZ.exe");
+
+        Assert.Contains("sc create OrgZDeviceHelper", oneShot, StringComparison.Ordinal);
+        Assert.Contains("sc start OrgZDeviceHelper", oneShot, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Registering_and_starting_are_the_same_service_by_the_same_name()
+    {
+        var create = DeviceHelperInstaller.WindowsCreateArguments(@"C:\OrgZ\current\OrgZ.exe");
+        var start = DeviceHelperInstaller.WindowsStartArguments();
+
+        // A rename in one and not the other registers a service that never gets started.
+        Assert.Contains(DeviceHelperInstaller.WindowsService, create, StringComparison.Ordinal);
+        Assert.Contains(DeviceHelperInstaller.WindowsService, start, StringComparison.Ordinal);
+    }
+
     // ── Reading the state back ────────────────────────────────
 
     [Fact]
