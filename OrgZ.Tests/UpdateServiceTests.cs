@@ -39,6 +39,17 @@ public class UpdateServiceTests
     }
 
     [Fact]
+    public void A_shipped_build_logs_enough_to_diagnose_a_bad_startup()
+    {
+        // Release used to default to Warning, so an entire session produced a single line
+        // and every Information-level breadcrumb - the startup timings, "Update available",
+        // the whole update flow - was discarded. A user reporting "it hung" left nothing
+        // to read, and the instrumentation added to diagnose that was silently dropped.
+        Assert.True(Logging.LevelSwitch.MinimumLevel <= Serilog.Events.LogEventLevel.Information,
+            $"shipped log level is {Logging.LevelSwitch.MinimumLevel}; Information-level diagnostics would be discarded");
+    }
+
+    [Fact]
     public async Task Applying_with_nothing_pending_refuses_instead_of_reaching_for_the_network()
     {
         // Guards the ordering the UI depends on: the menu can only ever apply an update

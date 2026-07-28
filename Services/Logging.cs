@@ -129,7 +129,13 @@ public static class Logging
 #if DEBUG
         return LogEventLevel.Verbose;
 #else
-        return LogEventLevel.Warning;
+        // Information, NOT Warning. A shipped build defaulting to Warning logs almost
+        // nothing - a real install produced a single line across an entire session - so a
+        // user reporting "it hung on startup" leaves nothing to read, and the startup
+        // instrumentation added to diagnose exactly that was silently discarded.
+        // The file sink is capped (10 MB, rolling, 7 days kept), so the cost is bounded;
+        // ORGZ_LOG_LEVEL still overrides for a quiet or a verbose run.
+        return LogEventLevel.Information;
 #endif
     }
 

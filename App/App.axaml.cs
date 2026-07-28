@@ -32,8 +32,17 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            StartupTrace.Mark("avalonia init");
+
             var mainWindow = new MainWindow();
+            StartupTrace.Mark("main window built");
+
             desktop.MainWindow = mainWindow;
+
+            // The number that actually matters: when the user first sees something. Every
+            // phase before this is invisible to them, which is why a slow one reads as a
+            // crash.
+            mainWindow.Opened += (_, _) => StartupTrace.ReportOnce("window shown");
 
             UpdateTitle(mainWindow);
 

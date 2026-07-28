@@ -95,6 +95,7 @@ internal class Program
 
         // Logging must come up first so Velopack/Avalonia init failures are captured.
         Logging.Initialize();
+        StartupTrace.Mark("logging");
 
         try
         {
@@ -105,6 +106,7 @@ internal class Program
             {
                 return 0;
             }
+            StartupTrace.Mark("single-instance guard");
 
             // The PerMachine MSI runs elevated, so its install hook can register the
             // background service outright - no button to find, no second prompt. The
@@ -125,10 +127,12 @@ internal class Program
             }
 #endif
             velopack.Run();
+            StartupTrace.Mark("velopack");
 
 #if WINDOWS
             SmtcNativeMethods.SetCurrentProcessExplicitAppUserModelID("com.foxcouncil.orgz");
             ShortcutInstaller.EnsureShortcut();
+            StartupTrace.Mark("shortcut + app id");
 #else
             if (OperatingSystem.IsLinux() && !RegisterLinuxVlcResolver())
             {
@@ -147,8 +151,11 @@ internal class Program
             // ctor reads them, and on a first launch on a clean machine nothing has
             // created the directory or schema yet.
             MediaCache.EnsureCreated();
+            StartupTrace.Mark("library db");
             Services.Podcast.PodcastCache.EnsureCreated();
+            StartupTrace.Mark("podcast db");
             Services.Media.AcquisitionStore.EnsureCreated();
+            StartupTrace.Mark("acquisition db");
 
             _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }

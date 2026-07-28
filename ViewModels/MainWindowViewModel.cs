@@ -2033,25 +2033,34 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task CheckForUpdates()
     {
-        // Already found one: the user picking the menu IS the go-ahead. Download, apply,
-        // restart - and let Windows raise its own consent dialog for the elevated write
-        // into Program Files, which is the only prompt in the whole flow.
-        if (_updates.PendingVersion is { } pending)
+        // Picking the menu IS the go-ahead, so a found update installs immediately and
+        // Windows' elevation prompt serves as the "install this?" confirmation. What it
+        // must never do is nothing: the first version only wrote to the status bar, which
+        // on a machine that was already up to date was indistinguishable from a dead menu
+        // item - reported as exactly that.
+        if (_updates.PendingVersion is null)
         {
-            UpdateMainStatus($"Downloading OrgZ {pending}...");
-            if (await _updates.ApplyAsync() is { } error)
+            UpdateMainStatus("Checking for updates...");
+            var found = await _updates.CheckAsync();
+            UpdateMenuHeader = UpdateService.MenuLabel(found);
+
+            if (!found)
             {
-                UpdateMainStatus($"Update failed: {error}");
+                UpdateMainStatus("OrgZ is up to date.");
+                await new Views.ConfirmDialog("Updates", $"OrgZ {App.Version} is up to date.", "OK", showCancel: false)
+                    .ShowDialog(_window);
+                return;
             }
-            return;
         }
 
-        UpdateMainStatus("Checking for updates...");
-        var available = await _updates.CheckAsync();
-        UpdateMenuHeader = UpdateService.MenuLabel(available);
-        UpdateMainStatus(available
-            ? $"OrgZ {_updates.PendingVersion} is available - choose \"{UpdateService.AvailableLabel}\" to install it."
-            : "OrgZ is up to date.");
+        var version = _updates.PendingVersion;
+        UpdateMainStatus($"Downloading OrgZ {version}...");
+
+        if (await _updates.ApplyAsync() is { } error)
+        {
+            UpdateMainStatus($"Update failed: {error}");
+            await new Views.ConfirmDialog("Update failed", error, "OK", showCancel: false).ShowDialog(_window);
+        }
     }
 
     [RelayCommand]
