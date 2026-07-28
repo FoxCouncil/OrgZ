@@ -105,6 +105,80 @@ public sealed class VlcPluginTrimTests : IDisposable
         Assert.Contains(media.Tracks, t => t.TrackType == LibVLCSharp.Shared.TrackType.Audio);
     }
 
+    [Fact]
+    public async Task Libvlc_still_plays_audio_over_HTTP_with_the_trimmed_plugin_set()
+    {
+        // The trim drops stream_out / access_output / mux, which is libvlc acting as a
+        // streaming SERVER (the --sout path). OrgZ only ever CONSUMES streams - radio,
+        // podcasts, and library shares served by our own HttpListener - and that uses the
+        // access/http plugin, which stays. Worth proving rather than reasoning about,
+        // because getting it wrong kills radio and sharing in shipped builds only.
+        var source = PluginSource();
+        if (source is null)
+        {
+            return;
+        }
+
+        var plugins = BuildTrimmedPluginTree(source);
+
+        var wav = Path.Combine(_dir, "served.wav");
+        WriteTone(wav, seconds: 2);
+
+        // A real socket, served by the same class that serves a library share.
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        var track = new MediaItem
+        {
+            Id = "t1",
+            Kind = MediaKind.Music,
+            Title = "Streamed",
+            FilePath = wav,
+            Extension = ".wav",
+        };
+
+        using var server = new OrgZ.Services.Sharing.LibraryShareServer("Trim Test", port, () => [track]);
+        server.Start(advertise: false);
+
+        LibVLCSharp.Shared.Core.Initialize();
+        using var vlc = new LibVLCSharp.Shared.LibVLC("--no-video", "--quiet", $"--plugin-path={plugins}");
+        using var media = new LibVLCSharp.Shared.Media(
+            vlc, $"http://127.0.0.1:{port}/stream/t1.wav", LibVLCSharp.Shared.FromType.FromLocation);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+        var status = await media.Parse(LibVLCSharp.Shared.MediaParseOptions.ParseNetwork, timeout: 30_000, cancellationToken: cts.Token);
+
+        Assert.Equal(LibVLCSharp.Shared.MediaParsedStatus.Done, status);
+        Assert.InRange(media.Duration, 1_500, 2_500);
+        Assert.Contains(media.Tracks, t => t.TrackType == LibVLCSharp.Shared.TrackType.Audio);
+    }
+
+    /// <summary>Copies the plugin tree minus the categories the publish step drops.</summary>
+    private string BuildTrimmedPluginTree(string source)
+    {
+        var plugins = Path.Combine(_dir, "plugins");
+        Directory.CreateDirectory(plugins);
+
+        foreach (var category in Directory.GetDirectories(source))
+        {
+            if (Dropped.Contains(Path.GetFileName(category), StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var dest = Path.Combine(plugins, Path.GetFileName(category));
+            Directory.CreateDirectory(dest);
+            foreach (var dll in Directory.GetFiles(category, "*.dll"))
+            {
+                File.Copy(dll, Path.Combine(dest, Path.GetFileName(dll)), overwrite: true);
+            }
+        }
+
+        return plugins;
+    }
+
     private static void WriteTone(string path, int seconds)
     {
         const int rate = 44100, channels = 2;
