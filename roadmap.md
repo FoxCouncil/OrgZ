@@ -67,6 +67,31 @@ end to end, libvlc included), and a background service hosting the privileged wo
 **Deferred past v1:** multi-disc burning, device playlists master view, slim custom ffmpeg
 build (would cut ~90 MB off the Windows installer; the fat build is fine for v1).
 
+### Startup time — 25 s to 8 s (0.9.30)
+Measured on a clean Windows install in a VM, cold, unsigned, Defender scanning everything:
+first paint went from **25,065 ms to 8,398 ms**. The cause was `new LibVLC()` in the
+ViewModel constructor - it scans libvlc's plugin directory to build its cache, and nothing
+was drawn until it returned, so a slow launch was indistinguishable from a hang.
+
+| phase | 0.9.29 | 0.9.30 |
+|---|---|---|
+| main window built | 19,990 ms | 2,935 ms |
+| avalonia init | 3,177 ms | 3,217 ms |
+| library db | 312 ms | 268 ms |
+| **window shown (total)** | **25,065 ms** | **8,398 ms** |
+
+Two independent changes, both visible in the log. The engine now builds on a background
+task (`playback engine ready after 9213 ms (background)`), so the window paints without it;
+and the publish step drops the plugin categories a music player never loads, taking 320
+plugin DLLs to 193, which roughly halved libvlc's own startup since the scan is per-file.
+`EnsurePlaybackReady()` guards every path that touches the player, so deferring it can't
+become a null-reference race.
+
+REMAINING on the critical path: avalonia init ~3.2 s (Skia + Inter font), MainWindow ~2.9 s,
+~0.7 s before Main. Code signing is the lever that cuts across all of them - unsigned
+binaries are what Defender scans hardest, and `vpk pack` currently reports "899 file(s) will
+not be signed".
+
 ## Now / Next
 
 ### Testing burning e2e — LARGELY DONE
