@@ -4,6 +4,7 @@ using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Headless;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 
 namespace OrgZ.Tests;
@@ -164,7 +165,11 @@ public sealed class MediaGridScrollRestoreTests
                 once = (_, _) =>
                 {
                     grid.LayoutUpdated -= once;
-                    grid.ScrollIntoView(items[320], null);
+
+                    // Off the layout pass entirely before scrolling. Doing it inline here - or
+                    // calling UpdateLayout() from inside it - re-enters measure and crashes the
+                    // same way the inline version does; that mistake shipped once already.
+                    Dispatcher.UIThread.Post(() => grid.ScrollIntoView(items[320], null), DispatcherPriority.Background);
                 };
                 grid.LayoutUpdated += once;
             };

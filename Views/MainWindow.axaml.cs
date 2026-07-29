@@ -317,10 +317,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // The grid must have measured before it can scroll anywhere meaningful, and before the
-        // visible-row count below means anything.
-        MediaDataGrid.UpdateLayout();
-
+        // No UpdateLayout() here. Callers run this AFTER a layout pass has completed, on a plain
+        // dispatcher callback - forcing another one from inside layout is what crashed the grid.
         var visibleRows = MediaDataGrid.GetVisualDescendants().OfType<DataGridRow>().Count(r => r.IsVisible);
         var lastInViewport = Math.Min(index + Math.Max(visibleRows, 1) - 1, items.Count - 1);
         MediaDataGrid.ScrollIntoView(items[lastInViewport], null);
@@ -374,11 +372,24 @@ public partial class MainWindow : Window
     {
         MediaDataGrid.LayoutUpdated -= OnLayoutUpdatedForRestore;
 
+        // Do NOT scroll from in here. LayoutUpdated fires from inside the layout pass, and
+        // scrolling re-enters measure - which is the same re-entrancy that crashes the grid from
+        // the ItemsSource notification. Hand off to the dispatcher so the pass finishes first.
+        Dispatcher.UIThread.Post(RunPendingRestore, DispatcherPriority.Background);
+    }
+
+    private void RunPendingRestore()
+    {
         var key = _pendingRestoreKey;
         _pendingRestoreKey = null;
         try
         {
             RestoreViewState(key);
+        }
+        catch (Exception ex)
+        {
+            // A failed restore is a cosmetic loss; it must never take the window with it.
+            _log.Warning(ex, "View state restore failed for {ViewKey}", key);
         }
         finally
         {
