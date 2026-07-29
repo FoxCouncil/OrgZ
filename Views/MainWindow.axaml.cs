@@ -22,6 +22,8 @@ namespace OrgZ.Views;
 
 public partial class MainWindow : Window
 {
+    private static readonly Serilog.ILogger _log = Logging.For<MainWindow>();
+
     private readonly MainWindowViewModel _viewModel;
 
     /// <summary>Exposed for the docs-screenshot harness to seed view-model state.</summary>
@@ -31,7 +33,7 @@ public partial class MainWindow : Window
 
 
     private string? _lastViewConfigKey;
-    private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
+    private readonly Dictionary<string, (string? AnchorId, MediaItem? SelectedItem)> _viewStates = new();
 
     internal static MediaItem? DraggedMediaItem;
 
@@ -168,46 +170,19 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                var grid = GetActiveDataGrid();
-                grid.ScrollIntoView(_viewModel.SelectedItem, null);
-
-                // Avalonia's DataGrid lands the target at the closest viewport edge
-                // rather than centering. After ScrollIntoView realizes the row,
-                // shift the scroll offset so the row sits mid-viewport.
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    var sv = grid.FindDescendantOfType<ScrollViewer>();
-                    if (sv == null)
-                    {
-                        return;
-                    }
-
-                    var idx = _viewModel.FilteredItems.IndexOf(_viewModel.SelectedItem);
-                    if (idx < 0)
-                    {
-                        return;
-                    }
-
-                    var rowHeight = grid.RowHeight > 0 ? grid.RowHeight : 22.0;
-                    var rowTop = idx * rowHeight;
-                    var viewportH = sv.Viewport.Height;
-                    var maxOffset = Math.Max(0, sv.Extent.Height - viewportH);
-                    var centered = Math.Clamp(rowTop - (viewportH - rowHeight) / 2, 0, maxOffset);
-                    sv.Offset = new Vector(sv.Offset.X, centered);
-                }, Avalonia.Threading.DispatcherPriority.Background);
+                // The old code followed this with a manual "centre the row in the viewport" pass
+                // driven by ScrollViewer.Offset. There is no ScrollViewer to drive - see
+                // ScrollAnchorIntoView - so it never ran, and the edge-docked result below is
+                // what "Go to current song" has always actually done.
+                GetActiveDataGrid().ScrollIntoView(_viewModel.SelectedItem, null);
             }, Avalonia.Threading.DispatcherPriority.Background);
         };
-        _viewModel.GetScrollOffset = () => GetDataGridScrollViewer()?.Offset.Y ?? 0;
-        _viewModel.SetScrollOffset = (offset) =>
+        _viewModel.GetScrollAnchor = TopVisibleItem;
+        _viewModel.RestoreScrollAnchor = anchor =>
         {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                var sv = GetDataGridScrollViewer();
-                if (sv != null)
-                {
-                    sv.Offset = new Vector(sv.Offset.X, offset);
-                }
-            }, Avalonia.Threading.DispatcherPriority.Background);
+            Avalonia.Threading.Dispatcher.UIThread.Post(
+                () => ScrollAnchorIntoView(anchor),
+                Avalonia.Threading.DispatcherPriority.Background);
         };
         _viewModel.PlaylistsChanged = RebuildContextMenu;
 
@@ -294,9 +269,50 @@ public partial class MainWindow : Window
         return MediaDataGrid;
     }
 
-    private ScrollViewer? GetDataGridScrollViewer()
+    /// <summary>
+    /// The item in the topmost visible row - how a view's scroll position is remembered.
+    ///
+    /// NOT a pixel offset. Avalonia 12's DataGrid contains no <see cref="ScrollViewer"/> at all
+    /// (it scrolls itself with a DataGridRowsPresenter and bare ScrollBars), so the offset this
+    /// used to save was read off a null lookup: every save recorded zero and every restore did
+    /// nothing. An anchor item also survives a re-sort, a filter change or a different row height,
+    /// none of which a pixel offset does.
+    /// </summary>
+    private MediaItem? TopVisibleItem()
     {
-        return GetActiveDataGrid().FindDescendantOfType<ScrollViewer>();
+        return MediaDataGrid.GetVisualDescendants()
+            .OfType<DataGridRow>()
+            .Where(r => r.IsVisible && r.DataContext is MediaItem)
+            .OrderBy(r => r.Bounds.Y)
+            .Select(r => r.DataContext as MediaItem)
+            .FirstOrDefault();
+    }
+
+    /// <summary>Puts <paramref name="anchor"/> back at the top of the viewport.</summary>
+    private void ScrollAnchorIntoView(MediaItem? anchor)
+    {
+        if (anchor is null)
+        {
+            return;
+        }
+
+        // Match by Id, not reference: a rebuilt view hands back equal-but-new instances.
+        var items = _viewModel.FilteredItems;
+        var index = items.FindIndex(i => i.Id == anchor.Id);
+        if (index < 0)
+        {
+            return;
+        }
+
+        // The grid must have measured before it can scroll anywhere meaningful.
+        MediaDataGrid.UpdateLayout();
+
+        // ScrollIntoView docks the target to the NEAREST viewport edge. Approaching from above
+        // would leave the anchor at the BOTTOM - a whole screen off. Overshooting past it first
+        // means the real scroll approaches from below, which docks it to the top, where it was.
+        MediaDataGrid.ScrollIntoView(items[^1], null);
+        MediaDataGrid.UpdateLayout();
+        MediaDataGrid.ScrollIntoView(items[index], null);
     }
 
     private void SaveViewState()
@@ -306,13 +322,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        var sv = GetDataGridScrollViewer();
-        var offset = sv?.Offset.Y ?? 0;
+        var anchor = TopVisibleItem();
         var selectedId = _viewModel.SelectedItem?.Id;
-        _viewStates[_lastViewConfigKey] = (offset, _viewModel.SelectedItem);
+        _viewStates[_lastViewConfigKey] = (anchor?.Id, _viewModel.SelectedItem);
+        _log.Debug("View state save: {ViewKey} anchor={Anchor}", _lastViewConfigKey, anchor?.Id ?? "<none>");
 
         // Persist to settings
-        Settings.Set($"OrgZ.View.{_lastViewConfigKey}.Scroll", offset);
+        Settings.Set($"OrgZ.View.{_lastViewConfigKey}.TopId", anchor?.Id ?? string.Empty);
         Settings.Set($"OrgZ.View.{_lastViewConfigKey}.SelectedId", selectedId ?? string.Empty);
         Settings.Save();
     }
@@ -332,16 +348,12 @@ public partial class MainWindow : Window
                 _viewModel.SelectedItem = state.SelectedItem;
             }
 
-            var sv = GetDataGridScrollViewer();
-            if (sv != null)
-            {
-                sv.Offset = new Vector(sv.Offset.X, state.ScrollOffset);
-            }
+            RestoreAnchorById(key, state.AnchorId);
             return;
         }
 
         // Restore from persisted settings (app restart)
-        var savedScroll = Settings.Get($"OrgZ.View.{key}.Scroll", 0.0);
+        var savedTopId = Settings.Get($"OrgZ.View.{key}.TopId", string.Empty);
         var savedSelectedId = Settings.Get($"OrgZ.View.{key}.SelectedId", string.Empty);
 
         if (!string.IsNullOrEmpty(savedSelectedId))
@@ -353,14 +365,25 @@ public partial class MainWindow : Window
             }
         }
 
-        if (savedScroll > 0)
+        RestoreAnchorById(key, savedTopId);
+    }
+
+    private void RestoreAnchorById(string key, string? anchorId)
+    {
+        if (string.IsNullOrEmpty(anchorId))
         {
-            var sv = GetDataGridScrollViewer();
-            if (sv != null)
-            {
-                sv.Offset = new Vector(sv.Offset.X, savedScroll);
-            }
+            return;
         }
+
+        var anchor = _viewModel.FilteredItems.FirstOrDefault(i => i.Id == anchorId);
+        if (anchor is null)
+        {
+            // The row is gone - deleted, filtered out, or a device that unmounted. Top is right.
+            _log.Debug("View state restore: {ViewKey} anchor {Anchor} no longer in view", key, anchorId);
+            return;
+        }
+
+        ScrollAnchorIntoView(anchor);
     }
 
     // Click handler for the error badge in the inlined view footer (the

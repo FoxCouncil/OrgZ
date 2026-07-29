@@ -793,8 +793,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal bool IsMediaLoaded => _player?.Media != null;
 
     internal Action? ScrollToSelectedRequested;
-    internal Func<double>? GetScrollOffset;
-    internal Action<double>? SetScrollOffset;
+    internal Func<MediaItem?>? GetScrollAnchor;
+    internal Action<MediaItem?>? RestoreScrollAnchor;
     internal Action? PlaylistsChanged;
 
     // -- Change Handlers --
@@ -3674,9 +3674,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Only rebuild the list when viewing Favorites (item may need to appear/disappear)
         if (SelectedSidebarItem?.IsFavorites == true)
         {
-            var scroll = GetScrollOffset?.Invoke() ?? 0;
+            var scrollAnchor = GetScrollAnchor?.Invoke();
             ApplyFilter();
-            SetScrollOffset?.Invoke(scroll);
+            RestoreScrollAnchor?.Invoke(scrollAnchor);
         }
     }
 
@@ -5205,7 +5205,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var playlistId = SelectedSidebarItem.PlaylistId.Value;
-        var scroll = GetScrollOffset?.Invoke() ?? 0;
+        var scrollAnchor = GetScrollAnchor?.Invoke();
 
         foreach (var item in items)
         {
@@ -5217,7 +5217,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, trackIds));
         _activeViewConfig = ListViewConfigs.Get(key);
         ApplyFilter();
-        SetScrollOffset?.Invoke(scroll);
+        RestoreScrollAnchor?.Invoke(scrollAnchor);
     }
 
     /// <summary>
@@ -5245,7 +5245,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var playlistId = _activeViewConfig.PlaylistId.Value;
-        var scroll = GetScrollOffset?.Invoke() ?? 0;
+        var scrollAnchor = GetScrollAnchor?.Invoke();
 
         // Move within current order then push the whole list back to DB.
         // Use the full DB order (not just filtered) so search-filtered reorders don't lose hidden tracks.
@@ -5273,7 +5273,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, fullOrder));
         _activeViewConfig = ListViewConfigs.Get(key);
         MoveWithinLiveView(movedItem, targetItem, insertBefore);
-        SetScrollOffset?.Invoke(scroll);
+        RestoreScrollAnchor?.Invoke(scrollAnchor);
     }
 
     /// <summary>
@@ -5287,11 +5287,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _dataVersion++;
         if (_activeViewConfig?.BaseFilter is { } visible && visible(item) && !FilteredItems.Contains(item))
         {
-            var scroll = GetScrollOffset?.Invoke() ?? 0;
+            var scrollAnchor = GetScrollAnchor?.Invoke();
             FilteredItems.Add(item);
             FilteredItemsView?.Refresh();
             UpdateViewStats(_activeViewConfig, FilteredItems);
-            SetScrollOffset?.Invoke(scroll);
+            RestoreScrollAnchor?.Invoke(scrollAnchor);
         }
     }
 
@@ -5300,7 +5300,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private void RemoveFromLiveView(MediaItem item)
     {
         _dataVersion++;
-        var scroll = GetScrollOffset?.Invoke() ?? 0;
+        var scrollAnchor = GetScrollAnchor?.Invoke();
         if (FilteredItems.Remove(item))
         {
             FilteredItemsView?.Refresh();
@@ -5308,7 +5308,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 UpdateViewStats(_activeViewConfig, FilteredItems);
             }
-            SetScrollOffset?.Invoke(scroll);
+            RestoreScrollAnchor?.Invoke(scrollAnchor);
         }
     }
 
@@ -5387,7 +5387,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var scroll = GetScrollOffset?.Invoke() ?? 0;
+        var scrollAnchor = GetScrollAnchor?.Invoke();
         _allItems.RemoveAt(fromAll);
         if (target == null)
         {
@@ -5411,7 +5411,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _allItems.Insert(Math.Clamp(insertIdx, 0, _allItems.Count), moved);
         }
         MoveWithinLiveView(moved, target, insertBefore);
-        SetScrollOffset?.Invoke(scroll);
+        RestoreScrollAnchor?.Invoke(scrollAnchor);
 
         var ordered = _allItems.Where(i => i.Source == source && i.Kind == MediaKind.Music).ToList();
         _ = Task.Run(async () =>
