@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Data;
@@ -140,5 +141,84 @@ public sealed class MediaGridGroupCollapseTests
 
         Assert.Equal(2, headers);
         Assert.Equal(0, rows);
+    }
+
+    [Fact]
+    public async Task A_headers_expanded_pseudo_class_tracks_its_real_state()
+    {
+        // How the app records what the user did. It used to listen for Tapped and flip a stored
+        // boolean, which desynced the moment a click landed anywhere that ISN'T the expander -
+        // and a desynced entry then re-applied the wrong state on the next visit, re-opening a
+        // group you had closed. Reading `:expanded` reads the truth instead of predicting it.
+        var trail = await HeadlessUi.RunAsync(() =>
+        {
+            var view = TwoGroups();
+            var grid = NewGrid();
+            var window = new Window { Width = 800, Height = 600, Content = grid };
+            window.Show();
+
+            grid.ItemsSource = view;
+            Settle(window);
+
+            string State()
+            {
+                var pairs = grid.GetVisualDescendants().OfType<DataGridRowGroupHeader>()
+                    .Select(h => $"{(h.DataContext as DataGridCollectionViewGroup)?.Key}={h.Classes.Contains(":expanded")}")
+                    .OrderBy(s => s, StringComparer.Ordinal);
+                return string.Join(",", pairs);
+            }
+
+            var rock = view.Groups!.OfType<DataGridCollectionViewGroup>().Single(g => (string?)g.Key == "Rock");
+            var log = new List<string> { State() };
+
+            grid.CollapseRowGroup(rock, collapseAllSubgroups: false);
+            Settle(window);
+            log.Add(State());
+
+            grid.ExpandRowGroup(rock, expandAllSubgroups: false);
+            Settle(window);
+            log.Add(State());
+
+            window.Close();
+            return log;
+        });
+
+        Assert.Equal(["Jazz=True,Rock=True", "Jazz=True,Rock=False", "Jazz=True,Rock=True"], trail);
+    }
+
+    [Fact]
+    public async Task A_single_click_on_a_group_header_does_not_toggle_it()
+    {
+        // The Avalonia behaviour that made the old tap-listener wrong, pinned so we notice if it
+        // ever changes: DataGridRowGroupHeader toggles on its expander button or a DOUBLE click,
+        // never on a plain single click of the header itself.
+        var (before, after) = await HeadlessUi.RunAsync<(bool Before, bool After)>(() =>
+        {
+            var view = TwoGroups();
+            var grid = NewGrid();
+            var window = new Window { Width = 800, Height = 600, Content = grid };
+            window.Show();
+
+            grid.ItemsSource = view;
+            Settle(window);
+
+            var header = grid.GetVisualDescendants().OfType<DataGridRowGroupHeader>().First();
+            var was = header.Classes.Contains(":expanded");
+
+            // Click the middle of the header, well clear of the expander glyph on the left.
+            var centre = ((Avalonia.Visual)header)
+                .TranslatePoint(new Avalonia.Point(header.Bounds.Width / 2, header.Bounds.Height / 2), window)
+                ?? new Avalonia.Point(400, 10);
+            window.MouseDown(centre, Avalonia.Input.MouseButton.Left);
+            window.MouseUp(centre, Avalonia.Input.MouseButton.Left);
+            Settle(window);
+
+            var now = header.Classes.Contains(":expanded");
+            window.Close();
+            return (was, now);
+        });
+
+        Assert.True(before);
+        Assert.Equal(before, after);
     }
 }

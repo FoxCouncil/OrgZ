@@ -157,6 +157,7 @@ public partial class MainWindow : Window
             ["BurnToCd"] = ContextMenu_BurnToCd,
         };
 
+        _viewModel.PropertyChanging += ViewModel_PropertyChanging;
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         _viewModel.ScrollToSelectedRequested = () =>
         {
@@ -247,6 +248,24 @@ public partial class MainWindow : Window
         };
     }
 
+    /// <summary>
+    /// Saves the outgoing view's scroll offset and selection, BEFORE anything rebinds.
+    ///
+    /// This can't wait for PropertyChanged. The view model runs ApplyFilter from its
+    /// OnSelectedSidebarItemChanged callback, and the toolkit calls that before raising
+    /// PropertyChanged - so by the time the changed handler runs, the grid is already showing the
+    /// INCOMING view and its scroll offset has been reset. Saving there recorded an offset of
+    /// roughly zero under the outgoing view's key, every time, which is why no view remembered
+    /// where it had been scrolled to.
+    /// </summary>
+    private void ViewModel_PropertyChanging(object? sender, System.ComponentModel.PropertyChangingEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.SelectedSidebarItem))
+        {
+            SaveViewState();
+        }
+    }
+
     private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(MainWindowViewModel.SelectedSidebarItem))
@@ -254,8 +273,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Save state of the view we're leaving
-        SaveViewState();
+        // NOTE: the outgoing view's scroll/selection is saved from PropertyChanging, not here -
+        // see ViewModel_PropertyChanging.
 
         var sidebarItem = _viewModel.SelectedSidebarItem;
         var config = ListViewConfigs.Get(sidebarItem?.ViewConfigKey);
@@ -497,19 +516,27 @@ public partial class MainWindow : Window
             return;
         }
 
-        MediaGrid.ApplyGroupExpansion(MediaDataGrid, MediaDataGrid.ItemsSource as DataGridCollectionView, key =>
+        _applyingGroupExpansion = true;
+        try
         {
-            _appliedExpansionKeys.Add(key);
-
-            // Unseen groups default to collapsed, and the choice is recorded so it persists.
-            if (!_groupExpansion.TryGetValue(key, out var expanded))
+            MediaGrid.ApplyGroupExpansion(MediaDataGrid, MediaDataGrid.ItemsSource as DataGridCollectionView, key =>
             {
-                _groupExpansion[key] = false;
-                return false;
-            }
+                _appliedExpansionKeys.Add(key);
 
-            return expanded;
-        });
+                // Unseen groups default to collapsed, and the choice is recorded so it persists.
+                if (!_groupExpansion.TryGetValue(key, out var expanded))
+                {
+                    _groupExpansion[key] = false;
+                    return false;
+                }
+
+                return expanded;
+            });
+        }
+        finally
+        {
+            _applyingGroupExpansion = false;
+        }
 
         PersistGroupExpansion();
     }
@@ -524,9 +551,9 @@ public partial class MainWindow : Window
     private string? _currentGroupedViewKey;
 
     /// <summary>
-    /// Headers we've already wired the IsItemsExpanded observer to, tracked by weak
-    /// reference so re-realization of the same header gets its own subscription
-    /// without leaking old ones.
+    /// Headers already wired to <see cref="OnGroupHeaderStateChanged"/>. The DataGrid recycles a
+    /// small, viewport-sized pool of these and hands the same instances back for different groups,
+    /// so this stays bounded and the observer reads the group off the header at fire time.
     /// </summary>
     private readonly HashSet<DataGridRowGroupHeader> _observedHeaders = new();
 
@@ -551,11 +578,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        MediaGrid.ApplyGroupExpansion(MediaDataGrid, view, key =>
+        _applyingGroupExpansion = true;
+        try
         {
-            _groupExpansion[key] = false;
-            return false;
-        });
+            MediaGrid.ApplyGroupExpansion(MediaDataGrid, view, key =>
+            {
+                _groupExpansion[key] = false;
+                return false;
+            });
+        }
+        finally
+        {
+            _applyingGroupExpansion = false;
+        }
 
         PersistGroupExpansion();
     }
@@ -563,28 +598,59 @@ public partial class MainWindow : Window
     private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
     {
         // No per-header collapse is applied here - doing it as each header realized is what made
-        // the grid collapse group-by-group "over time". The saved state is applied in one batch
-        // at bind time by OnGridItemsSourceChanged (which also covers groups that haven't
-        // realized yet). All that remains is wiring the tap observer once per header, so user
-        // toggles keep updating the persisted dict.
+        // the grid collapse group-by-group "over time". The saved state is applied in one batch at
+        // bind time by OnGridItemsSourceChanged (which also covers groups that haven't realized
+        // yet). All that remains is watching each header for changes to its real expanded state.
         var header = e.RowGroupHeader;
         if (_observedHeaders.Add(header))
         {
-            header.Tapped += OnGroupHeaderTapped;
+            header.Classes.CollectionChanged += (s, _) => OnGroupHeaderStateChanged(s as Classes, header);
         }
     }
 
-    private void OnGroupHeaderTapped(object? sender, Avalonia.Input.TappedEventArgs e)
+    /// <summary>
+    /// Records a group's expanded state from what the header ACTUALLY is, rather than from a tap.
+    ///
+    /// The previous version listened for <c>Tapped</c> and flipped the stored boolean. That
+    /// desynced constantly, because Avalonia's row-group header does not toggle on a single click
+    /// - only on the expander button or a double click (see
+    /// <c>DataGridRowGroupHeader.DataGridRowGroupHeader_PointerPressed</c>). Any other click on the
+    /// header flipped our dictionary while the visual stayed put, and from then on the state was
+    /// inverted: one click appeared to do nothing, and returning to the view re-applied the wrong
+    /// value and re-opened a group you had closed.
+    ///
+    /// The header exposes the truth as an <c>:expanded</c> pseudo-class, which lands in
+    /// <see cref="StyledElement.Classes"/>, so this reads it instead of predicting it.
+    /// </summary>
+    private void OnGroupHeaderStateChanged(Classes? classes, DataGridRowGroupHeader header)
     {
-        if (sender is not DataGridRowGroupHeader h || h.DataContext is not DataGridCollectionViewGroup g)
+        // Programmatic expand/collapse (applying saved state, "collapse all") moves these classes
+        // too. Those changes originate FROM the dictionary, so writing them back is at best a
+        // no-op, and during a rebind the header may still be showing its previous group.
+        if (_applyingGroupExpansion
+            || classes is null
+            || _currentGroupedViewKey is null
+            || header.DataContext is not DataGridCollectionViewGroup group)
         {
             return;
         }
-        var k = g.Key?.ToString() ?? string.Empty;
-        var prev = _groupExpansion.TryGetValue(k, out var p) && p;
-        _groupExpansion[k] = !prev;
+
+        var key = group.Key?.ToString() ?? string.Empty;
+        var expanded = classes.Contains(":expanded");
+        if (_groupExpansion.TryGetValue(key, out var previous) && previous == expanded)
+        {
+            return;
+        }
+
+        _groupExpansion[key] = expanded;
         PersistGroupExpansion();
     }
+
+    /// <summary>
+    /// Set while collapse state is being pushed INTO the grid, so the header observers above don't
+    /// treat our own writes as user intent.
+    /// </summary>
+    private bool _applyingGroupExpansion;
 
     private void PersistGroupExpansion()
     {
