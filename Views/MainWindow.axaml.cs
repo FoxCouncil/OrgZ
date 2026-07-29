@@ -170,11 +170,13 @@ public partial class MainWindow : Window
                     return;
                 }
 
-                // The old code followed this with a manual "centre the row in the viewport" pass
-                // driven by ScrollViewer.Offset. There is no ScrollViewer to drive - see
-                // ScrollAnchorIntoView - so it never ran, and the edge-docked result below is
-                // what "Go to current song" has always actually done.
-                GetActiveDataGrid().ScrollIntoView(_viewModel.SelectedItem, null);
+                // Going to the playing song OVERRIDES whatever scroll/selection this view had
+                // remembered - otherwise the restore queued by the rebind lands a moment later
+                // and yanks you back to where you last were, which is not where the song is.
+                _pendingRestoreKey = null;
+                MediaDataGrid.Opacity = 1;
+
+                CenterOnItem(_viewModel.SelectedItem, allowRetry: true);
             }, Avalonia.Threading.DispatcherPriority.Background);
         };
         _viewModel.GetScrollAnchor = TopVisibleItem;
@@ -290,6 +292,45 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Scrolls so <paramref name="item"/> sits in the MIDDLE of the viewport - what "go to current
+    /// song" should do, so what's coming next is visible alongside what's playing.
+    ///
+    /// Centring is just an anchor problem: put the row half a screen above it at the top.
+    /// <see cref="DataGrid.ScrollIntoView"/> has no alignment argument, so there's no way to ask
+    /// for this directly.
+    /// </summary>
+    private void CenterOnItem(MediaItem? item, bool allowRetry = false)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        var items = _viewModel.FilteredItems;
+        var index = items.FindIndex(i => i.Id == item.Id);
+        if (index < 0)
+        {
+            return;
+        }
+
+        // Arriving from another view, the target's rows may not have realized yet, and a viewport
+        // we measure as one row high would centre on nothing. Give it one more turn.
+        var visibleRows = VisibleRowCount();
+        if (visibleRows <= 1 && allowRetry)
+        {
+            Dispatcher.UIThread.Post(() => CenterOnItem(item), DispatcherPriority.Background);
+            return;
+        }
+
+        ScrollAnchorIntoView(items[Math.Max(0, index - (visibleRows / 2))]);
+    }
+
+    private int VisibleRowCount()
+    {
+        return Math.Max(MediaDataGrid.GetVisualDescendants().OfType<DataGridRow>().Count(r => r.IsVisible), 1);
+    }
+
+    /// <summary>
     /// Puts <paramref name="anchor"/> back at the top of the viewport, in ONE movement.
     ///
     /// <see cref="DataGrid.ScrollIntoView"/> docks its target to the nearest viewport edge. From
@@ -363,9 +404,28 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Views with nothing to restore - never visited, or last left at the top - skip the whole
+        // hide/defer dance. Paying a hidden frame and a deferred pass on EVERY switch is what made
+        // switching feel heavy, and most switches have nothing to put back.
+        if (!HasScrollToRestore(key))
+        {
+            return;
+        }
+
         _pendingRestoreKey = key;
         MediaDataGrid.Opacity = 0;
         MediaDataGrid.LayoutUpdated += OnLayoutUpdatedForRestore;
+    }
+
+    /// <summary>Whether a view has a remembered position worth the cost of restoring it.</summary>
+    private bool HasScrollToRestore(string key)
+    {
+        if (_viewStates.TryGetValue(key, out var state))
+        {
+            return !string.IsNullOrEmpty(state.AnchorId);
+        }
+
+        return !string.IsNullOrEmpty(Settings.Get($"OrgZ.View.{key}.TopId", string.Empty));
     }
 
     private void OnLayoutUpdatedForRestore(object? sender, EventArgs e)

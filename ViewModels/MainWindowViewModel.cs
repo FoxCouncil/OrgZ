@@ -2482,6 +2482,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
+            // The user picked this track in THIS view, so this view is where "go to current song"
+            // should return them - whether or not the queue below gets rebuilt. Setting it only on
+            // the rebuild path left the origin pointing at wherever the queue happened to be built
+            // last, so playing from Favorites and clicking the artwork took you to Music.
+            _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
+
             // Reuse the existing context only when the current view's filter
             // produces the SAME source list -- so a search that narrows the
             // visible tracks rebuilds the queue against the filtered set
@@ -2497,7 +2503,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             _playbackContext?.Release();
             _playbackContext = new PlaybackContext(FilteredItems, file, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
-            _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
             OnPropertyChanged(nameof(PlaybackContextUpcoming));
             ExecutePlayMusic(file);
         });
@@ -2535,6 +2540,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     return;
                 }
 
+                _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
+
                 if (_playbackContext != null
                     && _playbackContext.MatchesSource(FilteredItems)
                     && _playbackContext.JumpTo(station))
@@ -2546,7 +2553,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                 _playbackContext?.Release();
                 _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
-                _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
+                // See PlayMusicItem: the origin is the view the user picked in.
                 OnPropertyChanged(nameof(PlaybackContextUpcoming));
                 ExecutePlayRadio(station);
             });
