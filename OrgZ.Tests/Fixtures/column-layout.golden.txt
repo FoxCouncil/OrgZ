@@ -1,0 +1,122 @@
+Music [host=Grid]
+  (blank) | IsChecked | RowCheck | 28px | ---
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
+  Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+  Rating | RatingDisplay | Rating | 110px | -ro
+Radio [host=Grid, group=Tags]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Stream | Title | FavoriteTitle | 2* | sro
+  Country | CountryCode | Flag | 60px | sro
+  Bit Rate | BitrateLabel | RightAligned | 70px | sro
+  Codec | CodecLabel | Badge | 70px | sro
+Favorites [host=Grid]
+  (blank) | IsChecked | RowCheck | 28px | ---
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Album | Album | Text | 1* | sro
+  Year | Year | Centered | 60px | sro
+  Rating | RatingDisplay | Rating | 100px | -ro
+BadFormat [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Album | Album | Text | 1* | sro
+  Extension | Extension | Text | 70px | sro
+  Reason | FormatIssues | Text | 2* | sro
+CdAudio [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  # | Track | RightAligned | 60px | sro
+  Title | Title | Text | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Duration | Duration | Centered | 100px | sro | fmt=m\:ss
+Podcasts [host=PodcastsPanel]
+Audiobooks [host=AudiobooksPanel]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1.5* | sro
+  Author | Artist | Text | 1* | sro
+  Book | Album | Text | 1* | sro
+  Narrator | Composer | Text | 1* | sro
+  Duration | Duration | Centered | 90px | sro | fmt=h\:mm\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+  Rating | RatingDisplay | Rating | 110px | -ro
+Device [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
+  Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+  Rating | RatingDisplay | Rating | 110px | -ro
+Share [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | Text | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
+  Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+DeviceKind:Music [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
+  Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+  Rating | RatingDisplay | Rating | 110px | -ro
+DeviceKind:Podcast [host=Grid, group=Album]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Episode | Title | Text | 2* | sro
+  Duration | Duration | Centered | 90px | sro | fmt=h\:mm\:ss
+DeviceKind:Audiobook [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
+  Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+  Rating | RatingDisplay | Rating | 110px | -ro
+DevicePlaylist [host=Grid]
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  # | Track | Centered | 40px | sro
+  Title | Title | Text | 2* | sro
+  Artist | Artist | Text | 1* | sro
+  Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+DevicePlaylists [host=Grid]
+  Playlist | Title | Text | 2* | sro
+  Tracks | TotalTracks | RightAligned | 80px | sro
+  Duration | Duration | Centered | 100px | sro | fmt=h\:mm\:ss
+Playlist [host=Grid]
+  (blank) | IsChecked | RowCheck | 28px | ---
+  (blank) | IsPlaying | PlayIndicator | 30px | ---
+  Title | Title | FavoriteTitle | 1* | sro
+  Artist | Artist | Text | 1* | sro
+  Album | Album | Text | 1* | sro
+  Rating | RatingDisplay | Rating | 110px | -ro
