@@ -238,8 +238,20 @@
 				</Border>
 			</Grid>
 
-			<!-- Sidebar + Content area with resizable splitter -->
-			<Grid ColumnDefinitions="200,4,*" Margin="4">
+			<!-- Sidebar + Content area with resizable splitter.
+			     The sidebar column is BOUNDED. A GridSplitter will happily drag its column to
+			     the full width of the window, which leaves the track list squeezed off the right
+			     edge and the sidebar stranded in the middle of a grey field - the user can drag
+			     the app into a state it can't be dragged out of by any obvious means.
+			     MinWidth keeps it usable, MaxWidth keeps the content area.
+			     Constraints go on this FIXED column, never on the *-column: Avalonia 12's Grid
+			     crashes during measure when a *-column carries both (see the top controls row). -->
+			<Grid Margin="4">
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="200" MinWidth="180" MaxWidth="480" />
+					<ColumnDefinition Width="4" />
+					<ColumnDefinition Width="*" />
+				</Grid.ColumnDefinitions>
 				<controls:Sidebar Grid.Column="0" DataContext="{Binding}" />
 
 				<GridSplitter Grid.Column="1" ResizeDirection="Columns" />
