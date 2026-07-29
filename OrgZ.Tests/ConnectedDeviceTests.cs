@@ -383,13 +383,29 @@ public class ConnectedDeviceTests
     }
 
     [Fact]
-    public void Art_degrades_to_none_without_an_Avalonia_platform()
+    public void Art_degrades_to_none_when_the_catalogue_is_empty()
     {
-        // No override → the real loader path, which has no Avalonia platform under the test runner.
-        // It must degrade to "no art" (empty catalogue), never throw.
+        // An empty catalogue must read as "no art" rather than throwing or half-answering.
+        //
+        // This used to get its empty catalogue for free, by relying on there being no Avalonia
+        // platform under the test runner. That stopped being a safe assumption once the headless
+        // UI tests started one for the whole process - and it was never a property this test
+        // meant to assert anyway, just the cheapest way to reach the state. Injecting the empty
+        // catalogue says what's actually under test and can't be perturbed by a neighbour.
+        using var _ = new FakeArtCatalog();
         var d = Dev("Nano 5G", "Red");
         Assert.False(d.HasGenerationImage);
         Assert.Null(d.GenerationImage);
+    }
+
+    [Fact]
+    public void The_real_asset_loader_path_never_throws()
+    {
+        // The other half of what the old test covered: whatever the ambient platform situation,
+        // resolving art must not blow up a device row.
+        var d = Dev("Nano 5G", "Red");
+        var record = Record.Exception(() => (d.HasGenerationImage, d.GenerationImage));
+        Assert.Null(record);
     }
 
     // ===== Generation art - the SHIPPED asset set =====
