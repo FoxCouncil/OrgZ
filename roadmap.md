@@ -3,12 +3,12 @@
 Quality, beauty, and simplicity - in that order when they conflict. Tests reflect the finished
 product: nothing ships behind a capability flag without the conformance suite proving it.
 
-## v1 status (as of 0.9.18)
+## v1 status (as of 0.9.31)
 
 Working, verified: CD ripping and burning (audio + data, CD-TEXT read back off a real disc),
 iPod read/write across the tiers, podcasts, audiobooks, radio, library sharing (now proven
 end to end, libvlc included), and a background service hosting the privileged work. Suite:
-1813 green, gated per commit.
+1908 green, gated per commit — now including headless Avalonia UI tests.
 
 **Closed blockers**
 - Encoders ship in the installer — `encoders-1` release exists; a cold `fetch-encoders.ps1`
@@ -137,16 +137,53 @@ Later maybe: opt-in "follow playback" toggle, foobar-style.
 
 ## Architecture
 
-### Shared media grid v1
-One `MediaDataGrid` control + optional per-view XAML header; Kind-driven column order; podcast
-episodes become `MediaItem`s. Dissolves the three-grid split in MainWindow (main / radio-grouped /
-podcast-grouped), the build-once column workaround, and the feed-detail grid's separate row type.
-The `ViewHost` discriminator is the stepping stone already in place.
+### Shared media grid v1 — SHIPPED 0.9.31
+MainWindow has ONE grid. The three-grid split (flat / radio-grouped / podcast-grouped) and the
+build-once column workaround are gone, `ViewHost` is down to `Grid` / `PodcastsPanel` /
+`AudiobooksPanel`, and `GroupedItemsView` + `PodcastGroupedItemsView` collapse into
+`FilteredItemsView`. Whether a view groups is now decided by `GroupByPath` alone.
+
+The split existed for two Avalonia bugs, both of which were inherited assumptions rather than
+measured facts. Both are now measured, in `MediaGridColumnRebuildTests` /
+`MediaGridGroupCollapseTests`, against a real headless Avalonia app:
+
+- **`Columns.Clear()` under grouping throws.** `DataGridColumnCollection.ClearItems()` empties
+  `ItemsInternal` but never clears `RowGroupSpacerColumn.IsRepresented`, and `InsertItem()` offsets
+  by one whenever that flag is set - so the first column added after a Clear() on a grouped grid
+  does `Insert(1, …)` into an empty list. `RemoveItem()` applies the same offset, so removing
+  columns one at a time is safe. That's `MediaGrid.ReplaceColumns`.
+- **Collapse needs layout, not a frame.** `CollapseRowGroup` no-ops until the grid has built its
+  row-group info, which is why the saved state used to be re-applied from a background-priority
+  post - one frame later, which is the flash. A single synchronous `UpdateLayout()` builds it, and
+  the collapse then lands in the same dispatcher turn. That's `MediaGrid.ApplyGroupExpansion`, and
+  it's why one grid can now rebind on every switch. (Fox's Avalonia PR #242,
+  `AreRowGroupsInitiallyCollapsed`, is NOT in DataGrid 12.0.0 - when it lands this can get simpler.)
+
+Collapse state is applied where the source is bound rather than in `ApplyViewConfig`, because the
+view model also reassigns on search and filter changes that never reach it.
+
+Two parts of the original sketch were deliberately NOT done:
+
+- **Kind-driven column order** - the duplication it targeted is already factored. `MusicColumns()`
+  is shared by Music / Device / Share / device-kind views, and `ShareColumns()` derives from it.
+  What's left (Favorites, library Audiobooks) differs in ways - a 100px vs 110px Rating, Author /
+  Book / Narrator headers - that an abstraction would have to carry as overrides longer than the
+  literals. `ColumnLayoutGoldenTests` now pins all seventeen views' columns, so this can be
+  revisited without guessing.
+- **Podcast episodes become `MediaItem`s** - `PodcastEpisodeRow` carries live download state
+  (`DownloadState`, `IsDownloaded`, …) and its feed. Folding it in means pushing podcast-store
+  concerns into the core library model, and the feed-detail grid lives inside the Podcasts panel,
+  which has its own navigation and never touched the shared grid pipeline. Not worth the model
+  damage; the row type stays.
+
+Noted while snapshotting: the library **Audiobooks** config defines eleven columns that are never
+rendered - its host is `AudiobooksPanel`, which returns before columns are built. Dead config, left
+alone rather than churned this close to v1.
 
 ### Device playlists master view
 The device Playlists node is (by spec) a navigation container today. A real master list - rows are
-playlists (name, tracks, duration), double-click navigates - needs a playlist row type, which
-arrives naturally with shared media grid v1.
+playlists (name, tracks, duration), double-click navigates - needs a playlist row type. The shared
+grid it was waiting on has shipped (0.9.31), so this is now just the row type.
 
 ### OrgZ background service — HOST SHIPPED 0.9.3
 The device-helper grew into the general service host: protocol v2 (generic payload/result
