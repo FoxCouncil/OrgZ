@@ -346,8 +346,11 @@
 							     area - as Dock=Left children they only got their desired width, which
 							     collapsed the near-empty podcast feed list into a narrow strip. -->
 							<Grid>
-							<!-- Regular DataGrid for non-grouped views (Music, Favorites, Playlists, Ignored) -->
-							<DataGrid x:Name="MainDataGrid"
+							<!-- The one media grid: every list view, flat or grouped, library or device or
+							     radio or CD or share. Columns and grouping come from the view's
+							     ListViewConfig; MediaGrid (Controls/MediaGrid.cs) owns the two Avalonia
+							     workarounds that used to require a grid per column set. -->
+							<DataGrid x:Name="MediaDataGrid"
 								Classes="mediaGrid"
 								DoubleTapped="DataGrid_DoubleTapped"
 								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
@@ -397,50 +400,6 @@
 									<controls:AudiobooksPanel DataContext="{Binding Audiobooks}" />
 								</Grid>
 
-							<!-- Separate DataGrid for grouped views (Radio) - never shares column state with MainDataGrid.
-							     Bound to its OWN source (GroupedItemsView), not FilteredItemsView: an ungrouped-view
-							     switch reassigns FilteredItemsView, and if this grid shared it, every return to Radio
-							     would rebind to a fresh collection and rebuild expanded (the collapse "flash"). With a
-							     dedicated source the grid keeps the same DataGridCollectionView across switches, so its
-							     row-group collapse state survives and there's nothing to re-collapse. -->
-							<DataGrid x:Name="GroupedDataGrid"
-								Classes="mediaGrid"
-								DoubleTapped="DataGrid_DoubleTapped"
-								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-								ItemsSource="{Binding GroupedItemsView}"
-								GridLinesVisibility="All"
-								IsReadOnly="True"
-								AutoGenerateColumns="False"
-								CanUserSortColumns="True"
-								SelectionMode="Extended"
-								Background="{DynamicResource SystemAltHighColor}"
-								HorizontalScrollBarVisibility="Auto"
-								VerticalScrollBarVisibility="Auto"
-								IsVisible="False">
-								<DataGrid.Columns />
-							</DataGrid>
-
-							<!-- Dedicated grouped grid for a device's Podcasts view - one collapsible header
-							     per show. Separate from GroupedDataGrid because that grid carries Radio's
-							     columns and the shared grid can't rebuild columns for a second set (the
-							     Avalonia spacer-column crash); this one builds its podcast columns once and
-							     never rebuilds. Bound to its OWN source so it never thrashes the radio grid. -->
-							<DataGrid x:Name="PodcastGroupedDataGrid"
-								Classes="mediaGrid"
-								DoubleTapped="DataGrid_DoubleTapped"
-								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-								ItemsSource="{Binding PodcastGroupedItemsView}"
-								GridLinesVisibility="All"
-								IsReadOnly="True"
-								AutoGenerateColumns="False"
-								CanUserSortColumns="True"
-								SelectionMode="Extended"
-								Background="{DynamicResource SystemAltHighColor}"
-								HorizontalScrollBarVisibility="Auto"
-								VerticalScrollBarVisibility="Auto"
-								IsVisible="False">
-								<DataGrid.Columns />
-							</DataGrid>
 							</Grid>
 						</DockPanel>
 					</Border>

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
+﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
 using Avalonia.Animation;
@@ -32,13 +32,6 @@ public partial class MainWindow : Window
 
     private string? _lastViewConfigKey;
     private readonly Dictionary<string, (double ScrollOffset, MediaItem? SelectedItem)> _viewStates = new();
-    // Grouped grids whose columns have been built. Each is built exactly once - rebuilding after a
-    // grouped DataGridCollectionView was bound triggers the Avalonia spacer column bug.
-    private readonly HashSet<DataGrid> _initializedGroupedGrids = new();
-    // Whichever grouped grid is currently driving the view (GroupedDataGrid for Radio,
-    // PodcastGroupedDataGrid for a device Podcasts view). The row-group collapse/expand machinery
-    // operates on this rather than a hard-coded grid, since only one grouped view is active at a time.
-    private DataGrid? _activeGroupedGrid;
 
     internal static MediaItem? DraggedMediaItem;
 
@@ -80,16 +73,16 @@ public partial class MainWindow : Window
 
         WindowSizeTracker.Track(this, "Main");
 
-        MainDataGrid.AddHandler(InputElement.PointerPressedEvent, MainDataGrid_PointerPressed, RoutingStrategies.Tunnel);
-        MainDataGrid.AddHandler(InputElement.PointerMovedEvent, MainDataGrid_PointerMoved, RoutingStrategies.Tunnel);
-        MainDataGrid.AddHandler(InputElement.PointerReleasedEvent, MainDataGrid_PointerReleased, RoutingStrategies.Tunnel);
-        DragDrop.SetAllowDrop(MainDataGrid, true);
-        MainDataGrid.AddHandler(DragDrop.DragOverEvent, MainDataGrid_DragOver);
-        MainDataGrid.AddHandler(DragDrop.DropEvent, MainDataGrid_Drop);
+        MediaDataGrid.AddHandler(InputElement.PointerPressedEvent, MediaDataGrid_PointerPressed, RoutingStrategies.Tunnel);
+        MediaDataGrid.AddHandler(InputElement.PointerMovedEvent, MediaDataGrid_PointerMoved, RoutingStrategies.Tunnel);
+        MediaDataGrid.AddHandler(InputElement.PointerReleasedEvent, MediaDataGrid_PointerReleased, RoutingStrategies.Tunnel);
+        DragDrop.SetAllowDrop(MediaDataGrid, true);
+        MediaDataGrid.AddHandler(DragDrop.DragOverEvent, MediaDataGrid_DragOver);
+        MediaDataGrid.AddHandler(DragDrop.DropEvent, MediaDataGrid_Drop);
         // Leaving the grid retires the insertion line but NOT the ghost - the pointer is
         // usually on its way to a sidebar playlist or device, where the ghost is the only
         // feedback there is.
-        MainDataGrid.AddHandler(DragDrop.DragLeaveEvent, (_, _) => HideDropLine());
+        MediaDataGrid.AddHandler(DragDrop.DragLeaveEvent, (_, _) => HideDropLine());
 
         // The ghost follows the pointer anywhere in the window, so it's driven from the
         // window (tunnel, so a handled DragOver deeper in the tree can't stop it).
@@ -98,20 +91,24 @@ public partial class MainWindow : Window
 
         // Column-header context menu: right-click any header → toggle columns + persist.
         // Wired at the tunneling stage so the DataGrid doesn't eat the event first.
-        MainDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
-        GroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
-        PodcastGroupedDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
+        MediaDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_HeaderRightClick, RoutingStrategies.Tunnel);
 
         // Right-click SELECTS the row under the cursor before its context menu opens - Avalonia's
         // DataGrid only selects on the left button, so without this every context action (Add to
         // Playlist, Rating, Sync, ...) targeted whatever was last left-clicked, or nothing.
-        foreach (var grid in new[] { MainDataGrid, GroupedDataGrid, PodcastGroupedDataGrid })
+        MediaDataGrid.AddHandler(InputElement.PointerPressedEvent, DataGrid_RightClickSelectRow, RoutingStrategies.Tunnel);
+        MediaDataGrid.ColumnReordered += DataGrid_ColumnReordered;
+
+        // Every rebind of the grid's source is where grouped views get their collapse state, and
+        // where per-header tap observers get attached.
+        MediaDataGrid.LoadingRowGroup += AutoCollapseRowGroup;
+        MediaDataGrid.PropertyChanged += (_, e) =>
         {
-            grid.AddHandler(InputElement.PointerPressedEvent, DataGrid_RightClickSelectRow, RoutingStrategies.Tunnel);
-        }
-        MainDataGrid.ColumnReordered += DataGrid_ColumnReordered;
-        GroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
-        PodcastGroupedDataGrid.ColumnReordered += DataGrid_ColumnReordered;
+            if (e.Property == DataGrid.ItemsSourceProperty)
+            {
+                OnGridItemsSourceChanged();
+            }
+        };
 
         // Keyboard context-menu key (Apps / Shift+F10) opens the focused element's context menu by
         // re-dispatching ContextRequested - standard a11y, and it lets right-click menus be driven and
@@ -273,17 +270,9 @@ public partial class MainWindow : Window
         Avalonia.Threading.Dispatcher.UIThread.Post(() => RestoreViewState(_lastViewConfigKey), Avalonia.Threading.DispatcherPriority.Render);
     }
 
-    /// <summary>The grouped grid a host routes to, or null for ungrouped hosts (MainGrid / the panel).</summary>
-    private DataGrid? GroupedGridFor(ViewHost host) => host switch
-    {
-        ViewHost.GroupedGrid => GroupedDataGrid,
-        ViewHost.PodcastGroupedGrid => PodcastGroupedDataGrid,
-        _ => null,
-    };
-
     private DataGrid GetActiveDataGrid()
     {
-        return _activeGroupedGrid is { IsVisible: true } grouped ? grouped : MainDataGrid;
+        return MediaDataGrid;
     }
 
     private ScrollViewer? GetDataGridScrollViewer()
@@ -430,20 +419,17 @@ public partial class MainWindow : Window
 
     private void ApplyViewConfig(ListViewConfig config)
     {
-        // The config names its host directly (ViewHost) - the grid/panel routing, the grouped-grid
-        // selection, and BindActiveView in the VM all key off the same discriminator instead of
-        // re-deriving it from view-specific flags.
+        // The config names its host directly (ViewHost), so the grid/panel routing keys off one
+        // discriminator instead of being re-derived from view-specific flags at each consumer.
         bool isPodcasts = config.Host == ViewHost.PodcastsPanel;
         bool isAudiobooks = config.Host == ViewHost.AudiobooksPanel;
 
-        // Podcasts (the store) uses its own UserControl instead of a DataGrid. Hide the grids and show
+        // Podcasts (the store) uses its own UserControl instead of a DataGrid. Hide the grid and show
         // the panel; the panel's internal nav switches between store / subscriptions / feed-detail
         // without touching the DataGrid pipeline.
         PodcastsPanel.IsVisible = isPodcasts;
         AudiobooksHost.IsVisible = isAudiobooks;
-        MainDataGrid.IsVisible = config.Host == ViewHost.MainGrid;
-        GroupedDataGrid.IsVisible = config.Host == ViewHost.GroupedGrid;
-        PodcastGroupedDataGrid.IsVisible = config.Host == ViewHost.PodcastGroupedGrid;
+        MediaDataGrid.IsVisible = config.Host == ViewHost.Grid;
 
         // Set RadioFilterPanel visibility before any early-return so a previous
         // Radio view doesn't leave its country/genre dropdowns hanging in the
@@ -464,61 +450,68 @@ public partial class MainWindow : Window
             return;
         }
 
-        _activeGroupedGrid = GroupedGridFor(config.Host);
-        if (_activeGroupedGrid is { } groupedGrid)
+        // One grid, so its columns and context menu are rebuilt on every switch rather than
+        // built once per host. MediaGrid.ReplaceColumns is what makes that safe under grouping.
+        BuildColumns(config.Columns);
+        BuildContextMenu(config.ContextMenuItems);
+
+        // Collapse state is applied where the source is bound (OnGridItemsSourceChanged), not
+        // here: the view model assigns FilteredItemsView from its own property-changed callback,
+        // which runs BEFORE this handler, and it also reassigns on search/filter changes that
+        // never reach ApplyViewConfig at all. Keying off the bind covers both, in order.
+        EnsureGroupExpansionFor(config);
+    }
+
+    /// <summary>
+    /// Loads the persisted expand/collapse dictionary for a view, if it isn't already loaded.
+    ///
+    /// Keyed on the config being applied - NOT <see cref="_lastViewConfigKey"/>, which at
+    /// ApplyViewConfig time is still the view being LEFT. Getting that wrong made the radio
+    /// groups load and save their state under whichever view you arrived from.
+    /// </summary>
+    private void EnsureGroupExpansionFor(ListViewConfig? config)
+    {
+        var key = config?.GroupByPath is null ? null : config.Key;
+        if (key == _currentGroupedViewKey)
         {
-            // Build columns on each grouped grid exactly once - rebuilding after a grouped
-            // DataGridCollectionView is bound triggers the Avalonia spacer column bug, which is
-            // why every distinct grouped column set (Radio, device Podcasts) owns its own grid.
-            if (_initializedGroupedGrids.Add(groupedGrid))
+            return;
+        }
+
+        _currentGroupedViewKey = key;
+        _appliedExpansionKeys.Clear();
+        _groupExpansion = string.IsNullOrEmpty(key)
+            ? new Dictionary<string, bool>(StringComparer.Ordinal)
+            : GroupExpansionState.Load(key!);
+    }
+
+    /// <summary>
+    /// Applies saved collapse state the moment a grouped collection view is bound, in the same
+    /// dispatcher turn - so a grouped view never paints expanded and then snap shut.
+    /// </summary>
+    private void OnGridItemsSourceChanged()
+    {
+        EnsureGroupExpansionFor(ListViewConfigs.Get(_viewModel.SelectedSidebarItem?.ViewConfigKey));
+
+        if (_currentGroupedViewKey is null)
+        {
+            return;
+        }
+
+        MediaGrid.ApplyGroupExpansion(MediaDataGrid, MediaDataGrid.ItemsSource as DataGridCollectionView, key =>
+        {
+            _appliedExpansionKeys.Add(key);
+
+            // Unseen groups default to collapsed, and the choice is recorded so it persists.
+            if (!_groupExpansion.TryGetValue(key, out var expanded))
             {
-                BuildColumnsOn(groupedGrid, config.Columns);
-                BuildContextMenuOn(groupedGrid, config.ContextMenuItems);
-            }
-        }
-        else
-        {
-            BuildColumns(config.Columns);
-            BuildContextMenu(config.ContextMenuItems);
-        }
-
-        // Group expand/collapse for grouped views uses persisted per-view state. On
-        // load, each group gets the state it had last time (or collapsed by default
-        // for first-time keys). User toggles are captured via the header's
-        // IsItemsExpanded observable and saved immediately.
-        if (_activeGroupedGrid is not null)
-        {
-            // Key off the config being applied (the view we're entering), NOT
-            // _lastViewConfigKey - that's still the view we're leaving at this point, which
-            // made the radio groups load/save their collapse state under the previous view's
-            // key (so it "inherited" Music's or Podcasts' state depending on where you came
-            // from). config.Key is stable per grouped view.
-            _currentGroupedViewKey = config.Key;
-            _groupExpansion = string.IsNullOrEmpty(_currentGroupedViewKey)
-                ? new Dictionary<string, bool>(StringComparer.Ordinal)
-                : GroupExpansionState.Load(_currentGroupedViewKey!);
-            _appliedExpansionKeys.Clear();
-
-            if (_activeGroupedGrid is { } grouped)
-            {
-                grouped.LoadingRowGroup -= AutoCollapseRowGroup;
-                grouped.LoadingRowGroup += AutoCollapseRowGroup;
+                _groupExpansion[key] = false;
+                return false;
             }
 
-            // Apply the saved collapse state once, in a single batch, after the grid has laid
-            // out the freshly-bound collection. It MUST run post-layout: CollapseRowGroup only
-            // works once the DataGrid has built each group's row-group info, so applying it
-            // synchronously here (before that) silently no-ops and leaves the visual expanded
-            // while the stored dict says collapsed - which inverts the next tap's !prev and
-            // desyncs persistence. One batch (not the per-realization path) keeps it from
-            // collapsing group-by-group over time.
-            Dispatcher.UIThread.Post(ApplyGroupExpansionToAllGroups, DispatcherPriority.Background);
-        }
-        else
-        {
-            _currentGroupedViewKey = null;
-            _appliedExpansionKeys.Clear();
-        }
+            return expanded;
+        });
+
+        PersistGroupExpansion();
     }
 
     /// <summary>
@@ -548,84 +541,32 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _appliedExpansionKeys = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Deterministically applies the saved expand/collapse state to every group in the
-    /// active grouped view, working from the collection view's group list (so it covers
-    /// groups that haven't realized yet) rather than the racy per-realization path. Posted
-    /// once per view entry; a no-op once the grid isn't showing a grouped view.
-    /// </summary>
-    private void ApplyGroupExpansionToAllGroups()
-    {
-        if (_currentGroupedViewKey is null
-            || _activeGroupedGrid is not { } grid
-            || grid.ItemsSource is not DataGridCollectionView view
-            || view.Groups is null)
-        {
-            return;
-        }
-
-        foreach (var obj in view.Groups)
-        {
-            if (obj is not DataGridCollectionViewGroup group)
-            {
-                continue;
-            }
-
-            var key = group.Key?.ToString() ?? string.Empty;
-            _appliedExpansionKeys.Add(key);
-
-            // Default unseen groups to collapsed, recording the choice so it persists.
-            var expand = _groupExpansion.TryGetValue(key, out var v) && v;
-            if (!_groupExpansion.ContainsKey(key))
-            {
-                _groupExpansion[key] = false;
-            }
-
-            if (expand)
-            {
-                grid.ExpandRowGroup(group, false);
-            }
-            else
-            {
-                grid.CollapseRowGroup(group, false);
-            }
-        }
-
-        PersistGroupExpansion();
-    }
-
-    /// <summary>
     /// Collapses every group in the active grouped view and persists it - backs the
     /// "collapse all" button on the radio filter bar. No-op outside a grouped view.
     /// </summary>
     internal void CollapseAllRowGroups()
     {
-        if (_activeGroupedGrid is not { } grid
-            || grid.ItemsSource is not DataGridCollectionView view
-            || view.Groups is null)
+        if (MediaDataGrid.ItemsSource is not DataGridCollectionView view || view.Groups is null)
         {
             return;
         }
 
-        foreach (var obj in view.Groups)
+        MediaGrid.ApplyGroupExpansion(MediaDataGrid, view, key =>
         {
-            if (obj is not DataGridCollectionViewGroup group)
-            {
-                continue;
-            }
-            _groupExpansion[group.Key?.ToString() ?? string.Empty] = false;
-            grid.CollapseRowGroup(group, false);
-        }
+            _groupExpansion[key] = false;
+            return false;
+        });
 
         PersistGroupExpansion();
     }
 
     private void AutoCollapseRowGroup(object? sender, DataGridRowGroupHeaderEventArgs e)
     {
-        // No per-header collapse is applied here anymore - doing it as each header realized is
-        // what made the grid collapse group-by-group "over time". The saved state is applied
-        // in one batch by ApplyGroupExpansionToAllGroups (which also covers groups that
-        // haven't realized yet). All that remains is wiring the tap observer once per header,
-        // so user toggles keep updating the persisted dict.
+        // No per-header collapse is applied here - doing it as each header realized is what made
+        // the grid collapse group-by-group "over time". The saved state is applied in one batch
+        // at bind time by OnGridItemsSourceChanged (which also covers groups that haven't
+        // realized yet). All that remains is wiring the tap observer once per header, so user
+        // toggles keep updating the persisted dict.
         var header = e.RowGroupHeader;
         if (_observedHeaders.Add(header))
         {
@@ -655,7 +596,7 @@ public partial class MainWindow : Window
 
     private void BuildColumns(List<ColumnDef> columnDefs)
     {
-        BuildColumnsOn(MainDataGrid, columnDefs);
+        BuildColumnsOn(MediaDataGrid, columnDefs);
     }
 
     /// <summary>
@@ -702,7 +643,11 @@ public partial class MainWindow : Window
     {
         var viewKey = _lastViewConfigKey ?? _viewModel.SelectedSidebarItem?.ViewConfigKey;
         columnDefs = ApplySavedOrder(viewKey, columnDefs);
-        grid.Columns.Clear();
+
+        // Built into a list first, then swapped in one go by MediaGrid.ReplaceColumns - which is
+        // what makes a rebuild survive a bound grouped view. A throw while building a column
+        // therefore leaves the previous columns intact rather than a half-emptied grid.
+        var built = new List<DataGridColumn>(columnDefs.Count);
 
         foreach (var def in columnDefs)
         {
@@ -923,8 +868,10 @@ public partial class MainWindow : Window
             // up by DataGridColumn without having to maintain a parallel map.
             col.SetValue(ColumnKeyProperty, def.Key);
 
-            grid.Columns.Add(col);
+            built.Add(col);
         }
+
+        MediaGrid.ReplaceColumns(grid, built);
     }
 
     /// <summary>
@@ -1093,7 +1040,7 @@ public partial class MainWindow : Window
 
     private void BuildContextMenu(List<ContextMenuItemDef> defs)
     {
-        BuildContextMenuOn(MainDataGrid, defs);
+        BuildContextMenuOn(MediaDataGrid, defs);
     }
 
     // Commands whose menu entry gets a live "(N)" count suffix when several rows are
@@ -1343,7 +1290,7 @@ public partial class MainWindow : Window
         var config = ListViewConfigs.Get(_lastViewConfigKey);
         if (config != null)
         {
-            BuildContextMenuOn(GroupedGridFor(config.Host) ?? MainDataGrid, config.ContextMenuItems);
+            BuildContextMenuOn(MediaDataGrid, config.ContextMenuItems);
         }
     }
 
@@ -1624,11 +1571,11 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    // -- Drag from MainDataGrid (for drop into playlists, or playlist track reordering) --
+    // -- Drag from MediaDataGrid (for drop into playlists, or playlist track reordering) --
 
-    private void MainDataGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
+    private void MediaDataGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!e.GetCurrentPoint(MainDataGrid).Properties.IsLeftButtonPressed)
+        if (!e.GetCurrentPoint(MediaDataGrid).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -1645,7 +1592,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _gridDragOrigin = e.GetPosition(MainDataGrid);
+        _gridDragOrigin = e.GetPosition(MediaDataGrid);
         _gridDragItem = item;
         _gridDragRowIndex = row.Index;
         _gridPressEvent = e;
@@ -1655,20 +1602,20 @@ public partial class MainWindow : Window
         _gridPressSelection = SelectedTracks();
     }
 
-    private async void MainDataGrid_PointerMoved(object? sender, PointerEventArgs e)
+    private async void MediaDataGrid_PointerMoved(object? sender, PointerEventArgs e)
     {
         if (_gridDragOrigin == null || _gridDragItem == null || _gridPressEvent == null)
         {
             return;
         }
 
-        if (!e.GetCurrentPoint(MainDataGrid).Properties.IsLeftButtonPressed)
+        if (!e.GetCurrentPoint(MediaDataGrid).Properties.IsLeftButtonPressed)
         {
             ResetGridDragState();
             return;
         }
 
-        var current = e.GetPosition(MainDataGrid);
+        var current = e.GetPosition(MediaDataGrid);
         var dx = current.X - _gridDragOrigin.Value.X;
         var dy = current.Y - _gridDragOrigin.Value.Y;
         if ((dx * dx + dy * dy) < 36)
@@ -1735,7 +1682,7 @@ public partial class MainWindow : Window
         HideDragVisuals();
     }
 
-    private void MainDataGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    private void MediaDataGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         ResetGridDragState();
     }
@@ -1786,7 +1733,7 @@ public partial class MainWindow : Window
     }
 
     // ── row-reorder drag visuals: insertion line + pointer ghost + edge auto-scroll ──
-    // All three ride one hit-test-invisible Canvas adorning MainDataGrid, so nothing fights the
+    // All three ride one hit-test-invisible Canvas adorning MediaDataGrid, so nothing fights the
     // DataGridRow template. The auto-scroll runs on a timer (DragOver only fires while the pointer
     // MOVES - holding still at an edge must keep scrolling).
 
@@ -1827,8 +1774,8 @@ public partial class MainWindow : Window
 
         // Adorn the WINDOW, not the grid. The ghost has to follow the pointer onto the
         // sidebar (dropping on a playlist or a device) and out past the window edge, and
-        // an adorner scoped to MainDataGrid can only paint over the grid.
-        _dragOverlayHost = _dragOverlayHost ?? (Control?)this.GetVisualChildren().OfType<Control>().FirstOrDefault() ?? MainDataGrid;
+        // an adorner scoped to MediaDataGrid can only paint over the grid.
+        _dragOverlayHost = _dragOverlayHost ?? (Control?)this.GetVisualChildren().OfType<Control>().FirstOrDefault() ?? MediaDataGrid;
         var layer = Avalonia.Controls.Primitives.AdornerLayer.GetAdornerLayer(_dragOverlayHost);
         if (layer != null)
         {
@@ -1898,20 +1845,20 @@ public partial class MainWindow : Window
 
     private void UpdateDragVisuals(DragEventArgs e)
     {
-        var pos = e.GetPosition(MainDataGrid);
+        var pos = e.GetPosition(MediaDataGrid);
         _lastDragPos = pos;
 
         UpdateDragGhost(e);
 
         // The insertion line is drawn in the window-wide overlay, so grid coordinates have
         // to be translated up into it.
-        var gridOrigin = _dragOverlayHost != null ? MainDataGrid.TranslatePoint(new Point(0, 0), _dragOverlayHost) ?? new Point(0, 0) : new Point(0, 0);
+        var gridOrigin = _dragOverlayHost != null ? MediaDataGrid.TranslatePoint(new Point(0, 0), _dragOverlayHost) ?? new Point(0, 0) : new Point(0, 0);
 
         var row = (e.Source as Visual)?.FindAncestorOfType<DataGridRow>();
-        if (row != null && _dropLine != null && row.TranslatePoint(new Point(0, 0), MainDataGrid) is { } rowTop)
+        if (row != null && _dropLine != null && row.TranslatePoint(new Point(0, 0), MediaDataGrid) is { } rowTop)
         {
             bool before = e.GetPosition(row).Y < row.Bounds.Height / 2;
-            _dropLine.Width = MainDataGrid.Bounds.Width;
+            _dropLine.Width = MediaDataGrid.Bounds.Width;
             Canvas.SetLeft(_dropLine, gridOrigin.X);
             Canvas.SetTop(_dropLine, gridOrigin.Y + Math.Max(0, rowTop.Y + (before ? 0 : row.Bounds.Height) - 1));
             _dropLine.IsVisible = true;
@@ -1927,7 +1874,7 @@ public partial class MainWindow : Window
             _dragScrollTimer.Tick += (_, _) =>
             {
                 const double zone = 32, step = 26;
-                var sv = MainDataGrid.FindDescendantOfType<ScrollViewer>();
+                var sv = MediaDataGrid.FindDescendantOfType<ScrollViewer>();
                 if (sv == null)
                 {
                     return;
@@ -1936,7 +1883,7 @@ public partial class MainWindow : Window
                 {
                     sv.Offset = new Vector(sv.Offset.X, Math.Max(0, sv.Offset.Y - step));
                 }
-                else if (_lastDragPos.Y > MainDataGrid.Bounds.Height - zone)
+                else if (_lastDragPos.Y > MediaDataGrid.Bounds.Height - zone)
                 {
                     var max = Math.Max(0, sv.Extent.Height - sv.Viewport.Height);
                     sv.Offset = new Vector(sv.Offset.X, Math.Min(max, sv.Offset.Y + step));
@@ -1965,7 +1912,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MainDataGrid_DragOver(object? sender, DragEventArgs e)
+    private void MediaDataGrid_DragOver(object? sender, DragEventArgs e)
     {
         // Row-reorder drags only: a playlist's rows while viewing that playlist, or a reorderable
         // device's rows (Shuffle play order) while viewing that device.
@@ -1982,7 +1929,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void MainDataGrid_Drop(object? sender, DragEventArgs e)
+    private void MediaDataGrid_Drop(object? sender, DragEventArgs e)
     {
         HideDragVisuals();
 

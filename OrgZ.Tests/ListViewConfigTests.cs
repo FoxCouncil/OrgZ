@@ -73,30 +73,35 @@ public class ListViewConfigTests
     }
 
     [Fact]
-    public void DevicePodcastConfig_GroupsByAlbumOnTheDedicatedGrid()
+    public void DevicePodcastConfig_GroupsByShow()
     {
-        // The device Podcasts view groups episodes by show (Album) and routes to the dedicated
-        // PodcastGroupedDataGrid so it never collides with Radio's columns on the shared grouped grid.
+        // The device Podcasts view groups episodes by show (Album). It shares the one media grid
+        // with every other view now - grouping is decided by GroupByPath alone, not by which grid
+        // a config routes to.
         var config = ListViewConfigs.BuildDeviceKindConfig(@"E:\", MediaKind.Podcast);
         Assert.Equal("Album", config.GroupByPath);
-        Assert.Equal(ViewHost.PodcastGroupedGrid, config.Host);
+        Assert.Equal(ViewHost.Grid, config.Host);
     }
 
     [Fact]
     public void DeviceAudiobookConfig_IsFlat()
     {
-        // Audiobooks reuse the flat device-music grid - no grouping, not the podcast grid.
+        // Audiobooks reuse the flat device-music layout - no grouping.
         var config = ListViewConfigs.BuildDeviceKindConfig(@"E:\", MediaKind.Audiobook);
         Assert.Null(config.GroupByPath);
-        Assert.Equal(ViewHost.MainGrid, config.Host);
+        Assert.Equal(ViewHost.Grid, config.Host);
     }
 
     [Fact]
-    public void HostRouting_RadioIsGroupedGrid_PodcastsIsPanel()
+    public void HostRouting_OnlyThePanelsOptOutOfTheSharedGrid()
     {
-        Assert.Equal(ViewHost.GroupedGrid, ListViewConfigs.Get("Radio")!.Host);
+        // Radio is grouped and Music is flat, but both are the SAME host now. Only Podcasts and
+        // Audiobooks - which are whole UserControls, not lists - route anywhere else.
+        Assert.Equal(ViewHost.Grid, ListViewConfigs.Get("Radio")!.Host);
+        Assert.Equal(ViewHost.Grid, ListViewConfigs.Get("Music")!.Host);
         Assert.Equal(ViewHost.PodcastsPanel, ListViewConfigs.Get("Podcasts")!.Host);
-        Assert.Equal(ViewHost.MainGrid, ListViewConfigs.Get("Music")!.Host);
+        Assert.Equal("Tags", ListViewConfigs.Get("Radio")!.GroupByPath);
+        Assert.Null(ListViewConfigs.Get("Music")!.GroupByPath);
     }
 
     // -- Favorites view --

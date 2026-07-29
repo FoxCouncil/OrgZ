@@ -1,4 +1,4 @@
-// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
+﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
 using Avalonia.Collections;
@@ -734,31 +734,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// DataGrid-bound view for the active UNGROUPED view (Music, Favorites, Playlists, ...),
-    /// wrapping that view's filtered item list. Bound to MainDataGrid. Grouped views use
-    /// <see cref="GroupedItemsView"/> instead so the two grids never thrash each other's source.
+    /// The collection view the shared media grid renders, for whichever view is active - flat or
+    /// grouped, library or device or radio.
+    ///
+    /// There were three of these, one per grid, so that switching views never reassigned a grouped
+    /// grid's source (a reassignment rebuilds every group expanded, and the saved collapse state was
+    /// re-applied a frame later, which is a visible flash). The single grid reassigns on every
+    /// switch, and instead applies collapse in the same dispatcher turn as the bind - see
+    /// <c>MediaGrid.Bind</c>. The per-view cache below still hands back the same instance for a
+    /// re-entered view, so the common case stays a binding no-op regardless.
     /// </summary>
     [ObservableProperty]
     private DataGridCollectionView? _filteredItemsView;
-
-    /// <summary>
-    /// DataGrid-bound view for the active GROUPED view (Radio), wrapping its filtered list with
-    /// <c>GroupDescriptions</c> for Avalonia's collapsible group headers. Bound to GroupedDataGrid.
-    /// Kept separate from <see cref="FilteredItemsView"/> so switching to an ungrouped view never
-    /// reassigns the grouped grid's source - that's what lets the grid retain its row-group collapse
-    /// state across view switches (no rebuild, no collapse flash).
-    /// </summary>
-    [ObservableProperty]
-    private DataGridCollectionView? _groupedItemsView;
-
-    /// <summary>
-    /// DataGrid-bound view for a device Podcasts view - grouped by show, bound to the dedicated
-    /// PodcastGroupedDataGrid. Separate from <see cref="GroupedItemsView"/> because that grid carries
-    /// Radio's columns and the shared grid can't rebuild columns for a second set (Avalonia
-    /// spacer-column crash); the podcast grid builds its own podcast columns once.
-    /// </summary>
-    [ObservableProperty]
-    private DataGridCollectionView? _podcastGroupedItemsView;
 
     // Per-view cache of built collection views. A view switch that lands on a key whose cached
     // view is still valid (same library version + same filter signature) reuses it verbatim -
@@ -1298,11 +1285,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             && cached.Signature == signature)
         {
             // Fast path: nothing relevant changed since this view was last built. Reuse the exact
-            // same list + DataGridCollectionView. For the grouped grid the ItemsSource instance is
-            // unchanged, so BindActiveView is a no-op on the binding and the grid keeps its
-            // row-group collapse + scroll state - instant switch, nothing to re-collapse.
+            // same list + DataGridCollectionView. The ItemsSource instance is unchanged, so the
+            // assignment is a no-op on the binding and the grid keeps its row-group collapse +
+            // scroll state - instant switch, nothing to re-collapse.
             FilteredItems = cached.Items;
-            BindActiveView(_activeViewConfig, cached.View);
+            FilteredItemsView = cached.View;
             UpdateViewStats(_activeViewConfig, cached.Items);
             UpdateNavigationButtons();
             _log.Debug("ApplyFilter reuse: ViewKey={ViewKey} Filtered={FilteredCount} Version={Version}", viewKey, cached.Items.Count, _dataVersion);
@@ -1376,7 +1363,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             _viewCache[viewKey] = new CachedFilterView(list, view, _dataVersion, signature);
-            BindActiveView(_activeViewConfig, view);
+            FilteredItemsView = view;
 
             UpdateViewStats(_activeViewConfig, list);
             UpdateNavigationButtons();
@@ -1394,7 +1381,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _log.Error(ex, "ApplyFilter threw: ViewKey={ViewKey} _allItems={AllCount} Elapsed={ElapsedMs}ms", viewKey, startCount, sw.ElapsedMilliseconds);
             _viewCache.Remove(viewKey);
             FilteredItems = [];
-            BindActiveView(_activeViewConfig, new DataGridCollectionView(FilteredItems));
+            FilteredItemsView = new DataGridCollectionView(FilteredItems);
             UpdateNavigationButtons();
         }
     }
@@ -1410,36 +1397,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return config.ShowRadioFilterPanel
             ? string.Join("", search, SelectedCountry, SelectedGenre)
             : search;
-    }
-
-    /// <summary>
-    /// Routes a collection view to the grid that renders the active view: grouped views drive
-    /// GroupedDataGrid via <see cref="GroupedItemsView"/>, everything else drives MainDataGrid via
-    /// <see cref="FilteredItemsView"/>. Re-assigning the grouped grid the same instance it already
-    /// holds is a binding no-op - that's exactly why re-entering Radio doesn't rebuild or flash.
-    /// </summary>
-    private void BindActiveView(ListViewConfig config, DataGridCollectionView view)
-    {
-        switch (config.Host)
-        {
-            case ViewHost.PodcastGroupedGrid:
-            {
-                PodcastGroupedItemsView = view;
-            }
-            break;
-
-            case ViewHost.GroupedGrid:
-            {
-                GroupedItemsView = view;
-            }
-            break;
-
-            default:
-            {
-                FilteredItemsView = view;
-            }
-            break;
-        }
     }
 
     /// <summary>Status-bar / footer stats for the active view. Shared by the build and reuse paths.</summary>

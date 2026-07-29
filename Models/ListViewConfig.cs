@@ -5,20 +5,19 @@ using Avalonia.Controls;
 namespace OrgZ.Models;
 
 /// <summary>
-/// Which top-level control hosts a view. Each DataGrid host builds its columns exactly once -
-/// rebuilding columns after a grouped DataGridCollectionView is bound crashes inside Avalonia's
-/// column collection (the spacer-column bug) - so every distinct grouped column set needs its own
-/// grid, and the config names its host here instead of view-specific flags being re-derived at
-/// each consumer.
+/// Which top-level control hosts a view.
+///
+/// There used to be three grid hosts rather than one, because rebuilding a DataGrid's columns
+/// after a grouped collection view was bound crashed inside Avalonia's column collection, so each
+/// distinct grouped column set needed a grid of its own, built exactly once. That crash has a
+/// cause and a workaround now - see <c>MediaGrid.SetColumns</c> and
+/// <c>MediaGridColumnRebuildTests</c> - so one grid serves every view, and whether it groups is
+/// decided by <see cref="ListViewConfig.GroupByPath"/> alone.
 /// </summary>
 public enum ViewHost
 {
-    /// <summary>The shared flat grid (Music, Favorites, playlists, devices, ...).</summary>
-    MainGrid,
-    /// <summary>The grouped grid carrying Radio's columns (genre group headers).</summary>
-    GroupedGrid,
-    /// <summary>The grouped grid carrying podcast columns (a device's Podcasts view, one group per show).</summary>
-    PodcastGroupedGrid,
+    /// <summary>The shared media grid - every list view, grouped or flat.</summary>
+    Grid,
     /// <summary>The Podcasts panel UserControl - no DataGrid at all.</summary>
     PodcastsPanel,
     /// <summary>The Audiobooks composite: the golden store panel over the library audiobooks grid.</summary>
@@ -52,7 +51,7 @@ public record ListViewConfig
     public string? GroupByPath { get; init; }
 
     /// <summary>The control that hosts this view - see <see cref="ViewHost"/>.</summary>
-    public ViewHost Host { get; init; } = ViewHost.MainGrid;
+    public ViewHost Host { get; init; } = ViewHost.Grid;
 }
 
 public static class ListViewConfigs
@@ -252,9 +251,8 @@ public static class ListViewConfigs
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildDeviceContextMenu(),
-            // Group podcast episodes by show (Album) on the dedicated podcast grid. Audiobooks stay flat.
+            // Group podcast episodes by show (Album), one collapsible header per show. Audiobooks stay flat.
             GroupByPath = isPodcast ? "Album" : null,
-            Host = isPodcast ? ViewHost.PodcastGroupedGrid : ViewHost.MainGrid,
         };
     }
 
@@ -473,7 +471,6 @@ public static class ListViewConfigs
             // matching the OrgZ taxonomy ("Alternative Rock", "Synthwave",
             // etc.) without going through GenreNormalizer's fuzzy rules.
             GroupByPath = "Tags",
-            Host = ViewHost.GroupedGrid,
         };
     }
 
