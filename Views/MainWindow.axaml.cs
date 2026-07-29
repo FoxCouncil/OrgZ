@@ -344,6 +344,51 @@ public partial class MainWindow : Window
         Settings.Save();
     }
 
+    /// <summary>
+    /// Restores the incoming view's scroll + selection on the next layout pass, with the grid
+    /// hidden until it's in position.
+    ///
+    /// It CANNOT be done inline. Scrolling (or setting selection, which scrolls) from inside the
+    /// ItemsSource change notification re-enters the DataGrid while it is still rebuilding its
+    /// slot bookkeeping; on a grouped view that corrupts it outright and the next layout pass
+    /// throws from deep inside <c>DataGridDisplayData</c>. That's a hard crash, and
+    /// <c>MediaGridScrollRestoreTests</c> reproduces it.
+    ///
+    /// But deferring it is exactly what made the list paint at the top and then visibly jump. So
+    /// the grid is made invisible for the one frame in between: by the time it's shown again it
+    /// is already scrolled where the user left it.
+    /// </summary>
+    private void QueueViewStateRestore(string? key)
+    {
+        if (key is null || _pendingRestoreKey is not null)
+        {
+            return;
+        }
+
+        _pendingRestoreKey = key;
+        MediaDataGrid.Opacity = 0;
+        MediaDataGrid.LayoutUpdated += OnLayoutUpdatedForRestore;
+    }
+
+    private void OnLayoutUpdatedForRestore(object? sender, EventArgs e)
+    {
+        MediaDataGrid.LayoutUpdated -= OnLayoutUpdatedForRestore;
+
+        var key = _pendingRestoreKey;
+        _pendingRestoreKey = null;
+        try
+        {
+            RestoreViewState(key);
+        }
+        finally
+        {
+            // Whatever happened, the grid must not be left invisible.
+            MediaDataGrid.Opacity = 1;
+        }
+    }
+
+    private string? _pendingRestoreKey;
+
     private void RestoreViewState(string? key)
     {
         if (key == null)
@@ -545,13 +590,7 @@ public partial class MainWindow : Window
     {
         var incomingKey = _viewModel.SelectedSidebarItem?.ViewConfigKey;
         EnsureGroupExpansionFor(ListViewConfigs.Get(incomingKey));
-
-        // Scroll position is restored HERE, not from the posted callback in
-        // ViewModel_PropertyChanged, for the same reason the collapse state is: this runs in the
-        // same dispatcher turn as the rebind, so the view is already in position when it first
-        // paints. Restoring a frame later is what made it look like the list snapped to the top
-        // and then slammed back down.
-        RestoreViewState(incomingKey);
+        QueueViewStateRestore(incomingKey);
 
         if (_currentGroupedViewKey is null)
         {

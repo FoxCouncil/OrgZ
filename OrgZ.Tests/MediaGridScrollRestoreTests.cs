@@ -25,7 +25,7 @@ public sealed class MediaGridScrollRestoreTests
 {
     private static List<MediaItem> ManyRows() =>
         Enumerable.Range(0, 400)
-            .Select(i => new MediaItem { Id = i.ToString(), Kind = MediaKind.Music, Title = $"Track {i:000}" })
+            .Select(i => new MediaItem { Id = i.ToString(), Kind = MediaKind.Music, Title = $"Track {i:000}", Album = $"Album {i / 20:00}" })
             .ToList();
 
     private static DataGrid NewGrid() => new()
@@ -70,6 +70,125 @@ public sealed class MediaGridScrollRestoreTests
         });
 
         Assert.Equal(0, found);
+    }
+
+    [Fact]
+    public async Task Scrolling_from_inside_the_ItemsSource_change_notification_corrupts_the_grid()
+    {
+        // The crash: restoring scroll synchronously from the ItemsSource PropertyChanged handler
+        // re-enters the DataGrid while it is still rebuilding its slot bookkeeping, and a later
+        // layout pass then blows up in DataGridDisplayData.LoadScrollingSlot.
+        var outcome = await HeadlessUi.RunAsync(() =>
+        {
+            var items = ManyRows();
+            var grid = NewGrid();
+            var window = new Window { Width = 800, Height = 400, Content = grid };
+            window.Show();
+            grid.ItemsSource = new DataGridCollectionView(ManyRows());
+            Settle(window);
+
+            DataGridCollectionView Grouped()
+            {
+                var v = new DataGridCollectionView(items);
+                v.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(MediaItem.Album)));
+                return v;
+            }
+
+            grid.PropertyChanged += (_, e) =>
+            {
+                if (e.Property != DataGrid.ItemsSourceProperty || grid.ItemsSource is not DataGridCollectionView v
+                    || v.GroupDescriptions.Count == 0)
+                {
+                    return;
+                }
+
+                // Exactly the app's order: scroll the anchor into view, THEN collapse the groups -
+                // so the scroll targets a layout that is about to be torn down underneath it.
+                grid.UpdateLayout();
+                grid.ScrollIntoView(items[320], null);
+
+                foreach (var g in v.Groups!.OfType<DataGridCollectionViewGroup>().ToList())
+                {
+                    grid.CollapseRowGroup(g, collapseAllSubgroups: false);
+                }
+            };
+
+            try
+            {
+                grid.ItemsSource = Grouped();
+                Settle(window);
+                return "ok";
+            }
+            catch (Exception ex)
+            {
+                return $"{ex.GetType().Name}: {ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim()}";
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+        Assert.NotEqual("ok", outcome);
+    }
+
+    [Fact]
+    public async Task Scrolling_after_the_layout_pass_instead_is_safe()
+    {
+        // The fix: same work, moved out of the notification and onto the following layout pass -
+        // which is what MainWindow.QueueViewStateRestore does. Collapse still happens inline
+        // (that part is safe and has to be, or the groups flash open); only the scroll waits.
+        var outcome = await HeadlessUi.RunAsync(() =>
+        {
+            var items = ManyRows();
+            var grid = NewGrid();
+            var window = new Window { Width = 800, Height = 400, Content = grid };
+            window.Show();
+            grid.ItemsSource = new DataGridCollectionView(ManyRows());
+            Settle(window);
+
+            grid.PropertyChanged += (_, e) =>
+            {
+                if (e.Property != DataGrid.ItemsSourceProperty || grid.ItemsSource is not DataGridCollectionView v
+                    || v.GroupDescriptions.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var g in v.Groups!.OfType<DataGridCollectionViewGroup>().ToList())
+                {
+                    grid.CollapseRowGroup(g, collapseAllSubgroups: false);
+                }
+
+                EventHandler? once = null;
+                once = (_, _) =>
+                {
+                    grid.LayoutUpdated -= once;
+                    grid.ScrollIntoView(items[320], null);
+                };
+                grid.LayoutUpdated += once;
+            };
+
+            try
+            {
+                var grouped = new DataGridCollectionView(items);
+                grouped.GroupDescriptions.Add(new DataGridPathGroupDescription(nameof(MediaItem.Album)));
+                grid.ItemsSource = grouped;
+                Settle(window);
+                Settle(window);
+                return "ok";
+            }
+            catch (Exception ex)
+            {
+                return $"{ex.GetType().Name}: {ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim()}";
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+
+        Assert.Equal("ok", outcome);
     }
 
     [Fact]
