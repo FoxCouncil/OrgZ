@@ -1869,9 +1869,41 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _pauseWhenNextTrackStarts = IsPausedNow;
         var prev = _playbackContext.MovePrevious()!;
         ExecutePlayItem(prev);
     }
+
+    /// <summary>
+    /// Whether playback is loaded but paused, on either engine. Skipping tracks while paused has to
+    /// LAND paused - stepping through a queue looking for something shouldn't start blasting audio.
+    /// </summary>
+    private bool IsPausedNow => IsPausedState(_flacEngine?.IsPaused == true, EngineActive, _player?.State);
+
+    /// <summary>
+    /// Pure form of <see cref="IsPausedNow"/>, so the rule is testable without a live engine.
+    /// The FLAC engine's own paused flag wins when it owns playback; libvlc's state is only
+    /// meaningful when it does.
+    /// </summary>
+    internal static bool IsPausedState(bool flacPaused, bool flacEngineActive, LibVLCSharp.Shared.VLCState? vlcState)
+    {
+        if (flacEngineActive)
+        {
+            return flacPaused;
+        }
+
+        return flacPaused || vlcState == LibVLCSharp.Shared.VLCState.Paused;
+    }
+
+    /// <summary>
+    /// Set when a track change is initiated from a paused state; consumed by
+    /// <see cref="UiShowPlaying"/>, which pauses the newly started track.
+    ///
+    /// It pauses on the "playing" transition rather than before starting, because neither engine
+    /// can load a track without starting it - and that transition fires once libvlc has the media
+    /// but before audio reaches the tap, so nothing is actually heard.
+    /// </summary>
+    private bool _pauseWhenNextTrackStarts;
 
     [RelayCommand]
     public void ButtonPlayPause()
@@ -1883,6 +1915,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 return;
             }
+
+            // An explicit press outranks a pending skip-while-paused. Without this, a track that
+            // never reaches "playing" (missing file, dead share) would leave the flag armed and
+            // silently pause whatever the user pressed play on next.
+            _pauseWhenNextTrackStarts = false;
 
             // Pause / resume / stop ALWAYS acts on what is actually playing - never on the
             // active view. A pause request must never be ignored because the user happens to
@@ -1960,6 +1997,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _pauseWhenNextTrackStarts = IsPausedNow;
         var next = _playbackContext.MoveNext()!;
         ExecutePlayItem(next);
     }
@@ -3621,6 +3659,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void UiShowPlaying()
     {
+        // A track change that started from a paused state stays paused. Both engines funnel their
+        // "now playing" transition through here, so this covers libvlc and the FLAC path alike.
+        if (_pauseWhenNextTrackStarts)
+        {
+            _pauseWhenNextTrackStarts = false;
+            Pause();
+            return;
+        }
+
         ButtonPlayPauseIcon = ICON_PAUSE;
         ButtonPlayPausePadding = ICON_PAUSE_PADDING;
 
