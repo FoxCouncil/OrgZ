@@ -243,12 +243,13 @@
 			     the full width of the window, which leaves the track list squeezed off the right
 			     edge and the sidebar stranded in the middle of a grey field - the user can drag
 			     the app into a state it can't be dragged out of by any obvious means.
-			     MinWidth keeps it usable, MaxWidth keeps the content area.
-			     Constraints go on this FIXED column, never on the *-column: Avalonia 12's Grid
-			     crashes during measure when a *-column carries both (see the top controls row). -->
+			     The bounds MATCH the sidebar panel's own MinWidth/MaxWidth (Sidebar.axaml's root
+			     Border, 140..350). They have to: the panel caps itself at its MaxWidth and centres
+			     in whatever it's given, so every pixel of column past 350 is dead grey bar either
+			     side of it rather than more sidebar. Change one, change the other. -->
 			<Grid Margin="4">
 				<Grid.ColumnDefinitions>
-					<ColumnDefinition Width="200" MinWidth="180" MaxWidth="480" />
+					<ColumnDefinition Width="200" MinWidth="140" MaxWidth="350" />
 					<ColumnDefinition Width="4" />
 					<ColumnDefinition Width="*" />
 				</Grid.ColumnDefinitions>
