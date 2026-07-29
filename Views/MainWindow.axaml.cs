@@ -259,9 +259,10 @@ public partial class MainWindow : Window
             ApplyViewConfig(config);
         }
 
-        // Restore state of the view we're entering (deferred until items are bound)
+        // The incoming view's state was already restored, synchronously, when its collection view
+        // was bound - see OnGridItemsSourceChanged. Doing it from here would be a frame late and
+        // visibly jump.
         _lastViewConfigKey = sidebarItem?.ViewConfigKey;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => RestoreViewState(_lastViewConfigKey), Avalonia.Threading.DispatcherPriority.Render);
     }
 
     private DataGrid GetActiveDataGrid()
@@ -288,7 +289,19 @@ public partial class MainWindow : Window
             .FirstOrDefault();
     }
 
-    /// <summary>Puts <paramref name="anchor"/> back at the top of the viewport.</summary>
+    /// <summary>
+    /// Puts <paramref name="anchor"/> back at the top of the viewport, in ONE movement.
+    ///
+    /// <see cref="DataGrid.ScrollIntoView"/> docks its target to the nearest viewport edge. From
+    /// the top of a list that edge is the bottom - so scrolling to the row that should END the
+    /// viewport leaves the anchor exactly at its start. Scrolling to the anchor itself would park
+    /// it at the bottom instead, a full screen out; and overshooting to the end of the list and
+    /// coming back lands it correctly but moves the viewport twice, which reads as a jump to the
+    /// bottom followed by a slam back.
+    ///
+    /// Callers must invoke this in the same dispatcher turn as the rebind, so no frame paints at
+    /// the top first.
+    /// </summary>
     private void ScrollAnchorIntoView(MediaItem? anchor)
     {
         if (anchor is null)
@@ -299,20 +312,18 @@ public partial class MainWindow : Window
         // Match by Id, not reference: a rebuilt view hands back equal-but-new instances.
         var items = _viewModel.FilteredItems;
         var index = items.FindIndex(i => i.Id == anchor.Id);
-        if (index < 0)
+        if (index < 0 || items.Count == 0)
         {
             return;
         }
 
-        // The grid must have measured before it can scroll anywhere meaningful.
+        // The grid must have measured before it can scroll anywhere meaningful, and before the
+        // visible-row count below means anything.
         MediaDataGrid.UpdateLayout();
 
-        // ScrollIntoView docks the target to the NEAREST viewport edge. Approaching from above
-        // would leave the anchor at the BOTTOM - a whole screen off. Overshooting past it first
-        // means the real scroll approaches from below, which docks it to the top, where it was.
-        MediaDataGrid.ScrollIntoView(items[^1], null);
-        MediaDataGrid.UpdateLayout();
-        MediaDataGrid.ScrollIntoView(items[index], null);
+        var visibleRows = MediaDataGrid.GetVisualDescendants().OfType<DataGridRow>().Count(r => r.IsVisible);
+        var lastInViewport = Math.Min(index + Math.Max(visibleRows, 1) - 1, items.Count - 1);
+        MediaDataGrid.ScrollIntoView(items[lastInViewport], null);
     }
 
     private void SaveViewState()
@@ -532,7 +543,15 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnGridItemsSourceChanged()
     {
-        EnsureGroupExpansionFor(ListViewConfigs.Get(_viewModel.SelectedSidebarItem?.ViewConfigKey));
+        var incomingKey = _viewModel.SelectedSidebarItem?.ViewConfigKey;
+        EnsureGroupExpansionFor(ListViewConfigs.Get(incomingKey));
+
+        // Scroll position is restored HERE, not from the posted callback in
+        // ViewModel_PropertyChanged, for the same reason the collapse state is: this runs in the
+        // same dispatcher turn as the rebind, so the view is already in position when it first
+        // paints. Restoring a frame later is what made it look like the list snapped to the top
+        // and then slammed back down.
+        RestoreViewState(incomingKey);
 
         if (_currentGroupedViewKey is null)
         {

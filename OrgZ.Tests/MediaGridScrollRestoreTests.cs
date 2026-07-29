@@ -99,14 +99,17 @@ public sealed class MediaGridScrollRestoreTests
             var reset = TopVisibleItem(grid)?.Title;
             Assert.Equal(first, reset);
 
-            // Restore by anchor. ScrollIntoView docks to the NEAREST edge, so approaching the
-            // anchor from above would leave it at the BOTTOM of the viewport - a whole screen off.
-            // Overshooting past it first means the final scroll approaches from below, which docks
-            // it to the top, where it was.
-            var target = items.First(i => i.Id == anchor!.Id);
-            grid.ScrollIntoView(items[^1], null);
-            Settle(window);
-            grid.ScrollIntoView(target, null);
+            // Restore in ONE downward scroll, with no overshoot.
+            //
+            // ScrollIntoView docks the target to the nearest edge. From the top of the list that
+            // edge is the BOTTOM - so scrolling to the row that should END the viewport puts the
+            // anchor exactly at its start. Scrolling to the anchor itself would leave it at the
+            // bottom, a whole screen off; overshooting to the end and coming back lands it right
+            // but moves the viewport twice, which reads as a jump to the bottom and a slam back.
+            grid.UpdateLayout();
+            var visible = grid.GetVisualDescendants().OfType<DataGridRow>().Count(r => r.IsVisible);
+            var anchorIndex = items.FindIndex(i => i.Id == anchor!.Id);
+            grid.ScrollIntoView(items[Math.Min(anchorIndex + visible - 1, items.Count - 1)], null);
             Settle(window);
             var restored = TopVisibleItem(grid)?.Title;
 
