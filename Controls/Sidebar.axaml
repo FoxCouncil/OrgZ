@@ -42,8 +42,8 @@
             </StackPanel>
         </DataTemplate>
         <TreeDataTemplate x:Key="DeviceTreeTemplate" x:DataType="models:SidebarItem" ItemsSource="{Binding Children}">
-            <!-- The chevron column supplies the leading space now; no extra margin
-                 or the rows drift right of the LIBRARY column. -->
+            <!-- Leading space comes from the container theme's Padding (the chevron used to
+                 supply it), so no margin here or the rows drift right of the LIBRARY column. -->
             <StackPanel Orientation="Horizontal" Spacing="10" Margin="0">
                 <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
                     <Panel>
@@ -64,15 +64,25 @@
         <ControlTheme x:Key="SidebarItemContainerTheme" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
         </ControlTheme>
+        <!-- Per-level indent for the device tree, down from Fluent's 16. A device has exactly one
+             level of children and they're always shown, so the indent only has to read as "under
+             this device", not carry a deep hierarchy. -->
+        <x:Double x:Key="TreeViewItemIndent">10</x:Double>
+
         <ControlTheme x:Key="DeviceTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
-            <!-- Collapsible devices: the chevron is back and drives the model's
-                 observable IsExpanded (session-remembered per device, auto-expand
-                 on first connect). The container's default 12px side margins are
-                 tightened so the device icon stays near the LIBRARY column. -->
-            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+            <!-- Devices don't collapse. Their children (Podcasts, Audiobooks, playlists) are the
+                 point of the device being listed at all, so IsExpanded is pinned True rather than
+                 bound to the model, and the chevron is gone - a control that only ever has one
+                 valid state is just a thing to mis-click.
+                 With the chevron hidden the leading space it used to supply has to come from
+                 somewhere, hence the Padding: it keeps a device icon on the same column as the
+                 LIBRARY icons above it instead of drifting left. -->
+            <Setter Property="IsExpanded" Value="True" />
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+            <Setter Property="Padding" Value="16,6,0,6" />
             <Style Selector="^ /template/ Panel#PART_ExpandCollapseChevronContainer">
-                <Setter Property="Margin" Value="2,0,2,0" />
+                <Setter Property="IsVisible" Value="False" />
+                <Setter Property="Margin" Value="0" />
             </Style>
         </ControlTheme>
     </UserControl.Resources>

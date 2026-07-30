@@ -50,12 +50,4 @@ internal partial class SidebarItem : ObservableObject
     public ObservableCollection<SidebarItem> Children { get; init; } = [];
 
     public bool HasChildren => Children.Count > 0;
-
-    /// <summary>
-    /// Expansion state of this row's children in the device tree. Observable and
-    /// TwoWay-bound to the TreeViewItem so the chevron toggles it, the session
-    /// memory reads it, and a reconnecting device can restore it.
-    /// </summary>
-    [ObservableProperty]
-    private bool _isExpanded = true;
 }
