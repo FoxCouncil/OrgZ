@@ -2865,6 +2865,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentAlbumArt = null;
         _stationArtBitmap = null;
         _stationArtBytes = null;
+        _currentRadioArtBytes = null;
         _radioTrackArtActive = false;
 
         _nowPlaying?.SetMetadata(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl));
@@ -3042,7 +3043,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     CurrentTrackLine1 = title ?? nowPlaying;
                     CurrentTrackLine2 = artist ?? string.Empty;
 
-                    _nowPlaying?.SetMetadata(new NowPlayingMetadata(title, artist, CurrentStation?.Title));
+                    // Carry the art that's currently showing (per-track cover or the
+                    // station favicon) - SetMetadata rebuilds the whole SMTC entry, so
+                    // omitting it drops the thumbnail on every song change.
+                    _nowPlaying?.SetMetadata(new NowPlayingMetadata(title, artist, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _currentRadioArtBytes ?? _stationArtBytes));
                 });
             };
             thisMedia.MetaChanged += handler;
@@ -6376,7 +6380,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (_currentPodcastStream is { } ps && ps.Episode.Id == episode.Id)
                 {
                     CurrentAlbumArt = bitmap;
-                    _nowPlaying?.SetArtwork(bytes);
+                    _nowPlaying?.SetArtwork(ToOsArtworkBytes(bitmap, bytes));
                 }
             });
         }
@@ -6392,6 +6396,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private Bitmap? _stationArtBitmap;
     private byte[]? _stationArtBytes;
 
+    // The art bytes CURRENTLY on the OS now-playing surface for radio - station favicon
+    // or a per-track cover, whichever is showing. An ICY title update rebuilds the whole
+    // SMTC entry, and without carrying this the thumbnail is dropped every time the song
+    // changes: the art flashed in on tune-in, then vanished on the first "now playing".
+    private byte[]? _currentRadioArtBytes;
+
     private async Task LoadFaviconAsync(string url)
     {
         try
@@ -6402,10 +6412,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var bitmap = BitmapFromBytes(bytes);
             if (bitmap != null)
             {
+                // PNG-normalized for the OS surface; the raw favicon can be a format WIC
+                // won't decode even though Skia just did (that's why the app showed it).
+                var osBytes = ToOsArtworkBytes(bitmap, bytes);
                 UI(() =>
                 {
                     _stationArtBitmap = bitmap;
-                    _stationArtBytes = bytes;
+                    _stationArtBytes = osBytes;
                     // A per-track cover may have landed before the favicon finished
                     // downloading - never stomp real track art with the station logo.
                     if (_radioTrackArtActive)
@@ -6417,7 +6430,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     CurrentAlbumArt = bitmap;
                     // The now-playing widgets only learn the artwork once the favicon
                     // download finishes - push it to the current track's cover.
-                    _nowPlaying?.SetArtwork(bytes);
+                    _currentRadioArtBytes = osBytes;
+                    _nowPlaying?.SetArtwork(osBytes);
                 });
             }
         }
@@ -6440,6 +6454,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         CurrentTrackLine1 = station.Title ?? "Unknown Station";
         CurrentTrackLine2 = FormatTags(station.Tags);
+        _currentRadioArtBytes = _stationArtBytes;
         _nowPlaying?.SetMetadata(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl, ArtBytes: _stationArtBytes));
     }
 
@@ -6457,6 +6472,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _radioTrackArtActive = false;
             CurrentAlbumArt = _stationArtBitmap;
+            _currentRadioArtBytes = _stationArtBytes;
             _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _stationArtBytes));
             return;
         }
@@ -6491,7 +6507,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _radioTrackArtActive = true;
                 // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
                 CurrentAlbumArt = bitmap;
-                _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: bytes));
+                var osBytes = ToOsArtworkBytes(bitmap, bytes);
+                _currentRadioArtBytes = osBytes;
+                _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: osBytes));
             });
         }
         catch
@@ -6592,6 +6610,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         catch { }
 
         return null;
+    }
+
+    /// <summary>
+    /// Re-encodes a decoded bitmap to PNG for the OS now-playing surface. Radio favicons
+    /// arrive in formats Skia decodes but Windows' WIC (which renders the SMTC thumbnail)
+    /// can't - WEBP, some ICOs - so the app showed the logo while the OS silently dropped
+    /// it. Pushing the bitmap we already decoded, re-encoded as PNG, guarantees a format
+    /// every platform's imaging can read. Falls back to the original bytes on failure.
+    /// </summary>
+    private static byte[] ToOsArtworkBytes(Bitmap bitmap, byte[] fallback)
+    {
+        try
+        {
+            using var ms = new MemoryStream();
+            bitmap.Save(ms);   // Avalonia writes PNG
+            return ms.Length > 0 ? ms.ToArray() : fallback;
+        }
+        catch
+        {
+            return fallback;
+        }
     }
 
 
