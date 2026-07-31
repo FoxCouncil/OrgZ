@@ -18,6 +18,7 @@ namespace OrgZ.Tests;
 /// path traversal, unknown ids, tracks whose file vanished, ranges past the end, and the
 /// open-ended range libvlc really sends when it seeks.
 /// </summary>
+[Collection(RealSocketCollection.Name)]
 public sealed class ShareEndToEndTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"orgz-share-{Guid.NewGuid():N}");
@@ -127,20 +128,23 @@ public sealed class ShareEndToEndTests : IDisposable
         for (var attempt = 1; ; attempt++)
         {
             var port = FreePort();
-            var server = new LibraryShareServer("Test Library", port, () => [.. library]);
+            var server = new LibraryShareServer("Test Library", port, () => [.. library], certificateDirectory: _dir);
 
             try
             {
                 server.Start(advertise: false);
             }
-            catch (HttpListenerException) when (attempt < 5)
+            catch (SocketException) when (attempt < 5)
             {
                 server.Dispose();
                 continue;
             }
 
             _servers.Add(server);
-            return (server, new DiscoveredShare("Test Library", "localhost", port, "127.0.0.1"));
+
+            // Pin present → BaseUrl routes through the loopback relay over pinned TLS,
+            // so every test below exercises the REAL client path: relay → TLS → server.
+            return (server, new DiscoveredShare("Test Library", "localhost", port, "127.0.0.1", server.CertificatePin));
         }
     }
 
@@ -164,6 +168,79 @@ public sealed class ShareEndToEndTests : IDisposable
         // And then plays it - which is the step that had never once run.
         var served = await _http.GetByteArrayAsync(item.StreamUrl!, Ct);
         Assert.Equal(await File.ReadAllBytesAsync(path, Ct), served);
+    }
+
+    [Fact]
+    public async Task A_large_file_downloads_intact_through_the_relay()
+    {
+        // California Love (a 37 MB FLAC) came across "corrupt" - but a direct download
+        // was byte-exact, leaving the one path the byte-exact WAV test never covered:
+        // a LARGE file through the loopback TLS relay, streamed in chunks. And the client
+        // download path (ResponseHeadersRead + CopyToAsync) whose short-timeout HttpClient
+        // could truncate a slow transfer mid-copy. Both are exercised here.
+        var path = Path.Combine(_dir, "big.bin");
+        var payload = new byte[8 * 1024 * 1024 + 12345];   // 8 MB + change: not a chunk multiple
+        new Random(1234).NextBytes(payload);
+        await File.WriteAllBytesAsync(path, payload, Ct);
+
+        var (_, share) = Host(Track("big", path));
+
+        var items = ShareDiscovery.ParseCatalogue(await _http.GetStringAsync($"{share.BaseUrl}/catalogue", Ct), share);
+        var item = Assert.Single(items);
+
+        // The real client download path, not a buffered GetByteArrayAsync.
+        var dest = Path.Combine(_dir, "downloaded.bin");
+        Assert.True(await ShareDiscovery.DownloadTrackAsync(item, dest, Ct));
+
+        Assert.Equal(payload.Length, new FileInfo(dest).Length);
+        Assert.Equal(
+            System.Security.Cryptography.SHA256.HashData(payload),
+            System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(dest, Ct)));
+    }
+
+    [Fact]
+    public async Task A_broken_library_answers_500_not_a_connection_reset()
+    {
+        // The service-hosted share once threw on every request (the LocalSystem empty
+        // library db) and the handler ABORTED the response - which a client sees as a
+        // bare connection reset and diagnoses as a network problem. A handler failure
+        // must answer as HTTP so the failure is visible for what it is.
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = FreePort();
+            var server = new LibraryShareServer("Broken Library", port, () => throw new InvalidOperationException("no such table: Media"), certificateDirectory: _dir);
+
+            try
+            {
+                server.Start(advertise: false);
+            }
+            catch (SocketException) when (attempt < 5)
+            {
+                server.Dispose();
+                continue;
+            }
+
+            _servers.Add(server);
+
+            var share = new DiscoveredShare("Broken Library", "localhost", port, "127.0.0.1", server.CertificatePin);
+            var response = await _http.GetAsync($"{share.BaseUrl}/catalogue", Ct);
+            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            return;
+        }
+    }
+
+    [Fact]
+    public async Task A_wrong_pin_never_reaches_the_share()
+    {
+        // The point of the pin: a client that expects a different certificate refuses
+        // the connection outright - no request crosses the wire to a server (or an
+        // interceptor) that can't prove the announced identity.
+        var (server, _) = Host(Track("t1", MakeWav()));
+
+        var impostorPin = Convert.ToBase64String(new byte[32]);
+        var impostor = new DiscoveredShare("Test Library", "localhost", server.Port, "127.0.0.1", impostorPin);
+
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => _http.GetStringAsync($"{impostor.BaseUrl}/catalogue", Ct));
     }
 
     [Fact]

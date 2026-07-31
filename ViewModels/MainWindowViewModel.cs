@@ -269,12 +269,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal ObservableCollection<SidebarItem> DeviceItems { get; } = [];
 
-    /// <summary>Read-only OrgZ libraries discovered on the LAN (the SHARED LIBRARIES section).</summary>
+    /// <summary>Read-only OrgZ libraries discovered on the LAN, listed under DEVICES.</summary>
     internal ObservableCollection<SidebarItem> ShareItems { get; } = [];
 
     // Share key -> the tracks currently mounted from it, so a vanished share can be
     // withdrawn from the live list without disturbing anything else.
     private readonly Dictionary<string, List<MediaItem>> _shareTracks = new(StringComparer.OrdinalIgnoreCase);
+
+    // Share-playlist view key -> the remote playlist it shows, for the Import verb.
+    private readonly Dictionary<string, Services.Sharing.ShareDiscovery.SharePlaylist> _sharePlaylists = new(StringComparer.Ordinal);
     private bool _shareScanning;
     private Avalonia.Threading.DispatcherTimer? _shareScanTimer;
 
@@ -1720,11 +1723,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     {
                         _ = await e.Media.Parse();
                     }
-                    _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
+                    _pendingDurationMs = e.Media.Duration > 0
+                        ? e.Media.Duration
+                        : CurrentPlayingItem?.Duration is { TotalMilliseconds: > 0 } deviceKnown ? (long)deviceKnown.TotalMilliseconds : null;
                     ApplyPendingDuration();
                 }
 
-                var mountPath = CurrentPlayingItem.Source["device:".Length..];
+                var mountPath = CurrentPlayingItem!.Source["device:".Length..];
                 string deviceLabel = mountPath.TrimEnd('\\', '/');
                 if (_connectedDevices.TryGetValue(mountPath, out var dev))
                 {
@@ -1746,7 +1751,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _ = await e.Media.Parse();
             }
 
-            _pendingDurationMs = e.Media.Duration > 0 ? e.Media.Duration : null;
+            // libvlc first, then the item's own known duration - an HTTP share stream
+            // often parses with no duration at all, which took the LCD total (and the
+            // seek bar with it) even though the catalogue delivered the real length.
+            _pendingDurationMs = e.Media.Duration > 0
+                ? e.Media.Duration
+                : CurrentFileItem?.Duration is { TotalMilliseconds: > 0 } known ? (long)known.TotalMilliseconds : null;
             ApplyPendingDuration();
 
             CurrentTrackLine1 = CurrentFileItem?.Title ?? "Unknown Title";
@@ -4503,9 +4513,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var found = await Services.Sharing.ShareDiscovery.BrowseAsync(TimeSpan.FromSeconds(2));
 
-            // Never mount our own share back into our own sidebar.
-            var mine = Services.Sharing.MdnsAdvertiser.LocalIPv4();
-            found.RemoveAll(s => s.Address is { } a && mine is { } m && a == m);
+            // Never mount our own share back into our own sidebar. The advertiser
+            // answers with a per-subnet address on a multi-homed host, so "our own"
+            // means ANY of our interface addresses, not just the default-route one.
+            var mine = Services.Sharing.MdnsAdvertiser.LocalInterfaceAddresses()
+                .Select(i => i.Address.ToString())
+                .ToHashSet(StringComparer.Ordinal);
+            if (Services.Sharing.MdnsAdvertiser.LocalIPv4() is { } m)
+            {
+                mine.Add(m);
+            }
+            found.RemoveAll(s => s.Address is { } a && mine.Contains(a));
 
             var live = found.Select(s => s.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -4522,7 +4540,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
-                MountShare(share, tracks);
+                var playlists = await Services.Sharing.ShareDiscovery.FetchPlaylistsAsync(share);
+                MountShare(share, tracks, playlists);
             }
         }
         catch (Exception ex)
@@ -4535,7 +4554,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void MountShare(Services.Sharing.DiscoveredShare share, List<MediaItem> tracks)
+    private void MountShare(Services.Sharing.DiscoveredShare share, List<MediaItem> tracks, List<Services.Sharing.ShareDiscovery.SharePlaylist> playlists)
     {
         var viewKey = $"Share:{share.Key}";
         ListViewConfigs.Register(viewKey, ListViewConfigs.BuildShareConfig(share.Key));
@@ -4543,17 +4562,154 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _shareTracks[share.Key] = tracks;
         _allItems.AddRange(tracks);
 
-        ShareItems.Add(new SidebarItem
+        var node = new SidebarItem
         {
             Name = share.Name,
             Icon = "fa-solid fa-network-wired",
             Category = "SHARES",
             IsEnabled = true,
             ViewConfigKey = viewKey,
-        });
+        };
 
-        _log.Information("Mounted share \"{Name}\" ({Key}) with {Count} track(s)", share.Name, share.Key, tracks.Count);
+        // The remote's playlists hang under the share the way a device's do. Each is an
+        // ordered-ids view over the mounted tracks; Import (sidebar context menu) copies
+        // it - files and all - into the local library.
+        for (var i = 0; i < playlists.Count; i++)
+        {
+            var playlistKey = $"SharePlaylist:{share.Key}:{i}";
+            ListViewConfigs.Register(playlistKey, ListViewConfigs.BuildSharePlaylistConfig(playlistKey, playlists[i].TrackIds));
+            _sharePlaylists[playlistKey] = playlists[i];
+
+            node.Children.Add(new SidebarItem
+            {
+                Name = playlists[i].Name,
+                // The remote's Favorites wears the same star it wears at home, keyed
+                // off the wire's playlist TYPE - a remote's ordinary playlist that
+                // happens to be called "Favorites" stays a plain list.
+                Icon = playlists[i].IsFavorites ? "fa-solid fa-star" : "fa-solid fa-list-ul",
+                Category = "SHARES",
+                IsEnabled = true,
+                ViewConfigKey = playlistKey,
+            });
+        }
+
+        ShareItems.Add(node);
+
+        _log.Information("Mounted share \"{Name}\" ({Key}) with {Count} track(s), {Playlists} playlist(s)", share.Name, share.Key, tracks.Count, playlists.Count);
         ApplyFilter();
+    }
+
+    /// <summary>
+    /// Copies share tracks into the local library: each is downloaded over its stream
+    /// URL into the music folder and imported through the normal scan pipeline, so tags,
+    /// analysis and the database row all come out exactly as a local file's would.
+    /// Returns share-id → imported local id for the tracks that made it (a track whose
+    /// filename already exists locally is skipped and simply not in the map).
+    /// </summary>
+    internal async Task<Dictionary<string, string>> ImportShareTracksToLibraryAsync(IReadOnlyList<MediaItem> shareTracks)
+    {
+        var imported = new Dictionary<string, string>(StringComparer.Ordinal);
+        var failures = 0;
+
+        foreach (var track in shareTracks.Where(Services.Sharing.ShareDiscovery.IsShareItem))
+        {
+            var destPath = LibraryDestinationFor(track);
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                if (!File.Exists(destPath) && !await Services.Sharing.ShareDiscovery.DownloadTrackAsync(track, destPath))
+                {
+                    failures++;
+                    continue;
+                }
+
+                var newItem = FileScanner.CreateMediaItemFromPath(destPath);
+                if (newItem is null)
+                {
+                    failures++;
+                    continue;
+                }
+
+                AudioFileAnalyzer.AnalyzeFile(newItem);
+                MediaCache.UpsertMusic(newItem);
+                if (_allItems.All(i => i.Id != newItem.Id))
+                {
+                    _allItems.Add(newItem);
+                }
+
+                imported[track.Id] = newItem.Id;
+            }
+            catch (Exception ex)
+            {
+                failures++;
+                _log.Warning(ex, "Share import failed for {Title}", track.Title);
+            }
+        }
+
+        _log.Information("Imported {Count} share track(s) into the library ({Failures} failed)", imported.Count, failures);
+        ApplyFilter();
+        return imported;
+    }
+
+    /// <summary>
+    /// The library path a share track copies to - the SAME layout a CD rip and an iPod
+    /// sync-to-library use: {Music}/{Artist}/{Album}/{NN - Title}.ext, deduped with a
+    /// " (2)" suffix. A flat name at the library root (the old behaviour) sorted nowhere.
+    /// </summary>
+    internal static string LibraryDestinationFor(MediaItem track)
+    {
+        var artist = SanitizeFolderName(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
+        var album = SanitizeFolderName(string.IsNullOrWhiteSpace(track.Album) ? "Unknown Album" : track.Album!);
+        var destDir = Path.Combine(App.FolderPath, artist, album);
+
+        var title = string.IsNullOrWhiteSpace(track.Title) ? track.Id : track.Title!;
+        var baseName = SanitizeFolderName(track.Track is { } trackNo && trackNo > 0 ? $"{trackNo:00} - {title}" : title);
+        var ext = track.Extension ?? ".mp3";
+
+        var dest = Path.Combine(destDir, baseName + ext);
+        for (var n = 2; File.Exists(dest); n++)
+        {
+            dest = Path.Combine(destDir, $"{baseName} ({n}){ext}");
+        }
+        return dest;
+    }
+
+    /// <summary>
+    /// Imports a remote playlist: copies its tracks into the library (skipping any that
+    /// already came over), then recreates the playlist locally with the same name and
+    /// order. The sidebar picks the new playlist up immediately.
+    /// </summary>
+    internal async Task ImportSharePlaylistAsync(SidebarItem playlistNode)
+    {
+        if (playlistNode.ViewConfigKey is not { } key || !_sharePlaylists.TryGetValue(key, out var playlist))
+        {
+            return;
+        }
+
+        // The playlist's ids are namespaced share ids - resolve them to the mounted
+        // MediaItems, preserving the remote order.
+        var byId = _allItems.Where(Services.Sharing.ShareDiscovery.IsShareItem).ToDictionary(i => i.Id, StringComparer.Ordinal);
+        var tracks = playlist.TrackIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        if (tracks.Count == 0)
+        {
+            return;
+        }
+
+        var imported = await ImportShareTracksToLibraryAsync(tracks);
+
+        var playlistId = MediaCache.CreatePlaylist(playlist.Name, "Share");
+        foreach (var shareId in playlist.TrackIds)
+        {
+            if (imported.TryGetValue(shareId, out var localId))
+            {
+                MediaCache.AddTrackToPlaylist(playlistId, localId);
+            }
+        }
+
+        LoadPlaylistSidebarItems();
+        PlaylistsChanged?.Invoke();
+        _log.Information("Imported share playlist \"{Name}\" with {Count} track(s)", playlist.Name, imported.Count);
     }
 
     private void UnmountShare(string shareKey)
@@ -4566,15 +4722,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
+        var playlistPrefix = $"SharePlaylist:{shareKey}:";
+        foreach (var stale in _sharePlaylists.Keys.Where(k => k.StartsWith(playlistPrefix, StringComparison.Ordinal)).ToList())
+        {
+            _sharePlaylists.Remove(stale);
+        }
+
+        Services.Sharing.ShareStreamRelay.Unregister(shareKey);
+
         var viewKey = $"Share:{shareKey}";
         if (ShareItems.FirstOrDefault(i => i.ViewConfigKey == viewKey) is { } item)
         {
             ShareItems.Remove(item);
         }
 
-        // Viewing the share that just vanished? Fall back to the library rather than
-        // leaving a dead view selected.
-        if (SelectedSidebarItem?.ViewConfigKey == viewKey && LibraryItems.Count > 0)
+        // Viewing the share (or one of its playlists) that just vanished? Fall back to
+        // the library rather than leaving a dead view selected.
+        if (LibraryItems.Count > 0
+            && SelectedSidebarItem?.ViewConfigKey is { } selectedKey
+            && (selectedKey == viewKey || selectedKey.StartsWith(playlistPrefix, StringComparison.Ordinal)))
         {
             SelectedSidebarItem = LibraryItems[0];
         }

@@ -144,39 +144,38 @@
                       ItemContainerTheme="{StaticResource DeviceTreeItemTheme}"
                       SelectionChanged="DeviceTreeView_SelectionChanged" />
 
-            <!-- "No devices" placeholder, shown only when DeviceItems is empty -->
+            <!-- Shares: read-only OrgZ libraries discovered on the LAN over mDNS.
+                 They live in the DEVICES section - a share is a place your music
+                 comes from, same as an iPod - hidden entirely when none are mounted.
+                 A tree, not a list: the remote's playlists hang under the share. -->
+            <TreeView DockPanel.Dock="Top"
+                      x:Name="ShareTreeView"
+                      ItemsSource="{Binding ShareItems}"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Padding="0"
+                      Margin="0,0,0,4"
+                      IsVisible="{Binding ShareItems.Count}"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ItemTemplate="{StaticResource DeviceTreeTemplate}"
+                      ItemContainerTheme="{StaticResource DeviceTreeItemTheme}"
+                      SelectionChanged="ShareTreeView_SelectionChanged" />
+
+            <!-- "No devices" placeholder: only when there are no devices AND no shares -->
             <TextBlock DockPanel.Dock="Top"
                        Text="No devices connected"
                        FontFamily="{StaticResource OrgZMonoFont}"
                        FontSize="12"
                        FontStyle="Italic"
                        Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
-                       Margin="34,2,0,4"
-                       IsVisible="{Binding !DeviceItems.Count}" />
-
-            <!-- SHARES: read-only OrgZ libraries discovered on the LAN over mDNS.
-                 Whole section hides when nothing is being shared, so a solo user
-                 never sees an empty heading. -->
-            <StackPanel DockPanel.Dock="Top" IsVisible="{Binding ShareItems.Count}">
-                <Separator Background="{DynamicResource SystemControlBackgroundBaseMediumLowBrush}"
-                           Height="1"
-                           Margin="12,4" />
-                <TextBlock Text="SHARED LIBRARIES"
-                           FontFamily="{StaticResource OrgZMonoFont}"
-                           FontSize="11"
-                           FontWeight="Bold"
-                           Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
-                           Margin="16,8,0,4" />
-                <ListBox x:Name="ShareListBox"
-                         ItemsSource="{Binding ShareItems}"
-                         SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         Padding="0"
-                         ItemTemplate="{StaticResource SidebarItemTemplate}"
-                         ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
-                         SelectionChanged="ShareListBox_SelectionChanged" />
-            </StackPanel>
+                       Margin="34,2,0,4">
+                <TextBlock.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="!DeviceItems.Count" />
+                        <Binding Path="!ShareItems.Count" />
+                    </MultiBinding>
+                </TextBlock.IsVisible>
+            </TextBlock>
 
             <!-- Separator -->
             <Separator DockPanel.Dock="Top"

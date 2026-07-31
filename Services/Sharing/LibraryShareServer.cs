@@ -9,204 +9,218 @@ namespace OrgZ.Services.Sharing;
 
 /// <summary>
 /// Serves a library read-only on the LAN and advertises it over mDNS as
-/// <c>_orgz._tcp</c>. Two endpoints, deliberately boring: <c>/catalogue</c> returns the
-/// track list as JSON, <c>/stream/{id}</c> returns the audio file with Range support so
-/// a remote OrgZ can seek. Spiritually DAAP without the dead protocol. Read-only by
-/// construction - there is no mutating route to reach.
+/// <c>_orgz._tcp</c>. Deliberately boring routes: <c>/catalogue</c> (the full track
+/// records as JSON), <c>/playlists</c> (names + ordered track ids), <c>/stream/{id}</c>
+/// (the audio with Range support so a remote OrgZ can seek), and <c>/art/{id}</c>.
+/// Spiritually DAAP without the dead protocol. Read-only by construction - there is no
+/// mutating route to reach.
 /// </summary>
 public sealed class LibraryShareServer : IDisposable
 {
     private static readonly ILogger _log = Logging.For("LibraryShare");
 
-    private HttpListener _listener = new();
-    private readonly CancellationTokenSource _cts = new();
+    /// <summary>One playlist as served on the wire. Type distinguishes the synthetic
+    /// Favorites ("favorites") from ordinary playlists ("playlist") - clients key UI
+    /// off the TYPE, never the display name.</summary>
+    public sealed record ServedPlaylist(string Name, List<string> TrackIds, string Type = "playlist");
+
+    private TlsHttpServer? _server;
     private readonly Func<List<MediaItem>> _loadLibrary;
+    private readonly Func<List<ServedPlaylist>> _loadPlaylists;
+    private readonly string _certificateDirectory;
     private MdnsAdvertiser? _advertiser;
-    private Task? _loop;
 
     public string ShareName { get; }
     public int Port { get; }
 
-    public LibraryShareServer(string shareName, int port, Func<List<MediaItem>>? loadLibrary = null)
+    /// <summary>The TLS certificate pin this share announces; set once Start has run.</summary>
+    public string? CertificatePin { get; private set; }
+
+    public LibraryShareServer(string shareName, int port, Func<List<MediaItem>>? loadLibrary = null, Func<List<ServedPlaylist>>? loadPlaylists = null, string? certificateDirectory = null)
     {
         ShareName = string.IsNullOrWhiteSpace(shareName) ? "OrgZ Library" : shareName;
         Port = port;
         _loadLibrary = loadLibrary ?? MediaCache.LoadAll;
+        _loadPlaylists = loadPlaylists ?? LoadLocalPlaylists;
+        // Beside the library database, so the GUI and the service - whichever hosts -
+        // present the same identity and clients keep their remembered pin.
+        _certificateDirectory = certificateDirectory ?? (Path.GetDirectoryName(MediaCache.CurrentDatabasePath) ?? ".");
+    }
+
+    /// <summary>
+    /// The local library's playlists as (name, ordered track ids) - Favorites first.
+    /// Favorites isn't a playlist row (it's the per-track flag), so it has to be
+    /// synthesized here or the remote never sees it.
+    /// </summary>
+    private static List<ServedPlaylist> LoadLocalPlaylists()
+    {
+        var playlists = new List<ServedPlaylist>();
+        if (FavoritesPlaylist(MediaCache.LoadAll()) is { } favorites)
+        {
+            playlists.Add(new ServedPlaylist(favorites.Name, favorites.TrackIds, "favorites"));
+        }
+        playlists.AddRange(MediaCache.LoadAllPlaylists().Select(p => new ServedPlaylist(p.Name, MediaCache.GetPlaylistTrackIds(p.Id))));
+        return playlists;
+    }
+
+    /// <summary>The synthetic Favorites playlist: every favorited track, library order. Null when there are none.</summary>
+    internal static (string Name, List<string> TrackIds)? FavoritesPlaylist(IReadOnlyList<MediaItem> library)
+    {
+        var ids = library.Where(t => t.IsFavorite).Select(t => t.Id).ToList();
+        return ids.Count > 0 ? ("Favorites", ids) : null;
     }
 
     public void Start() => Start(advertise: true);
 
     /// <summary>
     /// Serving and advertising are separate concerns: <paramref name="advertise"/> false
-    /// brings the HTTP side up without touching the mDNS multicast socket.
+    /// brings the TLS side up without touching the mDNS multicast socket.
     /// </summary>
     internal void Start(bool advertise)
     {
-        try
-        {
-            _listener = Listen($"http://+:{Port}/");
-        }
-        catch (HttpListenerException ex)
-        {
-            // Binding "+" needs a URL ACL on Windows for a non-elevated process; the
-            // service (LocalSystem) has it. Fall back to loopback so a GUI-hosted share
-            // still works for local testing instead of dying outright.
-            //
-            // The fallback MUST build a fresh listener: HttpListener disposes itself
-            // when Start() fails, so reusing it throws ObjectDisposedException and takes
-            // the share down for real - which is what this path used to do, unnoticed,
-            // because nothing had ever exercised it.
-            _log.Warning(ex, "Share bind on +:{Port} failed - falling back to localhost", Port);
-            _listener = Listen($"http://127.0.0.1:{Port}/");
-        }
+        var certificate = ShareCertificate.LoadOrCreate(_certificateDirectory);
+        CertificatePin = ShareCertificate.PinOf(certificate);
 
-        _loop = Task.Run(() => AcceptLoopAsync(_cts.Token));
+        // A raw socket needs no URL ACL, so - unlike the HttpListener era - an
+        // unelevated GUI host is LAN-reachable, not loopback-only.
+        _server = new TlsHttpServer(IPAddress.Any, Port, certificate, HandleRequestAsync);
+        _server.Start();
 
         if (advertise)
         {
-            _advertiser = new MdnsAdvertiser(ShareName, (ushort)Port);
+            _advertiser = new MdnsAdvertiser(ShareName, (ushort)Port, ["tls=1", $"pin={CertificatePin}"]);
             _advertiser.Start();
         }
 
-        _log.Information("Library share \"{Name}\" listening on {Port}", ShareName, Port);
+        _log.Information("Library share \"{Name}\" listening on {Port} (TLS, pin {Pin})", ShareName, Port, CertificatePin);
     }
 
-    private static HttpListener Listen(string prefix)
-    {
-        var listener = new HttpListener();
-        listener.Prefixes.Add(prefix);
-        listener.Start();
-        return listener;
-    }
-
-    private async Task AcceptLoopAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested && _listener.IsListening)
-        {
-            HttpListenerContext context;
-            try
-            {
-                context = await _listener.GetContextAsync();
-            }
-            catch (Exception) when (ct.IsCancellationRequested || !_listener.IsListening)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _log.Debug(ex, "share accept failed");
-                continue;
-            }
-
-            _ = Task.Run(() => HandleAsync(context), ct);
-        }
-    }
-
-    private async Task HandleAsync(HttpListenerContext context)
+    private async Task HandleRequestAsync(TlsHttpServer.Request request, TlsHttpServer.Response response)
     {
         try
         {
             // Read-only share: anything that isn't a GET/HEAD is refused outright.
-            if (context.Request.HttpMethod is not ("GET" or "HEAD"))
+            if (request.Method is not ("GET" or "HEAD"))
             {
-                context.Response.StatusCode = 405;
-                context.Response.Close();
+                response.StatusCode = 405;
+                response.ContentLength64 = 0;
+                await response.CloseAsync();
                 return;
             }
 
-            var path = context.Request.Url?.AbsolutePath ?? "/";
+            var path = request.Path;
 
             if (path.Equals("/catalogue", StringComparison.OrdinalIgnoreCase))
             {
-                var json = BuildCatalogueJson(ShareName, _loadLibrary());
-                var bytes = Encoding.UTF8.GetBytes(json);
-                context.Response.ContentType = "application/json; charset=utf-8";
-                context.Response.ContentLength64 = bytes.Length;
-                await context.Response.OutputStream.WriteAsync(bytes);
-                context.Response.Close();
+                await WriteJsonAsync(response, BuildCatalogueJson(ShareName, _loadLibrary()));
+                return;
+            }
+
+            if (path.Equals("/playlists", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonAsync(response, BuildPlaylistsJson(_loadPlaylists()));
                 return;
             }
 
             if (TryParseSegment(path, "/stream/", out var streamId))
             {
-                await ServeStreamAsync(context, streamId);
+                await ServeStreamAsync(request, response, streamId);
                 return;
             }
 
             if (TryParseSegment(path, "/art/", out var artId))
             {
-                await ServeArtAsync(context, artId);
+                await ServeArtAsync(request, response, artId);
                 return;
             }
 
-            context.Response.StatusCode = 404;
-            context.Response.Close();
+            response.StatusCode = 404;
+            response.ContentLength64 = 0;
+            await response.CloseAsync();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!response.HeadersSent)
         {
-            _log.Debug(ex, "share request failed");
-            try { context.Response.Abort(); } catch { /* client already gone */ }
+            // Warning, not Debug: a handler that fails on EVERY request (as the
+            // LocalSystem empty-library bug did) must not be invisible. Answer 500 -
+            // a dropped connection diagnoses as a network problem instead of a server
+            // one. Mid-stream failures (headers already sent) propagate to the server,
+            // which just drops the connection.
+            _log.Warning(ex, "share request failed for {Path}", request.Path);
+            response.StatusCode = 500;
+            response.ContentLength64 = 0;
+            await response.CloseAsync();
         }
     }
 
-    private async Task ServeArtAsync(HttpListenerContext context, string id)
+    private static async Task WriteJsonAsync(TlsHttpServer.Response response, string json)
+    {
+        var bytes = Encoding.UTF8.GetBytes(json);
+        response.ContentType = "application/json; charset=utf-8";
+        response.ContentLength64 = bytes.Length;
+        await response.WriteAsync(bytes);
+        await response.CloseAsync();
+    }
+
+    private async Task ServeArtAsync(TlsHttpServer.Request request, TlsHttpServer.Response response, string id)
     {
         var track = ResolveTrack(_loadLibrary(), id);
         if (track?.FilePath is null || AlbumArtWriter.ReadArtwork(track.FilePath) is not { } art)
         {
             // No art is a perfectly ordinary answer - the client shows the placeholder.
-            context.Response.StatusCode = 404;
-            context.Response.Close();
+            response.StatusCode = 404;
+            response.ContentLength64 = 0;
+            await response.CloseAsync();
             return;
         }
 
-        context.Response.ContentType = art.MimeType;
-        context.Response.ContentLength64 = art.Data.Length;
+        response.ContentType = art.MimeType;
+        response.ContentLength64 = art.Data.Length;
 
-        if (context.Request.HttpMethod != "HEAD")
+        if (request.Method != "HEAD")
         {
-            await context.Response.OutputStream.WriteAsync(art.Data);
+            await response.WriteAsync(art.Data);
         }
 
-        context.Response.Close();
+        await response.CloseAsync();
     }
 
-    private async Task ServeStreamAsync(HttpListenerContext context, string id)
+    private async Task ServeStreamAsync(TlsHttpServer.Request request, TlsHttpServer.Response response, string id)
     {
         var track = ResolveTrack(_loadLibrary(), id);
         if (track?.FilePath is null || !File.Exists(track.FilePath))
         {
-            context.Response.StatusCode = 404;
-            context.Response.Close();
+            response.StatusCode = 404;
+            response.ContentLength64 = 0;
+            await response.CloseAsync();
             return;
         }
 
         await using var file = new FileStream(track.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var total = file.Length;
-        var range = ParseRange(context.Request.Headers["Range"], total);
+        var range = ParseRange(request.Headers.TryGetValue("Range", out var rangeHeader) ? rangeHeader : null, total);
 
-        context.Response.ContentType = ContentTypeFor(track.FilePath);
-        context.Response.Headers["Accept-Ranges"] = "bytes";
+        response.ContentType = ContentTypeFor(track.FilePath);
+        response.SetHeader("Accept-Ranges", "bytes");
 
         if (range is { } r)
         {
-            context.Response.StatusCode = 206;
-            context.Response.Headers["Content-Range"] = $"bytes {r.Start}-{r.End}/{total}";
-            context.Response.ContentLength64 = r.End - r.Start + 1;
+            response.StatusCode = 206;
+            response.SetHeader("Content-Range", $"bytes {r.Start}-{r.End}/{total}");
+            response.ContentLength64 = r.End - r.Start + 1;
             file.Seek(r.Start, SeekOrigin.Begin);
         }
         else
         {
-            context.Response.ContentLength64 = total;
+            response.ContentLength64 = total;
         }
 
-        if (context.Request.HttpMethod == "HEAD")
+        if (request.Method == "HEAD")
         {
-            context.Response.Close();
+            await response.CloseAsync();
             return;
         }
 
-        var remaining = context.Response.ContentLength64;
+        var remaining = response.ContentLength64;
         var buffer = new byte[81920];
         while (remaining > 0)
         {
@@ -217,11 +231,11 @@ public sealed class LibraryShareServer : IDisposable
                 break;
             }
 
-            await context.Response.OutputStream.WriteAsync(buffer.AsMemory(0, read));
+            await response.WriteAsync(buffer.AsMemory(0, read));
             remaining -= read;
         }
 
-        context.Response.Close();
+        await response.CloseAsync();
     }
 
     // ── Pure helpers (unit-tested) ───────────────────────────
@@ -345,7 +359,11 @@ public sealed class LibraryShareServer : IDisposable
         return end < start ? null : new ByteRange(start, end);
     }
 
-    /// <summary>Builds the read-only catalogue payload: share name + the playable tracks.</summary>
+    /// <summary>
+    /// Builds the read-only catalogue payload: share name + the playable tracks, with
+    /// the FULL track record - everything the local grid can show, the share grid can
+    /// show. Only local-machine concerns (file path, rip state, checkbox) stay home.
+    /// </summary>
     internal static string BuildCatalogueJson(string shareName, IReadOnlyList<MediaItem> library)
     {
         var tracks = library
@@ -360,7 +378,23 @@ public sealed class LibraryShareServer : IDisposable
                 kind = t.Kind.ToString(),
                 durationTicks = t.Duration?.Ticks ?? 0,
                 track = t.Track,
+                totalTracks = t.TotalTracks,
+                disc = t.Disc,
+                totalDiscs = t.TotalDiscs,
                 year = t.Year,
+                genre = t.Genre,
+                composer = t.Composer,
+                comment = t.Comment,
+                bpm = t.Bpm,
+                rating = t.Rating,
+                playCount = t.PlayCount,
+                fileSize = t.FileSize,
+                bitrate = t.AudioBitrate,
+                sampleRate = t.SampleRate,
+                bitDepth = t.BitDepth,
+                channels = t.AudioChannels,
+                codec = t.CodecDescription,
+                dateAdded = t.DateAdded,
                 // The client hangs this off the stream URL so the remote player sees a
                 // file-shaped location instead of a bare id.
                 ext = ExtensionFor(t),
@@ -375,6 +409,13 @@ public sealed class LibraryShareServer : IDisposable
             tracks,
         });
     }
+
+    /// <summary>The playlists payload: name, ordered track ids, and the playlist type.</summary>
+    internal static string BuildPlaylistsJson(IReadOnlyList<ServedPlaylist> playlists)
+        => JsonSerializer.Serialize(new
+        {
+            playlists = playlists.Select(p => new { name = p.Name, trackIds = p.TrackIds, type = p.Type }).ToList(),
+        });
 
     /// <summary>The track's audio extension, lowercased, or empty when it isn't one we serve.</summary>
     internal static string ExtensionFor(MediaItem track)
@@ -396,32 +437,8 @@ public sealed class LibraryShareServer : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
         _advertiser?.Dispose();
-
-        try
-        {
-            if (_listener.IsListening)
-            {
-                _listener.Stop();
-            }
-            _listener.Close();
-        }
-        catch (Exception ex)
-        {
-            _log.Debug(ex, "share listener teardown");
-        }
-
-        try
-        {
-            _loop?.Wait(TimeSpan.FromSeconds(2));
-        }
-        catch
-        {
-            // A cancelled accept loop throwing on the way down is expected.
-        }
-
-        _cts.Dispose();
+        _server?.Dispose();
         _log.Information("Library share \"{Name}\" stopped", ShareName);
     }
 }

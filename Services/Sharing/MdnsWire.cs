@@ -171,11 +171,18 @@ public static class MdnsWire
 
     // ── Responses ────────────────────────────────────────────
 
+    /// <summary>The packet's transaction id - zero for anything too short to carry one.</summary>
+    public static ushort ReadId(ReadOnlySpan<byte> packet)
+        => packet.Length >= 2 ? BinaryPrimitives.ReadUInt16BigEndian(packet) : (ushort)0;
+
     /// <summary>
     /// Builds the announcement for one service instance: PTR (service type → instance),
     /// SRV (instance → host:port), TXT (metadata), and A (host → IPv4) when known.
+    /// <paramref name="id"/> and <paramref name="cacheFlush"/> exist for RFC 6762 §6.7
+    /// legacy unicast replies, which must echo the query's id and must NOT set the
+    /// cache-flush bit (a legacy client reads that bit as part of the class).
     /// </summary>
-    public static byte[] BuildResponse(ServiceInstance instance, string serviceType = ServiceType, uint ttlSeconds = 120)
+    public static byte[] BuildResponse(ServiceInstance instance, string serviceType = ServiceType, uint ttlSeconds = 120, ushort id = 0, bool cacheFlush = true)
     {
         var records = new List<byte>();
         var answers = 0;
@@ -183,14 +190,14 @@ public static class MdnsWire
         var instanceFqdn = $"{instance.InstanceName}.{serviceType}";
 
         // PTR: service type → this instance
-        WriteRecord(records, serviceType, TypePtr, ttlSeconds, data =>
+        WriteRecord(records, serviceType, TypePtr, ttlSeconds, cacheFlush, data =>
         {
             WriteName(data, instanceFqdn);
         });
         answers++;
 
         // SRV: instance → host:port
-        WriteRecord(records, instanceFqdn, TypeSrv, ttlSeconds, data =>
+        WriteRecord(records, instanceFqdn, TypeSrv, ttlSeconds, cacheFlush, data =>
         {
             data.AddRange([0, 0]);                                                     // priority
             data.AddRange([0, 0]);                                                     // weight
@@ -200,7 +207,7 @@ public static class MdnsWire
         answers++;
 
         // TXT: key=value strings, each length-prefixed
-        WriteRecord(records, instanceFqdn, TypeTxt, ttlSeconds, data =>
+        WriteRecord(records, instanceFqdn, TypeTxt, ttlSeconds, cacheFlush, data =>
         {
             if (instance.TxtRecords.Length == 0)
             {
@@ -220,12 +227,12 @@ public static class MdnsWire
         if (instance.Address is { } address && System.Net.IPAddress.TryParse(address, out var ip)
             && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
         {
-            WriteRecord(records, instance.HostName, TypeA, ttlSeconds, data => data.AddRange(ip.GetAddressBytes()));
+            WriteRecord(records, instance.HostName, TypeA, ttlSeconds, cacheFlush, data => data.AddRange(ip.GetAddressBytes()));
             answers++;
         }
 
         var packet = new List<byte>(records.Count + 12);
-        packet.AddRange([0, 0]);
+        packet.AddRange([(byte)(id >> 8), (byte)id]);
         packet.AddRange([(byte)(FlagResponseAuthoritative >> 8), unchecked((byte)FlagResponseAuthoritative)]);
         packet.AddRange([0, 0]);                                   // no questions
         packet.AddRange([(byte)(answers >> 8), (byte)answers]);
@@ -234,12 +241,12 @@ public static class MdnsWire
         return [.. packet];
     }
 
-    private static void WriteRecord(List<byte> output, string name, ushort type, uint ttl, Action<List<byte>> writeData)
+    private static void WriteRecord(List<byte> output, string name, ushort type, uint ttl, bool cacheFlush, Action<List<byte>> writeData)
     {
         WriteName(output, name);
         output.AddRange([(byte)(type >> 8), (byte)type]);
 
-        var cls = (ushort)(ClassIn | CacheFlush);
+        var cls = cacheFlush ? (ushort)(ClassIn | CacheFlush) : ClassIn;
         output.AddRange([(byte)(cls >> 8), (byte)cls]);
 
         Span<byte> ttlBytes = stackalloc byte[4];

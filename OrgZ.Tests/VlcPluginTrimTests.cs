@@ -13,6 +13,7 @@ namespace OrgZ.Tests;
 /// names - it builds a trimmed plugin directory and makes libvlc decode real audio through
 /// it. If a category turns out to be load-bearing, this fails here rather than in a release.
 /// </summary>
+[Collection(RealSocketCollection.Name)]
 public sealed class VlcPluginTrimTests : IDisposable
 {
     // Kept in step with the TrimVlcPluginsOnPublish target in OrgZ.csproj.
@@ -110,9 +111,9 @@ public sealed class VlcPluginTrimTests : IDisposable
     {
         // The trim drops stream_out / access_output / mux, which is libvlc acting as a
         // streaming SERVER (the --sout path). OrgZ only ever CONSUMES streams - radio,
-        // podcasts, and library shares served by our own HttpListener - and that uses the
-        // access/http plugin, which stays. Worth proving rather than reasoning about,
-        // because getting it wrong kills radio and sharing in shipped builds only.
+        // podcasts, and library shares reached through the loopback relay - and that
+        // uses the access/http plugin, which stays. Worth proving rather than reasoning
+        // about, because getting it wrong kills radio and sharing in shipped builds only.
         var source = PluginSource();
         if (source is null)
         {
@@ -139,13 +140,17 @@ public sealed class VlcPluginTrimTests : IDisposable
             Extension = ".wav",
         };
 
-        using var server = new OrgZ.Services.Sharing.LibraryShareServer("Trim Test", port, () => [track]);
+        using var server = new OrgZ.Services.Sharing.LibraryShareServer("Trim Test", port, () => [track], certificateDirectory: _dir);
         server.Start(advertise: false);
+
+        // The exact shipped path: libvlc speaks plain http to the loopback relay,
+        // which carries the request to the share over pinned TLS.
+        var share = new OrgZ.Services.Sharing.DiscoveredShare("Trim Test", "localhost", port, "127.0.0.1", server.CertificatePin);
 
         LibVLCSharp.Shared.Core.Initialize();
         using var vlc = new LibVLCSharp.Shared.LibVLC("--no-video", "--quiet", $"--plugin-path={plugins}");
         using var media = new LibVLCSharp.Shared.Media(
-            vlc, $"http://127.0.0.1:{port}/stream/t1.wav", LibVLCSharp.Shared.FromType.FromLocation);
+            vlc, $"{share.BaseUrl}/stream/t1.wav", LibVLCSharp.Shared.FromType.FromLocation);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(40));
         var status = await media.Parse(LibVLCSharp.Shared.MediaParseOptions.ParseNetwork, timeout: 30_000, cancellationToken: cts.Token);

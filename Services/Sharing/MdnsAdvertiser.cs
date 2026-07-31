@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Serilog;
 
@@ -11,6 +12,12 @@ namespace OrgZ.Services.Sharing;
 /// announcement at start (and periodically), plus a response whenever someone browses
 /// for the service type. Deliberately small - no conflict probing, no goodbye storms;
 /// a duplicate name on the LAN just means two shares with the same label.
+///
+/// Every up IPv4 interface is joined and announced on, per RFC 6762's
+/// all-interfaces responder model. A bare JoinMulticastGroup joins only the
+/// default multicast interface - and on a host with Hyper-V switches, VPN
+/// adapters and VMware NICs, WHICH interface that is changes with metric
+/// ordering across restarts, so discovery worked or didn't by coin toss.
 /// </summary>
 public sealed class MdnsAdvertiser : IDisposable
 {
@@ -18,18 +25,83 @@ public sealed class MdnsAdvertiser : IDisposable
 
     private readonly MdnsWire.ServiceInstance _instance;
     private readonly CancellationTokenSource _cts = new();
+    private List<(IPAddress Address, IPAddress Mask)> _interfaces = [];
     private UdpClient? _client;
     private Task? _loop;
 
-    public MdnsAdvertiser(string shareName, ushort port)
+    public MdnsAdvertiser(string shareName, ushort port, IEnumerable<string>? extraTxt = null)
     {
         var host = $"{SanitizeLabel(Environment.MachineName)}.local";
         _instance = new MdnsWire.ServiceInstance(
             SanitizeLabel(shareName),
             host,
             port,
-            [$"name={shareName}", "version=1", "readonly=1"],
+            [$"name={shareName}", "version=1", "readonly=1", .. extraTxt ?? []],
             LocalIPv4());
+    }
+
+    /// <summary>Every up, multicast-capable, non-loopback IPv4 address with its subnet mask.</summary>
+    internal static List<(IPAddress Address, IPAddress Mask)> LocalInterfaceAddresses()
+    {
+        var result = new List<(IPAddress, IPAddress)>();
+        try
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != OperationalStatus.Up
+                    || !nic.SupportsMulticast
+                    || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                {
+                    continue;
+                }
+
+                foreach (var unicast in nic.GetIPProperties().UnicastAddresses)
+                {
+                    if (unicast.Address.AddressFamily == AddressFamily.InterNetwork)
+                    {
+                        result.Add((unicast.Address, unicast.IPv4Mask ?? IPAddress.None));
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "interface enumeration failed");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The local address a given peer can actually reach - the one sharing its subnet.
+    /// The A record must name it: advertising the default-route address to a peer on a
+    /// different attached network hands them an address that may not route back.
+    /// </summary>
+    internal static IPAddress? BestAddressFor(IPAddress peer, IReadOnlyList<(IPAddress Address, IPAddress Mask)> interfaces)
+    {
+        foreach (var (address, mask) in interfaces)
+        {
+            if (mask.Equals(IPAddress.None))
+            {
+                continue;
+            }
+
+            var a = address.GetAddressBytes();
+            var m = mask.GetAddressBytes();
+            var p = peer.GetAddressBytes();
+            var match = true;
+            for (var i = 0; i < 4 && match; i++)
+            {
+                match = (a[i] & m[i]) == (p[i] & m[i]);
+            }
+
+            if (match)
+            {
+                return address;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>mDNS labels can't carry dots (they'd split the name) - swap them out.</summary>
@@ -62,7 +134,31 @@ public sealed class MdnsAdvertiser : IDisposable
             _client = new UdpClient(AddressFamily.InterNetwork);
             _client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _client.Client.Bind(new IPEndPoint(IPAddress.Any, MdnsWire.Port));
-            _client.JoinMulticastGroup(IPAddress.Parse(MdnsWire.MulticastAddress));
+
+            var group = IPAddress.Parse(MdnsWire.MulticastAddress);
+            _interfaces = LocalInterfaceAddresses();
+            var joined = 0;
+            foreach (var (address, _) in _interfaces)
+            {
+                try
+                {
+                    _client.JoinMulticastGroup(group, address);
+                    joined++;
+                }
+                catch (SocketException ex)
+                {
+                    _log.Debug(ex, "join failed on {Address}", address);
+                }
+            }
+
+            if (joined == 0)
+            {
+                // No enumerable interfaces (or every join refused): the old single
+                // default-interface join is still better than deafness.
+                _client.JoinMulticastGroup(group);
+            }
+
+            _log.Information("mDNS advertiser up on {Count} interface(s): {Addresses}", joined, string.Join(", ", _interfaces.Select(i => i.Address)));
             _loop = Task.Run(() => RunAsync(_cts.Token));
         }
         catch (Exception ex)
@@ -75,10 +171,7 @@ public sealed class MdnsAdvertiser : IDisposable
 
     private async Task RunAsync(CancellationToken ct)
     {
-        var endpoint = new IPEndPoint(IPAddress.Parse(MdnsWire.MulticastAddress), MdnsWire.Port);
-        var response = MdnsWire.BuildResponse(_instance);
-
-        await SendAsync(response, endpoint, ct);
+        await AnnounceAsync(ct);
 
         var announce = Task.Run(async () =>
         {
@@ -87,7 +180,7 @@ public sealed class MdnsAdvertiser : IDisposable
                 try
                 {
                     await Task.Delay(TimeSpan.FromSeconds(60), ct);
-                    await SendAsync(response, endpoint, ct);
+                    await AnnounceAsync(ct);
                 }
                 catch (OperationCanceledException)
                 {
@@ -113,13 +206,61 @@ public sealed class MdnsAdvertiser : IDisposable
                 if (question.Name.Equals(MdnsWire.ServiceType, StringComparison.OrdinalIgnoreCase)
                     && question.Type is MdnsWire.TypePtr or MdnsWire.TypeAny)
                 {
-                    await SendAsync(response, endpoint, ct);
+                    if (packet.RemoteEndPoint.Port != MdnsWire.Port)
+                    {
+                        // RFC 6762 §6.7: a query from any port but 5353 is a one-shot
+                        // "legacy" query, and the reply must go unicast to that exact
+                        // source - a multicast answer to :5353 is a packet an
+                        // ephemeral-port querier (our own ShareDiscovery included) can
+                        // never receive. Legacy replies echo the query id, keep a short
+                        // TTL, clear the cache-flush bit - and carry the A record the
+                        // QUERIER can reach: our address on its subnet, not whatever
+                        // the default route says.
+                        var reachable = BestAddressFor(packet.RemoteEndPoint.Address, _interfaces)?.ToString() ?? _instance.Address;
+                        var legacy = MdnsWire.BuildResponse(_instance with { Address = reachable }, ttlSeconds: 10, id: MdnsWire.ReadId(packet.Buffer), cacheFlush: false);
+                        await SendAsync(legacy, packet.RemoteEndPoint, ct);
+                    }
+                    else
+                    {
+                        await AnnounceAsync(ct);
+                    }
+
                     break;
                 }
             }
         }
 
         await announce;
+    }
+
+    /// <summary>
+    /// Multicasts the announcement out EVERY joined interface, each carrying that
+    /// interface's own address as the A record. One un-steered send goes out only the
+    /// default multicast interface - which is whichever adapter won the metric race.
+    /// </summary>
+    private async Task AnnounceAsync(CancellationToken ct)
+    {
+        var endpoint = new IPEndPoint(IPAddress.Parse(MdnsWire.MulticastAddress), MdnsWire.Port);
+
+        if (_interfaces.Count == 0)
+        {
+            await SendAsync(MdnsWire.BuildResponse(_instance), endpoint, ct);
+            return;
+        }
+
+        foreach (var (address, _) in _interfaces)
+        {
+            try
+            {
+                _client!.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, address.GetAddressBytes());
+            }
+            catch (SocketException)
+            {
+                continue;   // interface went away since Start - skip it
+            }
+
+            await SendAsync(MdnsWire.BuildResponse(_instance with { Address = address.ToString() }), endpoint, ct);
+        }
     }
 
     private async Task SendAsync(byte[] payload, IPEndPoint endpoint, CancellationToken ct)

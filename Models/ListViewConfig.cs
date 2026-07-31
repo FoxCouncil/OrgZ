@@ -218,6 +218,33 @@ public static class ListViewConfigs
         Items(Cmd("Get Info", "GetInfo")));
 
     /// <summary>
+    /// One remote playlist under a share: the same ordered-ids view a device playlist
+    /// uses, wearing the share's columns and its playback-only menu.
+    /// </summary>
+    public static ListViewConfig BuildSharePlaylistConfig(string viewKey, IReadOnlyList<string> orderedTrackIds)
+    {
+        var idSet = new HashSet<string>(orderedTrackIds);
+        var orderMap = new Dictionary<string, int>(orderedTrackIds.Count);
+        for (int i = 0; i < orderedTrackIds.Count; i++)
+        {
+            orderMap[orderedTrackIds[i]] = i;
+        }
+
+        return new ListViewConfig
+        {
+            Key = viewKey,
+            Columns = ShareColumns(),
+            BaseFilter = item => idSet.Contains(item.Id),
+            SearchFilter = (item, search) =>
+                (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
+            ContextMenuItems = BuildShareContextMenu(),
+            Sorter = items => items.OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue),
+        };
+    }
+
+    /// <summary>
     /// Device sub-view filtered to one media kind (the Podcasts / Audiobooks nodes under a device).
     /// Populated for real now that both readers tag tracks by kind (binary MHIT media_type at 0xD0 +
     /// Nano 5G media_kind). The Podcasts node groups episodes into one collapsible header per show

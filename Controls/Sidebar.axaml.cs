@@ -28,6 +28,52 @@ public partial class Sidebar : UserControl
         DragDrop.SetAllowDrop(DeviceTreeView, true);
         DeviceTreeView.AddHandler(DragDrop.DragOverEvent, DeviceTreeView_DragOver);
         DeviceTreeView.AddHandler(DragDrop.DropEvent, DeviceTreeView_Drop);
+
+        ShareTreeView.ContextRequested += ShareTreeView_ContextRequested;
+
+        // Dragging share rows onto the library's Music node copies them in.
+        DragDrop.SetAllowDrop(LibraryListBox, true);
+        LibraryListBox.AddHandler(DragDrop.DragOverEvent, LibraryListBox_DragOver);
+        LibraryListBox.AddHandler(DragDrop.DropEvent, LibraryListBox_Drop);
+    }
+
+    // -- Drag share tracks onto the library's Music node (copy into the library) --
+
+    /// <summary>The live drag payload: the captured multi-selection, else the anchor row.</summary>
+    private static List<MediaItem> DraggedMedia()
+        => MainWindow.DraggedMediaItems.Count > 0
+            ? MainWindow.DraggedMediaItems
+            : MainWindow.DraggedMediaItem is { } single ? [single] : [];
+
+    private void LibraryListBox_DragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = DragDropEffects.None;
+
+        // Only share rows can be copied IN, and only the Music node accepts them -
+        // local tracks dropped on the library would be a no-op wearing a copy cursor.
+        var media = DraggedMedia();
+        if (e.DataTransfer.Contains(MediaItemDragFormat)
+            && (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext is SidebarItem { ViewConfigKey: "Music" }
+            && media.Count > 0
+            && media.All(Services.Sharing.ShareDiscovery.IsShareItem))
+        {
+            e.DragEffects = DragDropEffects.Copy;
+        }
+        e.Handled = true;
+    }
+
+    private async void LibraryListBox_Drop(object? sender, DragEventArgs e)
+    {
+        var media = DraggedMedia();
+        if (e.DataTransfer.Contains(MediaItemDragFormat)
+            && (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext is SidebarItem { ViewConfigKey: "Music" }
+            && DataContext is MainWindowViewModel vm
+            && media.Count > 0
+            && media.All(Services.Sharing.ShareDiscovery.IsShareItem))
+        {
+            e.Handled = true;
+            await vm.ImportShareTracksToLibraryAsync(media);
+        }
     }
 
     // -- Drag a library track onto a device node (iPod import; Music only, for now) --
@@ -292,7 +338,7 @@ public partial class Sidebar : UserControl
             _suppressSelectionChange = true;
             DeviceTreeView.SelectedItem = null;
             PlaylistListBox.SelectedItem = null;
-            ShareListBox.SelectedItem = null;
+            ShareTreeView.SelectedItem = null;
             _suppressSelectionChange = false;
 
             if (DataContext is MainWindowViewModel vm)
@@ -302,15 +348,15 @@ public partial class Sidebar : UserControl
         }
     }
 
-    /// <summary>A shared library was picked: it owns the selection, like any other section.</summary>
-    private void ShareListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    /// <summary>A shared library (or one of its playlists) was picked: it owns the selection.</summary>
+    private void ShareTreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionChange)
         {
             return;
         }
 
-        if (ShareListBox.SelectedItem is SidebarItem item)
+        if (ShareTreeView.SelectedItem is SidebarItem item)
         {
             _suppressSelectionChange = true;
             LibraryListBox.SelectedItem = null;
@@ -323,6 +369,27 @@ public partial class Sidebar : UserControl
                 vm.SelectedSidebarItem = item;
             }
         }
+    }
+
+    /// <summary>Right-click on a share's remote playlist offers Import; the share row itself has no verbs.</summary>
+    private void ShareTreeView_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    {
+        var treeItem = (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>();
+        if (treeItem?.DataContext is not SidebarItem sb
+            || sb.ViewConfigKey?.StartsWith("SharePlaylist:", StringComparison.Ordinal) != true
+            || DataContext is not MainWindowViewModel vm)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var menu = new ContextMenu();
+        var import = new MenuItem { Header = "Import Playlist" };
+        import.Click += async (_, _) => await vm.ImportSharePlaylistAsync(sb);
+        menu.Items.Add(import);
+
+        menu.Open(treeItem);
+        e.Handled = true;
     }
 
     private void DeviceTreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -361,7 +428,7 @@ public partial class Sidebar : UserControl
         _suppressSelectionChange = true;
         LibraryListBox.SelectedItem = null;
         PlaylistListBox.SelectedItem = null;
-        ShareListBox.SelectedItem = null;
+        ShareTreeView.SelectedItem = null;
         _suppressSelectionChange = false;
 
         if (DataContext is MainWindowViewModel vm)
@@ -395,7 +462,7 @@ public partial class Sidebar : UserControl
             _suppressSelectionChange = true;
             LibraryListBox.SelectedItem = null;
             DeviceTreeView.SelectedItem = null;
-            ShareListBox.SelectedItem = null;
+            ShareTreeView.SelectedItem = null;
             _suppressSelectionChange = false;
 
             if (DataContext is MainWindowViewModel vm)
