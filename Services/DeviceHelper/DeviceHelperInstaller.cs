@@ -134,15 +134,46 @@ public static class DeviceHelperInstaller
 
     internal static string LinuxStartScript() => $"systemctl start {LinuxUnit}.service";
 
+    internal const string FirewallMdnsRule = "OrgZ mDNS";
+    internal const string FirewallShareRule = "OrgZ Library Share";
+
+    /// <summary>
+    /// The two inbound allowances library sharing needs. Without them the firewall
+    /// silently drops both the browse query (UDP 5353) and the stream connect (TCP), so a
+    /// share is undiscoverable and unplayable from any other machine while working
+    /// perfectly on its own - nothing logs anywhere on either end.
+    ///
+    /// The mDNS rule is scoped to the exe: the advertiser owns a real in-process socket.
+    /// The share rule is port-only, deliberately - the HTTP server is HttpListener, whose
+    /// traffic terminates in kernel http.sys, and a rule scoped to OrgZ.exe never matches
+    /// a kernel-owned socket.
+    ///
+    /// Delete-then-add ('&' so a missing rule doesn't stop the add): netsh happily stacks
+    /// a second rule under the same name, so a reinstall would accrete rules forever.
+    /// </summary>
+    internal static string WindowsFirewallCommands(string exePath) =>
+        $"netsh advfirewall firewall delete rule name=\"{FirewallMdnsRule}\" & " +
+        $"netsh advfirewall firewall add rule name=\"{FirewallMdnsRule}\" dir=in action=allow protocol=UDP localport=5353 program=\"{exePath}\" & " +
+        $"netsh advfirewall firewall delete rule name=\"{FirewallShareRule}\" & " +
+        $"netsh advfirewall firewall add rule name=\"{FirewallShareRule}\" dir=in action=allow protocol=TCP localport={Sharing.ShareServiceOps.DefaultPort}";
+
+    internal static string WindowsFirewallRemoveCommands() =>
+        $"netsh advfirewall firewall delete rule name=\"{FirewallMdnsRule}\" & " +
+        $"netsh advfirewall firewall delete rule name=\"{FirewallShareRule}\"";
+
     /// <summary>
     /// Registers the service WITHOUT starting it. The installer path uses this and then
     /// starts separately, because starting inside the MSI's own install sequence races the
     /// file copy: the service comes up against a half-committed directory and dies with
     /// 1067 (observed intermittently in the VM). Starting afterwards, with a retry, is the
     /// difference between "usually works" and "works".
+    ///
+    /// The firewall rules ride in front on '&': their failures never gate the sc chain,
+    /// and cmd's exit code stays the last sc command's.
     /// </summary>
     internal static string WindowsCreateArguments(string exePath) =>
-        $"/c sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
+        $"/c {WindowsFirewallCommands(exePath)} & " +
+        $"sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
         $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\"";
 
     /// <summary>
@@ -151,12 +182,14 @@ public static class DeviceHelperInstaller
     /// survives reboots, the way AppleMobileDeviceService does.
     /// </summary>
     internal static string WindowsInstallArguments(string exePath) =>
-        $"/c sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
+        $"/c {WindowsFirewallCommands(exePath)} & " +
+        $"sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
         $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\" " +
         $"&& sc start {WindowsService}";
 
-    // '&' not '&&': delete must run even when the service was already stopped.
-    internal static string WindowsUninstallArguments() => $"/c sc stop {WindowsService} & sc delete {WindowsService}";
+    // '&' not '&&': delete must run even when the service was already stopped. Firewall
+    // deletes first, so the chain's exit code is still sc delete's.
+    internal static string WindowsUninstallArguments() => $"/c {WindowsFirewallRemoveCommands()} & sc stop {WindowsService} & sc delete {WindowsService}";
 
     internal static string WindowsStopArguments() => $"/c sc stop {WindowsService}";
 

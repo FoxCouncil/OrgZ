@@ -30,7 +30,7 @@ public class DeviceHelperInstallerTests
     {
         var args = DeviceHelperInstaller.WindowsInstallArguments(@"C:\Apps\OrgZ\OrgZ.exe");
 
-        Assert.StartsWith("/c sc create OrgZDeviceHelper ", args, StringComparison.Ordinal);
+        Assert.Contains("sc create OrgZDeviceHelper ", args, StringComparison.Ordinal);
 
         // sc's quirk: the space after each '=' is required, and omitting it silently
         // produces a service with an empty binPath.
@@ -185,6 +185,44 @@ public class DeviceHelperInstallerTests
         Assert.Contains(DeviceHelperInstaller.WindowsService, DeviceHelperInstaller.WindowsUninstallArguments(), StringComparison.Ordinal);
         Assert.Contains(DeviceHelperInstaller.MacLabel, DeviceHelperInstaller.MacUninstallScript(), StringComparison.Ordinal);
         Assert.Contains(DeviceHelperInstaller.LinuxUnit, DeviceHelperInstaller.LinuxUninstallScript(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sharing_firewall_rules_ride_the_install_and_leave_with_the_uninstall()
+    {
+        // Found on a real two-machine test: a share that works perfectly on its own box is
+        // invisible and unstreamable from any other, because no install step ever opened
+        // the firewall - the browse query and the stream connect are dropped silently.
+        var install = DeviceHelperInstaller.WindowsInstallArguments(@"C:\Program Files\OrgZ\OrgZ.exe");
+        var create = DeviceHelperInstaller.WindowsCreateArguments(@"C:\Program Files\OrgZ\OrgZ.exe");
+
+        foreach (var args in new[] { install, create })
+        {
+            // mDNS is an in-process socket, so the rule pins the program - quoted, so
+            // Program Files survives netsh's parser.
+            Assert.Contains("add rule name=\"OrgZ mDNS\" dir=in action=allow protocol=UDP localport=5353 program=\"C:\\Program Files\\OrgZ\\OrgZ.exe\"", args, StringComparison.Ordinal);
+
+            // The share server is HttpListener: its traffic terminates in kernel http.sys,
+            // and a rule scoped to OrgZ.exe never matches a kernel-owned socket. Port-only.
+            Assert.Contains("add rule name=\"OrgZ Library Share\" dir=in action=allow protocol=TCP localport=7391", args, StringComparison.Ordinal);
+            Assert.DoesNotContain("localport=7391 program=", args, StringComparison.Ordinal);
+
+            // Delete-then-add: netsh stacks duplicate rules under one name, so a reinstall
+            // without the delete accretes rules forever.
+            Assert.True(
+                args.IndexOf("delete rule name=\"OrgZ mDNS\"", StringComparison.Ordinal) < args.IndexOf("add rule name=\"OrgZ mDNS\"", StringComparison.Ordinal),
+                args);
+
+            // The firewall fragment rides on '&' ahead of the sc chain, so the composite
+            // exit code - what the hook reports - is still the service's, not netsh's.
+            Assert.True(args.IndexOf("netsh", StringComparison.Ordinal) < args.IndexOf("sc create", StringComparison.Ordinal), args);
+        }
+
+        // Uninstalling OrgZ must not leave allow-rules behind for an exe that is gone.
+        var uninstall = DeviceHelperInstaller.WindowsUninstallArguments();
+        Assert.Contains("delete rule name=\"OrgZ mDNS\"", uninstall, StringComparison.Ordinal);
+        Assert.Contains("delete rule name=\"OrgZ Library Share\"", uninstall, StringComparison.Ordinal);
+        Assert.DoesNotContain("add rule", uninstall, StringComparison.Ordinal);
     }
 
     // ── The install-time hook (PerMachine MSI) ────────────────
