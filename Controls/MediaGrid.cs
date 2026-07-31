@@ -2,6 +2,7 @@
 
 using Avalonia.Collections;
 using Avalonia.Controls;
+using Serilog;
 
 namespace OrgZ.Controls;
 
@@ -17,6 +18,8 @@ namespace OrgZ.Controls;
 /// </summary>
 internal static class MediaGrid
 {
+    private static readonly ILogger _log = Logging.For("MediaGrid");
+
     /// <summary>
     /// Replaces a grid's columns, safely, even when a grouped collection view is bound.
     ///
@@ -73,13 +76,25 @@ internal static class MediaGrid
         foreach (var group in view.Groups.OfType<DataGridCollectionViewGroup>().ToList())
         {
             var key = group.Key?.ToString() ?? string.Empty;
-            if (isExpanded(key))
+            try
             {
-                grid.ExpandRowGroup(group, expandAllSubgroups: false);
+                if (isExpanded(key))
+                {
+                    grid.ExpandRowGroup(group, expandAllSubgroups: false);
+                }
+                else
+                {
+                    grid.CollapseRowGroup(group, collapseAllSubgroups: false);
+                }
             }
-            else
+            catch (NullReferenceException)
             {
-                grid.CollapseRowGroup(group, collapseAllSubgroups: false);
+                // Avalonia's DataGrid throws from inside Collapse/ExpandRowGroup when a
+                // group's row-group info isn't realized (virtualized offscreen, or a
+                // transient layout state UpdateLayout above didn't settle). One group we
+                // can't toggle is a cosmetic miss - it must never take the app down, which
+                // it did: the throw escaped to the message pump and terminated the process.
+                _log.Debug("Skipped a row group that Avalonia couldn't toggle (key {Key})", key);
             }
         }
     }
