@@ -20,7 +20,7 @@ public static class SyncServiceOps
     public const string OpSyncRun = "sync-run";
 
     /// <summary>What the GUI sends as the sync-run payload.</summary>
-    public sealed record SyncRunPayload(string MountPath, string ProgressPath, List<string> MediaIds);
+    public sealed record SyncRunPayload(string MountPath, string ProgressPath, List<string> MediaIds, string? LibraryDb = null);
 
     // One sync at a time: concurrent writers on one iPod database corrupt it.
     private static int _busy;
@@ -119,8 +119,14 @@ public static class SyncServiceOps
             return;
         }
 
-        // The service shares the library database with the GUI, so IDs are all the
-        // payload needs to carry - no track metadata crosses the wire.
+        // IDs are all the payload carries - no track metadata crosses the wire - but the
+        // database they resolve against must be the OWNER's: the service's own %APPDATA%
+        // (LocalSystem → systemprofile) holds an empty library.
+        if (!MediaCache.AdoptClientDatabase(payload.LibraryDb) && payload.LibraryDb is not null)
+        {
+            _log.Warning("Ignoring library db path {Db}: not a rooted, existing file", payload.LibraryDb);
+        }
+
         var byId = MediaCache.LoadAll().ToDictionary(i => i.Id, StringComparer.Ordinal);
         var tracks = payload.MediaIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
         if (tracks.Count == 0)

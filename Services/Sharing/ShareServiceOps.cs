@@ -24,7 +24,7 @@ public static class ShareServiceOps
     private static readonly Lock _gate = new();
     private static LibraryShareServer? _server;
 
-    public sealed record ShareStartPayload(string? ShareName, int? Port);
+    public sealed record ShareStartPayload(string? ShareName, int? Port, string? LibraryDb = null);
 
     /// <summary>Test seam: builds (and starts) the server.</summary>
     internal static Func<string, int, LibraryShareServer> ServerFactory = (name, port) =>
@@ -72,6 +72,19 @@ public static class ShareServiceOps
         var payload = ParseStartPayload(request.PayloadJson);
         var name = ResolveName(payload.ShareName);
         var port = ResolvePort(payload.Port);
+
+        // The service runs as LocalSystem, whose %APPDATA% holds an empty library - so
+        // the client tells us where the real database lives. Found the hard way: a
+        // service-hosted share answered every request with a connection reset, because
+        // LoadAll threw on the systemprofile's tableless db and the handler aborted.
+        if (MediaCache.AdoptClientDatabase(payload.LibraryDb))
+        {
+            _log.Information("Serving library database {Db}", payload.LibraryDb);
+        }
+        else if (payload.LibraryDb is not null)
+        {
+            _log.Warning("Ignoring library db path {Db}: not a rooted, existing file", payload.LibraryDb);
+        }
 
         lock (_gate)
         {

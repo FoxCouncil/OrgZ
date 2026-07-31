@@ -13,6 +13,31 @@ public static class MediaCache
     private static string ConnectionString => $"Data Source={CacheFilePath}";
 
     /// <summary>
+    /// Where the library database lives right now. A GUI hands this to the background
+    /// service with share-start / sync-run: the service runs as LocalSystem, whose
+    /// %APPDATA% is the (empty) systemprofile - "the service shares the library DB" is
+    /// only true when it's told WHICH one.
+    /// </summary>
+    public static string CurrentDatabasePath => CacheFilePath;
+
+    /// <summary>
+    /// Points the cache at a client-supplied database - the service process adopting its
+    /// owner's library. Rooted, existing files only: a missing or relative path is
+    /// ignored (returns false) rather than aiming the service at a file that isn't a
+    /// library and silently serving nothing.
+    /// </summary>
+    internal static bool AdoptClientDatabase(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path) || !File.Exists(path))
+        {
+            return false;
+        }
+
+        OverrideCachePath(path);
+        return true;
+    }
+
+    /// <summary>
     /// Test hook: redirect the cache to a custom file path. Pass null to restore the default location.
     /// </summary>
     internal static void OverrideCachePath(string? path)

@@ -91,7 +91,7 @@ public static class DeviceHelperClient
     {
         try
         {
-            var payload = System.Text.Json.JsonSerializer.Serialize(new { mountPath, progressPath, mediaIds });
+            var payload = System.Text.Json.JsonSerializer.Serialize(new { mountPath, progressPath, mediaIds, libraryDb = MediaCache.CurrentDatabasePath });
             var resp = await ExchangeAsync(new DeviceHelperProtocol.Request(
                 DeviceHelperProtocol.Version, SyncServiceOps.OpSyncRun, mountPath, Generation: null, PayloadJson: payload));
             if (resp is { Ok: false })
@@ -132,7 +132,7 @@ public static class DeviceHelperClient
     /// <summary>Starts hosting the library share. Null when the service is unreachable.</summary>
     public static Task<ShareState?> StartShareAsync(string shareName, int port)
         => ShareOpAsync(Sharing.ShareServiceOps.OpShareStart,
-            System.Text.Json.JsonSerializer.Serialize(new { shareName, port }));
+            System.Text.Json.JsonSerializer.Serialize(new { shareName, port, libraryDb = MediaCache.CurrentDatabasePath }));
 
     public static Task<ShareState?> StopShareAsync()
         => ShareOpAsync(Sharing.ShareServiceOps.OpShareStop, null);

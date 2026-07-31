@@ -10,7 +10,10 @@ namespace OrgZ.Tests;
 /// Turning the library share on from Settings: the service's start/stop/status ops
 /// and the status wording the user reads. Adversarial cases attack repeat toggles,
 /// a failing server, and never claiming to share when nothing is listening.
+/// In the MediaCache collection because the adopt-database test swings the cache's
+/// global path - unserialized, that race corrupts whichever cache test runs beside it.
 /// </summary>
+[Collection("MediaCache")]
 public class ShareHostingTests : IDisposable
 {
     private readonly Func<string, int, LibraryShareServer> _originalFactory = ShareServiceOps.ServerFactory;
@@ -105,6 +108,52 @@ public class ShareHostingTests : IDisposable
         // Critically: status must not now claim we're sharing.
         var status = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStatus(Req(ShareServiceOps.OpShareStatus)).ResultJson);
         Assert.False(status.Sharing);
+    }
+
+    // ── The library the service actually serves ───────────────
+
+    [Fact]
+    public void Start_adopts_the_clients_library_database()
+    {
+        // The service is LocalSystem: its own %APPDATA% holds an EMPTY library, so a
+        // share hosted there served nothing - worse, LoadAll threw on the tableless db
+        // and every request died as a connection reset. The client names its database.
+        var db = Path.Combine(Path.GetTempPath(), $"orgz-sharetest-{Guid.NewGuid():N}.db");
+        File.WriteAllBytes(db, [1]);
+
+        try
+        {
+            var payload = $$"""{"shareName":"Fox","port":7391,"libraryDb":{{System.Text.Json.JsonSerializer.Serialize(db)}}}""";
+            Assert.True(ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, payload)).Ok);
+            Assert.Equal(db, MediaCache.CurrentDatabasePath);
+        }
+        finally
+        {
+            MediaCache.OverrideCachePath(null);
+            File.Delete(db);
+        }
+    }
+
+    [Theory]
+    [InlineData("relative\\library.db")]           // not rooted
+    [InlineData("C:\\definitely\\not\\there.db")]  // rooted but absent
+    public void A_bad_library_path_is_ignored_not_adopted(string bad)
+    {
+        var before = MediaCache.CurrentDatabasePath;
+
+        var payload = $$"""{"shareName":"Fox","port":7391,"libraryDb":{{System.Text.Json.JsonSerializer.Serialize(bad)}}}""";
+        Assert.True(ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, payload)).Ok);
+
+        Assert.Equal(before, MediaCache.CurrentDatabasePath);
+    }
+
+    [Fact]
+    public void Both_service_payloads_carry_the_library_database()
+    {
+        // Share and sync resolve ids against the same database; a payload that forgets
+        // it regresses to serving the systemprofile's empty library.
+        Assert.Equal(@"C:\x\l.db", ShareServiceOps.ParseStartPayload("""{"libraryDb":"C:\\x\\l.db"}""").LibraryDb);
+        Assert.Equal(@"C:\x\l.db", SyncServiceOps.ParsePayload("""{"mountPath":"E:\\","progressPath":"C:\\p","mediaIds":["a"],"libraryDb":"C:\\x\\l.db"}""")!.LibraryDb);
     }
 
     // ── Client-side state parsing ─────────────────────────────
