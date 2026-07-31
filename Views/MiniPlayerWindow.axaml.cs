@@ -133,14 +133,12 @@ public partial class MiniPlayerWindow : Window
 
     // -- Context menu ----------------------------------------------------
 
+    // "Close Mini-Player" is deliberately NOT a menu item: closing the mini-player
+    // re-shows the hidden main window (the Closed handler in ToggleMiniPlayer), which
+    // makes it indistinguishable from switching - one concept, one entry.
     private void MenuExpand_Click(object? sender, RoutedEventArgs e)
     {
         RestoreMainRequested?.Invoke();
-        Close();
-    }
-
-    private void MenuClose_Click(object? sender, RoutedEventArgs e)
-    {
         Close();
     }
 

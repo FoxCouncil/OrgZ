@@ -113,8 +113,6 @@
                 <Separator />
                 <MenuItem Header="Switch to Full Player" Click="MenuExpand_Click" />
                 <MenuItem Header="Always on Top" x:Name="MenuAlwaysOnTop" Click="MenuAlwaysOnTop_Click" />
-                <Separator />
-                <MenuItem Header="Close Mini-Player" Click="MenuClose_Click" />
             </ContextMenu>
         </Border.ContextMenu>
 
