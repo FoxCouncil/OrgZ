@@ -124,6 +124,21 @@ internal sealed class WaveOutSink : IAudioSink
 
     public void Write(ReadOnlySpan<byte> pcm)
     {
+        // The lifecycle lock makes Write and Close mutually exclusive. Without it,
+        // swapping output devices mid-playback disposed the sink under a Write in
+        // flight: Close freed the pinned buffers and closed the handle between
+        // Write's entry check and its waveOutWrite - a null-deref or a dead-handle
+        // call on the audio callback thread, i.e. a process crash dressed as a
+        // deadlock (Write's slot-wait spins against a device that stopped consuming
+        // first, THEN the dispose lands). Found swapping sources on real hardware.
+        lock (_lifecycle)
+        {
+            WriteLocked(pcm);
+        }
+    }
+
+    private void WriteLocked(ReadOnlySpan<byte> pcm)
+    {
         if (_disposed || pcm.Length == 0 || _handle == IntPtr.Zero)
         {
             return;
@@ -215,60 +230,80 @@ internal sealed class WaveOutSink : IAudioSink
 
     private void ApplyVolumeToDevice()
     {
-        if (_handle == IntPtr.Zero)
+        lock (_lifecycle)
         {
-            return;
-        }
+            if (_handle == IntPtr.Zero)
+            {
+                return;
+            }
 
-        // waveOutSetVolume packs left-right as two uint16 halves; we set
-        // both to the same value for stereo.  When muted, send 0 to both.
-        ushort amp = _muted ? (ushort)0 : (ushort)(_volume * 0xFFFF);
-        uint stereo = (uint)amp | ((uint)amp << 16);
-        WaveNative.waveOutSetVolume(_handle, stereo);
+            // waveOutSetVolume packs left-right as two uint16 halves; we set
+            // both to the same value for stereo.  When muted, send 0 to both.
+            ushort amp = _muted ? (ushort)0 : (ushort)(_volume * 0xFFFF);
+            uint stereo = (uint)amp | ((uint)amp << 16);
+            WaveNative.waveOutSetVolume(_handle, stereo);
+        }
     }
+
+    // Every handle-touching operation shares the lifecycle lock with Close: winmm
+    // calls on a handle that a concurrent Close just freed are undefined behaviour.
+    // The blocking ones (Drain up to 2 s, Write's slot-wait up to 1 s) bound how
+    // long a Close can stall - a fair price for never crashing the audio thread.
 
     public void Pause()
     {
-        if (_handle == IntPtr.Zero) return;
-        WaveNative.waveOutPause(_handle);
+        lock (_lifecycle)
+        {
+            if (_handle == IntPtr.Zero) return;
+            WaveNative.waveOutPause(_handle);
+        }
     }
 
     public void Resume()
     {
-        if (_handle == IntPtr.Zero) return;
-        WaveNative.waveOutRestart(_handle);
+        lock (_lifecycle)
+        {
+            if (_handle == IntPtr.Zero) return;
+            WaveNative.waveOutRestart(_handle);
+        }
     }
 
     public void Flush()
     {
-        if (_handle == IntPtr.Zero) return;
-        // waveOutReset marks every queued header as done, so the next Write
-        // can reuse them without waiting.  The audio stops instantly at
-        // the hardware level - this is what makes Pause / Seek feel crisp.
-        WaveNative.waveOutReset(_handle);
+        lock (_lifecycle)
+        {
+            if (_handle == IntPtr.Zero) return;
+            // waveOutReset marks every queued header as done, so the next Write
+            // can reuse them without waiting.  The audio stops instantly at
+            // the hardware level - this is what makes Pause / Seek feel crisp.
+            WaveNative.waveOutReset(_handle);
+        }
     }
 
     public void Drain()
     {
-        if (_handle == IntPtr.Zero)
+        lock (_lifecycle)
         {
-            return;
-        }
-
-        // End-of-track: let every queued header finish playing instead of
-        // waveOutReset-ing it away (which cut the last ~ring-depth of audio).
-        // The ring holds well under a second; 2s is a generous stall ceiling.
-        var deadline = Environment.TickCount64 + 2000;
-        for (int i = 0; i < RingSize; i++)
-        {
-            while (!IsSlotDone(i))
+            if (_handle == IntPtr.Zero)
             {
-                if (Environment.TickCount64 > deadline)
+                return;
+            }
+
+            // End-of-track: let every queued header finish playing instead of
+            // waveOutReset-ing it away (which cut the last ~ring-depth of audio).
+            // The ring holds well under a second; 2s is a generous stall ceiling.
+            var deadline = Environment.TickCount64 + 2000;
+            for (int i = 0; i < RingSize; i++)
+            {
+                while (!IsSlotDone(i))
                 {
-                    _log.Warning("WaveOutSink {Id}: drain timed out with audio still queued", Id);
-                    return;
+                    if (Environment.TickCount64 > deadline)
+                    {
+                        _log.Warning("WaveOutSink {Id}: drain timed out with audio still queued", Id);
+                        return;
+                    }
+                    System.Threading.Thread.Sleep(5);
                 }
-                System.Threading.Thread.Sleep(5);
             }
         }
     }
