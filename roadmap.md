@@ -3,17 +3,19 @@
 Quality, beauty, and simplicity - in that order when they conflict. Tests reflect the finished
 product: nothing ships behind a capability flag without the conformance suite proving it.
 
-## v1 status (as of 0.9.31)
+## v1 status (as of 0.9.47)
 
 Working, verified: CD ripping and burning (audio + data, CD-TEXT read back off a real disc),
-iPod read/write across the tiers, podcasts, audiobooks, radio, library sharing (now proven
-end to end, libvlc included), and a background service hosting the privileged work. Suite:
-1908 green, gated per commit — now including headless Avalonia UI tests.
+iPod read/write across the tiers — hash58 and the Shuffle iTunesSD now validated on metal
+(Nano 3G, Shuffle 2G) — podcasts, audiobooks, radio, library sharing (proven across two
+physical machines, TLS'd, libvlc included), and a background service hosting the privileged
+work. Suite: 1946 green, gated per commit — including headless Avalonia UI tests.
 
 **Closed blockers**
 - Encoders ship in the installer — `encoders-1` release exists; a cold `fetch-encoders.ps1`
   pulls all five win-x64 binaries, verifies every SHA-256, and they execute. CI will now
-  produce packages that can rip/burn/transcode.
+  produce packages that can rip/burn/transcode. DONE on all three platforms - nothing is
+  PENDING in `encoders.json`.
 - **All six Burn Tests passed on real media (2026-07-25)**, ear checks included. 3, 5 and 6 are
   automated in `BurnValidationTests`; 1, 2 and 4 were burned on the Pioneer BDR-XS07U and
   listened to. Test 2 confirms skip-to-track lands on each song's first note at Gap 0, and
@@ -26,18 +28,31 @@ end to end, libvlc included), and a background service hosting the privileged wo
   leaked its catalogue into Music and Bad Format, and the server's loopback bind fallback
   threw `ObjectDisposedException` because `HttpListener.Start()` disposes itself on failure —
   so a GUI-hosted share could never come up at all.
+- **Sharing across two real machines — confirmed 2026-07-31.** Host on one box, mount from
+  another, over a real LAN and a real firewall. Getting there surfaced four bugs only metal
+  could: the advertiser answered legacy-unicast queries by multicast (RFC 6762 §6.7 —
+  OrgZ-to-OrgZ discovery had never worked anywhere), a bare `JoinMulticastGroup` landed on
+  whichever interface the metric lottery picked (now joins every up IPv4 interface and
+  answers with the A record on the querier's subnet), the LocalSystem service shared its own
+  empty systemprofile library (share-start/sync-run payloads now carry the owner's
+  `libraryDb`), and handler exceptions answered as bare connection resets (now 500 +
+  Warning). The installer opens the firewall on every install path — the share TCP rule
+  port-only, because HttpListener terminates in http.sys and program rules never match it.
+  TLS on top (0.9.43+): hand-rolled `TlsHttpServer`, self-signed cert persisted beside
+  library.db, cert-hash pin carried in the mDNS TXT, clients reach it through a pinned
+  loopback relay so libvlc never sees TLS. Version lockstep: pre-TLS clients can't read a
+  TLS share. PIN pairing was considered and rejected — trusted LAN + the announcement's
+  cert pin IS the v1 trust model.
 
-**Open before v1 — highest risk first**
+**Open before v1**
 1. **A burn THROUGH the installed service, on metal.** The service itself is now installed
    and asserted from a real MSI (0.9.25, see the service section) - registered as
    LocalSystem, Running, Automatic, and fully removed on uninstall. What a VM can't test is
    the disc half: Hyper-V passes through no USB optical drive, so burning via the service
    (expect zero UAC), an iPod sync, and a mid-job relaunch for the LCD reattach all still
    need Fox's machine. This is the last piece of the "elevation, once" story.
-2. **Sharing across two real machines.** The pipe is proven; the *discovery* half still isn't.
-   mDNS on loopback is not mDNS on a LAN with a firewall, and `MdnsAdvertiser` binds 5353,
-   where Bonjour/Windows' own responder may already sit. Host on one box, mount from another.
-3. ~~Encoders~~ **DONE on all three platforms - nothing is PENDING in `encoders.json`.**
+
+**Encoder record, per platform** (all closed - kept because the build quirks will bite again):
    - win-x64: ffmpeg, flac (+ libFLAC, libFLAC++), lame.
    - linux-x64: ffmpeg from BtbN's LGPL build via WSL2 (Windows' bsdtar can't read the
      `.tar.xz`, which is what had blocked it), plus `flac` and `lame` built from upstream
@@ -301,8 +316,15 @@ fixed: share rows were silently unplayable (`PlayMusicItem` bailed on the missin
 mounted share leaked its catalogue into Music and Bad Format (only CDs and devices were
 excluded), and the loopback bind fallback threw `ObjectDisposedException` - `HttpListener.Start()`
 disposes itself on failure, so a GUI-hosted share had never once come up.
-REMAINING: two real machines (mDNS on a LAN with a firewall, and 5353 possibly already held by
-Bonjour, is not mDNS on loopback); PIN pairing beyond the trusted-LAN default; share playlists.
+Two real machines: confirmed 2026-07-31 (the four LAN bugs it surfaced are in the v1 status
+section). Share playlists shipped 0.9.42 (remote playlists under DEVICES + Import), TLS 0.9.43,
+favorites ride along as of 0.9.47. PIN pairing: rejected - trusted LAN + the cert pin is the model.
+The share now survives a service restart: the last successful share-start persists its config
+(name, port, the owner's library db) in the daemon account's own app data, the daemon replays it
+at startup (after waiting, bounded, for a NIC - at boot the service can beat the network up), and
+share-stop retires it. Restore refuses to start without the owner's database, because restoring
+one without it would serve the systemprofile's empty library - the exact bug the libraryDb
+payload exists to fix. `ShareHostingTests` covers the restart journeys, corrupt config included.
 
 ## Identity read - reference-verification matrix (slice A)
 Goal: exact identity (model / colour / factory-or-modded capacity / serial) for every in-scope
@@ -500,19 +522,26 @@ round-tripping. Proven via libgpod's `itdb_parse` + `itdb_artwork_get_pixbuf`
   the device, not the oracle.
 
 ## Hardware validation pass
-The conformance suite proves these against synthetic devices; one session with the fleet closes
-them against metal:
-- Shuffle classic (1G/2G) iTunesSD write - the path that never worked before the recursion fix
-- Shuffle playlist-replace + podcasts-as-tracks semantics on-device
-- hash58 signing of an OrgZ-created (fresh/erased) iTunesDB - the header-overwrite fix
+The July session with the eBay units (Nano 3G, Shuffle 2G) closed the two open write tiers:
+- ~~Shuffle classic iTunesSD write~~ **DONE** - hardware-validated on the Shuffle 2G, which also
+  taught us it can't decode ALAC (a valid file is silently skipped), so Shuffle 1G/2G transcode
+  to AAC. Playlist-replace and podcasts-as-tracks were RETIRED rather than validated: the
+  Shuffle now honestly claims no playlist support and dropped the fake podcast support - only
+  legit support counts.
+- ~~hash58 signing of an OrgZ-created (fresh/erased) iTunesDB~~ **DONE** - the hash58 tier is
+  validated on metal (Nano 3G, HARDWARE.md ✅), and the hash is pinned to its hardware-verified
+  state in the suite. A Classic would re-prove the same tier on its own silicon; not blocking.
+
+Still metal-gated:
 - Rockbox erase on a real box
 - Nano 5G ALAC/AAC audio-format codes (MP3 proven)
-- hash58 known-answer vector captured from a real Classic (boot test)
 - Nano 5G CDB user-playlist form (research pending - playlists live in SQLite only until iTunes
   accepts a user-playlist mhyp in the CDB)
 - Audiobooks land in the on-device Audiobooks menu (media_type 8 on Binary, media_kind 8 on
   Nano 5G) with the firmware honoring the remember-position flag - the conformance suite proves
   the writes; the menus need metal
+- Shuffle 3G/4G bdhs is implemented-but-unverified - no 3G/4G in the fleet. (The eBay "Nano 4G"
+  was mislabeled, actually a Nano 2G, so hash58 rests on the 3G alone - which is enough.)
 
 ## Release
 - Encoder bundling — win-x64 DONE (0.9.6 vendored, release published 0.9.17). How it works:
@@ -520,9 +549,9 @@ them against metal:
   release; CI runs `scripts/fetch-encoders.ps1`, which downloads from OUR release (never the
   upstream URL, which moves), verifies the hash, and drops the binaries in `tools/<rid>/`;
   `BundleMediaToolsOnPublish` copies them into `publish/tools/` so Velopack ships them INSIDE
-  the installer. Users download once. Verified cold end-to-end on 2026-07-25.
-  REMAINING: vendor linux-x64 from a linux host (Windows tar chokes on the .tar.xz) and
-  osx-arm64 via scripts/build-ffmpeg-mac.sh — those packages ship without encoders today.
+  the installer. Users download once. Verified cold end-to-end on 2026-07-25. linux-x64 and
+  osx-arm64 are vendored too - all three platforms passed the cold fetch (details in the
+  encoder record up top).
 - Slim ffmpeg (post-v1): the vendored win-x64 ffmpeg is 108.9 MB, ~98% of the payload, and is
   a full build. A `--disable-everything` build carrying only the codecs OrgZ needs lands
   ~10-20 MB. Deliberately deferred - fat is fine for v1.

@@ -42,6 +42,11 @@ internal class Program
                 Services.DeviceHelper.JobsServiceOps.RegisterAll();
                 Services.Sharing.ShareServiceOps.RegisterAll();
 
+                // A configured share comes back on its own after a restart - the GUI that
+                // knew the library's path may not run again for days. Off the serving
+                // path: the wait-for-network inside must not delay the SCM handshake.
+                _ = Task.Run(Services.Sharing.ShareServiceOps.RestoreOnStartupAsync);
+
 #if WINDOWS
                 // Launched by the SCM (no interactive session) → run under ServiceBase so the
                 // control-dispatcher handshake happens and `sc start` succeeds. A developer

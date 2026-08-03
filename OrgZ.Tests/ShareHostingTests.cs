@@ -17,17 +17,23 @@ namespace OrgZ.Tests;
 public class ShareHostingTests : IDisposable
 {
     private readonly Func<string, int, LibraryShareServer> _originalFactory = ShareServiceOps.ServerFactory;
+    private readonly string _originalConfigPath = ShareServiceOps.ConfigPath;
 
     public ShareHostingTests()
     {
         // Never bind a real socket in tests: hand back an unstarted server object.
         ShareServiceOps.ServerFactory = (name, port) => new LibraryShareServer(name, port, () => []);
+
+        // And never write the real restart config - each run gets its own file.
+        ShareServiceOps.ConfigPath = Path.Combine(Path.GetTempPath(), $"orgz-shareconfig-{Guid.NewGuid():N}.json");
     }
 
     public void Dispose()
     {
         ShareServiceOps.ResetForTests();
         ShareServiceOps.ServerFactory = _originalFactory;
+        File.Delete(ShareServiceOps.ConfigPath);
+        ShareServiceOps.ConfigPath = _originalConfigPath;
         GC.SuppressFinalize(this);
     }
 
@@ -154,6 +160,112 @@ public class ShareHostingTests : IDisposable
         // it regresses to serving the systemprofile's empty library.
         Assert.Equal(@"C:\x\l.db", ShareServiceOps.ParseStartPayload("""{"libraryDb":"C:\\x\\l.db"}""").LibraryDb);
         Assert.Equal(@"C:\x\l.db", SyncServiceOps.ParsePayload("""{"mountPath":"E:\\","progressPath":"C:\\p","mediaIds":["a"],"libraryDb":"C:\\x\\l.db"}""")!.LibraryDb);
+    }
+
+    // ── Surviving a service restart ───────────────────────────
+
+    [Fact]
+    public void A_restarted_service_restores_the_configured_share_and_its_library()
+    {
+        var db = Path.Combine(Path.GetTempPath(), $"orgz-sharetest-{Guid.NewGuid():N}.db");
+        File.WriteAllBytes(db, [1]);
+
+        try
+        {
+            var payload = $$"""{"shareName":"Fox Library","port":7391,"libraryDb":{{System.Text.Json.JsonSerializer.Serialize(db)}}}""";
+            Assert.True(ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, payload)).Ok);
+
+            // The service dies (reboot, crash, update relaunch) and comes back empty-handed.
+            ShareServiceOps.ResetForTests();
+            MediaCache.OverrideCachePath(null);
+
+            ShareServiceOps.RestorePersistedShare();
+
+            var state = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStatus(Req(ShareServiceOps.OpShareStatus)).ResultJson);
+            Assert.True(state.Sharing);
+            Assert.Equal("Fox Library", state.Name);
+            Assert.Equal(7391, state.Port);
+            // And it serves the owner's database, not the service account's empty one.
+            Assert.Equal(db, MediaCache.CurrentDatabasePath);
+        }
+        finally
+        {
+            MediaCache.OverrideCachePath(null);
+            File.Delete(db);
+        }
+    }
+
+    [Fact]
+    public void Stop_retires_the_config_so_a_restart_stays_stopped()
+    {
+        var db = Path.Combine(Path.GetTempPath(), $"orgz-sharetest-{Guid.NewGuid():N}.db");
+        File.WriteAllBytes(db, [1]);
+
+        try
+        {
+            var payload = $$"""{"shareName":"Fox","port":7391,"libraryDb":{{System.Text.Json.JsonSerializer.Serialize(db)}}}""";
+            ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, payload));
+            ShareServiceOps.HandleStop(Req(ShareServiceOps.OpShareStop));
+
+            Assert.False(File.Exists(ShareServiceOps.ConfigPath));
+
+            ShareServiceOps.ResetForTests();
+            ShareServiceOps.RestorePersistedShare();
+
+            var state = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStatus(Req(ShareServiceOps.OpShareStatus)).ResultJson);
+            Assert.False(state.Sharing);
+        }
+        finally
+        {
+            MediaCache.OverrideCachePath(null);
+            File.Delete(db);
+        }
+    }
+
+    [Fact]
+    public void Restore_refuses_a_config_that_names_no_library_database()
+    {
+        // A start that never named a database can't be replayed - restoring it would
+        // serve the service account's empty library, the bug the payload exists to fix.
+        ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, """{"shareName":"Fox","port":7391}"""));
+        ShareServiceOps.ResetForTests();
+
+        ShareServiceOps.RestorePersistedShare();
+
+        var state = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStatus(Req(ShareServiceOps.OpShareStatus)).ResultJson);
+        Assert.False(state.Sharing);
+    }
+
+    [Fact]
+    public void Restore_refuses_when_the_persisted_database_has_vanished()
+    {
+        var db = Path.Combine(Path.GetTempPath(), $"orgz-sharetest-{Guid.NewGuid():N}.db");
+        File.WriteAllBytes(db, [1]);
+
+        var payload = $$"""{"shareName":"Fox","port":7391,"libraryDb":{{System.Text.Json.JsonSerializer.Serialize(db)}}}""";
+        ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, payload));
+        ShareServiceOps.ResetForTests();
+        MediaCache.OverrideCachePath(null);
+        File.Delete(db);
+
+        ShareServiceOps.RestorePersistedShare();
+
+        var state = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStatus(Req(ShareServiceOps.OpShareStatus)).ResultJson);
+        Assert.False(state.Sharing);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("")]
+    [InlineData("null")]
+    public void Restore_survives_a_corrupt_config(string junk)
+    {
+        File.WriteAllText(ShareServiceOps.ConfigPath, junk);
+
+        ShareServiceOps.RestorePersistedShare();
+
+        var state = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStatus(Req(ShareServiceOps.OpShareStatus)).ResultJson);
+        Assert.False(state.Sharing);
     }
 
     // ── Client-side state parsing ─────────────────────────────
