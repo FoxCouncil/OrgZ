@@ -158,54 +158,16 @@ public static class IPodScsiInquiry
         // SCSI pass-through doesn't work against volume handles - Windows's volume stack
         // eats the CDB and returns 1306 (ERROR_NO_NETWORK). We need the PhysicalDriveN
         // handle, which maps via IOCTL_STORAGE_GET_DEVICE_NUMBER on the volume.
-        var volumePath = $@"\\.\{letter}";
-        log.AppendLine($"Opening volume {volumePath} (to resolve PhysicalDrive number)...");
+        log.AppendLine($@"Opening volume \\.\{letter} (to resolve PhysicalDrive number)...");
 
-        int physicalDriveNumber;
-        using (var volHandle = CreateFile(
-            volumePath,
-            0, // no access - FILE_ANY_ACCESS IOCTL only
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            IntPtr.Zero,
-            OPEN_EXISTING,
-            0,
-            IntPtr.Zero))
+        if (!TryResolvePhysicalDrive(letter, out int physicalDriveNumber, out var resolveFailure))
         {
-            if (volHandle.IsInvalid)
-            {
-                int err = Marshal.GetLastWin32Error();
-                log.AppendLine($"  CreateFile failed, err={err} ({Win32ErrorName(err)})");
-                diagnostic = log.ToString();
-                return null;
-            }
-
-            int sdnSize = Marshal.SizeOf<STORAGE_DEVICE_NUMBER>();
-            var sdnBuf = Marshal.AllocHGlobal(sdnSize);
-            try
-            {
-                bool ok = DeviceIoControl(
-                    volHandle,
-                    IOCTL_STORAGE_GET_DEVICE_NUMBER,
-                    IntPtr.Zero, 0,
-                    sdnBuf, (uint)sdnSize,
-                    out _,
-                    IntPtr.Zero);
-                if (!ok)
-                {
-                    int err = Marshal.GetLastWin32Error();
-                    log.AppendLine($"  IOCTL_STORAGE_GET_DEVICE_NUMBER failed, err={err} ({Win32ErrorName(err)})");
-                    diagnostic = log.ToString();
-                    return null;
-                }
-                var sdn = Marshal.PtrToStructure<STORAGE_DEVICE_NUMBER>(sdnBuf);
-                physicalDriveNumber = (int)sdn.DeviceNumber;
-                log.AppendLine($"  resolved to PhysicalDrive{physicalDriveNumber}");
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(sdnBuf);
-            }
+            log.AppendLine($"  {resolveFailure}");
+            diagnostic = log.ToString();
+            return null;
         }
+
+        log.AppendLine($"  resolved to PhysicalDrive{physicalDriveNumber}");
 
         // Now open the physical drive with R+W. This ABSOLUTELY requires elevation on
         // Windows 10+ for fixed and removable storage alike - without admin you get
@@ -428,19 +390,10 @@ public static class IPodScsiInquiry
             return log.ToString();
         }
 
-        int physicalDriveNumber;
-        using (var volHandle = CreateFile($@"\\.\{letter}", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero))
+        if (!TryResolvePhysicalDrive(letter, out int physicalDriveNumber, out var resolveFailure))
         {
-            if (volHandle.IsInvalid) { log.AppendLine($"FAIL: open volume err={Marshal.GetLastWin32Error()}"); return log.ToString(); }
-            int sdnSize = Marshal.SizeOf<STORAGE_DEVICE_NUMBER>();
-            var sdnBuf = Marshal.AllocHGlobal(sdnSize);
-            try
-            {
-                if (!DeviceIoControl(volHandle, IOCTL_STORAGE_GET_DEVICE_NUMBER, IntPtr.Zero, 0, sdnBuf, (uint)sdnSize, out _, IntPtr.Zero))
-                { log.AppendLine($"FAIL: GET_DEVICE_NUMBER err={Marshal.GetLastWin32Error()}"); return log.ToString(); }
-                physicalDriveNumber = (int)Marshal.PtrToStructure<STORAGE_DEVICE_NUMBER>(sdnBuf).DeviceNumber;
-            }
-            finally { Marshal.FreeHGlobal(sdnBuf); }
+            log.AppendLine($"FAIL: {resolveFailure}");
+            return log.ToString();
         }
 
         using var handle = CreateFile($@"\\.\PhysicalDrive{physicalDriveNumber}", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
@@ -513,42 +466,127 @@ public static class IPodScsiInquiry
     /// CHECK CONDITION left by a prior (e.g. OS-issued) command can't be misread as our INQUIRY's.
     /// Best-effort: failures are ignored.
     /// </summary>
-    private static void DrainRequestSense(SafeFileHandleWrapper handle)
+    /// <summary>
+    /// Volume letter ("E:") → its PhysicalDriveN number, via IOCTL_STORAGE_GET_DEVICE_NUMBER
+    /// on the volume handle. Both raw-disk entry points open a volume just to learn this
+    /// number before reopening the physical drive; the block was written out twice with
+    /// different diagnostics, so the failure text is returned rather than logged here.
+    /// </summary>
+    private static bool TryResolvePhysicalDrive(string letter, out int driveNumber, out string? failure)
     {
-        const int senseSize = 32;
-        const int dataSize = 252;
+        driveNumber = -1;
+        failure = null;
+
+        using var volHandle = CreateFile($@"\\.\{letter}", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+        if (volHandle.IsInvalid)
+        {
+            int err = Marshal.GetLastWin32Error();
+            failure = $"CreateFile failed, err={err} ({Win32ErrorName(err)})";
+            return false;
+        }
+
+        int sdnSize = Marshal.SizeOf<STORAGE_DEVICE_NUMBER>();
+        var sdnBuf = Marshal.AllocHGlobal(sdnSize);
+        try
+        {
+            if (!DeviceIoControl(volHandle, IOCTL_STORAGE_GET_DEVICE_NUMBER, IntPtr.Zero, 0, sdnBuf, (uint)sdnSize, out _, IntPtr.Zero))
+            {
+                int err = Marshal.GetLastWin32Error();
+                failure = $"IOCTL_STORAGE_GET_DEVICE_NUMBER failed, err={err} ({Win32ErrorName(err)})";
+                return false;
+            }
+
+            driveNumber = (int)Marshal.PtrToStructure<STORAGE_DEVICE_NUMBER>(sdnBuf).DeviceNumber;
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(sdnBuf);
+        }
+    }
+
+    /// <summary>The outcome of one SCSI_PASS_THROUGH round trip.</summary>
+    private readonly record struct ScsiResult(bool Ok, byte[] Data, byte ScsiStatus, byte[] Sense, int Win32Error)
+    {
+        /// <summary>Sense key / ASC / ASCQ - why the target rejected the command.</summary>
+        public (int Key, int Asc, int Ascq) SenseKca => (
+            Sense.Length > 2 ? Sense[2] & 0x0F : 0,
+            Sense.Length > 12 ? Sense[12] : 0,
+            Sense.Length > 13 ? Sense[13] : 0);
+    }
+
+    private const int ScsiSenseSize = 32;
+
+    /// <summary>
+    /// The ONE SCSI_PASS_THROUGH scaffold. Five copies of this buffer arithmetic used to
+    /// live in this file - identical but for the CDB and its length - which is exactly the
+    /// code where a one-site-only offset slip is invisible until real hardware answers
+    /// garbage. Callers now build a CDB and read a typed result.
+    ///
+    /// The layout is the documented one: [SCSI_PASS_THROUGH][sense][data], with the two
+    /// offsets pointing past the struct, a 10-second timeout, and DATA_IN (every command
+    /// OrgZ issues here reads).
+    /// </summary>
+    /// <param name="cdb">Exactly 16 bytes (the struct's fixed CDB field); only the first <paramref name="cdbLength"/> are sent.</param>
+    private static ScsiResult SendScsi(SafeFileHandleWrapper handle, byte[] cdb, byte cdbLength, int dataSize)
+    {
         int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
-        int totalSize = structSize + senseSize + dataSize;
+        int totalSize = structSize + ScsiSenseSize + dataSize;
         var buffer = Marshal.AllocHGlobal(totalSize);
         try
         {
-            for (int i = 0; i < totalSize; i++) { Marshal.WriteByte(buffer, i, 0); }
-            var cdb = new byte[16];
-            cdb[0] = 0x03;                 // REQUEST SENSE
-            cdb[4] = (byte)dataSize;       // allocation length (single byte for REQUEST SENSE)
+            for (int i = 0; i < totalSize; i++)
+            {
+                Marshal.WriteByte(buffer, i, 0);
+            }
 
             var spt = new SCSI_PASS_THROUGH
             {
                 Length             = (ushort)structSize,
-                CdbLength          = 6,
-                SenseInfoLength    = senseSize,
+                PathId             = 0,
+                TargetId           = 0,
+                Lun                = 0,
+                CdbLength          = cdbLength,
+                SenseInfoLength    = ScsiSenseSize,
                 DataIn             = SCSI_IOCTL_DATA_IN,
                 DataTransferLength = (uint)dataSize,
                 TimeOutValue       = 10,
                 SenseInfoOffset    = (uint)structSize,
-                DataBufferOffset   = new IntPtr(structSize + senseSize),
+                DataBufferOffset   = new IntPtr(structSize + ScsiSenseSize),
                 Cdb                = cdb,
             };
             Marshal.StructureToPtr(spt, buffer, false);
-            DeviceIoControl(handle, IOCTL_SCSI_PASS_THROUGH, buffer, (uint)totalSize, buffer, (uint)totalSize, out _, IntPtr.Zero);
-        }
-        catch
-        {
-            // best-effort drain
+
+            bool ok = DeviceIoControl(handle, IOCTL_SCSI_PASS_THROUGH, buffer, (uint)totalSize, buffer, (uint)totalSize, out _, IntPtr.Zero);
+            int werr = ok ? 0 : Marshal.GetLastWin32Error();
+
+            var result = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
+            var sense = new byte[ScsiSenseSize];
+            Marshal.Copy(buffer + structSize, sense, 0, ScsiSenseSize);
+            var data = new byte[dataSize];
+            Marshal.Copy(buffer + structSize + ScsiSenseSize, data, 0, dataSize);
+
+            return new ScsiResult(ok, data, result.ScsiStatus, sense, werr);
         }
         finally
         {
             Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static void DrainRequestSense(SafeFileHandleWrapper handle)
+    {
+        try
+        {
+            const int dataSize = 252;
+            var cdb = new byte[16];
+            cdb[0] = 0x03;                 // REQUEST SENSE
+            cdb[4] = (byte)dataSize;       // allocation length (single byte for REQUEST SENSE)
+            SendScsi(handle, cdb, cdbLength: 6, dataSize);
+        }
+        catch
+        {
+            // best-effort drain
         }
     }
 
@@ -560,48 +598,15 @@ public static class IPodScsiInquiry
     /// </summary>
     private static (byte[] data, byte status, byte[] sense, int win32err) InquiryProbe(SafeFileHandleWrapper handle, bool evpd, byte page, int alloc)
     {
-        const int senseSize = 32;
-        int dataSize = Math.Max(4, alloc);
-        int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
-        int totalSize = structSize + senseSize + dataSize;
-        var buffer = Marshal.AllocHGlobal(totalSize);
-        try
-        {
-            for (int i = 0; i < totalSize; i++) { Marshal.WriteByte(buffer, i, 0); }
-            var cdb = new byte[16];
-            cdb[0] = SCSI_INQUIRY;
-            cdb[1] = (byte)(evpd ? 0x01 : 0x00);
-            cdb[2] = page;
-            cdb[3] = (byte)((alloc >> 8) & 0xFF);
-            cdb[4] = (byte)(alloc & 0xFF);
+        var cdb = new byte[16];
+        cdb[0] = SCSI_INQUIRY;
+        cdb[1] = (byte)(evpd ? 0x01 : 0x00);
+        cdb[2] = page;
+        cdb[3] = (byte)((alloc >> 8) & 0xFF);
+        cdb[4] = (byte)(alloc & 0xFF);
 
-            var spt = new SCSI_PASS_THROUGH
-            {
-                Length             = (ushort)structSize,
-                CdbLength          = 6,
-                SenseInfoLength    = senseSize,
-                DataIn             = SCSI_IOCTL_DATA_IN,
-                DataTransferLength = (uint)dataSize,
-                TimeOutValue       = 10,
-                SenseInfoOffset    = (uint)structSize,
-                DataBufferOffset   = new IntPtr(structSize + senseSize),
-                Cdb                = cdb,
-            };
-            Marshal.StructureToPtr(spt, buffer, false);
-
-            bool ok = DeviceIoControl(handle, IOCTL_SCSI_PASS_THROUGH, buffer, (uint)totalSize, buffer, (uint)totalSize, out _, IntPtr.Zero);
-            int werr = ok ? 0 : Marshal.GetLastWin32Error();
-            var result = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
-            var sense = new byte[senseSize];
-            Marshal.Copy(buffer + structSize, sense, 0, senseSize);
-            var data = new byte[dataSize];
-            Marshal.Copy(buffer + structSize + senseSize, data, 0, dataSize);
-            return (data, result.ScsiStatus, sense, werr);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
+        var r = SendScsi(handle, cdb, cdbLength: 6, Math.Max(4, alloc));
+        return (r.Data, r.ScsiStatus, r.Sense, r.Win32Error);
     }
 
     /// <summary>
@@ -611,80 +616,29 @@ public static class IPodScsiInquiry
     private static byte[]? ReadAppleSysInfoBlob(SafeFileHandleWrapper handle, out string? error)
     {
         error = null;
-        const int senseSize = 32;
-        const int dataSize = 256;
 
-        int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
-        int totalSize = structSize + senseSize + dataSize;
-        var buffer = Marshal.AllocHGlobal(totalSize);
+        // CDB: C6 00 00 00 00 00 00 01 00 00 - byte 7 = 0x01 → 256-byte transfer length (hi byte)
+        var cdb = new byte[16];
+        cdb[0] = APPLE_READ_SYSINFO;
+        cdb[7] = 0x01;
 
-        try
+        var r = SendScsi(handle, cdb, cdbLength: 10, dataSize: 256);
+
+        if (!r.Ok)
         {
-            for (int i = 0; i < totalSize; i++)
-            {
-                Marshal.WriteByte(buffer, i, 0);
-            }
-
-            // CDB: C6 00 00 00 00 00 00 01 00 00 - byte 7 = 0x01 → 256-byte transfer length (hi byte)
-            var cdb = new byte[16];
-            cdb[0] = APPLE_READ_SYSINFO;
-            cdb[7] = 0x01;
-
-            var spt = new SCSI_PASS_THROUGH
-            {
-                Length             = (ushort)structSize,
-                PathId             = 0,
-                TargetId           = 0,
-                Lun                = 0,
-                CdbLength          = 10,
-                SenseInfoLength    = senseSize,
-                DataIn             = SCSI_IOCTL_DATA_IN,
-                DataTransferLength = dataSize,
-                TimeOutValue       = 10,
-                SenseInfoOffset    = (uint)structSize,
-                DataBufferOffset   = new IntPtr(structSize + senseSize),
-                Cdb                = cdb,
-            };
-            Marshal.StructureToPtr(spt, buffer, false);
-
-            bool ok = DeviceIoControl(
-                handle,
-                IOCTL_SCSI_PASS_THROUGH,
-                buffer,
-                (uint)totalSize,
-                buffer,
-                (uint)totalSize,
-                out _,
-                IntPtr.Zero);
-
-            if (!ok)
-            {
-                int err = Marshal.GetLastWin32Error();
-                error = $"DeviceIoControl err={err} ({Win32ErrorName(err)})";
-                return null;
-            }
-
-            var result = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
-            if (result.ScsiStatus != 0)
-            {
-                // Decode sense key/ASC/ASCQ so we can tell why the device rejected it
-                var sense = new byte[senseSize];
-                Marshal.Copy(buffer + structSize, sense, 0, senseSize);
-                int senseKey = sense.Length > 2 ? (sense[2] & 0x0F) : 0;
-                int asc = sense.Length > 12 ? sense[12] : 0;
-                int ascq = sense.Length > 13 ? sense[13] : 0;
-                error = $"SCSI status=0x{result.ScsiStatus:X2} sense K/C/Q = {senseKey:X}/{asc:X2}/{ascq:X2}";
-                return null;
-            }
-
-            var data = new byte[dataSize];
-            Marshal.Copy(buffer + structSize + senseSize, data, 0, dataSize);
-            return data;
+            error = $"DeviceIoControl err={r.Win32Error} ({Win32ErrorName(r.Win32Error)})";
+            return null;
         }
-        finally
+
+        if (r.ScsiStatus != 0)
         {
-            Marshal.FreeHGlobal(buffer);
+            // Decode sense key/ASC/ASCQ so we can tell why the device rejected it
+            var (key, asc, ascq) = r.SenseKca;
+            error = $"SCSI status=0x{r.ScsiStatus:X2} sense K/C/Q = {key:X}/{asc:X2}/{ascq:X2}";
+            return null;
         }
+
+        return r.Data;
     }
 
     /// <summary>
@@ -735,73 +689,23 @@ public static class IPodScsiInquiry
     private static byte[]? SendAtaPassThrough(SafeFileHandleWrapper handle, byte[] cdb, int cdbLength, int dataSize, out string? error)
     {
         error = null;
-        const int senseSize = 32;
 
-        int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
-        int totalSize = structSize + senseSize + dataSize;
-        var buffer = Marshal.AllocHGlobal(totalSize);
+        var r = SendScsi(handle, cdb, (byte)cdbLength, dataSize);
 
-        try
+        if (!r.Ok)
         {
-            for (int i = 0; i < totalSize; i++)
-            {
-                Marshal.WriteByte(buffer, i, 0);
-            }
-
-            var spt = new SCSI_PASS_THROUGH
-            {
-                Length             = (ushort)structSize,
-                PathId             = 0,
-                TargetId           = 0,
-                Lun                = 0,
-                CdbLength          = (byte)cdbLength,
-                SenseInfoLength    = senseSize,
-                DataIn             = SCSI_IOCTL_DATA_IN,
-                DataTransferLength = (uint)dataSize,
-                TimeOutValue       = 10,
-                SenseInfoOffset    = (uint)structSize,
-                DataBufferOffset   = new IntPtr(structSize + senseSize),
-                Cdb                = cdb,
-            };
-            Marshal.StructureToPtr(spt, buffer, false);
-
-            bool ok = DeviceIoControl(
-                handle,
-                IOCTL_SCSI_PASS_THROUGH,
-                buffer,
-                (uint)totalSize,
-                buffer,
-                (uint)totalSize,
-                out _,
-                IntPtr.Zero);
-
-            if (!ok)
-            {
-                int err = Marshal.GetLastWin32Error();
-                error = $"DeviceIoControl err={err} ({Win32ErrorName(err)})";
-                return null;
-            }
-
-            var result = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
-            if (result.ScsiStatus != 0)
-            {
-                var sense = new byte[senseSize];
-                Marshal.Copy(buffer + structSize, sense, 0, senseSize);
-                int senseKey = sense.Length > 2 ? (sense[2] & 0x0F) : 0;
-                int asc = sense.Length > 12 ? sense[12] : 0;
-                int ascq = sense.Length > 13 ? sense[13] : 0;
-                error = $"SCSI status=0x{result.ScsiStatus:X2} sense K/C/Q = {senseKey:X}/{asc:X2}/{ascq:X2}";
-                return null;
-            }
-
-            var data = new byte[dataSize];
-            Marshal.Copy(buffer + structSize + senseSize, data, 0, dataSize);
-            return data;
+            error = $"DeviceIoControl err={r.Win32Error} ({Win32ErrorName(r.Win32Error)})";
+            return null;
         }
-        finally
+
+        if (r.ScsiStatus != 0)
         {
-            Marshal.FreeHGlobal(buffer);
+            var (key, asc, ascq) = r.SenseKca;
+            error = $"SCSI status=0x{r.ScsiStatus:X2} sense K/C/Q = {key:X}/{asc:X2}/{ascq:X2}";
+            return null;
         }
+
+        return r.Data;
     }
 #endif
 
@@ -946,7 +850,6 @@ public static class IPodScsiInquiry
     private static byte[]? InquiryVpd(SafeFileHandleWrapper handle, byte pageCode, out string? error)
     {
         error = null;
-        const int senseSize = 32;
         // Allocation length MUST be 252 (0x00FC), matching libgpod's IPOD_XML_PAGE read. Apple's
         // iPod firmware is picky about the INQUIRY allocation length on its vendor device-info
         // pages: an oversized request (we used 4096) gets a malformed/empty page-list back -
@@ -954,87 +857,33 @@ public static class IPodScsiInquiry
         // device-info pages were sized for, so the page list and each XML chunk come back whole.
         const int dataSize = 252;
 
-        // sizeof(SCSI_PASS_THROUGH) with default alignment - includes Cdb[16] inline.
-        // x64 = 56, x86 = 44. This is what goes into sptd.Length and is the base for offsets.
-        int structSize = Marshal.SizeOf<SCSI_PASS_THROUGH>();
-        int totalSize = structSize + senseSize + dataSize;
-        var buffer = Marshal.AllocHGlobal(totalSize);
+        // Build the CDB: [opcode=INQUIRY] [EVPD=1] [page] [alloc-len MSB] [alloc-len LSB] [ctrl]
+        var cdb = new byte[16];
+        cdb[0] = SCSI_INQUIRY;
+        cdb[1] = 0x01;
+        cdb[2] = pageCode;
+        cdb[3] = (byte)((dataSize >> 8) & 0xFF);
+        cdb[4] = (byte)(dataSize & 0xFF);
+        cdb[5] = 0x00;
 
-        try
+        var r = SendScsi(handle, cdb, cdbLength: 6, dataSize);
+
+        if (!r.Ok)
         {
-            // Zero the whole allocation so any padding bytes and the sense/data regions start clean
-            for (int i = 0; i < totalSize; i++)
-            {
-                Marshal.WriteByte(buffer, i, 0);
-            }
-
-            // Build the CDB: [opcode=INQUIRY] [EVPD=1] [page] [alloc-len MSB] [alloc-len LSB] [ctrl]
-            var cdb = new byte[16];
-            cdb[0] = SCSI_INQUIRY;
-            cdb[1] = 0x01;
-            cdb[2] = pageCode;
-            cdb[3] = (byte)((dataSize >> 8) & 0xFF);
-            cdb[4] = (byte)(dataSize & 0xFF);
-            cdb[5] = 0x00;
-
-            var spt = new SCSI_PASS_THROUGH
-            {
-                Length             = (ushort)structSize,
-                PathId             = 0,
-                TargetId           = 0,
-                Lun                = 0,
-                CdbLength          = 6,
-                SenseInfoLength    = senseSize,
-                DataIn             = SCSI_IOCTL_DATA_IN,
-                DataTransferLength = dataSize,
-                TimeOutValue       = 10,
-                SenseInfoOffset    = (uint)structSize,                   // sense immediately after the struct
-                DataBufferOffset   = new IntPtr(structSize + senseSize), // data immediately after sense
-                Cdb                = cdb,
-            };
-            Marshal.StructureToPtr(spt, buffer, false);
-
-            bool ok = DeviceIoControl(
-                handle,
-                IOCTL_SCSI_PASS_THROUGH,
-                buffer,
-                (uint)totalSize,
-                buffer,
-                (uint)totalSize,
-                out _,
-                IntPtr.Zero);
-
-            if (!ok)
-            {
-                int err = Marshal.GetLastWin32Error();
-                error = $"DeviceIoControl err={err} ({Win32ErrorName(err)})";
-                return null;
-            }
-
-            // Read the struct back to get the actual ScsiStatus. Non-zero means the device
-            // rejected the command (CHECK CONDITION → sense data explains why).
-            var resultSpt = Marshal.PtrToStructure<SCSI_PASS_THROUGH>(buffer);
-            if (resultSpt.ScsiStatus != 0)
-            {
-                var sense = new byte[senseSize];
-                Marshal.Copy(buffer + structSize, sense, 0, senseSize);
-                int sk = sense.Length > 2 ? (sense[2] & 0x0F) : 0;
-                int asc = sense.Length > 12 ? sense[12] : 0;
-                int ascq = sense.Length > 13 ? sense[13] : 0;
-                error = $"SCSI status=0x{resultSpt.ScsiStatus:X2} sense K/C/Q={sk:X}/{asc:X2}/{ascq:X2}";
-                return null;
-            }
-
-            // Copy the data payload out of the buffer
-            int dataOffset = structSize + senseSize;
-            var result = new byte[dataSize];
-            Marshal.Copy(buffer + dataOffset, result, 0, dataSize);
-            return result;
+            error = $"DeviceIoControl err={r.Win32Error} ({Win32ErrorName(r.Win32Error)})";
+            return null;
         }
-        finally
+
+        // Non-zero status means the device rejected the command (CHECK CONDITION → sense
+        // data explains why).
+        if (r.ScsiStatus != 0)
         {
-            Marshal.FreeHGlobal(buffer);
+            var (sk, asc, ascq) = r.SenseKca;
+            error = $"SCSI status=0x{r.ScsiStatus:X2} sense K/C/Q={sk:X}/{asc:X2}/{ascq:X2}";
+            return null;
         }
+
+        return r.Data;
     }
 
 #endif
