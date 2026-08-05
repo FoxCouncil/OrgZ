@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
+// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia;
 using Avalonia.Collections;
@@ -6348,19 +6348,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #region Utils
 
-    private static readonly HttpClient _faviconHttp = new()
-    {
-        Timeout = TimeSpan.FromSeconds(5),
-        DefaultRequestHeaders = { { "User-Agent", $"OrgZ/{App.Version}" } }
-    };
-
-    // Dedicated client for fetching podcast show art to embed on a device. Standard browser UA - the
-    // art sits on third-party CDNs that can reject odd agents, and request logs stay anonymous.
-    private static readonly HttpClient _artHttp = new()
-    {
-        Timeout = TimeSpan.FromSeconds(8),
-        DefaultRequestHeaders = { { "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" } }
-    };
+    // The ONE client for third-party art (station favicons, podcast covers, radio track art).
+    // Stock browser UA via Web.Create - the art sits on third-party CDNs that can reject odd
+    // agents, and their request logs stay anonymous. Never put an app-identifying UA on a
+    // request that leaves the machine.
+    private static readonly HttpClient _artHttp = Web.Create(TimeSpan.FromSeconds(8));
 
     /// <summary>Downloads a podcast show's cover (URL) to a temp file so it can be rendered into the
     /// iPod ArtworkDB. Returns the local path, or null when there's no URL / the fetch fails.</summary>
@@ -6391,7 +6383,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _faviconHttp.GetByteArrayAsync(url));
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _artHttp.GetByteArrayAsync(url));
             var bitmap = BitmapFromBytes(bytes);
             if (bitmap == null) return;
             UI(() =>
@@ -6430,7 +6422,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             // SVG station logos become PNG bytes here, so the bitmap decode below AND the
             // OS now-playing surfaces (SMTC/macOS) all receive something they can render.
-            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _faviconHttp.GetByteArrayAsync(url));
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _artHttp.GetByteArrayAsync(url));
             var bitmap = BitmapFromBytes(bytes);
             if (bitmap != null)
             {
@@ -6512,7 +6504,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // VLC's art cache hands us file:// URLs; the session's injected URLs are http(s).
             var raw = url.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
                 ? await System.IO.File.ReadAllBytesAsync(new Uri(url).LocalPath)
-                : await _faviconHttp.GetByteArrayAsync(url);
+                : await _artHttp.GetByteArrayAsync(url);
             var bytes = Helpers.ImageDecoder.EnsureRasterBytes(raw);
             var bitmap = BitmapFromBytes(bytes);
             if (bitmap == null)
