@@ -255,6 +255,16 @@ public static class MdnsWire
 
         var data = new List<byte>();
         writeData(data);
+
+        // RDLENGTH is 16 bits. Nothing OrgZ advertises comes close, but writing the low
+        // two bytes of an oversized length would emit a record claiming a size it doesn't
+        // have - corruption that reads as a malformed packet on every client. Fail loudly
+        // at the composing end instead.
+        if (data.Count > ushort.MaxValue)
+        {
+            throw new InvalidOperationException($"mDNS record data is {data.Count} bytes; RDLENGTH tops out at {ushort.MaxValue}.");
+        }
+
         output.AddRange([(byte)(data.Count >> 8), (byte)data.Count]);
         output.AddRange(data);
     }

@@ -1414,7 +1414,7 @@ public partial class MainWindow : Window
             var dev = device;   // capture
             // Grey out a device the track is already on - the same "already there" cue the
             // Add-to-Playlist submenu gives for the current playlist.
-            var entry = new Avalonia.Controls.MenuItem { Header = dev.SidebarLabel, IsEnabled = !_viewModel.IsItemAlreadyOnDevice(item, dev) };
+            var entry = new Avalonia.Controls.MenuItem { Header = dev.SidebarLabel, IsEnabled = item is not null && !_viewModel.IsItemAlreadyOnDevice(item, dev) };
             entry.Click += async (_, _) =>
             {
                 if (_viewModel.SelectedItem is { } sel)

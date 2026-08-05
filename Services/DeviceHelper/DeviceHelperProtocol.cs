@@ -47,7 +47,11 @@ public static class DeviceHelperProtocol
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(message, _json);
         var lenPrefix = new byte[4];
-        BitConverter.TryWriteBytes(lenPrefix, bytes.Length);
+        // Explicit little-endian, not BitConverter's host order. Both ends are the same
+        // binary today, but this type is the documented cross-VERSION contract ("a newer
+        // OrgZ can talk to an older installed service") - and the day one side is arm64
+        // and the other x64 under emulation, host-order framing would silently desync.
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(lenPrefix, bytes.Length);
         await stream.WriteAsync(lenPrefix, ct);
         await stream.WriteAsync(bytes, ct);
         await stream.FlushAsync(ct);
@@ -60,7 +64,7 @@ public static class DeviceHelperProtocol
         {
             await stream.ReadExactlyAsync(lenPrefix, ct);
 
-            var len = BitConverter.ToInt32(lenPrefix);
+            var len = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(lenPrefix);
             if (len is <= 0 or > 1_000_000)
             {
                 return default;

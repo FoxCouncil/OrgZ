@@ -238,28 +238,42 @@ public sealed class MdnsAdvertiser : IDisposable
     /// interface's own address as the A record. One un-steered send goes out only the
     /// default multicast interface - which is whichever adapter won the metric race.
     /// </summary>
+    // Announces are serialized. Each one STEERS the shared socket (SetSocketOption
+    // MulticastInterface) and then sends - so the periodic announcer and a query-triggered
+    // reply running concurrently could interleave one's steer with the other's send, and
+    // the answer would go out the wrong interface carrying the wrong A record.
+    private readonly SemaphoreSlim _announceGate = new(1, 1);
+
     private async Task AnnounceAsync(CancellationToken ct)
     {
         var endpoint = new IPEndPoint(IPAddress.Parse(MdnsWire.MulticastAddress), MdnsWire.Port);
 
-        if (_interfaces.Count == 0)
+        await _announceGate.WaitAsync(ct);
+        try
         {
-            await SendAsync(MdnsWire.BuildResponse(_instance), endpoint, ct);
-            return;
+            if (_interfaces.Count == 0)
+            {
+                await SendAsync(MdnsWire.BuildResponse(_instance), endpoint, ct);
+                return;
+            }
+
+            foreach (var (address, _) in _interfaces)
+            {
+                try
+                {
+                    _client!.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, address.GetAddressBytes());
+                }
+                catch (SocketException)
+                {
+                    continue;   // interface went away since Start - skip it
+                }
+
+                await SendAsync(MdnsWire.BuildResponse(_instance with { Address = address.ToString() }), endpoint, ct);
+            }
         }
-
-        foreach (var (address, _) in _interfaces)
+        finally
         {
-            try
-            {
-                _client!.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, address.GetAddressBytes());
-            }
-            catch (SocketException)
-            {
-                continue;   // interface went away since Start - skip it
-            }
-
-            await SendAsync(MdnsWire.BuildResponse(_instance with { Address = address.ToString() }), endpoint, ct);
+            _announceGate.Release();
         }
     }
 

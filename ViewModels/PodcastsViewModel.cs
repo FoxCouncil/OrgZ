@@ -510,7 +510,10 @@ public partial class PodcastsViewModel : ObservableObject
             FileSize    = episode.EnclosureLength > 0 ? episode.EnclosureLength : null,
         };
 
-        await _main.ShowMediaInfoForItemAsync(item);
+        if (_main is not null)
+        {
+            await _main.ShowMediaInfoForItemAsync(item);
+        }
     }
 
     [RelayCommand]
@@ -530,12 +533,12 @@ public partial class PodcastsViewModel : ObservableObject
                 var localPath = PodcastDownloadService.GetLocalPath(feed, episode, libraryRoot);
                 if (!string.IsNullOrWhiteSpace(localPath))
                 {
-                    _main.PlayPodcastEpisode(feed, episode, localPath: localPath);
+                    _main?.PlayPodcastEpisode(feed, episode, localPath: localPath);
                     return;
                 }
             }
         }
-        _main.PlayPodcastEpisodeStream(feed, episode);
+        _main?.PlayPodcastEpisodeStream(feed, episode);
     }
 
     [RelayCommand]
@@ -583,7 +586,9 @@ public partial class PodcastsViewModel : ObservableObject
         _navStack.Push(SnapshotCurrent());
         var cts = new CancellationTokenSource();
         _feedListCts = cts;
-        await LoadFeedListAsync(category.Name,
+        // The upstream category name is nullable; a nameless category still browses,
+        // it just shows the generic heading.
+        await LoadFeedListAsync(category.Name ?? "Category",
             ct => PodcastIndexClient.GetTrendingAsync(max: 60, categoryId: category.Id, ct: ct),
             cts.Token,
             isSearch: false);

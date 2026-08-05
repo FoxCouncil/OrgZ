@@ -147,13 +147,12 @@ public sealed class OrgZDeviceRecord
 
             File.WriteAllText(tempPath, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
-            // Atomic replace: delete old, rename new. File.Move overwrite behavior varies
-            // across runtimes, so do it explicitly.
-            if (File.Exists(finalPath))
-            {
-                File.Delete(finalPath);
-            }
-            File.Move(tempPath, finalPath);
+            // Genuinely atomic replace. The delete-then-move this used to do had a window
+            // where the record existed NOWHERE - a crash (or a yanked device) between the
+            // two calls lost it entirely. The overwrite-behaviour caveat that justified
+            // the split is long stale: File.Move(overwrite:) has been available since
+            // .NET Core 3, and AtomicFile relies on it for every on-device database.
+            File.Move(tempPath, finalPath, overwrite: true);
             return true;
         }
         catch (Exception ex)

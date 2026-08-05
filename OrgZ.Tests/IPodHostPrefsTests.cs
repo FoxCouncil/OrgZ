@@ -63,7 +63,9 @@ public class IPodHostPrefsTests
             Assert.Equal("Fox", hosts.UserName);
             Assert.Equal("FOXDESK", hosts.Computer);   // the active slot iTunes rewrites
             // Every legacy slot raw - no deduping; an old iPod reads as the trip it really carries.
-            Assert.Equal(["DEBBIE-PC", "DEBBIE-PC", "DEBBIE-PC"], hosts.LegacySlots.Select(s => s.Value).ToArray());
+            // Value! - every slot the test wrote carries text, and the non-null element type
+            // is what Assert.Equal's IEquatable constraint wants.
+            Assert.Equal(["DEBBIE-PC", "DEBBIE-PC", "DEBBIE-PC"], hosts.LegacySlots.Select(s => s.Value!).ToArray());
             Assert.Equal([0x1C0, 0x280, 0x380], hosts.LegacySlots.Select(s => s.Offset).ToArray());
 
             // The scrub: machines become "{user}'s Computer", the user survives, and OrgZ backups die.
