@@ -24,10 +24,11 @@ namespace OrgZ.Services.AudioOutput.AirPlay;
 /// </para>
 /// <para>
 /// The mDNS browser here uses raw UDP multicast against
-/// 224.0.0.251:5353 - no Bonjour / avahi dependency.  Responses are
-/// one-shot: each call to <see cref="EnumerateDevices"/> sends a query and
-/// waits ~1.5 seconds for answers.  A background "watch" mode firing
-/// <see cref="DevicesChanged"/> will come with the RAOP implementation.
+/// 224.0.0.251:5353 - no Bonjour / avahi dependency.  Sweeps are one-shot
+/// (a query plus ~2s of answer collection) and run on the thread pool;
+/// <see cref="EnumerateDevices"/> itself never blocks - it serves the cache
+/// and raises <see cref="DevicesChanged"/> when a background sweep finds a
+/// different receiver set.
 /// </para>
 /// </remarks>
 internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
@@ -45,25 +46,53 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
 
     public event EventHandler? DevicesChanged;
 
-    // mDNS discovery is expensive (~2s of UDP multicast per sweep) and noisy
-    // in the debugger.  We cache the last result and only re-sweep at a
-    // relaxed cadence, or when the user hits "Refresh Devices" in Settings
-    // (which calls this directly without the cache hint).
+    // mDNS discovery is expensive (~2s of UDP multicast per sweep) and noisy in the
+    // debugger. EnumerateDevices therefore NEVER blocks: it hands back the cached list
+    // and, when the cache has gone stale, kicks one background sweep that refreshes it
+    // and raises DevicesChanged. Callers on the UI thread (the speaker flyout used to
+    // eat the whole 2s sweep on open) get an instant answer; the refreshed topology
+    // arrives via the event, and a Settings "Refresh" click behaves the same way.
     private static readonly TimeSpan DiscoveryTtl = TimeSpan.FromMinutes(2);
     private readonly object _cacheLock = new();
     private List<AudioDeviceInfo> _cachedDevices = [];
     private DateTime _cachedAt = DateTime.MinValue;
+    private int _sweeping;   // 0/1 - at most one background sweep in flight
 
     public IReadOnlyList<AudioDeviceInfo> EnumerateDevices()
     {
+        List<AudioDeviceInfo> cached;
+        bool fresh;
         lock (_cacheLock)
         {
-            if (DateTime.UtcNow - _cachedAt < DiscoveryTtl)
-            {
-                return _cachedDevices;
-            }
+            cached = _cachedDevices;
+            fresh = DateTime.UtcNow - _cachedAt < DiscoveryTtl;
         }
 
+        if (!fresh && System.Threading.Interlocked.CompareExchange(ref _sweeping, 1, 0) == 0)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    SweepNow();
+                }
+                catch (Exception ex)
+                {
+                    _log.Debug(ex, "AirPlay background sweep failed");
+                }
+                finally
+                {
+                    System.Threading.Interlocked.Exchange(ref _sweeping, 0);
+                }
+            });
+        }
+
+        return cached;
+    }
+
+    /// <summary>One blocking mDNS sweep; updates the cache and raises <see cref="DevicesChanged"/> when the receiver set changed.</summary>
+    private void SweepNow()
+    {
         var receivers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -86,19 +115,26 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 ProviderName = ProviderName,
                 // Discovery works; STREAMING doesn't yet (CreateSink returns the placeholder that
                 // drops all samples). Unavailable keeps the picker honest - the device shows,
-                // disabled, instead of being a placebo that silently kills audio. Flip when RAOP
-                // streaming lands (see roadmap).
+                // disabled, instead of being a placebo that silently kills audio - and
+                // AudioOutputManager.ApplySelections refuses to create sinks for it. Flip when
+                // RAOP streaming lands (see roadmap).
                 IsAvailable = false,
             });
         }
 
+        bool changed;
         lock (_cacheLock)
         {
+            changed = !_cachedDevices.Select(d => d.DeviceId).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                .SetEquals(result.Select(d => d.DeviceId));
             _cachedDevices = result;
             _cachedAt = DateTime.UtcNow;
         }
 
-        return result;
+        if (changed)
+        {
+            DevicesChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     public IAudioSink CreateSink(AudioDeviceInfo device)

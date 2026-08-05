@@ -222,6 +222,16 @@ public sealed class AudioOutputManager : IDisposable
                 continue;
             }
 
+            // An unavailable device must never become a live sink: the AirPlay placeholder
+            // Opens successfully and then silently drops every sample - a persisted
+            // "airplay:*" selection used to kill audio as a placebo. The picker shows these
+            // disabled for the same reason; ApplySelections is the enforcement.
+            if (!deviceInfo.IsAvailable)
+            {
+                _log.Information("ApplySelections: {Id} is not available for playback (discovery-only) — skipping", sel.QualifiedId);
+                continue;
+            }
+
             try
             {
                 var sink = provider.CreateSink(deviceInfo);
