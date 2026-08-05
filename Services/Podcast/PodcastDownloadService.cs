@@ -199,19 +199,13 @@ public sealed class PodcastDownloadService
                 resp.EnsureSuccessStatusCode();
                 var totalBytes = resp.Content.Headers.ContentLength ?? ep.EnclosureLength;
                 using var src = await resp.Content.ReadAsStreamAsync(job.Token);
-                using var dst = new FileStream(partialPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                var buf = new byte[64 * 1024];
-                long received = 0;
-                int read;
-                while ((read = await src.ReadAsync(buf, job.Token)) > 0)
+                await Media.DownloadStream.CopyToFileAsync(src, partialPath, received =>
                 {
-                    await dst.WriteAsync(buf.AsMemory(0, read), job.Token);
-                    received += read;
                     if (totalBytes > 0)
                     {
                         ProgressChanged?.Invoke(new DownloadProgress(ep.Id, ep.Title ?? string.Empty, received, totalBytes));
                     }
-                }
+                }, job.Token);
             }
 
             // Atomic rename: only replace target when fully written.

@@ -152,18 +152,17 @@ public sealed class AudiobookDownloadService
                 {
                     resp.EnsureSuccessStatusCode();
                     using var src = await resp.Content.ReadAsStreamAsync(ct);
-                    using var dst = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    var buf = new byte[64 * 1024];
-                    int read;
-                    while ((read = await src.ReadAsync(buf, ct)) > 0)
+                    // `received` accumulates across FILES, so the callback reports the running
+                    // total plus this file's bytes; the final add below lands the exact figure.
+                    var beforeFile = received;
+                    var fileBytes = await Media.DownloadStream.CopyToFileAsync(src, partial, soFar =>
                     {
-                        await dst.WriteAsync(buf.AsMemory(0, read), ct);
-                        received += read;
                         if (totalBytes > 0)
                         {
-                            ProgressChanged?.Invoke(new AudiobookDownloadProgress(book.Identifier, book.Title ?? "", received, totalBytes, i + 1, files.Count));
+                            ProgressChanged?.Invoke(new AudiobookDownloadProgress(book.Identifier, book.Title ?? "", beforeFile + soFar, totalBytes, i + 1, files.Count));
                         }
-                    }
+                    }, ct);
+                    received = beforeFile + fileBytes;
                 }
 
                 File.Move(partial, target, overwrite: true);
@@ -380,18 +379,14 @@ public sealed class AudiobookDownloadService
                 totalBytes = resp.Content.Headers.ContentLength ?? 0;
             }
             using var src = await resp.Content.ReadAsStreamAsync(ct);
-            using var dst = new FileStream(partial, FileMode.Create, FileAccess.Write, FileShare.Read);
-            var buf = new byte[64 * 1024];
-            int read;
-            while ((read = await src.ReadAsync(buf, ct)) > 0)
+            var beforeFile = received;
+            received = beforeFile + await Media.DownloadStream.CopyToFileAsync(src, partial, soFar =>
             {
-                await dst.WriteAsync(buf.AsMemory(0, read), ct);
-                received += read;
                 if (totalBytes > 0)
                 {
-                    ProgressChanged?.Invoke(new AudiobookDownloadProgress(listing.Identifier, listing.Title ?? "", received, totalBytes, fileIndex, fileCount));
+                    ProgressChanged?.Invoke(new AudiobookDownloadProgress(listing.Identifier, listing.Title ?? "", beforeFile + soFar, totalBytes, fileIndex, fileCount));
                 }
-            }
+            }, ct);
         }
         File.Move(partial, target, overwrite: true);
         return received;
