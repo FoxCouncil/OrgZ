@@ -42,7 +42,7 @@ public class IPodModelDatabaseTests
     // CONFORMANCE: one real serial suffix per IN-SCOPE generation (the /goal scope - binary
     // iTunesDB iPods: no-checksum 1G-4G/Mini/Photo/Video/Nano 1G-2G, hash58 Nano 3G-4G/Classic
     // 6G-7G, iTunesSD Shuffle 1G-4G; NOT Nano 5G+ SQLite). Suffixes are from libgpod's verified
-    // serial_to_model_mapping. This is the "exact identity for EVERY in-scope generation" proof.
+    // serial_to_model_mapping. This is the "exact identity for every in-scope generation" proof.
     [InlineData("8L645KABLG6",  "1G",           "",       5)]   // LG6 → 8541
     [InlineData("8L645KABMMB",  "2G",           "",      10)]   // MMB → 8737
     [InlineData("8L645KABNRH",  "3G",           "",      10)]   // NRH → 8976

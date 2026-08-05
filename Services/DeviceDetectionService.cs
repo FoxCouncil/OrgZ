@@ -165,8 +165,8 @@ public sealed class DeviceDetectionService : IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => RemoveDrive(e.FullPath));
     }
 
-    // udisks2 auto-mounts removable media under /media/$USER on Debian/Ubuntu and
-    // /run/media/$USER on Fedora/Arch. Watching those directories for subdirectory
+    // udisks2 auto-mounts removable media under /media/$user on Debian/Ubuntu and
+    // /run/media/$user on Fedora/Arch. Watching those directories for subdirectory
     // creation/deletion gives us hot-plug without polling /proc/self/mountinfo.
     private void StartLinuxMountWatchers()
     {
@@ -322,7 +322,7 @@ public sealed class DeviceDetectionService : IDisposable
     /// <summary>
     /// Fingerprints a drive on the thread pool, then registers it on the UI thread. Identify
     /// does volume I/O, WMI queries, and (elevated) SCSI reads with multi-second timeouts - an
-    /// iFlash bridge can hold it for 30s - so it may NEVER run on the UI thread. The startup
+    /// iFlash bridge can hold it for 30s - so it may never run on the UI thread. The startup
     /// scan learned that live (see <see cref="EnumerateExistingDrives"/>); the hot-plug paths
     /// carried the same freeze until they were routed through here. Safe to call from any thread.
     /// </summary>

@@ -8,7 +8,7 @@ namespace OrgZ.Services.DeviceHelper;
 /// <summary>
 /// Installs (and removes) the privileged device-helper as a real OS service - a macOS
 /// LaunchDaemon, a Linux systemd unit, or a Windows service - each running the OrgZ
-/// executable with <c>--device-helper</c> as root / LocalSystem at boot. This is the ONE
+/// executable with <c>--device-helper</c> as root / LocalSystem at boot. This is the one
 /// authorization the whole design costs: approve the install once, and every device read
 /// afterward is silent, on every OS. Modelled on how iTunes installs AppleMobileDeviceService.
 /// </summary>
@@ -365,7 +365,7 @@ public static class DeviceHelperInstaller
     /// lazily on first launch.
     ///
     /// That lazy creation is fatal for a PerMachine install: the directory sits under
-    /// Program Files, so the FIRST person to open OrgZ crashes with
+    /// Program Files, so the first person to open OrgZ crashes with
     /// UnauthorizedAccessException out of <c>VelopackApp.Run()</c> unless they happen to be
     /// an administrator. An admin launching once "fixes" it for everyone afterwards, which
     /// is precisely why it survives testing on a developer's machine and breaks for a user.
@@ -425,7 +425,7 @@ public static class DeviceHelperInstaller
                 return new(false, "failed to start cmd.exe");
             }
 
-            // Drain BOTH pipes concurrently, then wait for exit. Waiting first deadlocks:
+            // Drain both pipes concurrently, then wait for exit. Waiting first deadlocks:
             // a child that fills a redirected pipe blocks on write, never exits, and the
             // timeout below then reports a FAILED install for a service that actually
             // registered fine.

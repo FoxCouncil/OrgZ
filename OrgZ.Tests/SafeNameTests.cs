@@ -7,7 +7,7 @@ namespace OrgZ.Tests;
 /// <summary>
 /// Six separate filename sanitizers collapsed into <see cref="SafeName"/>. Their outputs are on
 /// disk in real libraries and on real iPods, so the consolidation had to be behaviour-preserving,
-/// not behaviour-improving: each test below reimplements the ORIGINAL expression the style
+/// not behaviour-improving: each test below reimplements the original expression the style
 /// replaced and asserts the shared helper still agrees with it, character for character.
 /// </summary>
 public class SafeNameTests
@@ -110,7 +110,7 @@ public class SafeNameTests
     [Fact]
     public void ReplaceOnly_matches_the_old_on_device_path_rules()
     {
-        // The device style trims NOTHING - an on-device path has to keep matching what the
+        // The device style trims nothing - an on-device path has to keep matching what the
         // iPod's own database already says.
         foreach (var sample in Samples)
         {
@@ -136,7 +136,7 @@ public class SafeNameTests
         }
     }
 
-    // ── The differences between styles are REAL and deliberate ──
+    // ── The differences between styles are real and deliberate ──
 
     [Fact]
     public void The_styles_genuinely_differ_so_none_can_be_quietly_merged()

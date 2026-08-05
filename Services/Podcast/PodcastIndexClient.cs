@@ -95,7 +95,7 @@ public static class PodcastIndexClient
         return resp?.Items ?? [];
     }
 
-    /// <summary>Reads a feed's episodes from the on-disk cache ONLY - never the network - so the device
+    /// <summary>Reads a feed's episodes from the on-disk cache only - never the network - so the device
     /// sync can resolve episode publish dates while staying offline. Returns null when nothing's cached.</summary>
     public static List<PodcastEpisode>? GetCachedEpisodesByFeedId(long feedId)
     {

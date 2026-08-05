@@ -86,13 +86,13 @@ public partial class MediaItem : ObservableObject
     [ObservableProperty]
     private int _playCount;
 
-    // Settable (not init) so a rescan's replacement item can adopt the ORIGINAL added date -
+    // Settable (not init) so a rescan's replacement item can adopt the original added date -
     // otherwise every metadata change resets the row to "added just now" until restart.
     public DateTime DateAdded { get; set; } = DateTime.UtcNow;
 
     /// <summary>
     /// Carries the user's own state from the item being replaced onto this freshly-scanned one.
-    /// A rescan rebuilds file facts (tags, size, duration) but must never reset what the USER
+    /// A rescan rebuilds file facts (tags, size, duration) but must never reset what the user
     /// did: rating, play history, favorites, the row tick, and the Options-tab playback
     /// settings. The DB upsert preserves some of these on conflict; this keeps the in-memory
     /// row honest too, and covers the columns the upsert legitimately overwrites.

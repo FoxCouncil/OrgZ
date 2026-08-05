@@ -59,7 +59,7 @@ public static class ShareDiscovery
             client.Client.Bind(new IPEndPoint(IPAddress.Any, 0));   // ephemeral: never fights a responder on 5353
             client.JoinMulticastGroup(IPAddress.Parse(MdnsWire.MulticastAddress));
 
-            // The query goes out EVERY up interface, not just the default multicast one -
+            // The query goes out every up interface, not just the default multicast one -
             // the share may live on any attached network, and which adapter is "default"
             // on a multi-homed host changes with metric ordering. Replies come back
             // unicast to this one socket regardless of which interface carried the query.

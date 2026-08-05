@@ -255,7 +255,7 @@ public sealed class FlacPlaybackEngine : IDisposable
 
     private void KillPumpLocked()
     {
-        // Invalidate the session FIRST: a pump blocked in stdout.Read sees the process
+        // Invalidate the session first: a pump blocked in stdout.Read sees the process
         // disposal below as ObjectDisposedException, not as cancellation, and its catch
         // gates on session == _sessionId - without this bump a plain user Stop() surfaced
         // a spurious EncounteredError to the UI.

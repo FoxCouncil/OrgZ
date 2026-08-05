@@ -38,7 +38,7 @@ public class DeviceHelperInstallerTests
         Assert.Contains("start= auto", args, StringComparison.Ordinal);
         Assert.DoesNotContain("binPath=\"", args, StringComparison.Ordinal);
 
-        // The exe path is quoted INSIDE the quoted binPath value, so a path with spaces
+        // The exe path is quoted inside the quoted binPath value, so a path with spaces
         // survives both cmd.exe and the service control manager.
         Assert.Contains(@"""\""C:\Apps\OrgZ\OrgZ.exe\"" --device-helper""", args, StringComparison.Ordinal);
 

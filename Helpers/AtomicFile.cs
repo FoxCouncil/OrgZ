@@ -15,7 +15,7 @@ public static class AtomicFile
 
     /// <summary>
     /// Atomically replaces <paramref name="path"/> with <paramref name="bytes"/>. When
-    /// <paramref name="backup"/> is given, the ORIGINAL is copied aside once (and never
+    /// <paramref name="backup"/> is given, the original is copied aside once (and never
     /// overwritten on later writes), so the pre-OrgZ state stays recoverable.
     /// </summary>
     public static void WriteAllBytes(string path, byte[] bytes, string? backup = null)

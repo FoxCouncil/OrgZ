@@ -122,7 +122,7 @@ public partial class MainWindow : Window
     /// Empty-genre placeholders exist only to force their group header into existence -
     /// the DataGridCollectionView grouping model can't represent an itemless group. Hide
     /// the row itself so an empty genre renders as a bare header. Rows are recycled, so
-    /// visibility is set BOTH ways on every load.
+    /// visibility is set both ways on every load.
     /// </summary>
     private void OnCuratedRowLoading(object? sender, DataGridRowEventArgs e)
     {

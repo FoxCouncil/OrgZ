@@ -190,7 +190,7 @@ public class FileScannerTests : IDisposable
         // Task.Run(_, ct) with a pre-cancelled token throws TaskCanceledException before
         // the work runs. If the token is cancelled mid-scan, the inner loop bails on the
         // next iteration and returns a partial list. Either is correct cancellation behavior -
-        // but a partial list must NEVER claim to be complete.
+        // but a partial list must never claim to be complete.
         try
         {
             var result = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true, cts.Token);

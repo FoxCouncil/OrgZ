@@ -97,14 +97,14 @@ public class BinaryIPodTests
                 await ipod.CreatePlaylistAsync("Batched PL", [.. lib.Tracks]);
                 await ipod.RemoveTrackAsync(t1);
 
-                // NOTHING may reach the disk mid-batch: the database is untouched and
+                // Nothing may reach the disk mid-batch: the database is untouched and
                 // the removed track's audio still exists (its delete is deferred so a
                 // failed commit can't leave the db pointing at missing audio).
                 Assert.Equal(before, File.ReadAllBytes(dbPath));
                 Assert.True(File.Exists(Path.Combine(musicF00, "T1.m4a")));
             }
 
-            // ONE commit carried everything: playlist present, track gone (db + audio).
+            // One commit carried everything: playlist present, track gone (db + audio).
             ITunesDbReader.ReadAll(dbPath, mount, out var tracks, out var playlists);
             Assert.Single(tracks);
             Assert.DoesNotContain(tracks, t => t.Title == "Track 1");

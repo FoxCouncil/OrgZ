@@ -8,11 +8,9 @@ using Serilog;
 namespace OrgZ.Services.Podcast;
 
 /// <summary>
-/// Whether an episode is on disk and usable. "Downloaded" requires both the
-/// final file to exist AND its size to match (or be close to) the upstream
-/// EnclosureLength. "Incomplete" covers the broken-rename window and any case
-/// where bytes were written but the file is the wrong size - both manifest as
-/// a file you don't want to feed to libvlc.
+/// Whether an episode is on disk and usable. "Downloaded" means the final file exists, which
+/// only happens after a complete read and atomic rename. "Incomplete" means a leftover
+/// .partial is sitting there from an interrupted download.
 /// </summary>
 public enum PodcastDownloadState
 {
@@ -75,13 +73,10 @@ public sealed class PodcastDownloadService
     }
 
     /// <summary>
-    /// Inspects disk + in-flight jobs to report the current state of an
-    /// episode's download. Order matters: an in-flight job always wins, then
-    /// a leftover .partial is "Incomplete" (resumed downloads aren't supported
-    /// yet - clicking the button re-fetches from scratch), then a final file
-    /// is "Downloaded" only if its size matches the upstream EnclosureLength.
-    /// A size mismatch is reported as "Incomplete" so the UI can flag the
-    /// half-downloaded / interrupted case the user explicitly asked about.
+    /// Inspects disk and in-flight jobs to report an episode's download state. Order matters:
+    /// an in-flight job wins, then a leftover .partial is "Incomplete" (resume isn't
+    /// supported - clicking the button re-fetches from scratch), then a final file is
+    /// "Downloaded".
     /// </summary>
     public static PodcastDownloadState GetState(PodcastFeed feed, PodcastEpisode episode, string? libraryRoot)
     {
@@ -103,10 +98,9 @@ public sealed class PodcastDownloadService
             return PodcastDownloadState.NotDownloaded;
         }
 
-        // A final (non-.partial) file only exists after RunJob's full-read -> atomic rename,
-        // so it is complete by construction. enclosureLength is unreliable (hosts re-mux /
-        // mis-report in BOTH directions), so second-guessing a renamed file on size just
-        // produced false "Incomplete" flags on perfectly good downloads (no green check).
+        // A final (non-.partial) file only exists after RunJob's full read and atomic rename,
+        // so it's complete by construction. EnclosureLength can't refine that - hosts re-mux
+        // and mis-report it in both directions, which flagged good downloads as "Incomplete".
         return PodcastDownloadState.Downloaded;
     }
 
@@ -188,7 +182,7 @@ public sealed class PodcastDownloadService
             // Pre-emptively clear a stale target file. The atomic rename below
             // would replace it anyway, but a leftover from a previous broken
             // download could make GetState briefly report Downloaded mid-job;
-            // wiping it up front keeps state honest.
+            // wiping it up front avoids that.
             if (File.Exists(targetPath))
             {
                 File.Delete(targetPath);
@@ -211,7 +205,7 @@ public sealed class PodcastDownloadService
             // Atomic rename: only replace target when fully written.
             File.Move(partialPath, targetPath);
 
-            // Drop the in-flight marker BEFORE signaling. A Completed handler refreshes the
+            // Drop the in-flight marker before signaling. A Completed handler refreshes the
             // row via GetState, which reports InProgress while the job is still in _jobs - if
             // we removed it in a finally (after the event), that refresh could race ahead of
             // the removal and the row would spin forever instead of flipping to the check.

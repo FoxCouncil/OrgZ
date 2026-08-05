@@ -35,7 +35,7 @@ public sealed class SyncPlan
 /// <summary>
 /// Persists each iPod's <see cref="SyncPlan"/> in app settings, keyed by the device's most stable
 /// identity (FireWire GUID, else serial, else mount path). Host-side on purpose - a plan references
-/// THIS library's playlist ids, which don't travel with the iPod.
+/// this library's playlist ids, which don't travel with the iPod.
 /// </summary>
 public static class SyncPlanStore
 {

@@ -3,7 +3,7 @@
 namespace OrgZ.Services;
 
 /// <summary>
-/// Identifies what a stream ACTUALLY carries by parsing the audio bytes themselves, because
+/// Identifies what a stream actually carries by parsing the audio bytes themselves, because
 /// Content-Type and icy-br are just claims. MPEG audio (mp3/mp2/mp1) and ADTS AAC are walked
 /// frame-by-frame - a real stream chains valid frames, which also yields the true bitrate
 /// (averaged, so VBR reports its running rate). Ogg and FLAC are matched by container magic,

@@ -11,7 +11,7 @@ namespace OrgZ.Services.DeviceHelper;
 /// behind the <c>Removable Volumes</c> TCC permission (<c>kTCCServiceSystemPolicyRemovableVolumes</c>) -
 /// a narrow, promptable permission, NOT Full Disk Access. A background daemon can never obtain
 /// it (no GUI session for TCC to prompt). This agent runs in the logged-in user's GUI session
-/// with the SAME code signature as the daemon: when it touches a removable raw device, macOS
+/// with the same code signature as the daemon: when it touches a removable raw device, macOS
 /// shows the one-time consent dialog, and the resulting grant - keyed to the shared signature -
 /// is what the root daemon then inherits and reads under, with no prompt of its own.
 ///

@@ -437,7 +437,7 @@ public sealed class MprisService : INowPlayingIntegration
         }
 
         /// <summary>
-        /// One property, looked up in the SAME table GetAll builds. Spelling the values
+        /// One property, looked up in the same table GetAll builds. Spelling the values
         /// out twice meant every future property had to be added in two places - and the
         /// Player branch read status and metadata under two separate lock acquisitions,
         /// exactly the torn snapshot PlayerProperties was fixed to avoid.

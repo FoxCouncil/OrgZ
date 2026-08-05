@@ -726,7 +726,7 @@ public partial class PodcastsViewModel : ObservableObject
 
     internal async Task LoadStoreAsync()
     {
-        // Guard at entry, not just on Featured.Count: the rails are populated AFTER the
+        // Guard at entry, not just on Featured.Count: the rails are populated after the
         // awaited fetch below, so two calls racing in before either finishes (e.g. the view
         // shows, then a sidebar rebuild re-selects the Podcasts item) would both pass a
         // Count==0 check and both append - doubling every rail. _storeLoading closes that gap.

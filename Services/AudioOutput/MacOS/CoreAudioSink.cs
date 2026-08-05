@@ -33,12 +33,12 @@ internal sealed class CoreAudioSink : IAudioSink
 
     private readonly string? _deviceUid;
 
-    // Lock discipline (the same Write-vs-Close race WaveOutSink and PulseAudioSink each
-    // fixed after a live crash): every NATIVE AudioQueue call happens under _lifecycle with
-    // a fresh _queue check, so Close can never dispose the queue between another thread's
-    // check and its call. The pool WAIT deliberately happens OUTSIDE _lifecycle - only the
-    // enqueue itself takes the lock - so Volume/Pause from the UI thread never stall behind
-    // the audio thread's backpressure wait (the stall WaveOutSink's coarser locking has).
+    // Lock discipline for the Write-vs-Close race (WaveOutSink and PulseAudioSink each fixed
+    // their own version of it): every native AudioQueue call happens under _lifecycle with a
+    // fresh _queue check, so Close can't dispose the queue between another thread's check and
+    // its call. The pool wait happens outside _lifecycle - only the enqueue takes the lock -
+    // so Volume/Pause from the UI thread don't stall behind the audio thread's backpressure
+    // wait, which is the stall WaveOutSink's coarser locking has.
     // Order when both are needed: _lifecycle, then _poolLock - never the reverse.
     private readonly object _lifecycle = new();
     private readonly object _poolLock = new();
@@ -217,13 +217,12 @@ internal sealed class CoreAudioSink : IAudioSink
         int written = 0;
         while (written < pcm.Length)
         {
-            // Wait for the AudioQueue callback to return a buffer. SetAudioCallbacks
-            // works on backpressure - the LibVLC decoder thread is *meant* to block
-            // here while playback drains the pool. Dropping samples on timeout caused
-            // audible speed wobble. Monitor.Wait (pulsed by OnBufferComplete) replaces
-            // the old 2ms poll: the normal steady state no longer burns ~500 lock
-            // acquisitions a second on the audio thread. 5 s ceiling keeps us from
-            // hanging forever if the AudioQueue truly stopped responding.
+            // Wait for the AudioQueue callback to return a buffer. SetAudioCallbacks works
+            // on backpressure: the LibVLC decoder thread is supposed to block here while
+            // playback drains the pool. Dropping samples on timeout caused audible speed
+            // wobble. Monitor.Wait (pulsed by OnBufferComplete) replaces a 2ms poll that
+            // burned ~500 lock acquisitions a second on the audio thread in steady state.
+            // The 5 s ceiling stops us hanging forever if the AudioQueue stops responding.
             IntPtr bufPtr = IntPtr.Zero;
             lock (_poolLock)
             {
@@ -245,8 +244,7 @@ internal sealed class CoreAudioSink : IAudioSink
                     return;   // closed underneath us mid-wait - not a wedge, nothing to report
                 }
 
-                // AudioQueue stopped returning buffers for 5 s - something
-                // is genuinely wrong (queue stopped, hardware unplugged).
+                // No buffers back for 5 s: the queue stopped, or the hardware was unplugged.
                 var dropped = System.Threading.Interlocked.Increment(ref _droppedBuffers);
                 var nowTicks = Environment.TickCount64;
                 var lastTicks = System.Threading.Interlocked.Read(ref _lastDropLogTicks);
@@ -260,8 +258,8 @@ internal sealed class CoreAudioSink : IAudioSink
 
             lock (_lifecycle)
             {
-                // Close can win the race between our entry check and here - the queue (and
-                // this buffer) are gone, so the only safe move is to walk away.
+                // Close can win the race between our entry check and here: the queue and this
+                // buffer are gone, so there's nothing left to enqueue into.
                 if (_disposed || _queue == IntPtr.Zero)
                 {
                     return;
@@ -432,7 +430,7 @@ internal sealed class CoreAudioSink : IAudioSink
             CoreAudioNative.AudioQueueFlush(_queue);
         }
 
-        // Then wait (OUTSIDE the lock, so Pause/Volume stay responsive) for
+        // Then wait (outside the lock, so Pause/Volume stay responsive) for
         // OnBufferComplete to hand every pool buffer back, which means all
         // enqueued audio has actually played. The callback pulses on each return.
         var deadline = Environment.TickCount64 + 5000;

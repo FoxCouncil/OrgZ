@@ -234,8 +234,8 @@ internal sealed class WaveOutSink : IAudioSink
         {
             return true;
         }
-        // Only dwFlags matters - marshaling the whole 8-field struct (which the
-        // spin-wait did thousands of times a second) to read one int was pure waste.
+        // Only dwFlags matters, and the spin-wait reads it thousands of times a second -
+        // no reason to marshal the whole 8-field struct for one int.
         return (Marshal.ReadInt32(_headerPtrs[slot], DwFlagsOffset) & WaveNative.WHDR_DONE) != 0;
     }
 
@@ -369,7 +369,7 @@ internal sealed class WaveOutSink : IAudioSink
             for (int i = 0; i < RingSize; i++)
             {
                 UnprepareSlot(i);
-                // The header blocks outlive individual writes but NOT the open handle -
+                // The header blocks outlive individual writes but not the open handle;
                 // Close is the one place they're released.
                 if (_headerPtrs[i] != IntPtr.Zero)
                 {

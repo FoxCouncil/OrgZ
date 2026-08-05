@@ -142,7 +142,7 @@ public sealed class LibraryShareServer : IDisposable
     }
 
     // ── Library snapshot ─────────────────────────────────────
-    // Every /stream/{id} Range request used to re-read the ENTIRE library from SQLite
+    // Every /stream/{id} Range request used to re-read the entire library from SQLite
     // and linear-scan it (twice, counting the extension-stripped retry); a seeking
     // client fires dozens of those a minute. The library changes far slower than
     // requests arrive, so a short-TTL snapshot with an id index serves the hot path,
@@ -163,7 +163,7 @@ public sealed class LibraryShareServer : IDisposable
                 _snapshotById = new Dictionary<string, MediaItem>(_snapshotLibrary.Count, StringComparer.Ordinal);
                 foreach (var track in _snapshotLibrary)
                 {
-                    // TryAdd keeps the FIRST occurrence, matching the linear scan's
+                    // TryAdd keeps the first occurrence, matching the linear scan's
                     // behaviour if two rows ever carried the same id.
                     _snapshotById.TryAdd(track.Id, track);
                 }
@@ -384,7 +384,7 @@ public sealed class LibraryShareServer : IDisposable
 
     /// <summary>
     /// Builds the read-only catalogue payload: share name + the playable tracks, with
-    /// the FULL track record - everything the local grid can show, the share grid can
+    /// the full track record - everything the local grid can show, the share grid can
     /// show. Only local-machine concerns (file path, rip state, checkbox) stay home.
     /// </summary>
     internal static string BuildCatalogueJson(string shareName, IReadOnlyList<MediaItem> library)

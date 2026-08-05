@@ -124,7 +124,7 @@ public class Nano5gLibraryWriterTests
                 Assert.False(File.Exists(cdbPath));
             }
 
-            // Disposing the scope runs the ONE regeneration: a non-empty signed CDB plus the zeroed
+            // Disposing the scope runs the one regeneration: a non-empty signed CDB plus the zeroed
             // legacy iTunesDB the firmware requires next to it, reflecting both tracks.
             Assert.True(File.Exists(cdbPath));
             Assert.True(new FileInfo(cdbPath).Length > 0);

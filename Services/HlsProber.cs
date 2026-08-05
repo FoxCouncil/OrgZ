@@ -13,7 +13,7 @@ public sealed record HlsSegmentInfo(string? MetaKind, string? Title, string? Cod
 public sealed record HlsInspection(string? MetaKind, string? StreamTitle, string? MeasuredFormat, int? MeasuredBitrate, bool HasDateRange, int ExtraHops, int? FirstAudioMs = null);
 
 /// <summary>
-/// Looks INSIDE an HLS stream instead of stopping at "the playlist parses": descends a master
+/// Looks inside an HLS stream instead of stopping at "the playlist parses": descends a master
 /// playlist to its highest-bandwidth variant, fetches the newest media segment, and identifies
 /// the metadata channel in use - timed ID3 as a TS elementary stream (stream_type 0x15, the
 /// Apple way), an ID3v2 tag heading a packed-audio (raw ADTS/MP3) segment, or an 'emsg' box in

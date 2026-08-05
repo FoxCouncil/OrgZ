@@ -85,7 +85,7 @@ public static class ITunesDbWriter
     public static ITunesDbDocument CreateEmpty()
     {
         // 0xBC is the mhbd header size iTunes itself writes (libgpod's layout). It must be at
-        // LEAST 0x6C: hash58 embeds its 20-byte HMAC at 0x58..0x6C INSIDE the header - a smaller
+        // LEAST 0x6C: hash58 embeds its 20-byte HMAC at 0x58..0x6C inside the header - a smaller
         // header puts the hash tail on top of the first child mhsd's magic and destroys the DB.
         var mhbd = NewChunk("mhbd", 0xBC);
         mhbd.WriteHeaderInt32(0x10, 0x19);   // db version (iPod Video / iTunes 7 era)
@@ -583,7 +583,7 @@ public static class ITunesDbWriter
             list.Add(tid);
         }
 
-        // Write into BOTH playlist datasets (legacy type 2 + v2 type 3), sharing one playlist id.
+        // Write into both playlist datasets (legacy type 2 + v2 type 3), sharing one playlist id.
         int pid = -1;
         foreach (var datasetType in new[] { 3, 2 })
         {

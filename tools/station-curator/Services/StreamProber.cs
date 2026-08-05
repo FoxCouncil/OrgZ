@@ -26,7 +26,7 @@ public sealed record ProbeOutcome(
 
 /// <summary>
 /// The curator's health check, now a thin adapter over <see cref="StreamSession"/> - the
-/// SAME engine playback uses, run in fact-only mode: connect once, sample once, close.
+/// same engine playback uses, run in fact-only mode: connect once, sample once, close.
 /// Adds the curation-side extras a live pump doesn't need: GeoIP of the server actually
 /// reached and the mapping onto <see cref="Models.ProbeStatus"/> strings curated.json stores.
 /// </summary>

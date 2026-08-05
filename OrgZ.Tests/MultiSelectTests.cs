@@ -22,7 +22,7 @@ public class MultiSelectTests
         var a = Track("a"); var b = Track("b"); var c = Track("c");
 
         // THE BUG: this used to arrive as one row. The press handler is on the tunnel
-        // route and runs BEFORE the DataGrid collapses the selection to the row under the
+        // route and runs before the DataGrid collapses the selection to the row under the
         // cursor, so the drag has to resolve against the selection captured at press time
         // - reading it later gets the collapsed one.
         var payload = Views.MainWindow.DragPayload(b, [a, b, c]);

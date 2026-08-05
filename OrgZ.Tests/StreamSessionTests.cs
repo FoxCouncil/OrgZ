@@ -6,7 +6,7 @@ namespace OrgZ.Tests;
 
 /// <summary>
 /// The single-connection engine's parsing primitives: the incremental ICY de-interleaver
-/// (must survive metadata blocks straddling ANY read boundary), the HLS media-playlist
+/// (must survive metadata blocks straddling any read boundary), the HLS media-playlist
 /// parser the playback pump drives, and the packed-audio ID3 strip.
 /// </summary>
 public class StreamSessionTests
@@ -197,7 +197,7 @@ public class StreamSessionTests
     [Fact]
     public void MediaPlaylistFiltersSpotBreaksButKeepsMislabeledMusic()
     {
-        // First entry is a VERBATIM live capture from zc6882 (July 2026): a station sweeper
+        // First entry is a verbatim live capture from zc6882 (July 2026): a station sweeper
         // tagged song_spot="T" with a junk internal title, blank artist, and empty catalog
         // IDs. Second entry is the known station quirk: a real song mislabeled "F" but
         // still carrying catalog IDs (MediaBaseId/TPID > 0) - catalog wins over the label.

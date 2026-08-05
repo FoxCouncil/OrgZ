@@ -262,7 +262,7 @@ public static class DeviceHelperDaemon
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             PipeAccessRights.FullControl, AccessControlType.Allow));
 
-        // The account actually running the daemon must be able to create EACH successive pipe
+        // The account actually running the daemon must be able to create each successive pipe
         // instance (FullControl carries CreateNewInstance). LocalSystem is covered above in the
         // installed service; this line additionally covers a daemon run under any other account
         // (e.g. a developer running it directly) so the accept loop doesn't die on instance #2.

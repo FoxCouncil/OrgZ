@@ -9,7 +9,7 @@ namespace OrgZ.StationCurator.Services;
 
 /// <summary>
 /// One-shot preview player for auditioning streams, single-connection like the main app:
-/// a <see cref="StreamSession"/> owns the ONE upstream pull (ICY de-interleave or HLS
+/// a <see cref="StreamSession"/> owns the one upstream pull (ICY de-interleave or HLS
 /// client) and pumps clean audio to VLC through <see cref="PipeMediaInput"/> - VLC never
 /// opens a network connection. Titles ride the same bytes and are injected via SetMeta,
 /// and the session's settled facts double as a free health probe for the audition
@@ -132,7 +132,7 @@ public sealed class AudioPlayer : IDisposable
         _input = input;
         _player!.Play(media);
 
-        // Titles come off the SAME connection the audio rides; injected on the UI thread,
+        // Titles come off the same connection the audio rides; injected on the UI thread,
         // guarded against media switches - a title that lands after this Media is gone
         // must not stamp its successor (or touch a disposed native handle). SetMeta fires
         // MetaChanged, so the handler above stays the single metadata consumer. (The

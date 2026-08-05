@@ -74,7 +74,7 @@ public static class ReplayGainService
     /// <summary>
     /// Pulls the integrated-loudness value ("I: -14.2 LUFS") out of ffmpeg's ebur128 summary, which
     /// prints to stderr. Returns null when the summary carries no valid I line (silent track / ffmpeg
-    /// error). The LAST "I:" line is the final integrated figure ebur128 emits.
+    /// error). The last "I:" line is the final integrated figure ebur128 emits.
     /// </summary>
     internal static double? ParseIntegratedLoudness(string ffmpegStderr)
     {

@@ -7,7 +7,7 @@ namespace OrgZ.Services.DeviceHelper;
 
 /// <summary>
 /// Hosts <see cref="DeviceHelperDaemon"/> under the Windows Service Control Manager. A process
-/// launched by the SCM MUST call the control dispatcher and report SERVICE_RUNNING within the
+/// launched by the SCM must call the control dispatcher and report SERVICE_RUNNING within the
 /// start timeout, or the SCM tears it down with error 1053 ("did not respond in a timely
 /// fashion"). <see cref="ServiceBase.Run"/> performs that handshake; OnStart just kicks the
 /// listener onto a background task and returns immediately, OnStop cancels and drains it.

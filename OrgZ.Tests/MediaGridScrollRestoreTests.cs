@@ -224,7 +224,7 @@ public sealed class MediaGridScrollRestoreTests
             var reset = TopVisibleItem(grid)?.Title;
             Assert.Equal(first, reset);
 
-            // Restore in ONE downward scroll, with no overshoot.
+            // Restore in one downward scroll, with no overshoot.
             //
             // ScrollIntoView docks the target to the nearest edge. From the top of the list that
             // edge is the BOTTOM - so scrolling to the row that should END the viewport puts the

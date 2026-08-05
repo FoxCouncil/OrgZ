@@ -6,13 +6,11 @@ namespace OrgZ.Services;
 /// Where <c>library.db</c> is, for everything that stores tables in it - <see cref="MediaCache"/>,
 /// <see cref="Podcast.PodcastCache"/> and <see cref="Media.AcquisitionStore"/>.
 ///
-/// One locator because they must never disagree. Each used to carry its own copy of the path
-/// logic and its own override hook, which made a real trap out of the service's
-/// <see cref="MediaCache.AdoptClientDatabase"/> path: the background service runs as LocalSystem,
-/// whose %APPDATA% is the empty systemprofile, so a share-start hands it the owner's database -
-/// but that only repointed MediaCache. The other two stayed aimed at the service account's empty
-/// file. Harmless only while the share served no podcast or acquisition data; a trap the moment
-/// it did.
+/// One locator because they must never disagree. Each carried its own copy of the path logic
+/// and its own override hook, which broke <see cref="MediaCache.AdoptClientDatabase"/>: the
+/// background service runs as LocalSystem, whose %APPDATA% is the empty systemprofile, so a
+/// share-start hands it the owner's database - but that only repointed MediaCache. The other
+/// two stayed aimed at the service account's empty file.
 /// </summary>
 public static class LibraryDb
 {
@@ -20,9 +18,9 @@ public static class LibraryDb
     private static readonly string DefaultFilePath = System.IO.Path.Combine(DefaultDirectory, "library.db");
 
     /// <summary>
-    /// The database FILE. Held as a full path rather than a directory + fixed name, because
-    /// the service adopts whatever file its owner names in the share-start payload - which is
-    /// usually, but is not required to be, called library.db.
+    /// The database file, held as a full path rather than a directory plus fixed name: the
+    /// service adopts whatever file its owner names in the share-start payload, which is
+    /// usually but not necessarily library.db.
     /// (FilePath, not Path: a <c>Path</c> member would shadow <see cref="System.IO.Path"/>.)
     /// </summary>
     public static string FilePath { get; private set; } = DefaultFilePath;

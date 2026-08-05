@@ -226,7 +226,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Saves the outgoing view's scroll offset and selection, BEFORE anything rebinds.
+    /// Saves the outgoing view's scroll offset and selection, before anything rebinds.
     ///
     /// This can't wait for PropertyChanged. The view model runs ApplyFilter from its
     /// OnSelectedSidebarItemChanged callback, and the toolkit calls that before raising
@@ -331,7 +331,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Puts <paramref name="anchor"/> back at the top of the viewport, in ONE movement.
+    /// Puts <paramref name="anchor"/> back at the top of the viewport, in one movement.
     ///
     /// <see cref="DataGrid.ScrollIntoView"/> docks its target to the nearest viewport edge. From
     /// the top of a list that edge is the bottom - so scrolling to the row that should END the
@@ -358,7 +358,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // No UpdateLayout() here. Callers run this AFTER a layout pass has completed, on a plain
+        // No UpdateLayout() here. Callers run this after a layout pass has completed, on a plain
         // dispatcher callback - forcing another one from inside layout is what crashed the grid.
         var visibleRows = MediaDataGrid.GetVisualDescendants().OfType<DataGridRow>().Count(r => r.IsVisible);
         var lastInViewport = Math.Min(index + Math.Max(visibleRows, 1) - 1, items.Count - 1);
@@ -407,7 +407,7 @@ public partial class MainWindow : Window
         }
 
         // Views with nothing to restore - never visited, or last left at the top - skip the whole
-        // hide/defer dance. Paying a hidden frame and a deferred pass on EVERY switch is what made
+        // hide/defer dance. Paying a hidden frame and a deferred pass on every switch is what made
         // switching feel heavy, and most switches have nothing to put back.
         if (!HasScrollToRestore(key))
         {
@@ -628,7 +628,7 @@ public partial class MainWindow : Window
 
         // Collapse state is applied where the source is bound (OnGridItemsSourceChanged), not
         // here: the view model assigns FilteredItemsView from its own property-changed callback,
-        // which runs BEFORE this handler, and it also reassigns on search/filter changes that
+        // which runs before this handler, and it also reassigns on search/filter changes that
         // never reach ApplyViewConfig at all. Keying off the bind covers both, in order.
         EnsureGroupExpansionFor(config);
     }
@@ -763,7 +763,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Records a group's expanded state from what the header ACTUALLY is, rather than from a tap.
+    /// Records a group's expanded state from what the header actually is, rather than from a tap.
     ///
     /// The previous version listened for <c>Tapped</c> and flipped the stored boolean. That
     /// desynced constantly, because Avalonia's row-group header does not toggle on a single click
@@ -1154,7 +1154,7 @@ public partial class MainWindow : Window
             return;
         }
         // A row, not a header (the header right-click owns the column menu). Select the item under
-        // the cursor so the context menu that's about to open acts on THIS row.
+        // the cursor so the context menu that's about to open acts on this row.
         if ((e.Source as Visual)?.FindAncestorOfType<DataGridRow>()?.DataContext is MediaItem item)
         {
             _viewModel.SelectedItem = item;
@@ -1846,7 +1846,7 @@ public partial class MainWindow : Window
         DraggedMediaItem = _gridDragItem;
         _draggedPlaylistRowIndex = _gridDragRowIndex;
 
-        // Dragging a row that's part of a multi-selection drags the WHOLE selection
+        // Dragging a row that's part of a multi-selection drags the whole selection
         // (view-ordered); dragging an unselected row drags just that row - the
         // Explorer/iTunes convention. Resolved against the selection captured at press
         // time, not the live one, which the grid has already collapsed by now.
@@ -2047,7 +2047,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Moves the ghost to follow the pointer. Called for EVERY drag, from the window, so
+    /// Moves the ghost to follow the pointer. Called for every drag, from the window, so
     /// it keeps up over the sidebar as well as the grid.
     /// </summary>
     private void UpdateDragGhost(DragEventArgs e)

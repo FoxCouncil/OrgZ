@@ -5,14 +5,13 @@ using System.Text;
 namespace OrgZ.Helpers;
 
 /// <summary>
-/// Turning arbitrary tag text into something a filesystem will accept. This existed as six
-/// separate implementations that disagreed - one replaced invalid characters with '_', another
-/// dropped them, one trimmed trailing dots, one didn't - so the SAME track could land under
-/// different names depending on whether it arrived by rip, sync, playlist export, or download.
+/// Turns arbitrary tag text into something a filesystem will accept. This was six separate
+/// implementations that disagreed - one replaced invalid characters with '_', another dropped
+/// them, one trimmed trailing dots, one didn't - so a track could land under different names
+/// depending on whether it arrived by rip, sync, playlist export, or download.
 ///
-/// The variants are preserved EXACTLY as <see cref="Style"/> options rather than unified,
-/// because the outputs are on disk in users' libraries and on their iPods: changing them would
-/// orphan existing files. Unifying is a decision for a migration, not a refactor.
+/// The variants are kept as <see cref="Style"/> options rather than unified: their outputs are
+/// already on disk and on devices, so changing the shapes would orphan existing files.
 /// </summary>
 public static class SafeName
 {
@@ -52,8 +51,8 @@ public static class SafeName
             var kept = new StringBuilder(value.Length);
             foreach (var c in value)
             {
-                // Control characters are legal in a filename on some platforms and a
-                // nightmare on all of them; the rip path has always dropped them.
+                // Control characters are legal in a filename on some platforms; the rip
+                // path has always dropped them anyway.
                 if (c >= 0x20 && Array.IndexOf(Invalid, c) < 0)
                 {
                     kept.Append(c);
@@ -70,9 +69,8 @@ public static class SafeName
 
         return style switch
         {
-            // The device paths deliberately trim NOTHING - an iPod path is matched against
-            // what's already written in its database, so "fixing" the shape would orphan
-            // tracks that are on the device right now.
+            // Device paths trim nothing: an iPod path is matched against what's already in
+            // its database, so reshaping it would orphan tracks currently on the device.
             Style.ReplaceOnly => sb.ToString(),
 
             // Identical output to the string.Join("_", s.Split(invalid)).TrimEnd('.', ' ')

@@ -5,11 +5,11 @@ using Serilog;
 namespace OrgZ.Services;
 
 /// <summary>
-/// The outcome of a library folder walk. <see cref="Complete"/> is the authority bit: only a scan
-/// that walked the whole tree may be used to decide a file is GONE. A missing folder (an unplugged
-/// external drive), a cancelled scan, or an enumeration that died mid-walk all return whatever was
-/// found so far with <c>Complete = false</c> - treating any of those as "the library is empty now"
-/// is how ratings, play counts, and playlist memberships get mass-deleted.
+/// The outcome of a library folder walk. Only a scan with <see cref="Complete"/> set may be used
+/// to decide a file is gone. A missing folder (an unplugged external drive), a cancelled scan, or
+/// an enumeration that died mid-walk all return what was found so far with <c>Complete = false</c>;
+/// treating those as "the library is empty now" mass-deletes ratings, play counts and playlist
+/// memberships.
 /// </summary>
 public sealed record FileScanResult(List<MediaItem> Items, bool Complete);
 
@@ -46,9 +46,9 @@ public class FileScanner
 
             var options = new EnumerationOptions
             {
-                // One locked folder skips itself instead of aborting the whole walk - the old
-                // eager GetFiles threw on the first inaccessible directory and returned NOTHING,
-                // which the reconciler read as "every track was deleted".
+                // One locked folder skips itself instead of aborting the walk. The eager
+                // GetFiles this replaced threw on the first inaccessible directory and returned
+                // nothing, which the reconciler read as "every track was deleted".
                 IgnoreInaccessible = true,
                 RecurseSubdirectories = recursive,
                 // GetFiles never skipped hidden/system entries; keep that (the default here
@@ -66,8 +66,8 @@ public class FileScanner
                         break;
                     }
 
-                    // Skip only OrgZ's own .podcasts/ downloads (Podcasts view owns them).
-                    // NOT a blanket "any dotted folder" rule -- dot-named albums get scanned.
+                    // Skip only OrgZ's own .podcasts/ downloads (the Podcasts view owns them).
+                    // Not a blanket "any dotted folder" rule - dot-named albums get scanned.
                     if (IsInHiddenSubdirectory(filePath, directoryPath))
                     {
                         continue;
@@ -83,8 +83,8 @@ public class FileScanner
             }
             catch (Exception ex)
             {
-                // The enumerator itself died mid-walk (drive yanked, IO error). The list is
-                // partial; hand it back for display but never let it drive deletions.
+                // The enumerator died mid-walk (drive yanked, IO error). The list is partial:
+                // fine for display, but it must not drive deletions.
                 complete = false;
                 _log.Warning(ex, "Library scan of {Directory} aborted mid-walk; results are partial", directoryPath);
             }
@@ -127,11 +127,11 @@ public class FileScanner
     }
 
     /// <summary>
-    /// The ONLY folders kept out of the music scan - skipped by exact name, not by any "starts with
-    /// a dot" rule (that wrongly dropped legit dot-named albums like "...Baby One More Time"). Just
-    /// <c>.podcasts</c>: its episode files are MP3s that would otherwise pollute the Music view, and
-    /// they're owned by the Podcasts view instead. Everything else - <c>.audiobooks</c> (library
-    /// content), a user's <c>.tools</c>, any dotted album - is walked normally.
+    /// The folders kept out of the music scan, skipped by exact name rather than a "starts with a
+    /// dot" rule (which dropped dot-named albums like "...Baby One More Time"). Only
+    /// <c>.podcasts</c>: its episodes are MP3s that would otherwise show up in the Music view, and
+    /// the Podcasts view owns them. Everything else - <c>.audiobooks</c>, a user's <c>.tools</c>,
+    /// any dotted album - is walked normally.
     /// </summary>
     private static readonly HashSet<string> ManagedSkipFolders = new(StringComparer.OrdinalIgnoreCase)
     {

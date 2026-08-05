@@ -7,7 +7,7 @@ namespace OrgZ.Tests;
 
 /// <summary>
 /// The sample-scaling kernels the bus and every platform sink now share. These carried
-/// three verbatim copies before, so the point of the tests is that the ONE remaining
+/// three verbatim copies before, so the point of the tests is that the one remaining
 /// implementation still behaves exactly as the copies did - the clamp, the deliberate
 /// double precision in the 32-bit path, and bit-exactness at unity gain.
 /// </summary>

@@ -80,7 +80,7 @@ public static class ITunesDbHash58
         {
             throw new InvalidDataException("iTunesDB too small to hold a hash58 checksum.");
         }
-        // The hash region (0x58..0x6C) must sit INSIDE the mhbd header - writing past headerSize
+        // The hash region (0x58..0x6C) must sit inside the mhbd header - writing past headerSize
         // lands on the first child mhsd's magic and silently destroys the database.
         int mhbdHeaderSize = db[4] | (db[5] << 8) | (db[6] << 16) | (db[7] << 24);
         if (mhbdHeaderSize < 0x6C)

@@ -25,7 +25,7 @@ public sealed class CuratedStation : INotifyPropertyChanged
 
     /// <summary>
     /// The grids bind computed getters (ProbeSummary, BestBitrate, ...) on plain POCOs; after a
-    /// mutation (probe, edit, prefer) the SAME instance goes back into the collection, so row
+    /// mutation (probe, edit, prefer) the same instance goes back into the collection, so row
     /// recycling keeps the stale cell text. Empty property name = "re-read everything".
     /// </summary>
     public void NotifyChanged() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(""));

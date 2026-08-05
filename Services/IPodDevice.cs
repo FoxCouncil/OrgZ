@@ -422,7 +422,7 @@ public sealed class BinaryIPod : IPodDevice
                 throw new FileNotFoundException($"This iPod has no iTunesDB at '{dbPath}'.", dbPath);
             }
 
-            // Under an open batch the removal edits the batch's ONE doc (a fresh parse
+            // Under an open batch the removal edits the batch's one doc (a fresh parse
             // here would miss its uncommitted adds, and the batch commit would then
             // resurrect this track); the audio delete defers until that commit lands.
             var batch = IPodTrackImporter.ActiveBatch(MountPath);
@@ -697,7 +697,7 @@ public sealed class RockboxIPod : IPodDevice
     public override Task<int> EraseAsync(CancellationToken ct = default)
         => Task.Run(() =>
         {
-            // Wipe the OrgZ-managed content roots - music, podcasts, playlists - and NOTHING else.
+            // Wipe the OrgZ-managed content roots - music, podcasts, playlists - and nothing else.
             // /.rockbox is the firmware: the device must stay bootable, so it is never touched, and
             // neither is anything else the user keeps on the drive. Returns audio files removed
             // (playlist files go too but don't count - same accounting as the other tiers).
@@ -821,7 +821,7 @@ public sealed class ShuffleIPod : IPodDevice
     private static readonly Serilog.ILogger _log = Logging.For("ShuffleSync");
 
     /// <summary>Extensions the Shuffle firmware decodes natively (every generation): MP3, AAC-family
-    /// .m4a/.m4b, WAV. Anything else (FLAC, OGG, ...) MUST be transcoded first: hardware-confirmed on a
+    /// .m4a/.m4b, WAV. Anything else (FLAC, OGG, ...) must be transcoded first: hardware-confirmed on a
     /// real 2G that a copied FLAC is silently skipped by the firmware. An .m4a needs a second look on
     /// 1G/2G - see <see cref="PlaysNatively"/>.</summary>
     private static readonly HashSet<string> NativeExtensions = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".m4a", ".m4b", ".aac", ".wav" };
@@ -1043,7 +1043,7 @@ public sealed class ShuffleIPod : IPodDevice
         }, ct);
 
     // ── iTunes co-habitation ─────────────────────────────────────────────────
-    // The firmware plays from iTunesSD, but iTUNES reads the iTunesDB - and writes BOTH on every
+    // The firmware plays from iTunesSD, but iTunes reads the iTunesDB - and writes both on every
     // sync. So must we: without DB rows our tracks are invisible in iTunes, and an iTunes sync
     // would rewrite the iTunesSD from its stale view, clobbering every OrgZ-added track.
     // (Hardware-found: a device OrgZ had synced for a day showed its 2023 iTunes library, and

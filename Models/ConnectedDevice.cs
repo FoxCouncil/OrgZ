@@ -315,7 +315,7 @@ public partial class ConnectedDevice : ObservableObject
     // to exercise the resolution rules deterministically.
     private static readonly Lazy<IReadOnlySet<string>> _artCatalog = new(LoadArtCatalog);
 
-    /// <summary>Test hook: replaces the asset catalogue art resolution reads. Set BEFORE the device
+    /// <summary>Test hook: replaces the asset catalogue art resolution reads. Set before the device
     /// resolves (results are memoized per instance); reset to null when done.</summary>
     internal static Func<IReadOnlySet<string>>? ArtCatalogOverride;
 
@@ -395,7 +395,7 @@ public partial class ConnectedDevice : ObservableObject
     }
 
     /// <summary>
-    /// Combined firmware display, BOOTED OS FIRST - the first entry tells you at a glance which
+    /// Combined firmware display, booted OS first - the first entry tells you at a glance which
     /// mode the device is running: "Rockbox 3.15 / iPod OS 1.3" when Rockbox is booted (DeviceType
     /// carries the live boot mode from fingerprinting), Apple first on stock. Falls back to either
     /// alone, em-dash when neither source yielded anything.
@@ -490,7 +490,7 @@ public partial class ConnectedDevice : ObservableObject
 
     /// <summary>
     /// Recomputes the capacity-bar buckets from a device track set - podcasts get their own
-    /// segment, every other kind counts as audio. The ONE owner of that partition: call sites
+    /// segment, every other kind counts as audio. The one owner of that partition: call sites
     /// hand over the tracks and never spell the Kind rule themselves.
     /// </summary>
     public void SetSpaceFrom(IEnumerable<MediaItem> deviceTracks)

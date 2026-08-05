@@ -95,7 +95,7 @@ public class ListViewConfigTests
     [Fact]
     public void HostRouting_OnlyThePanelsOptOutOfTheSharedGrid()
     {
-        // Radio is grouped and Music is flat, but both are the SAME host now. Only Podcasts and
+        // Radio is grouped and Music is flat, but both are the same host now. Only Podcasts and
         // Audiobooks - which are whole UserControls, not lists - route anywhere else.
         Assert.Equal(ViewHost.Grid, ListViewConfigs.Get("Radio")!.Host);
         Assert.Equal(ViewHost.Grid, ListViewConfigs.Get("Music")!.Host);

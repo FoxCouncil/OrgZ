@@ -31,7 +31,7 @@ public sealed record ArtImage(ulong Dbid, int ImageId, IReadOnlyList<ArtThumb> T
 ///   └ mhsd index=3 (file list, 0x60) -> mhlf -> mhif (0x7C; format_id@0x10, image_size@0x14)
 ///
 /// The mhii's <c>song_id</c> must equal the iTunesDB track's dbid (see
-/// <see cref="ITunesDbWriter"/>). Critically, each mhni MUST carry its filename
+/// <see cref="ITunesDbWriter"/>). Critically, each mhni must carry its filename
 /// MHOD child - without it the firmware accepts the DB but renders the art blank.
 /// </summary>
 public static class ArtworkDbWriter

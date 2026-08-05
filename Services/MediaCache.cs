@@ -185,7 +185,7 @@ public static class MediaCache
     }
 
     /// <summary>
-    /// Standing invariant repair: PlaylistTracks declares ON DELETE CASCADE, but SQLite only
+    /// PlaylistTracks declares ON DELETE CASCADE, but SQLite only
     /// honors it when <c>PRAGMA foreign_keys</c> is on for the deleting connection - which it
     /// historically wasn't, so every RemoveLibraryFiles left ghost membership rows behind
     /// forever. The delete paths now clean up in-transaction; this sweeps the ghosts already
@@ -298,7 +298,7 @@ public static class MediaCache
 
     /// <summary>
     /// Adds only the columns a table is actually missing. The old shape - attempt every
-    /// historical ALTER and swallow the SqliteException - also swallowed REAL failures
+    /// historical ALTER and swallow the SqliteException - also swallowed real failures
     /// (locked file, read-only db, corruption), which then surfaced as a crash deep in
     /// ReadMediaItem instead of a clear one here.
     /// </summary>
@@ -414,10 +414,9 @@ public static class MediaCache
     }
 
     /// <summary>
-    /// Batch upsert: ONE connection, ONE transaction, one journal fsync for the whole
-    /// set. The per-item overload autocommits - fine for a dialog save, ruinous for a
-    /// first scan, where per-file connections + fsyncs made 25k tracks cost 25k journal
-    /// flushes. Same shape UpsertRadioStations has always used.
+    /// Batch upsert: one connection, one transaction, one journal fsync for the whole
+    /// set. The per-item overload autocommits, which is fine for a dialog save but costs
+    /// 25k journal flushes on a 25k-track first scan. Same shape as UpsertRadioStations.
     /// </summary>
     public static void UpsertMusicBatch(IReadOnlyList<MediaItem> items)
     {
@@ -580,12 +579,10 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
-    // IgnoreMedia / RestoreMedia lived here until the Ignored VIEW was replaced by the
-    // iTunes-style row tick (0.9.16). Nothing in the app had called them since, and their
-    // semantics actively CONTRADICTED the live SetIgnored above: ignoring used to purge the
-    // track from every playlist it belonged to, and restoring couldn't put it back. Leaving
-    // that reachable was a trap - one call from a future feature and a user's playlists lose
-    // their tracks silently. The tick is the whole feature now.
+    // IgnoreMedia / RestoreMedia lived here until the Ignored view was replaced by the
+    // iTunes-style row tick (0.9.16). Nothing had called them since, and their semantics
+    // contradicted the live SetIgnored above: ignoring purged the track from every playlist
+    // it belonged to, and restoring couldn't put it back.
 
     public static void SetLastPlayed(string id, DateTime lastPlayed)
     {

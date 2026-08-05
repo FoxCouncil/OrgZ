@@ -19,7 +19,7 @@ public class ITunesDbHash58Tests
     {
         var db = new byte[0x100];
         db[0] = (byte)'m'; db[1] = (byte)'h'; db[2] = (byte)'b'; db[3] = (byte)'d';
-        // A realistic mhbd header size - the hash region (0x58..0x6C) must fit INSIDE the header,
+        // A realistic mhbd header size - the hash region (0x58..0x6C) must fit inside the header,
         // and Apply refuses buffers where it wouldn't (it would overwrite the first child's magic).
         db[4] = (byte)(mhbdHeaderSize & 0xFF); db[5] = (byte)((mhbdHeaderSize >> 8) & 0xFF);
         // give db_id (0x18) and unk_0x32 (0x32) distinctive non-zero content

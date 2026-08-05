@@ -22,7 +22,7 @@ public static class AcquisitionStore
     /// <summary>
     /// Test hook: redirect the DB to a custom directory (pass null to restore the default
     /// %APPDATA%/OrgZ location). Call <see cref="EnsureCreated"/> afterward to build the schema.
-    /// Moves EVERY library.db consumer together.
+    /// Moves every library.db consumer together.
     /// </summary>
     internal static void OverrideCacheDirectory(string? directory) => LibraryDb.OverrideDirectory(directory);
 

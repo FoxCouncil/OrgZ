@@ -552,7 +552,7 @@ public class ITunesDbReaderTests : IDisposable
         WriteInt32(mhit, 8, mhitTotal);
         WriteInt32(mhit, 12, mhods.Count);
         WriteInt32(mhit, 16, (int)t.TrackId);
-        // These byte offsets match a REAL iTunes-written iTunesDB (verified on hardware), not the
+        // These byte offsets match a real iTunes-written iTunesDB (verified on hardware), not the
         // reader's old assumptions - that's what makes this fixture a reference oracle, not a mirror
         // of the parser. Rating = byte @0x1F; disc# = u16 @0x5C; total discs = u16 @0x60.
         mhit[0x1F] = t.Rating;

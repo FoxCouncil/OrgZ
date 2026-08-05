@@ -174,7 +174,7 @@ public sealed class AudiobookDownloadService
                 StampMetadata(target, book, item.Metadata, coverBytes, trackNumber: i + 1, trackCount: files.Count);
             }
 
-            // Drop the in-flight marker BEFORE signaling, so a Completed handler that re-probes
+            // Drop the in-flight marker before signaling, so a Completed handler that re-probes
             // GetState sees Downloaded rather than a racing InProgress.
             RemoveJob(book.Identifier);
             _log.Information("Downloaded audiobook {Identifier} ({Files} file(s)) -> {Dir}", book.Identifier, files.Count, dir);
@@ -219,7 +219,7 @@ public sealed class AudiobookDownloadService
         => long.TryParse(size, out var bytes) && bytes > 0 ? bytes : 0;
 
     /// <summary>
-    /// Deletes an audiobook from disk given ANY of its files: inside the canonical
+    /// Deletes an audiobook from disk given any of its files: inside the canonical
     /// .audiobooks/{Author}/{Title}/ layout the whole book folder goes (all chapters/parts, plus
     /// the author folder when that leaves it empty); anywhere else exactly the one file goes.
     /// Returns the deleted audio-file paths so the caller can drop the matching library rows.

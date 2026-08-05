@@ -6,21 +6,18 @@ using Serilog;
 namespace OrgZ.Services;
 
 /// <summary>
-/// Getting cover art from wherever it lives - a file's tags, a third-party CDN - and into the
-/// forms the app and the OS need. Pure helpers with no view-model state: the FIRST piece
-/// lifted out of MainWindowViewModel's art cluster, which is the split's beachhead. What stays
-/// behind in the view model is the part that genuinely IS view-model work: deciding which art
-/// belongs to the current epoch, and assigning it to the bound properties.
+/// Cover art from wherever it lives - a file's tags, a third-party CDN - in the forms the app
+/// and the OS need. Pure helpers, no view-model state. Choosing which art belongs to the
+/// current playback epoch stays in the view model.
 /// </summary>
 public static class ArtworkSource
 {
     private static readonly ILogger _log = Logging.For("ArtworkSource");
 
     /// <summary>
-    /// The ONE client for third-party art (station favicons, podcast covers, radio track art).
-    /// Stock browser UA via Web.Create - the art sits on third-party CDNs that can reject odd
-    /// agents, and their request logs stay anonymous. Never put an app-identifying UA on a
-    /// request that leaves the machine.
+    /// Shared client for third-party art (station favicons, podcast covers, radio track art).
+    /// Stock browser UA via Web.Create: these CDNs can reject odd agents, and an
+    /// app-identifying UA has no business in someone else's request log.
     /// </summary>
     public static readonly HttpClient Http = Web.Create(TimeSpan.FromSeconds(8));
 
@@ -28,10 +25,10 @@ public static class ArtworkSource
     public static byte[]? EmbeddedArt(string filePath) => ReadArtAndProperties(filePath).Art;
 
     /// <summary>
-    /// Embedded art AND the audio properties the bit-perfect engine needs, from ONE TagLib
-    /// open. The play path used to open the same file twice on the UI thread - once for art,
-    /// once to probe an item that predates the BitDepth column - which on a sleeping disk is
-    /// two spin-ups at the moment of a double-click.
+    /// Embedded art plus the audio properties the bit-perfect engine needs, from a single
+    /// TagLib open. The play path opened the file twice on the UI thread - once for art, once
+    /// to probe items predating the BitDepth column - which costs two spin-ups on a sleeping
+    /// disk.
     /// </summary>
     public static (byte[]? Art, int SampleRate, int? BitDepth, int Channels) ReadArtAndProperties(string filePath)
     {
@@ -65,9 +62,9 @@ public static class ArtworkSource
     /// <summary>
     /// Re-encodes a decoded bitmap to PNG for the OS now-playing surface. Radio favicons
     /// arrive in formats Skia decodes but Windows' WIC (which renders the SMTC thumbnail)
-    /// can't - WEBP, some ICOs - so the app showed the logo while the OS silently dropped
-    /// it. Pushing the bitmap we already decoded, re-encoded as PNG, guarantees a format
-    /// every platform's imaging can read. Falls back to the original bytes on failure.
+    /// can't - WEBP, some ICOs - so the app showed the logo while the OS silently dropped it.
+    /// Re-encoding the already-decoded bitmap gives every platform's imaging something it can
+    /// read. Falls back to the original bytes on failure.
     /// </summary>
     public static byte[] ToOsArtworkBytes(Bitmap bitmap, byte[] fallback)
     {

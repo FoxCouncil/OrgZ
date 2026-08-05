@@ -63,7 +63,7 @@ public static class RemoteImage
 
         while (_cache.Count > MaxCachedBitmaps && _cacheOrder.TryDequeue(out var evicted))
         {
-            // Dropped, NEVER disposed: a live Image may still be rendering this bitmap,
+            // Dropped, never disposed: a live Image may still be rendering this bitmap,
             // and disposing one under a render pass is a hard crash (the ref-counting
             // lesson from the album-art path). The GC reclaims it once nothing shows it,
             // and the disk cache makes re-decoding a re-visited tile cheap.
@@ -129,7 +129,7 @@ public static class RemoteImage
         var bmp = await FetchAsync(url);
         if (bmp == null) return;
 
-        // Only assign if the Image is still asking for THIS url -- the row
+        // Only assign if the Image is still asking for this url -- the row
         // may have been recycled to a different DataContext while we were
         // fetching.
         await Dispatcher.UIThread.InvokeAsync(() =>

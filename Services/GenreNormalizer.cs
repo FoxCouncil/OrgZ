@@ -382,7 +382,7 @@ public static class GenreNormalizer
         ("ethnic",          World),
         ("traditional",     World),
 
-        // -- Top 40 / Pop (chart radio; AFTER World so "j-pop"/"k-pop" stay World, and the
+        // -- Top 40 / Pop (chart radio; after World so "j-pop"/"k-pop" stay World, and the
         //    whole-word matcher keeps "pop" out of "synthpop" which the 80s rules own) --
         ("top 40",          Top40Pop),
         ("top40",           Top40Pop),

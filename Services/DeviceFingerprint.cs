@@ -140,7 +140,7 @@ public static class DeviceFingerprint
             PopulateRockboxVersion(root, device);
         }
 
-        // USB descriptor via WMI Win32_DiskDrive runs FIRST now so we can detect bridges
+        // USB descriptor via WMI Win32_DiskDrive runs first now so we can detect bridges
         // that are hostile to SCSI pass-through (iFlash especially - it hangs on 0xC6
         // and ATA PASS-THROUGH for the full 10-second timeout, costing 30s per connect
         // for zero result). We also extract the FireWire GUID from the USB iSerial here
@@ -885,7 +885,7 @@ public static class DeviceFingerprint
 
         // The FireWire GUID: hash58's key input, and a unique-per-device fallback serial. Route it to
         // device.FireWireGuid (normalized through the same OUI extractor the WMI path uses) - SysInfo /
-        // SysInfoExtended is the ONLY GUID source off-Windows, and without this hash58 writes threw
+        // SysInfoExtended is the only GUID source off-Windows, and without this hash58 writes threw
         // "needs FireWireGuid" on Linux even though the GUID was sitting right here.
         if (fields.TryGetValue("FirewireGuid", out var guid) && !string.IsNullOrWhiteSpace(guid))
         {
@@ -1084,7 +1084,7 @@ public static class DeviceFingerprint
     }
 
     /// <summary>
-    /// Reads rockbox-info.txt from .rockbox/. Parses BOTH Version: and Target: - the
+    /// Reads rockbox-info.txt from .rockbox/. Parses both Version: and Target: - the
     /// latter identifies the iPod generation unambiguously (one of "ipod1g2g", "ipod3g",
     /// "ipod4g", "ipodmini1g/2g", "ipodcolor", "ipodnano1g-4g", "ipodvideo", "ipod6g")
     /// and lets us fill in Model/IpodGeneration when SysInfo and SCSI both come up empty.

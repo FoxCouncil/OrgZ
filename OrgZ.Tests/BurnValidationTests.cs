@@ -180,7 +180,7 @@ public class BurnValidationTests
 
             await CdAudioTranscoder.ToCdAudioWavAsync(ffmpeg, source, wav);
 
-            // The burn path's own validator is the oracle: it accepts ONLY 16-bit
+            // The burn path's own validator is the oracle: it accepts only 16-bit
             // stereo 44.1 kHz PCM, and CdBurnService rejects any non-sector-multiple.
             using var stream = File.OpenRead(wav);
             var (offset, length) = CdBurnService.ParseCdAudioWav(stream, wav);

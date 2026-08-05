@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 namespace OrgZ.Models;
 
 // DTOs for the (unofficial) Libro.fm app API - the shapes community clients have proven
-// (burntcookie90/librofm-downloader, jedwards1230/libro-client). All content is the USER'S OWN
+// (burntcookie90/librofm-downloader, jedwards1230/libro-client). All content is the user's own
 // DRM-free purchases; the store's checkout stays on libro.fm - there is no purchase API.
 
 public class LibroLoginRequest

@@ -5,7 +5,7 @@ using System.Text;
 namespace OrgZ.Tests;
 
 /// <summary>
-/// A golden snapshot of the columns EVERY view shows: order, header text, binding, type, width,
+/// A golden snapshot of the columns every view shows: order, header text, binding, type, width,
 /// default visibility, and the sort/resize/reorder permissions.
 ///
 /// This is a UX guard, not a design statement. The column definitions carry a lot of duplication

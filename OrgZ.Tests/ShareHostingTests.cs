@@ -71,7 +71,7 @@ public class ShareHostingTests : IDisposable
         var first = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, """{"shareName":"A","port":7391}""")).ResultJson);
         var second = DeviceHelperClient.ParseShareState(ShareServiceOps.HandleStart(Req(ShareServiceOps.OpShareStart, """{"shareName":"B","port":9999}""")).ResultJson);
 
-        // The second call reports what is ACTUALLY live, not what it asked for.
+        // The second call reports what is actually live, not what it asked for.
         Assert.True(second.Sharing);
         Assert.Equal(first.Name, second.Name);
         Assert.Equal(first.Port, second.Port);

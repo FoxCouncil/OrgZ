@@ -18,33 +18,30 @@ namespace OrgZ.Tests;
 ///
 /// Avalonia ships `Avalonia.Headless.XUnit`, which would be the obvious thing to use - but its
 /// 12.x line depends on xunit **v3** and this suite is v2, and the two can't co-exist in one
-/// assembly. Driving `HeadlessUnitTestSession` directly (the previous approach) produced an
-/// intermittent, load-sensitive whole-suite HANG (~1 in 5 runs under pressure), root-caused
-/// with testhost hang dumps on 2026-08-05:
+/// assembly. Driving `HeadlessUnitTestSession` directly produced an intermittent,
+/// load-sensitive whole-suite hang (~1 in 5 runs under pressure):
 ///
-///   - This suite MIXES headless UI tests with plain unit tests whose product code touches
+///   - The suite mixes headless UI tests with plain unit tests whose product code touches
 ///     `Dispatcher.UIThread` from xunit worker threads (posts, timers). Avalonia binds the
 ///     dispatcher to whichever thread reaches it first.
-///   - The session (re)runs platform setup on ITS thread; when a foreign touch had already
+///   - The session re-runs platform setup on its own thread. When a foreign touch had already
 ///     claimed the dispatcher, setup's `DefaultRenderLoop.Add` threw "the calling thread
 ///     cannot access this object because a different thread owns it", the throw escaped the
-///     session's queue consumer, and every later Dispatch waited forever - four UI test
-///     classes parked on tasks nobody would complete, with the exception sitting on the heap.
+///     session's queue consumer, and every later Dispatch waited forever.
 ///
-/// The suite now owns the whole arrangement instead:
-///   - ONE dedicated dispatcher thread, ONE `SetupWithoutStarting`, pumping
+/// So the suite owns the arrangement itself:
+///   - one dedicated dispatcher thread and one `SetupWithoutStarting`, pumping
 ///     `Dispatcher.MainLoop` for the life of the run (a throwing job faults its own
-///     DispatcherOperation task and can never kill the pump);
-///   - started EAGERLY by <see cref="HeadlessUiTestFramework"/> - xunit constructs the
+///     DispatcherOperation task and can't kill the pump);
+///   - started by <see cref="HeadlessUiTestFramework"/>, because xunit constructs the
 ///     assembly's test framework before any discovery or test code runs, so the dispatcher
-///     thread always claims the UI thread FIRST and the race ceases to exist. (A
-///     ModuleInitializer cannot do this: the dispatcher thread executes this module's own
-///     code, and blocking the initializer on it deadlocks the loader.)
+///     thread always claims the UI thread first. (A ModuleInitializer can't do this: the
+///     dispatcher thread executes this module's own code, and blocking the initializer on it
+///     deadlocks the loader.)
 ///
-/// The app is built in C# rather than XAML on purpose - the test project has no Avalonia XAML
+/// The app is built in C# rather than XAML because the test project has no Avalonia XAML
 /// compilation, and OrgZ's own `App` runs the whole library/service startup in
-/// `OnFrameworkInitializationCompleted`. What a DataGrid test needs is exactly the two style
-/// sets below.
+/// `OnFrameworkInitializationCompleted`. A DataGrid test needs only the two style sets below.
 /// </summary>
 public sealed class HeadlessApp : Application
 {
@@ -60,7 +57,7 @@ public sealed class HeadlessApp : Application
 
 /// <summary>
 /// The assembly's xunit test framework: stock behaviour plus claiming the Avalonia UI thread
-/// before anything else can. See <see cref="HeadlessApp"/> for the full story.
+/// before anything else can. See <see cref="HeadlessApp"/> for why.
 /// </summary>
 public sealed class HeadlessUiTestFramework : XunitTestFramework
 {
@@ -71,9 +68,9 @@ public sealed class HeadlessUiTestFramework : XunitTestFramework
 }
 
 /// <summary>
-/// The xunit collection every HeadlessUi-dispatching test class MUST join. All headless UI work
-/// funnels through the single dispatcher thread, so parallel classes never truly ran
-/// concurrently - the collection makes that explicit and keeps their dispatches strictly ordered.
+/// The xunit collection every HeadlessUi-dispatching test class joins. All headless UI work
+/// funnels through the single dispatcher thread, so parallel classes never really ran
+/// concurrently; the collection makes that explicit and keeps their dispatches ordered.
 /// </summary>
 [CollectionDefinition(Name)]
 public sealed class HeadlessUiCollection

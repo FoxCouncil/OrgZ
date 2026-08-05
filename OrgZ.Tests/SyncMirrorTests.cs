@@ -8,7 +8,7 @@ namespace OrgZ.Tests;
 /// <summary>
 /// The auto-sync (mirror) removal decision - the destructive core, so it's pinned as a pure
 /// function: device music whose artist+title isn't in the keep-set is removed, matches are kept
-/// (case-insensitively), and untagged tracks are NEVER removed (we can't prove they were deselected).
+/// (case-insensitively), and untagged tracks are never removed (we can't prove they were deselected).
 /// </summary>
 public class SyncMirrorTests
 {

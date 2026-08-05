@@ -378,7 +378,7 @@ public partial class AudiobooksViewModel : ObservableObject
 
     /// <summary>
     /// Driven by the global header search box (see <c>MainWindowViewModel</c>) - the composite
-    /// has ONE search: the same text filters the library grid through the normal pipeline and,
+    /// has one search: the same text filters the library grid through the normal pipeline and,
     /// debounced here, searches the store. Clearing the box restores the landing sections.
     /// </summary>
     internal void ApplyHeaderSearch(string? text)

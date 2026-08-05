@@ -115,7 +115,7 @@ public sealed class MediaGridGroupCollapseTests
     public async Task Collapsing_after_a_synchronous_layout_pass_works_with_nothing_painted_in_between()
     {
         // The finding the shared grid rests on: one synchronous UpdateLayout() is enough to
-        // build the row-group info, and the collapse then takes effect in the SAME dispatcher
+        // build the row-group info, and the collapse then takes effect in the same dispatcher
         // turn. Nothing renders expanded, so there is no frame to flash - which is what lets a
         // single MediaDataGrid rebind on every view switch instead of hiding three grids.
         var (rows, headers) = await HeadlessUi.RunAsync(() =>

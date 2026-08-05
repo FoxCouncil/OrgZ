@@ -142,7 +142,7 @@ internal static class Settings
     // close, shutdown) keeps calling Save(), which also supersedes any pending deferral.
     private static Timer? _deferredSave;
 
-    /// <summary>Schedules a Save ~500ms after the LAST call - one write per burst.</summary>
+    /// <summary>Schedules a Save ~500ms after the last call - one write per burst.</summary>
     public static void SaveDeferred()
     {
         lock (_lock)

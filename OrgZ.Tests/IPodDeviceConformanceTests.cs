@@ -87,7 +87,7 @@ public class IPodDeviceConformanceTests
     }
 
     // ── binary tier: the full claimed lifecycle on a synthetic iPod ───────────
-    // Covers BOTH checksum flavours: "Video 5.5G" (checksum None - the validated tier-1 path) and
+    // Covers both checksum flavours: "Video 5.5G" (checksum None - the validated tier-1 path) and
     // "Classic 7G" (hash58, FireWire-GUID keyed - every 2007+ Classic/Nano 3G/4G takes this path).
     // The device starts as a bare mount with an EMPTY factory database; every subsequent byte is
     // written by the product and read back by the product. The import source is a deliberately
@@ -194,7 +194,7 @@ public class IPodDeviceConformanceTests
     }
 
     // ── shuffle tier: podcasts + playlists fold into the single track list ────
-    // The Shuffle claims ONLY what its hardware has: a single track list. Playlists and podcasts
+    // The Shuffle claims only what its hardware has: a single track list. Playlists and podcasts
     // are unclaimed - the fold-into-the-song-pile shims are gone ("only legit support") - and the
     // unclaimed operations throw loudly instead of silently faking it.
 

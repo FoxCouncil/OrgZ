@@ -309,7 +309,7 @@ public class ShuffleIPodTests
     /// iTunes co-habitation: the firmware plays from iTunesSD but iTunes reads the iTunesDB, and a
     /// device where only the SD is maintained looks frozen-in-time in iTunes (hardware-found - a day
     /// of OrgZ syncs was invisible there, and an iTunes sync would have clobbered them all). Every
-    /// add must land in BOTH files, adds must backfill rows for pre-co-habitation SD entries,
+    /// add must land in both files, adds must backfill rows for pre-co-habitation SD entries,
     /// removes must drop the row, and erase must empty the DB too.
     /// </summary>
     [Fact]

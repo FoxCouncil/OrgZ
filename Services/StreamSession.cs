@@ -53,7 +53,7 @@ public sealed class StreamFacts
 public sealed record StreamNowPlaying(string Title, string? ArtUrl);
 
 /// <summary>
-/// ONE upstream pull per station, shared by every consumer: playback, now-playing metadata,
+/// one upstream pull per station, shared by every consumer: playback, now-playing metadata,
 /// and probing all read from the same connection instead of opening their own. Connect
 /// walks redirects and playlist indirections by hand (hop counts survive), handles classic
 /// "ICY 200 OK" servers over raw TCP, and lands on one of three connection kinds:
@@ -74,7 +74,7 @@ public sealed class StreamSession : IDisposable
 {
     private static readonly ILogger _log = Logging.For("StreamSession");
 
-    // CDNs that geo-fence per station. A 200 from here still means "works from THIS vantage
+    // CDNs that geo-fence per station. A 200 from here still means "works from this vantage
     // point"; the flag marks the stream as worth suspicion before shipping it worldwide.
     private static readonly string[] GeoFencedHosts =
     [
@@ -254,7 +254,7 @@ public sealed class StreamSession : IDisposable
 
         // SHOUTcast DNAS sniffs the User-Agent on its root path: media players get the
         // stream, browsers get the status webpage - and our stock browser UA gets the
-        // webpage. The legacy player path "/;" serves the raw stream to ANY UA, so walk
+        // webpage. The legacy player path "/;" serves the raw stream to any UA, so walk
         // there when a root-ish URL came back as HTML. Anything else claiming text/html
         // is a webpage, not a stream - never pump markup into the decoder.
         if (contentType.StartsWith("text/html", StringComparison.Ordinal))
@@ -710,7 +710,7 @@ public sealed class StreamSession : IDisposable
         _lastTitle = title;
         if (Facts.LiveTitle == null)
         {
-            // Snapshot the FIRST now-playing (title + its art together) for the
+            // Snapshot the first now-playing (title + its art together) for the
             // subscribe-after-pump-start race - consumers re-read it once wired.
             Facts.LiveTitle = title;
             Facts.LiveArtUrl = artUrl;

@@ -8,7 +8,7 @@ using Xunit;
 namespace OrgZ.Tests;
 
 /// <summary>
-/// Slice D: OrgZ must mutate a REAL iTunes-written iTunesDB (add/remove tracks + playlists) without
+/// Slice D: OrgZ must mutate a real iTunes-written iTunesDB (add/remove tracks + playlists) without
 /// corrupting everything iTunes put there that OrgZ doesn't model - the type-4 album table, the type-5
 /// built-in playlists, per-track sort MHODs, the full 5-dataset set. Point <c>ORGZ_REAL_ITUNESDB</c> at
 /// a real device DB (e.g. a mounted iPod's <c>iPod_Control/iTunes/iTunesDB</c>) to exercise it; skipped

@@ -599,7 +599,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     // -- Audition probing: every listen IS a probe. The player's session settles its facts
-    // (real codec, bitrate, metadata channel, tune-in time) off the SAME connection the
+    // (real codec, bitrate, metadata channel, tune-in time) off the same connection the
     // audio rides - no second connection is ever opened for an audition. --
 
     /// <summary>What the in-flight audition should stamp when the session's facts settle.</summary>

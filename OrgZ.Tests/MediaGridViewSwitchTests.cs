@@ -10,7 +10,7 @@ using OrgZ.Controls;
 namespace OrgZ.Tests;
 
 /// <summary>
-/// The behaviour the three-grid split was standing in for: ONE grid surviving the actual sequence
+/// The behaviour the three-grid split was standing in for: one grid surviving the actual sequence
 /// of view switches a user performs - flat to grouped to a differently-grouped view and back -
 /// rebuilding its columns each time and landing collapsed, not expanded.
 ///

@@ -86,7 +86,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     // Radio is single-connection: a StreamSession owns the upstream pull (ICY de-interleave
     // or HLS client), pumps clean audio to VLC through PipeMediaInput, and raises titles off
-    // the SAME bytes - which are injected into the playing Media via SetMeta, firing the
+    // the same bytes - which are injected into the playing Media via SetMeta, firing the
     // same MetaChanged event the radio handler already consumes. VLC never opens a network
     // connection for radio. The handle pairs the session with its MediaInput so teardown
     // can order them around the Media's own deferred dispose.
@@ -863,7 +863,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             Podcasts.ApplyHeaderSearch(value);
         }
 
-        // The Audiobooks composite has ONE search - this box. ApplyFilter above already filtered
+        // The Audiobooks composite has one search - this box. ApplyFilter above already filtered
         // the library grid through the normal pipeline; the same text also feeds the store's
         // debounced archive.org search, so the grid and the store react together.
         if (!_suppressSearchPersist && ListViewConfigs.Get(SelectedSidebarItem?.ViewConfigKey)?.Host == ViewHost.AudiobooksPanel && Audiobooks is not null)
@@ -1163,7 +1163,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedSidebarItemChanging(SidebarItem? oldValue, SidebarItem? newValue)
     {
-        // Fires BEFORE SelectedSidebarItem is actually updated. SearchText still reflects
+        // Fires before SelectedSidebarItem is actually updated. SearchText still reflects
         // the old view, so snapshot it into the per-view dict before the view swap.
         PerViewSearchState.Save(_searchTextByView, oldValue?.ViewConfigKey, SearchText);
     }
@@ -1554,11 +1554,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // LibVLC's own volume is pinned at 100% - the audio tap sits
         // downstream of LibVLC's volume filter, so any attenuation at this
         // level would hit the FFT analyzer and make the VU meter scale
-        // with the user's volume slider.  Volume is applied ONLY in the
+        // with the user's volume slider.  Volume is applied only in the
         // sink bus (MasterVolume) and per-sink, which sit after the tap.
         _player.Volume = 100;
 
-        // Attach the audio tap BEFORE any Play() call - LibVLC only routes
+        // Attach the audio tap before any Play() call - LibVLC only routes
         // samples through SetAudioCallbacks for media that start playing
         // after the callbacks were registered.  Once wired, every track the
         // user plays funnels through the sink bus (audible on selected
@@ -1921,7 +1921,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // silently pause whatever the user pressed play on next.
             _pauseWhenNextTrackStarts = false;
 
-            // Pause / resume / stop ALWAYS acts on what is actually playing - never on the
+            // Pause / resume / stop always acts on what is actually playing - never on the
             // active view. A pause request must never be ignored because the user happens to
             // be looking at a different page (e.g. browsing Podcasts while music plays). The
             // view's kind is consulted only to decide what to START when nothing is loaded.
@@ -2010,7 +2010,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private const string GitHubUrl = "https://github.com/FoxCouncil/OrgZ";
 
-    /// <summary>The manual for THIS build. Docs deploy versioned (mike) alongside every release, so
+    /// <summary>The manual for this build. Docs deploy versioned (mike) alongside every release, so
     /// an installed app links to its own version's pages forever - never a newer release's docs.</summary>
     internal static string ManualUrl =>
         typeof(MainWindowViewModel).Assembly.GetName().Version is { } v
@@ -2367,7 +2367,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         NewPlaybackEpoch();
         BeginPlayback();
         // CD track duration comes from the TOC, not libvlc - restore it
-        // AFTER BeginPlayback clears the LCD time labels so the total time
+        // after BeginPlayback clears the LCD time labels so the total time
         // shows up immediately instead of waiting on MediaChanged.
         CurrentTrackDuration = track.Duration?.ToString(@"m\:ss") ?? "--:--";
         CurrentTrackDurationNumber = (long)(track.Duration?.TotalMilliseconds ?? 0);
@@ -2493,14 +2493,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UI(() =>
         {
-            // The user picked this track in THIS view, so this view is where "go to current song"
+            // The user picked this track in this view, so this view is where "go to current song"
             // should return them - whether or not the queue below gets rebuilt. Setting it only on
             // the rebuild path left the origin pointing at wherever the queue happened to be built
             // last, so playing from Favorites and clicking the artwork took you to Music.
             _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
 
             // Reuse the existing context only when the current view's filter
-            // produces the SAME source list -- so a search that narrows the
+            // produces the same source list -- so a search that narrows the
             // visible tracks rebuilds the queue against the filtered set
             // (otherwise shuffle would pick from the wider pre-search list).
             if (_playbackContext != null
@@ -2658,7 +2658,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             artBytes = IPodArtworkReader.LoadThumbnail(file.Source["device:".Length..], dbid);
         }
 
-        // One TagLib open serves BOTH the art and the engine's format probe below.
+        // One TagLib open serves both the art and the engine's format probe below.
         (int SampleRate, int? BitDepth, int Channels)? probed = null;
         if (file.FilePath is { Length: > 0 } artPath)
         {
@@ -2921,7 +2921,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // reconnect logic replacing :http-reconnect). 3s matches the CD path.
             _currentMedia.AddOption(":file-caching=3000");
 
-            // Capture THIS specific Media instance. When the user switches stations rapidly,
+            // Capture this specific Media instance. When the user switches stations rapidly,
             // LibVLC can still deliver late MetaChanged events from the previous (disposed)
             // Media object. The ReferenceEquals checks below guard against that; storing
             // the delegate lets DeferDispose detach it before Dispose(), preventing both
@@ -3034,7 +3034,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // the deferred dispose under the same lock is the safe combination.
             _ = _player.Play(thisMedia);
 
-            // Now-playing parsed off the SAME connection the audio rides, injected on the
+            // Now-playing parsed off the same connection the audio rides, injected on the
             // UI thread under the swap lock, guarded against station switches - an update
             // that lands after this Media is gone must not stamp its successor (or touch a
             // disposed native handle). Real titles and covers ride SetMeta so the handler
@@ -4145,14 +4145,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal List<MediaItem> GetPlaylistMediaItems(int playlistId, Dictionary<string, MediaItem>? lookup = null)
     {
         var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
-        // Callers on a background thread MUST pass a lookup built via BuildItemLookup() on the
+        // Callers on a background thread must pass a lookup built via BuildItemLookup() on the
         // UI thread; the null-default path enumerates _allItems here and is only safe on the UI thread.
         lookup ??= BuildItemLookup();
         return trackIds.Where(lookup.ContainsKey).Select(id => lookup[id]).ToList();
     }
 
     /// <summary>
-    /// A snapshot id→item map of the library. MUST be built on the UI thread: it enumerates the
+    /// A snapshot id→item map of the library. Must be built on the UI thread: it enumerates the
     /// UI-bound <c>_allItems</c>, and reading an ObservableCollection from a threadpool thread
     /// while the UI may be mutating it throws "collection was modified". Pass the result into any
     /// <see cref="GetPlaylistMediaItems"/> call that runs inside a <see cref="Task.Run"/>.
@@ -4381,7 +4381,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// full device sync, and audiobook sync all funnel here so the gestures can never diverge again.
     /// The LCD detail row shows the live phase + track title ("Transcoding “X”…" / "Copying “X”…")
     /// with that phase's true 0..1 bar; batch callers pass index/count for a "(i/N) " prefix - the
-    /// ONLY textual difference between a single add and a batch. Cancellation-aware end to end: the
+    /// only textual difference between a single add and a batch. Cancellation-aware end to end: the
     /// LCD Cancel X trips the token, the tier aborts mid-transcode/mid-copy and deletes its torn
     /// output, and nothing joins the live view.
     /// </summary>
@@ -4534,7 +4534,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             // Never mount our own share back into our own sidebar. The advertiser
             // answers with a per-subnet address on a multi-homed host, so "our own"
-            // means ANY of our interface addresses, not just the default-route one.
+            // means any of our interface addresses, not just the default-route one.
             var mine = Services.Sharing.MdnsAdvertiser.LocalInterfaceAddresses()
                 .Select(i => i.Address.ToString())
                 .ToHashSet(StringComparer.Ordinal);
@@ -4679,7 +4679,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// The library path a share track copies to - the SAME layout a CD rip and an iPod
+    /// The library path a share track copies to - the same layout a CD rip and an iPod
     /// sync-to-library use: {Music}/{Artist}/{Album}/{NN - Title}.ext, deduped with a
     /// " (2)" suffix. A flat name at the library root (the old behaviour) sorted nowhere.
     /// </summary>
@@ -4927,7 +4927,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// Drag-onto-device import: delegates to <see cref="SyncItemToDeviceAsync"/> so a drop and the
-    /// right-click "Sync > (device)" are ONE code path - same duplicate check, same batch write,
+    /// right-click "Sync > (device)" are one code path - same duplicate check, same batch write,
     /// same space accounting, same progress surface. They diverged once (drag skipped the duplicate
     /// check and demanded ffmpeg even for Rockbox); never again.
     /// </summary>
@@ -5261,7 +5261,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// ignored before the change).
     /// </summary>
     /// <summary>
-    /// Bulk remove: ONE confirmation for the whole selection, then per-file deletes and a
+    /// Bulk remove: one confirmation for the whole selection, then per-file deletes and a
     /// single cache/playlist/view refresh. Audiobooks are excluded from bulk (they're
     /// folder-level deletions with their own flow) - a single-item selection still routes
     /// through the singular path so its wording and audiobook handling stay intact.
@@ -5509,7 +5509,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// In-place ADD twin of <see cref="MoveWithinLiveView"/> for a single new row: appends to the
-    /// live list and re-reads the SAME DataGridCollectionView when the active view shows the item,
+    /// live list and re-reads the same DataGridCollectionView when the active view shows the item,
     /// instead of the full ApplyFilter rebuild whose ItemsSource swap snaps the grid scroll. Always
     /// bumps the cache version so every other (and future) view rebuilds from _allItems on access.
     /// </summary>
@@ -5545,7 +5545,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// Reflects a row move in the LIVE view: mutates the current FilteredItems list in place and
-    /// re-reads the SAME DataGridCollectionView. Never goes through ApplyFilter for a reorder - that
+    /// re-reads the same DataGridCollectionView. Never goes through ApplyFilter for a reorder - that
     /// swaps the grid's ItemsSource (new list + new view), which resets its scroll position to the
     /// top for a frame before the restore lands: the visible "jump".
     /// </summary>
@@ -5899,7 +5899,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>
     /// True for an item that lives in the local library folder - a Music or Audiobook row with a
     /// file path and no Source (device tracks carry "device:{mount}", CD tracks "cdda"). The
-    /// library scan reconciles ONLY these: without the Source check, a folder rescan while an
+    /// library scan reconciles only these: without the Source check, a folder rescan while an
     /// iPod is connected would sweep the device's rows out of _allItems, since device tracks are
     /// also Kind=Music with FilePaths that are never under the library folder.
     /// </summary>
@@ -6278,13 +6278,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void UpdateData()
     {
-        // The enumeration lives INSIDE the UI post (same shape as UpdateTitle): _allItems is
+        // The enumeration lives inside the UI post (same shape as UpdateTitle): _allItems is
         // UI-thread-only, and this method gets called from Task.Run bodies (analysis loop,
         // rip completion). Enumerating on the calling thread here was a live
         // "collection was modified" crash whenever the library changed mid-analysis.
         UI(() =>
         {
-            // Whole-library totals are only the truth when NOTHING is filtering the Music
+            // Whole-library totals are only the truth when nothing is filtering the Music
             // view. With a search active the footer belongs to UpdateViewStats (which sums
             // the filtered set) - both used to write these three, so whichever dispatcher
             // post landed last won and a searched footer got silently stomped with
@@ -6481,7 +6481,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// Per-track radio artwork from the stream's metadata channel (iHeart EXTINF art URL,
     /// or VLC's own file:// art-cache path for streams with embedded pictures). An empty
     /// or missing URL means the current track has none - revert to the station favicon,
-    /// which is ALWAYS the fallback. Art is decoration: every failure lands on the favicon.
+    /// which is always the fallback. Art is decoration: every failure lands on the favicon.
     /// </summary>
     private async Task LoadRadioTrackArtAsync(string? url)
     {
@@ -7903,7 +7903,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Whether the shown device can take ANY sync - the header Sync button's gate.</summary>
+    /// <summary>Whether the shown device can take any sync - the header Sync button's gate.</summary>
     public bool CanSyncToDevice
     {
         get
@@ -7968,7 +7968,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Runs a device's whole saved plan under ONE batch scope, so a Nano 5G regenerates its
+    /// Runs a device's whole saved plan under one batch scope, so a Nano 5G regenerates its
     /// compressed CDB a single time across podcasts + audiobooks + every playlist, not once each.
     /// Each component honors the tier's own capability claim, so a stale plan can't push a kind the
     /// device can't carry.
@@ -7992,12 +7992,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Refresh the device's library from disk FIRST, so add-dedup and the mirror pass match against
+            // Refresh the device's library from disk first, so add-dedup and the mirror pass match against
             // what's actually on the device - a stale in-memory view was writing duplicate copies of tracks
             // (random on-device filenames + always-insert), and mirror needs the true device set to prune.
             await ReloadStockIPodLibraryAsync(dev);
 
-            // Snapshot the UI-bound _allItems on THIS (UI) thread before any Task.Run below reads it.
+            // Snapshot the UI-bound _allItems on this (UI) thread before any Task.Run below reads it.
             var itemById = BuildItemLookup();
 
             // Block-scoped using (not `using var`): the batch's Dispose - which flushes/regenerates
@@ -8524,7 +8524,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         var totalSize = tracks.Sum(t => t.FileSize ?? 0);
         var summary = $"{count:N0} {(count == 1 ? "song" : "songs")} · {FormatPlaylistDuration(totalDuration)} · {FormatHelper.FormatFileSize(totalSize)}";
 
-        // ONE TILE PER SONG - the first four tracks in playlist order, each showing its OWN album
+        // One tile per song - the first four tracks in playlist order, each showing its own album
         // art or a no-art placeholder (null) when it has none. Duplicates are intentional: two
         // songs from the same album give two identical tiles. Cells past the song count stay null,
         // so a short playlist pads with placeholders.
@@ -8603,7 +8603,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _connectedDevices[device.MountPath] = device;
 
-        // Cancellation scope for THIS device's library scan. Disconnect (or a swap re-using the drive
+        // Cancellation scope for this device's library scan. Disconnect (or a swap re-using the drive
         // letter) cancels it, which both aborts the read and voids every batch still queued on the
         // dispatcher - see FlushBatch below.
         var scanCts = new CancellationTokenSource();
@@ -8740,7 +8740,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly HashSet<string> _identityReadAttempted = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Automatic identity read on connect - but ONLY when the privileged helper service is
+    /// Automatic identity read on connect - but only when the privileged helper service is
     /// installed and can do it silently (no UAC / auth dialog). Without the service we do
     /// NOT auto-fire a prompt; the manual info-bar affordance stays as the (deliberately
     /// unlovely) fallback. So installing the service is what turns "click to read" into
@@ -9069,7 +9069,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Cancel the in-flight library scan FIRST, so batches it already queued on the dispatcher void
+        // Cancel the in-flight library scan first, so batches it already queued on the dispatcher void
         // themselves (FlushBatch checks the token) instead of re-populating _allItems after the
         // RemoveAll below.
         if (_deviceScanCts.Remove(mountPath, out var scanCts))
@@ -9091,7 +9091,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _allItems.RemoveAll(i => i.Source == source);
 
         // Evict every cached view that can still show the departed iPod's rows. The device's own view
-        // family MUST go: a different iPod arriving at the reused drive letter inherits the exact same
+        // family must go: a different iPod arriving at the reused drive letter inherits the exact same
         // view key, and with _dataVersion untouched by any of the removals above, ApplyFilter's reuse
         // path would serve the OLD iPod's cached list verbatim - the swapped-in device showing its
         // predecessor's library. The content scan catches device rows cached under non-device keys
@@ -9197,7 +9197,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _vmCts.Cancel();   // stop background loops (job reattach polling) before teardown
 
-        // Detach from the process-wide singletons FIRST: they outlive this ViewModel, and a
+        // Detach from the process-wide singletons first: they outlive this ViewModel, and a
         // handler left attached keeps the whole VM (and its window) alive and reachable.
         if (_onSubscriptionsRefreshed is not null)
         {

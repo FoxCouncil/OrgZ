@@ -47,7 +47,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     public event EventHandler? DevicesChanged;
 
     // mDNS discovery is expensive (~2s of UDP multicast per sweep) and noisy in the
-    // debugger. EnumerateDevices therefore NEVER blocks: it hands back the cached list
+    // debugger. EnumerateDevices therefore never blocks: it hands back the cached list
     // and, when the cache has gone stale, kicks one background sweep that refreshes it
     // and raises DevicesChanged. Callers on the UI thread (the speaker flyout used to
     // eat the whole 2s sweep on open) get an instant answer; the refreshed topology

@@ -173,7 +173,7 @@ public sealed class TlsHttpServer : IDisposable
             catch (Exception ex)
             {
                 // The server owns the 500 path - handlers just throw. Warning, not Debug:
-                // a handler that fails on EVERY request (as the LocalSystem empty-library
+                // a handler that fails on every request (as the LocalSystem empty-library
                 // bug did) must not be invisible. Answering 500 makes the failure diagnose
                 // as a server problem instead of a network one; mid-stream failures
                 // (headers already sent) just drop the connection.

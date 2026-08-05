@@ -234,7 +234,7 @@ public sealed class MdnsAdvertiser : IDisposable
     }
 
     /// <summary>
-    /// Multicasts the announcement out EVERY joined interface, each carrying that
+    /// Multicasts the announcement out every joined interface, each carrying that
     /// interface's own address as the A record. One un-steered send goes out only the
     /// default multicast interface - which is whichever adapter won the metric race.
     /// </summary>

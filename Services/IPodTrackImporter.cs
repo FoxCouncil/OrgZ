@@ -211,7 +211,7 @@ public static class IPodTrackImporter
             var (hasArt, artSize, _) = await TryWriteArtworkAsync(mountPath, sourceFile, ffmpegPath, dbid, coverFormats, ct);
 
             // --- iTunesDB: parse -> add -> normalize -> verify -> backup -> atomic write ---
-            // (or, under an open batch: add into the ONE parsed doc and let the batch commit.)
+            // (or, under an open batch: add into the one parsed doc and let the batch commit.)
             var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
             var batch = ActiveBatch(mountPath);
             var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
@@ -293,10 +293,10 @@ public static class IPodTrackImporter
 
     // ── Binary-tier batch scope ──────────────────────────────
     // One parsed iTunesDB (and one ArtworkDB rebuild) for a whole sync, committed on
-    // dispose. The per-track shape re-read, re-serialized, re-hashed, and re-verified the
-    // ENTIRE database once per track - the perf cliff every big Classic sync fell off,
-    // and the reason the Nano 5G tier grew BeginCdbBatch. The scope is ambient per MOUNT
-    // (matching the Nano 5G defer): every ImportAsync / AddPlaylist under it participates.
+    // dispose. The per-track shape re-read, re-serialized, re-hashed and re-verified the
+    // entire database once per track, which is what made big Classic syncs slow and what
+    // BeginCdbBatch already solves on the Nano 5G tier. The scope is ambient per mount:
+    // every ImportAsync / AddPlaylist under it participates.
 
     private static readonly object _batchGate = new();
     private static readonly Dictionary<string, BinaryBatch> _batches = new(StringComparer.OrdinalIgnoreCase);
@@ -480,7 +480,7 @@ public static class IPodTrackImporter
 
     /// <summary>
     /// Copies every episode's file (MP3/AAC - passthrough, no transcode) into iPod_Control/Music and
-    /// adds its podcast MHIT into ONE parsed iTunesDB, then normalizes/checksums/verifies/backs-up
+    /// adds its podcast MHIT into one parsed iTunesDB, then normalizes/checksums/verifies/backs-up
     /// and writes a single time - loading + committing once rather than re-writing the whole DB per
     /// episode. Returns the number of episodes written.
     /// </summary>
@@ -502,7 +502,7 @@ public static class IPodTrackImporter
             // (Nano 5G+), which this Hash58 path doesn't handle. Fail clearly, don't crash.
             throw new FileNotFoundException($"This iPod has no iTunesDB at '{dbPath}'. Podcast sync currently needs an iTunes-format (binary) database.", dbPath);
         }
-        // Under an open batch this joins its ONE doc (a private parse would miss the
+        // Under an open batch this joins its one doc (a private parse would miss the
         // batch's uncommitted adds and the batch commit would clobber these episodes).
         var batch = ActiveBatch(mountPath);
         ITunesDbDocument doc;
@@ -630,7 +630,7 @@ public static class IPodTrackImporter
             var dbPath = Path.Combine(artDir, "ArtworkDB");
             var batch = ActiveBatch(mountPath);
 
-            // ── Stage phase: extract and validate EVERY format before touching any
+            // ── Stage phase: extract and validate every format before touching any
             // .ithmb. The old per-format append meant a failure on format 2 left
             // format 1's bytes stranded in its file - unrecorded garbage that grew
             // forever across failed imports.
@@ -680,7 +680,7 @@ public static class IPodTrackImporter
             int imageId = ArtworkDbWriter.NextImageId(existing);
 
             // ── Append phase: every format validated, so appends only fail on I/O -
-            // and then everything appended by THIS call rolls back together.
+            // and then everything appended by this call rolls back together.
             var appended = new List<(string Path, long Offset)>();
             var thumbs = new List<ArtThumb>();
             int totalSize = 0;

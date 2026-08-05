@@ -34,8 +34,8 @@ public static class Nano5gCdbWriter
 
     /// <summary>Re-emits an (edited) mhbd tree as a signed, zlib-compressed iTunesCDB, signed with the
     /// device <paramref name="fireWireGuid"/>. The CDB is validated by <b>hash58</b> (scheme 1, the
-    /// FireWire-GUID HMAC) computed over the WHOLE COMPRESSED FILE - verified byte-identical to a real
-    /// iTunes-written CDB. (NOT hash72 - that scheme is the separate Locations.itdb.cbk's.) When the
+    /// FireWire-GUID HMAC) computed over the whole compressed file - verified byte-identical to a real
+    /// iTunes-written CDB. (Not hash72 - that scheme is the separate Locations.itdb.cbk's.) When the
     /// GUID is absent (offline tests) the CDB is left unsigned.</summary>
     public static byte[] Emit(ITunesDbDocument doc, string? fireWireGuid)
     {

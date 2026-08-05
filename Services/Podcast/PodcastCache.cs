@@ -20,7 +20,7 @@ public static class PodcastCache
     /// <summary>
     /// Test hook: redirect the cache DB to a custom directory (pass null to restore the
     /// default %APPDATA%/OrgZ location). Call <see cref="EnsureCreated"/> afterward to build
-    /// the schema in the new location. Moves EVERY library.db consumer together.
+    /// the schema in the new location. Moves every library.db consumer together.
     /// </summary>
     internal static void OverrideCacheDirectory(string? directory) => LibraryDb.OverrideDirectory(directory);
 

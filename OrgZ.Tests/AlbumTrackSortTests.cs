@@ -31,7 +31,7 @@ public class AlbumTrackSortTests
     [Fact]
     public void Orders_by_disc_first_then_track()
     {
-        // Disc 2 track 1 should come AFTER Disc 1 track 99
+        // Disc 2 track 1 should come after Disc 1 track 99
         var tracks = new[]
         {
             T("Disc2Track1", track: 1, disc: 2),

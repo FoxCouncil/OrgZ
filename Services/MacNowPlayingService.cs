@@ -196,7 +196,7 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
             return;
         }
 
-        // Every autoreleased object this method makes belongs to THIS pool - without
+        // Every autoreleased object this method makes belongs to this pool - without
         // one they accumulate for the process lifetime (see the P/Invoke declarations).
         var pool = objc_autoreleasePoolPush();
         try

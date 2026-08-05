@@ -110,7 +110,7 @@ public static class IPodScsiInquiry
     // IOCTL_SCSI_PASS_THROUGH to bounce back as ERROR_NOT_ALL_ASSIGNED (1306) at the port
     // driver before ever reaching the device.
     //
-    // Cdb[16] MUST be declared inline here so Marshal.SizeOf returns the full 44/56 bytes
+    // Cdb[16] must be declared inline here so Marshal.SizeOf returns the full 44/56 bytes
     // that Windows expects in sptd.Length.
     [StructLayout(LayoutKind.Sequential)]
     private struct SCSI_PASS_THROUGH
@@ -518,10 +518,10 @@ public static class IPodScsiInquiry
     private const int ScsiSenseSize = 32;
 
     /// <summary>
-    /// The ONE SCSI_PASS_THROUGH scaffold. Five copies of this buffer arithmetic used to
-    /// live in this file - identical but for the CDB and its length - which is exactly the
-    /// code where a one-site-only offset slip is invisible until real hardware answers
-    /// garbage. Callers now build a CDB and read a typed result.
+    /// The one SCSI_PASS_THROUGH scaffold. Five copies of this buffer arithmetic lived in
+    /// this file, identical but for the CDB and its length, where an offset slip fixed at
+    /// one site only stays invisible until real hardware answers garbage. Callers build a
+    /// CDB and read a typed result.
     ///
     /// The layout is the documented one: [SCSI_PASS_THROUGH][sense][data], with the two
     /// offsets pointing past the struct, a 10-second timeout, and DATA_IN (every command
@@ -850,7 +850,7 @@ public static class IPodScsiInquiry
     private static byte[]? InquiryVpd(SafeFileHandleWrapper handle, byte pageCode, out string? error)
     {
         error = null;
-        // Allocation length MUST be 252 (0x00FC), matching libgpod's IPOD_XML_PAGE read. Apple's
+        // Allocation length must be 252 (0x00FC), matching libgpod's IPOD_XML_PAGE read. Apple's
         // iPod firmware is picky about the INQUIRY allocation length on its vendor device-info
         // pages: an oversized request (we used 4096) gets a malformed/empty page-list back -
         // which is exactly why page 0xC0 reported "0 pages" on the Nano 5G. 252 is what the

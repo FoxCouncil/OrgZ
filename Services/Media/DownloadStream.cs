@@ -5,9 +5,8 @@ using System.Buffers;
 namespace OrgZ.Services.Media;
 
 /// <summary>
-/// The download read-loop the podcast and audiobook services share. It existed as three
-/// verbatim copies - two in the audiobook service alone - each with its own progress
-/// reporting, which is how one path can quietly get a fix (or a throttle) the others don't.
+/// The download read-loop the podcast and audiobook services share. It was three verbatim
+/// copies - two in the audiobook service alone - each with its own progress reporting.
 /// </summary>
 internal static class DownloadStream
 {
@@ -17,10 +16,9 @@ internal static class DownloadStream
     /// Copies <paramref name="source"/> into <paramref name="destinationPath"/>, reporting
     /// bytes received. Returns the total written.
     ///
-    /// <paramref name="onProgress"/> is THROTTLED to ~10 reports a second, with a final
+    /// <paramref name="onProgress"/> is throttled to ~10 reports a second, with a final
     /// report guaranteed. Unthrottled it fired once per 64 KB - about 8,000 events for a
-    /// 500 MB audiobook, each one marshalled to the UI thread by the view models - which is
-    /// the same "aggregate before you notify" discipline the audio bus already enforces.
+    /// 500 MB audiobook, each one marshalled to the UI thread by the view models.
     /// </summary>
     public static async Task<long> CopyToFileAsync(
         Stream source,
@@ -49,8 +47,8 @@ internal static class DownloadStream
                 }
             }
 
-            // The last chunk almost never lands on a throttle boundary, so report the final
-            // total unconditionally - otherwise a progress bar stops just short of full.
+            // The last chunk rarely lands on a throttle boundary, so report the final total
+            // unconditionally - otherwise a progress bar stops just short of full.
             onProgress?.Invoke(received);
             return received;
         }

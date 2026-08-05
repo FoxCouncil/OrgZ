@@ -43,7 +43,7 @@ public class ITunesDbWriterOracleTests
         var blessed = File.ReadAllBytes(Path.Combine(FixtureDir, fixture));
 
         // The committed fixture is the exact output libgpod parsed correctly. If the writer changes,
-        // these bytes diverge - regenerate BOTH the fixture and the golden via the oracle (README) so a
+        // these bytes diverge - regenerate both the fixture and the golden via the oracle (README) so a
         // writer change is re-blessed, never silently accepted.
         Assert.Equal(blessed, bytes);
     }

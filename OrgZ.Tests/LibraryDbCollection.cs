@@ -5,13 +5,11 @@ namespace OrgZ.Tests;
 /// <summary>
 /// Every test class that redirects or writes <c>library.db</c> belongs here.
 ///
-/// MediaCache, PodcastCache and AcquisitionStore all keep their tables in ONE file and now
-/// resolve it through one <see cref="OrgZ.Services.LibraryDb"/> locator - which is the point:
-/// the service adopting its owner's library has to move all three together, and three private
-/// copies of the path meant only MediaCache moved. The flip side is that their test classes
-/// share global state, so they can no longer run in parallel with each other - previously each
-/// store had its own path and the collections could be separate ("MediaCache" /
-/// "AcquisitionStore" / none). One collection, no parallelism, no clobbering.
+/// MediaCache, PodcastCache and AcquisitionStore keep their tables in one file and resolve it
+/// through a single <see cref="OrgZ.Services.LibraryDb"/> locator, so the service adopting its
+/// owner's library moves all three together. That shared global state means their test classes
+/// can't run in parallel any more; when each store carried its own path they could sit in
+/// separate collections.
 /// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class LibraryDbCollection

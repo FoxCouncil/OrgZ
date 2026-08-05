@@ -7,7 +7,7 @@ using OrgZ.Services;
 namespace OrgZ.Tests;
 
 /// <summary>
-/// Offline proof that the Nano 5G CDB writer produces a CDB with the SAME structure iTunes does.
+/// Offline proof that the Nano 5G CDB writer produces a CDB with the same structure iTunes does.
 /// The fixture <c>itunes-nano5g-empty.cdb</c> is a real iTunes-written empty Nano 5G CDB; we inject a
 /// track into it via the template path and assert the 5-dataset structure + version survive and the
 /// track lands. No device required - this is what gates touching real hardware.

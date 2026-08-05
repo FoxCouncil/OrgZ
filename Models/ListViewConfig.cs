@@ -58,10 +58,9 @@ public static class ListViewConfigs
 {
     // Concurrent, not a plain Dictionary. Device connect/disconnect registers and removes
     // view configs while other code reads them, and the test suite drives Register/Remove
-    // from several classes xunit runs in PARALLEL - concurrent write+read on a plain
-    // Dictionary is undefined behaviour (torn enumeration, spurious
-    // InvalidOperationException, or silent corruption), which is exactly the kind of
-    // once-in-a-hundred-runs flake nobody can reproduce on demand.
+    // from several classes xunit runs in parallel. Concurrent write+read on a plain
+    // Dictionary is undefined behaviour: torn enumeration, spurious
+    // InvalidOperationException, or silent corruption.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ListViewConfig> _configs = new()
     {
         ["Music"] = BuildMusicConfig(),
@@ -445,7 +444,7 @@ public static class ListViewConfigs
     ];
 
     /// <summary>
-    /// True for items that belong to THIS library - not a CD in the drive, not a connected
+    /// True for items that belong to this library - not a CD in the drive, not a connected
     /// device, not a mounted network share. Every local view filters on it; without the
     /// share clause a mounted share dumps its whole catalogue into Music and Bad Format.
     /// </summary>
@@ -607,7 +606,7 @@ public static class ListViewConfigs
         Items(Cmd("Show in Explorer", "ShowInExplorer"), Cmd("Remove from Playlist", "RemoveFromPlaylist"), Cmd("Remove from Library", "RemoveFromLibrary")));
 
     // --- shared context-menu vocabulary ---------------------------------------------------
-    // Every track menu is the SAME skeleton in the same order - header · playback · info ·
+    // Every track menu is the same skeleton in the same order - header · playback · info ·
     // organize · file/destructive - with a separator between the sections a view actually uses.
     // Menu() drops empty sections and never leaves a dangling separator, so each builder above
     // just lists the sections it wants; that's what keeps the six menus from drifting apart.

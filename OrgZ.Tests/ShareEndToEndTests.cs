@@ -143,7 +143,7 @@ public sealed class ShareEndToEndTests : IDisposable
             _servers.Add(server);
 
             // Pin present → BaseUrl routes through the loopback relay over pinned TLS,
-            // so every test below exercises the REAL client path: relay → TLS → server.
+            // so every test below exercises the real client path: relay → TLS → server.
             return (server, new DiscoveredShare("Test Library", "localhost", port, "127.0.0.1", server.CertificatePin));
         }
     }
