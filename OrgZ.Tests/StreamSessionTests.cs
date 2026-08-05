@@ -305,6 +305,20 @@ public class StreamSessionTests
         Assert.Same(adts, StreamSession.StripLeadingId3(adts));
     }
 
+    [Fact]
+    public void StripLeadingId3SurvivesATagClaimingMoreBytesThanTheSegmentHas()
+    {
+        // A truncated/corrupt segment can declare a tag size far past the fetched bytes
+        // (synchsafe max is 256 MB). This used to throw ArgumentOutOfRangeException,
+        // kill the HLS pump, and leave the station permanently silent.
+        byte[] segment = [(byte)'I', (byte)'D', (byte)'3', 4, 0, 0, 0x0F, 0x7F, 0x7F, 0x7F, 1, 2, 3, 4, 5, 6];
+
+        var stripped = StreamSession.StripLeadingId3(segment);
+
+        // Everything the (lying) tag covers is consumed; no exception, empty remainder.
+        Assert.Empty(stripped);
+    }
+
     // -- AudioPipe: the VLC-facing conduit --
 
     [Fact]

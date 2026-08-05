@@ -315,7 +315,10 @@ public sealed class StreamSession : IDisposable
             if (uri.Scheme == "https")
             {
                 var ssl = new SslStream(stream);
-                await ssl.AuthenticateAsClientAsync(uri.Host);
+                // The options overload is the only AuthenticateAsClientAsync that takes a
+                // token - the bare-host one ignores cancellation, so a wedged host could
+                // hang the handshake past every deadline this session enforces.
+                await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = uri.Host }, ct);
                 stream = ssl;
             }
 
@@ -894,6 +897,13 @@ public sealed class StreamSession : IDisposable
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            // A beat between attempts (the playlist fetch backs off the same way): a CDN
+            // that just errored gets a moment to recover instead of an instant re-hammer.
+            if (attempt > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
+            }
+
             try
             {
                 var (bytes, _, _) = await HlsProber.FetchBytesAsync(segment.Url, MaxSegmentBytes, ct);
@@ -924,7 +934,10 @@ public sealed class StreamSession : IDisposable
                 aes.IV = iv;
                 aes.Mode = CipherMode.CBC;
                 aes.Padding = PaddingMode.PKCS7;
-                return aes.CreateDecryptor().TransformFinalBlock(bytes, 0, bytes.Length);
+                // The transform owns native crypto state - undisposed, one leaked per
+                // encrypted segment (~every 6 s) for the life of the station.
+                using var decryptor = aes.CreateDecryptor();
+                return decryptor.TransformFinalBlock(bytes, 0, bytes.Length);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1025,7 +1038,14 @@ public sealed class StreamSession : IDisposable
         resp.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
 
     private static bool LooksLikeIcyResponse(HttpRequestException ex) =>
-        ex.Message.Contains("invalid", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("malformed", StringComparison.OrdinalIgnoreCase);
+        // "ICY 200 OK" isn't HTTP, so HttpClient rejects the response line - the typed
+        // HttpRequestError is the contract for that. The old check substring-matched
+        // ex.Message ("invalid"/"malformed"), which is neither stable across .NET
+        // versions nor across runtime localizations: one wording change and every
+        // SHOUTcast-v1 station silently reads as Dead instead of falling back to the
+        // raw-socket path. The message probe stays only as a net for older handlers.
+        ex.HttpRequestError == HttpRequestError.InvalidResponse
+        || ex.Message.Contains("invalid", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("malformed", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsGeoFencedHost(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && GeoFencedHosts.Any(h => uri.Host.EndsWith(h, StringComparison.OrdinalIgnoreCase));

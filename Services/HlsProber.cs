@@ -775,7 +775,11 @@ public static class Id3
             (not null, null) => artist,
             _ => null,
         };
-        return (composed, 10 + size);
+        // TagSize is CLAMPED to the buffer: a truncated/corrupt segment can declare a size
+        // (synchsafe, up to 256 MB) far past the bytes actually fetched, and an unclamped
+        // value walked StripLeadingId3's offset off the end of the array - one bad segment
+        // threw, killed the HLS pump, and the station went permanently silent.
+        return (composed, Math.Min(10 + size, d.Length - offset));
     }
 
     private static string? DecodeText(byte[] d, int offset, int length)
