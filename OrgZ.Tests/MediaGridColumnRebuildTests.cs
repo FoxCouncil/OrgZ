@@ -18,6 +18,7 @@ namespace OrgZ.Tests;
 /// crash (<see cref="Clearing_then_re_adding_columns_under_a_grouped_view_throws"/>), and the
 /// sequence <see cref="MediaDataGrid"/> uses really does not.
 /// </summary>
+[Collection(HeadlessUiCollection.Name)]
 public sealed class MediaGridColumnRebuildTests
 {
     private static List<MediaItem> Tracks() =>

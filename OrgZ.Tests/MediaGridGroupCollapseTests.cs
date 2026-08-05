@@ -19,6 +19,7 @@ namespace OrgZ.Tests;
 /// applied before anything paints. These tests establish exactly when
 /// <see cref="DataGrid.CollapseRowGroup"/> starts working.
 /// </summary>
+[Collection(HeadlessUiCollection.Name)]
 public sealed class MediaGridGroupCollapseTests
 {
     private static DataGridCollectionView TwoGroups()

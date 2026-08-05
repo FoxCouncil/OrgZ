@@ -17,6 +17,7 @@ namespace OrgZ.Tests;
 /// Every one of these switches was previously impossible on a single grid: the first would have
 /// thrown out of Avalonia's column collection, and any that survived would have flashed open.
 /// </summary>
+[Collection(HeadlessUiCollection.Name)]
 public sealed class MediaGridViewSwitchTests
 {
     private sealed record ViewDef(string Key, string[] Columns, string? GroupBy);

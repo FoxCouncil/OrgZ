@@ -22,6 +22,7 @@ namespace OrgZ.Tests;
 /// the ITEM at the top of the viewport rather than a pixel offset. That also survives a change of
 /// row height, a filter, or a re-sort, none of which a pixel offset does.
 /// </summary>
+[Collection(HeadlessUiCollection.Name)]
 public sealed class MediaGridScrollRestoreTests
 {
     private static List<MediaItem> ManyRows() =>
