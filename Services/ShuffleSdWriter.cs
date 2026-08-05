@@ -15,7 +15,9 @@ public sealed record ShuffleSdTrack(
     int StartTimeMs = 0,
     int StopTimeMs = 0,              // 0 = play to end
     bool PlayInShuffle = true,
-    bool Bookmarkable = false);
+    bool Bookmarkable = false,
+    int BookmarkTimeMs = 0,          // bdhs (3G/4G) only - the classic format has no bookmark field
+    ulong Dbid = 0);                 // bdhs only; 0 = "assign one". VoiceOver names its announcement .wav by this, so an existing track must KEEP its dbid across rewrites
 
 /// <summary>
 /// Reads and writes the classic <c>iTunesSD</c> database used by the iPod Shuffle 1G/2G - the screenless

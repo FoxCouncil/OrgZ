@@ -391,6 +391,47 @@ public class ShuffleIPodTests
         }
     }
 
+    [Fact]
+    public void Bdhs_round_trip_preserves_flags_volume_bookmark_and_dbid()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "orgz-bdhs-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            ShuffleBdhsWriter.Write(dir,
+            [
+                new ShuffleSdTrack("/iPod_Control/Music/F00/A.mp3", 1,
+                    Volume: 50, StartTimeMs: 1000, StopTimeMs: 2000,
+                    PlayInShuffle: false, Bookmarkable: true, BookmarkTimeMs: 1500, Dbid: 7),
+                new ShuffleSdTrack("/iPod_Control/Music/F00/B.m4a", 2),   // fresh: assigned a dbid
+            ]);
+
+            var read = ShuffleBdhsWriter.Read(dir);
+            Assert.Equal(2, read.Count);
+
+            var a = read[0];
+            Assert.Equal(50, a.Volume);
+            Assert.Equal(1000, a.StartTimeMs);
+            Assert.Equal(2000, a.StopTimeMs);
+            Assert.False(a.PlayInShuffle);
+            Assert.True(a.Bookmarkable);
+            Assert.Equal(1500, a.BookmarkTimeMs);
+            // VoiceOver names its announcement file by dbid - it must survive the rewrite,
+            // not be re-stamped from list position (which would be 1 here).
+            Assert.Equal(7ul, a.Dbid);
+            Assert.Equal(1ul, read[1].Dbid);   // fresh track takes the lowest UNUSED id
+
+            // Rewriting exactly what was read must be a fixed point - that is the contract
+            // ReorderAsync's read-modify-write depends on.
+            ShuffleBdhsWriter.Write(dir, read);
+            Assert.Equal(read, ShuffleBdhsWriter.Read(dir));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static int Be24(byte[] b, int off) => (b[off] << 16) | (b[off + 1] << 8) | b[off + 2];
     private static int Le32(byte[] b, int off) => b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24);
 }

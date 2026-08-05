@@ -18,6 +18,10 @@ public static class ShuffleBdhsWriter
     private const int RthsSize = 372;
     private const int PathBytes = 256;
     private const int RthsPathOffset = 0x18;   // start/stop/volume/filetype (4×4) after magic+len = 24
+    private const int RthsBookmarkOffset = RthsPathOffset + PathBytes;      // 0x118
+    private const int RthsShuffleFlagOffset = RthsBookmarkOffset + 4;       // 0x11C (stored inverted: 1 = skip)
+    private const int RthsBookmarkableOffset = RthsShuffleFlagOffset + 1;   // 0x11D
+    private const int RthsDbidOffset = 0x148;  // after gapless/gap fields, album/track/disc ids (see WriteRths)
 
     public static void Write(string iTunesDir, IReadOnlyList<ShuffleSdTrack> tracks)
     {
@@ -52,10 +56,22 @@ public static class ShuffleBdhsWriter
         for (int i = 0; i < tracks.Count; i++) { w.U32(0); }   // per-track rths offsets
         w.PatchU32(hths + 4, (uint)(w.Pos - hths));            // hths header length
 
+        // dbids name the VoiceOver announcement files, so a track that already carries one keeps
+        // it across every rewrite (reorder / add / remove). Fresh tracks take the lowest unused
+        // ids - which for an all-new list is the same 1..N this writer has always produced.
+        var usedDbids = new HashSet<ulong>(tracks.Where(t => t.Dbid != 0).Select(t => t.Dbid));
+        ulong nextDbid = 1;
         for (int i = 0; i < tracks.Count; i++)
         {
+            var dbid = tracks[i].Dbid;
+            if (dbid == 0)
+            {
+                while (usedDbids.Contains(nextDbid)) { nextDbid++; }
+                dbid = nextDbid;
+                usedDbids.Add(dbid);
+            }
             w.PatchU32(trackTable + i * 4, (uint)w.Pos);
-            WriteRths(w, tracks[i], dbid: (ulong)(i + 1));
+            WriteRths(w, tracks[i], dbid);
         }
         w.PatchU32(32, (uint)tracks.Count);   // bdhs non-podcast count (all tracks are plain music)
 
@@ -89,10 +105,10 @@ public static class ShuffleBdhsWriter
         w.U32(0);                       // length - patched
         w.U32((uint)t.StartTimeMs);
         w.U32((uint)t.StopTimeMs);
-        w.U32(0);                       // volume gain (neutral)
+        w.U32(unchecked((uint)t.Volume));   // volume gain (0 = neutral; preserved round-trip)
         w.U32((uint)t.FileType);
         w.StringPad(t.IpodPath, PathBytes);
-        w.U32(0);                       // bookmark time
+        w.U32((uint)t.BookmarkTimeMs);  // bookmark time (preserved round-trip)
         w.U8((byte)(t.PlayInShuffle ? 0 : 1));   // NB: inverted vs old format (1 = skip)
         w.U8((byte)(t.Bookmarkable ? 1 : 0));
         w.U8(0);                        // gapless album
@@ -128,7 +144,11 @@ public static class ShuffleBdhsWriter
         w.PatchU32(lphs + 4, (uint)(w.Pos - lphs));
     }
 
-    /// <summary>Parses the bdhs iTunesSD back to its track list (path + file type). Empty on missing/bad file.</summary>
+    /// <summary>
+    /// Parses the bdhs iTunesSD back to its full track list - every per-track field the writer
+    /// emits (path, type, volume, start/stop, shuffle + bookmark flags, bookmark time, dbid), so
+    /// a read-modify-write (the reorder path) is loss-free. Empty on missing/bad file.
+    /// </summary>
     public static List<ShuffleSdTrack> Read(string iTunesDir)
     {
         var path = Path.Combine(iTunesDir, "iTunesSD");
@@ -154,17 +174,25 @@ public static class ShuffleBdhsWriter
         {
             int off = (int)U32(b, table + i * 4);
             if (off <= 0 || off + RthsSize > b.Length || b[off] != (byte)'r') { continue; }
-            // rths: magic(4) len(4) start(4) stop(4) volume(4) filetype(4) then the 256-byte path.
+            // rths: magic(4) len(4) start(4) stop(4) volume(4) filetype(4) then the 256-byte path,
+            // bookmark time, the two flag bytes, and (further in) the dbid - see WriteRths.
             int start = (int)U32(b, off + 0x08);
             int stop = (int)U32(b, off + 0x0C);
+            int volume = unchecked((int)U32(b, off + 0x10));
             int fileType = (int)U32(b, off + 0x14);
             var ipodPath = Encoding.UTF8.GetString(b, off + RthsPathOffset, PathBytes).TrimEnd('\0');
-            result.Add(new ShuffleSdTrack(ipodPath, fileType, 100, start, stop));
+            int bookmark = (int)U32(b, off + RthsBookmarkOffset);
+            bool playInShuffle = b[off + RthsShuffleFlagOffset] == 0;   // stored inverted (1 = skip)
+            bool bookmarkable = b[off + RthsBookmarkableOffset] == 1;
+            ulong dbid = U64(b, off + RthsDbidOffset);
+            result.Add(new ShuffleSdTrack(ipodPath, fileType, volume, start, stop, playInShuffle, bookmarkable, bookmark, dbid));
         }
         return result;
     }
 
     private static uint U32(byte[] b, int o) => (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24));
+
+    private static ulong U64(byte[] b, int o) => U32(b, o) | ((ulong)U32(b, o + 4) << 32);
 
     /// <summary>Little-endian growable binary sink with absolute-offset back-patching.</summary>
     private sealed class Le
