@@ -2662,12 +2662,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         (int SampleRate, int? BitDepth, int Channels)? probed = null;
         if (file.FilePath is { Length: > 0 } artPath)
         {
-            var read = ReadArtAndProperties(artPath);
+            var read = ArtworkSource.ReadArtAndProperties(artPath);
             artBytes ??= read.Art;
             probed = (read.SampleRate, read.BitDepth, read.Channels);
         }
 
-        CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
+        CurrentAlbumArt = artBytes != null ? ArtworkSource.BitmapFromBytes(artBytes) : null;
 
         _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtUri: string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri, ArtBytes: artBytes));
 
@@ -2826,7 +2826,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            CurrentAlbumArt = BitmapFromBytes(bytes);
+            CurrentAlbumArt = ArtworkSource.BitmapFromBytes(bytes);
             _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtBytes: bytes));
         });
     }
@@ -6382,43 +6382,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #region Utils
 
-    // The ONE client for third-party art (station favicons, podcast covers, radio track art).
-    // Stock browser UA via Web.Create - the art sits on third-party CDNs that can reject odd
-    // agents, and their request logs stay anonymous. Never put an app-identifying UA on a
-    // request that leaves the machine.
-    private static readonly HttpClient _artHttp = Web.Create(TimeSpan.FromSeconds(8));
 
-    /// <summary>Downloads a podcast show's cover (URL) to a temp file so it can be rendered into the
-    /// iPod ArtworkDB. Returns the local path, or null when there's no URL / the fetch fails.</summary>
-    private static string? TryDownloadShowArt(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return null;
-        }
-        try
-        {
-            var bytes = _artHttp.GetByteArrayAsync(url).GetAwaiter().GetResult();
-            if (bytes.Length == 0)
-            {
-                return null;
-            }
-            var path = Path.Combine(Path.GetTempPath(), "orgz_pcart_" + Guid.NewGuid().ToString("N")[..8] + ".img");
-            File.WriteAllBytes(path, bytes);
-            return path;
-        }
-        catch
-        {
-            return null;   // no art / fetch failed - the episode just imports without a cover
-        }
-    }
 
     private async Task LoadPodcastArtAsync(string url, Models.PodcastEpisode episode, Models.PodcastFeed feed)
     {
         try
         {
-            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _artHttp.GetByteArrayAsync(url));
-            var bitmap = BitmapFromBytes(bytes);
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await ArtworkSource.Http.GetByteArrayAsync(url));
+            var bitmap = ArtworkSource.BitmapFromBytes(bytes);
             if (bitmap == null) return;
             UI(() =>
             {
@@ -6428,7 +6399,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (_currentPodcastStream is { } ps && ps.Episode.Id == episode.Id)
                 {
                     CurrentAlbumArt = bitmap;
-                    _nowPlaying?.SetArtwork(ToOsArtworkBytes(bitmap, bytes));
+                    _nowPlaying?.SetArtwork(ArtworkSource.ToOsArtworkBytes(bitmap, bytes));
                 }
             });
         }
@@ -6456,13 +6427,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             // SVG station logos become PNG bytes here, so the bitmap decode below AND the
             // OS now-playing surfaces (SMTC/macOS) all receive something they can render.
-            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await _artHttp.GetByteArrayAsync(url));
-            var bitmap = BitmapFromBytes(bytes);
+            var bytes = Helpers.ImageDecoder.EnsureRasterBytes(await ArtworkSource.Http.GetByteArrayAsync(url));
+            var bitmap = ArtworkSource.BitmapFromBytes(bytes);
             if (bitmap != null)
             {
                 // PNG-normalized for the OS surface; the raw favicon can be a format WIC
                 // won't decode even though Skia just did (that's why the app showed it).
-                var osBytes = ToOsArtworkBytes(bitmap, bytes);
+                var osBytes = ArtworkSource.ToOsArtworkBytes(bitmap, bytes);
                 UI(() =>
                 {
                     _stationArtBitmap = bitmap;
@@ -6538,9 +6509,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // VLC's art cache hands us file:// URLs; the session's injected URLs are http(s).
             var raw = url.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
                 ? await System.IO.File.ReadAllBytesAsync(new Uri(url).LocalPath)
-                : await _artHttp.GetByteArrayAsync(url);
+                : await ArtworkSource.Http.GetByteArrayAsync(url);
             var bytes = Helpers.ImageDecoder.EnsureRasterBytes(raw);
-            var bitmap = BitmapFromBytes(bytes);
+            var bitmap = ArtworkSource.BitmapFromBytes(bytes);
             if (bitmap == null)
             {
                 return;
@@ -6555,7 +6526,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _radioTrackArtActive = true;
                 // Don't dispose - Avalonia's ref-counted bitmap lifecycle handles cleanup.
                 CurrentAlbumArt = bitmap;
-                var osBytes = ToOsArtworkBytes(bitmap, bytes);
+                var osBytes = ArtworkSource.ToOsArtworkBytes(bitmap, bytes);
                 _currentRadioArtBytes = osBytes;
                 _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: osBytes));
             });
@@ -6665,78 +6636,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             TaskScheduler.Default);
     }
 
-    private static byte[]? ExtractAlbumArtBytes(string filePath)
-    {
-        try
-        {
-            using var file = TagLib.File.Create(filePath);
-            if (file.Tag.Pictures?.Length > 0)
-            {
-                return file.Tag.Pictures[0].Data.Data;
-            }
-        }
-        catch { }
 
-        return null;
-    }
 
-    /// <summary>
-    /// Embedded art AND the audio properties the bit-perfect engine needs, from ONE
-    /// TagLib open. The play path used to open the same file twice on the UI thread -
-    /// once for art, once to probe an item that predates the BitDepth column - which on
-    /// a sleeping disk is two spin-ups at the moment of a double-click.
-    /// </summary>
-    private static (byte[]? Art, int SampleRate, int? BitDepth, int Channels) ReadArtAndProperties(string filePath)
-    {
-        try
-        {
-            using var file = TagLib.File.Create(filePath);
-            var art = file.Tag.Pictures?.Length > 0 ? file.Tag.Pictures[0].Data.Data : null;
-            return (art, file.Properties.AudioSampleRate,
-                file.Properties.BitsPerSample > 0 ? file.Properties.BitsPerSample : null,
-                file.Properties.AudioChannels);
-        }
-        catch
-        {
-            return (null, 0, null, 0);
-        }
-    }
 
-    private static Bitmap? BitmapFromBytes(byte[] bytes)
-    {
-        try
-        {
-            var decoded = Helpers.ImageDecoder.Decode(bytes);
-            if (decoded != null)
-            {
-                return decoded;
-            }
-        }
-        catch { }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Re-encodes a decoded bitmap to PNG for the OS now-playing surface. Radio favicons
-    /// arrive in formats Skia decodes but Windows' WIC (which renders the SMTC thumbnail)
-    /// can't - WEBP, some ICOs - so the app showed the logo while the OS silently dropped
-    /// it. Pushing the bitmap we already decoded, re-encoded as PNG, guarantees a format
-    /// every platform's imaging can read. Falls back to the original bytes on failure.
-    /// </summary>
-    private static byte[] ToOsArtworkBytes(Bitmap bitmap, byte[] fallback)
-    {
-        try
-        {
-            using var ms = new MemoryStream();
-            bitmap.Save(ms);   // Avalonia writes PNG
-            return ms.Length > 0 ? ms.ToArray() : fallback;
-        }
-        catch
-        {
-            return fallback;
-        }
-    }
 
 
     #endregion
@@ -6909,7 +6811,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                 // Store cover art for playback display. Keep the raw bytes too - the
                 // macOS Now Playing widget needs them to build an MPMediaItemArtwork.
-                _cdCoverArt = discInfo.CoverArtBytes != null ? BitmapFromBytes(discInfo.CoverArtBytes) : null;
+                _cdCoverArt = discInfo.CoverArtBytes != null ? ArtworkSource.BitmapFromBytes(discInfo.CoverArtBytes) : null;
                 _cdCoverArtBytes = discInfo.CoverArtBytes;
 
                 // Surface the disc's details in the CD-view info bar.
@@ -8500,7 +8402,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
                     if (!artByFeed.TryGetValue(feedId, out var coverPath))
                     {
-                        coverPath = TryDownloadShowArt(sub?.ImageUrl);
+                        coverPath = ArtworkSource.DownloadShowArtToTempFile(sub?.ImageUrl);
                         artByFeed[feedId] = coverPath;
                     }
 
@@ -8637,10 +8539,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 {
                     try
                     {
-                        var bytes = ExtractAlbumArtBytes(t.FilePath!);
+                        var bytes = ArtworkSource.EmbeddedArt(t.FilePath!);
                         if (bytes is { Length: > 0 })
                         {
-                            bmp = BitmapFromBytes(bytes);
+                            bmp = ArtworkSource.BitmapFromBytes(bytes);
                         }
                     }
                     catch (Exception ex)
