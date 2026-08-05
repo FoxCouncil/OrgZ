@@ -235,6 +235,15 @@ internal static unsafe class ButtonPressedHandlerFactory
     {
         s_callback = callback;
 
+        // Creating a second handler without releasing the first leaked the old block
+        // (and left SMTC holding a pointer nothing tracked). Release our construction
+        // reference on it first; it frees once SMTC lets go too.
+        if (s_instance != IntPtr.Zero)
+        {
+            ReleaseCore(s_instance);
+            s_instance = IntPtr.Zero;
+        }
+
         if (s_vtable == IntPtr.Zero)
         {
             s_vtable = (IntPtr)NativeMemory.AllocZeroed((nuint)(4 * IntPtr.Size));
@@ -252,12 +261,19 @@ internal static unsafe class ButtonPressedHandlerFactory
         return s_instance;
     }
 
+    /// <summary>
+    /// Drops OUR reference to the handler. The memory is freed by the last
+    /// <see cref="Release"/> - which may well be SMTC's, after we're gone.
+    /// Freeing unconditionally here (as this used to) meant that if the OS still
+    /// held a reference - e.g. because remove_ButtonPressed failed, whose hr is
+    /// ignored - its next Release wrote into freed memory.
+    /// </summary>
     internal static void Destroy()
     {
         s_callback = null;
         if (s_instance != IntPtr.Zero)
         {
-            NativeMemory.Free((void*)s_instance);
+            ReleaseCore(s_instance);
             s_instance = IntPtr.Zero;
         }
     }
@@ -282,9 +298,21 @@ internal static unsafe class ButtonPressedHandlerFactory
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
-    private static uint Release(IntPtr thisPtr)
+    private static uint Release(IntPtr thisPtr) => ReleaseCore(thisPtr);
+
+    /// <summary>
+    /// The managed-callable body of <see cref="Release"/> (an UnmanagedCallersOnly method
+    /// can only be entered from native code). COM's contract: the object frees ITSELF when
+    /// its last reference goes.
+    /// </summary>
+    private static uint ReleaseCore(IntPtr thisPtr)
     {
-        return (uint)Interlocked.Decrement(ref *(int*)(thisPtr + IntPtr.Size));
+        var remaining = (uint)Interlocked.Decrement(ref *(int*)(thisPtr + IntPtr.Size));
+        if (remaining == 0)
+        {
+            NativeMemory.Free((void*)thisPtr);
+        }
+        return remaining;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]

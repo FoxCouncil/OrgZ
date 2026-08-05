@@ -37,8 +37,9 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
     public event Action? NextRequested;
     public event Action? PreviousRequested;
     public event Action? StopRequested;
-    // macOS has no "raise the app from the widget" command; declared for the interface, never fired.
-    public event Action? RaiseRequested;
+    // macOS has no "raise the app from the widget" command - no-op accessors say so in
+    // the code instead of leaving an event nothing can ever invoke.
+    public event Action? RaiseRequested { add { } remove { } }
 
     // Cached selector / class pointers. Once registered with the Objective-C
     // runtime these are valid for the lifetime of the process, so we resolve
@@ -56,7 +57,9 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
     private readonly IntPtr _selDictInit;
     private readonly IntPtr _selRelease;
 
-    private readonly bool _initialized;
+    // Not readonly: Dispose clears it so the publish paths go inert once the remote
+    // commands are unwired.
+    private bool _initialized;
 
     // MPNowPlayingPlaybackState values per Apple's MediaPlayer headers.
     private const long MPNowPlayingPlaybackStateUnknown = 0;
@@ -193,6 +196,9 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
             return;
         }
 
+        // Every autoreleased object this method makes belongs to THIS pool - without
+        // one they accumulate for the process lifetime (see the P/Invoke declarations).
+        var pool = objc_autoreleasePoolPush();
         try
         {
             var dict = objc_msgSend_IntPtr(_nsMutableDictClass, _selDictAlloc);
@@ -227,6 +233,10 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
         catch (Exception ex)
         {
             _log.Warning(ex, "MacNowPlayingService.Publish threw");
+        }
+        finally
+        {
+            objc_autoreleasePoolPop(pool);
         }
     }
 
@@ -333,9 +343,50 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
 
     public void Dispose()
     {
-        // Nothing to release: cached selectors/classes are process-globals owned
-        // by the Objective-C runtime, and the singleton info center is not ours
-        // to retain or release.
+        // Cached selectors/classes are process-globals owned by the Objective-C runtime,
+        // and the singleton info center isn't ours to release - but the remote-command
+        // targets ARE ours, and leaving them wired meant the OS kept invoking handlers
+        // into a service the app had already torn down.
+        if (!_initialized)
+        {
+            return;
+        }
+
+        try
+        {
+            var commandCenter = objc_msgSend_IntPtr(
+                objc_getClass("MPRemoteCommandCenter"),
+                sel_registerName("sharedCommandCenter"));
+
+            if (commandCenter != IntPtr.Zero && _targetInstance != IntPtr.Zero)
+            {
+                foreach (var command in new[]
+                {
+                    "playCommand", "pauseCommand", "togglePlayPauseCommand",
+                    "nextTrackCommand", "previousTrackCommand", "stopCommand",
+                })
+                {
+                    var handle = objc_msgSend_IntPtr(commandCenter, sel_registerName(command));
+                    if (handle != IntPtr.Zero)
+                    {
+                        objc_msgSend_IntPtr_IntPtr(handle, sel_registerName("removeTarget:"), _targetInstance);
+                    }
+                }
+            }
+
+            if (ReferenceEquals(_current, this))
+            {
+                _current = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "MacNowPlayingService.Dispose could not unwire the remote commands");
+        }
+        finally
+        {
+            _initialized = false;
+        }
     }
 
     private IntPtr NSString(string value)
@@ -478,6 +529,17 @@ public sealed class MacNowPlayingService : INowPlayingIntegration
 
     [DllImport(Libobjc, EntryPoint = "objc_getClass", CharSet = CharSet.Ansi)]
     private static extern IntPtr objc_getClass(string name);
+
+    // Publish creates autoreleased objects (stringWithUTF8String:, numberWithDouble:,
+    // dataWithBytes:length:) and runs on OrgZ's own threads, which have no ambient
+    // autorelease pool - so those objects had nothing to drain them and leaked on
+    // every call. SetPlaybackPosition publishes about once a second for the whole
+    // session, so this was a steady drip for the life of the app.
+    [DllImport(Libobjc, EntryPoint = "objc_autoreleasePoolPush")]
+    private static extern IntPtr objc_autoreleasePoolPush();
+
+    [DllImport(Libobjc, EntryPoint = "objc_autoreleasePoolPop")]
+    private static extern void objc_autoreleasePoolPop(IntPtr pool);
 
     [DllImport(Libobjc, EntryPoint = "sel_registerName", CharSet = CharSet.Ansi)]
     private static extern IntPtr sel_registerName(string name);

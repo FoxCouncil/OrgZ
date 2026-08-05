@@ -15,14 +15,18 @@ internal sealed class SmtcNowPlaying : INowPlayingIntegration
     private readonly SmtcService _smtc = new();
     private NowPlayingMetadata? _current;
 
-    // SMTC only surfaces PlayPause / Next / Previous; the rest are declared for the interface.
-    public event Action? PlayRequested;
-    public event Action? PauseRequested;
+    // SMTC only surfaces PlayPause / Next / Previous. The rest are the interface's, and
+    // Windows never raises them - declared with no-op accessors so that's stated in the
+    // CODE (and so the compiler stops warning about events nothing ever fires) rather
+    // than in a comment a subscriber would never read.
+    public event Action? PlayRequested { add { } remove { } }
+    public event Action? PauseRequested { add { } remove { } }
+    public event Action? StopRequested { add { } remove { } }
+    public event Action? RaiseRequested { add { } remove { } }
+
     public event Action? PlayPauseRequested;
     public event Action? NextRequested;
     public event Action? PreviousRequested;
-    public event Action? StopRequested;
-    public event Action? RaiseRequested;
 
     /// <summary>Diagnostics string from the underlying SMTC init attempt.</summary>
     public string? Diagnostics => _smtc.InitDiagnostics;

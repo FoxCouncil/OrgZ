@@ -436,46 +436,25 @@ public sealed class MprisService : INowPlayingIntegration
             context.Reply(writer.CreateMessage());
         }
 
+        /// <summary>
+        /// One property, looked up in the SAME table GetAll builds. Spelling the values
+        /// out twice meant every future property had to be added in two places - and the
+        /// Player branch read status and metadata under two separate lock acquisitions,
+        /// exactly the torn snapshot PlayerProperties was fixed to avoid.
+        /// </summary>
         private VariantValue? LookupProperty(string? interfaceName, string? propName)
         {
-            if (interfaceName == RootInterface)
+            if (propName is null)
             {
-                return propName switch
-                {
-                    "CanQuit"              => VariantValue.Bool(false),
-                    "CanRaise"             => VariantValue.Bool(true),
-                    "HasTrackList"         => VariantValue.Bool(false),
-                    "Identity"             => VariantValue.String("OrgZ"),
-                    "SupportedUriSchemes"  => StringArrayVariant("file"),
-                    "SupportedMimeTypes"   => StringArrayVariant(SupportedMimeTypes),
-                    _ => null,
-                };
+                return null;
             }
 
-            if (interfaceName == PlayerInterface)
-            {
-                return propName switch
-                {
-                    "PlaybackStatus" => VariantValue.String(_svc.SnapshotPlaybackStatus()),
-                    "LoopStatus"     => VariantValue.String("None"),
-                    "Rate"           => VariantValue.Double(1.0),
-                    "Shuffle"        => VariantValue.Bool(false),
-                    "Metadata"       => _svc.BuildMetadataVariant(),
-                    "Volume"         => VariantValue.Double(1.0),
-                    "Position"       => VariantValue.Int64(0),
-                    "MinimumRate"    => VariantValue.Double(1.0),
-                    "MaximumRate"    => VariantValue.Double(1.0),
-                    "CanGoNext"      => VariantValue.Bool(true),
-                    "CanGoPrevious"  => VariantValue.Bool(true),
-                    "CanPlay"        => VariantValue.Bool(true),
-                    "CanPause"       => VariantValue.Bool(true),
-                    "CanSeek"        => VariantValue.Bool(false),
-                    "CanControl"     => VariantValue.Bool(true),
-                    _ => null,
-                };
-            }
+            Dictionary<string, VariantValue>? table =
+                interfaceName == RootInterface ? RootProperties()
+                : interfaceName == PlayerInterface ? _svc.PlayerProperties()
+                : null;
 
-            return null;
+            return table is not null && table.TryGetValue(propName, out var value) ? value : (VariantValue?)null;
         }
 
         private static Dictionary<string, VariantValue> RootProperties() => new()
