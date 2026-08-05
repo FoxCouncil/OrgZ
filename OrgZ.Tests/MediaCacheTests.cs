@@ -342,6 +342,20 @@ public class MediaCacheTests : IDisposable
     }
 
     [Fact]
+    public void RemoveLibraryFiles_CleansPlaylistMemberships()
+    {
+        // The schema's ON DELETE CASCADE never fires (foreign_keys is off per connection),
+        // so the delete path must clean memberships itself - ghosts used to pile up forever.
+        SeedMedia("x");
+        var p = MediaCache.CreatePlaylist("MyList");
+        MediaCache.AddTrackToPlaylist(p, "x");
+
+        MediaCache.RemoveLibraryFiles(["x"]);
+
+        Assert.Empty(MediaCache.GetPlaylistTrackIds(p));
+    }
+
+    [Fact]
     public void RestoreMedia_DoesNotRestorePlaylistMemberships()
     {
         SeedMedia("x");

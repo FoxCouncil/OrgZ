@@ -2,11 +2,14 @@
 
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Serilog;
 
 namespace OrgZ.Services;
 
 public static class MediaCache
 {
+    private static readonly ILogger _log = Logging.For("MediaCache");
+
     private static readonly string DefaultCacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
     private static string CacheDirectory { get; set; } = DefaultCacheDirectory;
     private static string CacheFilePath { get; set; } = Path.Combine(DefaultCacheDirectory, "library.db");
@@ -185,6 +188,26 @@ public static class MediaCache
         MigrateAddColumns(connection);
         MigrateAddCdCacheColumns(connection);
         MigrateAddPlaylistColumns(connection);
+        PurgeOrphanedPlaylistTracks(connection);
+    }
+
+    /// <summary>
+    /// Standing invariant repair: PlaylistTracks declares ON DELETE CASCADE, but SQLite only
+    /// honors it when <c>PRAGMA foreign_keys</c> is on for the deleting connection - which it
+    /// historically wasn't, so every RemoveLibraryFiles left ghost membership rows behind
+    /// forever. The delete paths now clean up in-transaction; this sweeps the ghosts already
+    /// accumulated (and any a future path forgets). Cheap: the table is small and the subquery
+    /// hits Media's primary key.
+    /// </summary>
+    private static void PurgeOrphanedPlaylistTracks(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM PlaylistTracks WHERE MediaId NOT IN (SELECT Id FROM Media)";
+        var purged = cmd.ExecuteNonQuery();
+        if (purged > 0)
+        {
+            _log.Information("Purged {Count} orphaned playlist membership row(s)", purged);
+        }
     }
 
     /// <summary>
@@ -438,6 +461,19 @@ public static class MediaCache
 
         foreach (var id in idList)
         {
+            // The schema's ON DELETE CASCADE never fires (foreign_keys is off on this
+            // connection), so playlist memberships are cleaned up explicitly - same
+            // pattern as IgnoreMedia. Without this, deleted tracks haunt playlists as
+            // invisible ghost rows forever. The EXISTS mirrors the Kind guard below: an
+            // id that won't be deleted must not lose its membership either.
+            using var cleanup = connection.CreateCommand();
+            cleanup.CommandText = """
+                DELETE FROM PlaylistTracks WHERE MediaId = @Id
+                    AND EXISTS (SELECT 1 FROM Media WHERE Id = @Id AND Kind IN ('Music', 'Audiobook'))
+                """;
+            cleanup.Parameters.AddWithValue("@Id", id);
+            cleanup.ExecuteNonQuery();
+
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "DELETE FROM Media WHERE Id = @Id AND Kind IN ('Music', 'Audiobook')";
             cmd.Parameters.AddWithValue("@Id", id);
