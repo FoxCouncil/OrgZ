@@ -147,17 +147,22 @@ public sealed class TlsHttpServer : IDisposable
         {
             await using var ssl = new SslStream(client.GetStream(), leaveInnerStreamOpen: false);
 
-            using var handshakeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            handshakeCts.CancelAfter(TimeSpan.FromSeconds(10));
+            // One deadline covers the whole connection SETUP - handshake AND request head.
+            // The head read used to run on the server-lifetime token only, so a peer that
+            // completed the handshake and then sent nothing pinned a connection forever
+            // (slowloris shape). Streaming after the head has no deadline by design -
+            // audio streams are legitimately long.
+            using var setupCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            setupCts.CancelAfter(TimeSpan.FromSeconds(10));
             await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
             {
                 ServerCertificate = _certificate,
                 ClientCertificateRequired = false,
-            }, handshakeCts.Token);
+            }, setupCts.Token);
 
-            if (await ReadRequestAsync(ssl, ct) is not { } request)
+            if (await ReadRequestAsync(ssl, setupCts.Token) is not { } request)
             {
-                return;   // not our HTTP - drop without ceremony
+                return;   // not our HTTP (or too slow to say so) - drop without ceremony
             }
 
             var response = new Response(ssl);
@@ -167,6 +172,11 @@ public sealed class TlsHttpServer : IDisposable
             }
             catch (Exception ex)
             {
+                // The server owns the 500 path - handlers just throw. Warning, not Debug:
+                // a handler that fails on EVERY request (as the LocalSystem empty-library
+                // bug did) must not be invisible. Answering 500 makes the failure diagnose
+                // as a server problem instead of a network one; mid-stream failures
+                // (headers already sent) just drop the connection.
                 _log.Warning(ex, "share request failed for {Path}", request.Path);
                 if (!response.HeadersSent)
                 {
@@ -192,15 +202,21 @@ public sealed class TlsHttpServer : IDisposable
     {
         var buffer = new byte[MaxHeadBytes];
         var filled = 0;
+        var searchFrom = 3;
         int headEnd;
 
         while (true)
         {
-            headEnd = FindHeadEnd(buffer.AsSpan(0, filled));
+            headEnd = FindHeadEnd(buffer.AsSpan(0, filled), searchFrom);
             if (headEnd >= 0)
             {
                 break;
             }
+            // Resume the scan where it left off (the terminator can span the read
+            // boundary by at most 3 bytes) - a byte-at-a-time sender used to make the
+            // accumulation O(N²) in comparisons.
+            searchFrom = Math.Max(3, filled - 3);
+
             if (filled == buffer.Length)
             {
                 return null;   // head larger than the cap
@@ -217,9 +233,9 @@ public sealed class TlsHttpServer : IDisposable
         return ParseHead(Encoding.ASCII.GetString(buffer, 0, headEnd));
     }
 
-    private static int FindHeadEnd(ReadOnlySpan<byte> data)
+    private static int FindHeadEnd(ReadOnlySpan<byte> data, int from)
     {
-        for (var i = 3; i < data.Length; i++)
+        for (var i = Math.Max(3, from); i < data.Length; i++)
         {
             if (data[i] == (byte)'\n' && data[i - 1] == (byte)'\r' && data[i - 2] == (byte)'\n' && data[i - 3] == (byte)'\r')
             {

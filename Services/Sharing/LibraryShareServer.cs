@@ -97,58 +97,80 @@ public sealed class LibraryShareServer : IDisposable
 
     private async Task HandleRequestAsync(TlsHttpServer.Request request, TlsHttpServer.Response response)
     {
-        try
+        // No try/catch here: TlsHttpServer owns the 500 path (it logs the failure and
+        // answers 500 when the head hasn't gone out yet) - two layers doing it meant
+        // two places to keep the behaviour in sync.
+
+        // Read-only share: anything that isn't a GET/HEAD is refused outright.
+        if (request.Method is not ("GET" or "HEAD"))
         {
-            // Read-only share: anything that isn't a GET/HEAD is refused outright.
-            if (request.Method is not ("GET" or "HEAD"))
-            {
-                response.StatusCode = 405;
-                response.ContentLength64 = 0;
-                await response.CloseAsync();
-                return;
-            }
-
-            var path = request.Path;
-
-            if (path.Equals("/catalogue", StringComparison.OrdinalIgnoreCase))
-            {
-                await WriteJsonAsync(response, BuildCatalogueJson(ShareName, _loadLibrary()));
-                return;
-            }
-
-            if (path.Equals("/playlists", StringComparison.OrdinalIgnoreCase))
-            {
-                await WriteJsonAsync(response, BuildPlaylistsJson(_loadPlaylists()));
-                return;
-            }
-
-            if (TryParseSegment(path, "/stream/", out var streamId))
-            {
-                await ServeStreamAsync(request, response, streamId);
-                return;
-            }
-
-            if (TryParseSegment(path, "/art/", out var artId))
-            {
-                await ServeArtAsync(request, response, artId);
-                return;
-            }
-
-            response.StatusCode = 404;
+            response.StatusCode = 405;
             response.ContentLength64 = 0;
             await response.CloseAsync();
+            return;
         }
-        catch (Exception ex) when (!response.HeadersSent)
+
+        var path = request.Path;
+
+        if (path.Equals("/catalogue", StringComparison.OrdinalIgnoreCase))
         {
-            // Warning, not Debug: a handler that fails on EVERY request (as the
-            // LocalSystem empty-library bug did) must not be invisible. Answer 500 -
-            // a dropped connection diagnoses as a network problem instead of a server
-            // one. Mid-stream failures (headers already sent) propagate to the server,
-            // which just drops the connection.
-            _log.Warning(ex, "share request failed for {Path}", request.Path);
-            response.StatusCode = 500;
-            response.ContentLength64 = 0;
-            await response.CloseAsync();
+            await WriteJsonAsync(response, BuildCatalogueJson(ShareName, Snapshot().Library));
+            return;
+        }
+
+        if (path.Equals("/playlists", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteJsonAsync(response, BuildPlaylistsJson(_loadPlaylists()));
+            return;
+        }
+
+        if (TryParseSegment(path, "/stream/", out var streamId))
+        {
+            await ServeStreamAsync(request, response, streamId);
+            return;
+        }
+
+        if (TryParseSegment(path, "/art/", out var artId))
+        {
+            await ServeArtAsync(request, response, artId);
+            return;
+        }
+
+        response.StatusCode = 404;
+        response.ContentLength64 = 0;
+        await response.CloseAsync();
+    }
+
+    // ── Library snapshot ─────────────────────────────────────
+    // Every /stream/{id} Range request used to re-read the ENTIRE library from SQLite
+    // and linear-scan it (twice, counting the extension-stripped retry); a seeking
+    // client fires dozens of those a minute. The library changes far slower than
+    // requests arrive, so a short-TTL snapshot with an id index serves the hot path,
+    // and the TTL keeps a just-imported track reachable within seconds.
+    private static readonly TimeSpan SnapshotTtl = TimeSpan.FromSeconds(5);
+    private readonly object _snapshotGate = new();
+    private List<MediaItem>? _snapshotLibrary;
+    private Dictionary<string, MediaItem>? _snapshotById;
+    private long _snapshotExpires;
+
+    private (List<MediaItem> Library, Dictionary<string, MediaItem> ById) Snapshot()
+    {
+        lock (_snapshotGate)
+        {
+            if (_snapshotLibrary is null || Environment.TickCount64 >= _snapshotExpires)
+            {
+                _snapshotLibrary = _loadLibrary();
+                _snapshotById = new Dictionary<string, MediaItem>(_snapshotLibrary.Count, StringComparer.Ordinal);
+                foreach (var track in _snapshotLibrary)
+                {
+                    // TryAdd keeps the FIRST occurrence, matching the linear scan's
+                    // behaviour if two rows ever carried the same id.
+                    _snapshotById.TryAdd(track.Id, track);
+                }
+                _snapshotExpires = Environment.TickCount64 + (long)SnapshotTtl.TotalMilliseconds;
+            }
+
+            return (_snapshotLibrary, _snapshotById!);
         }
     }
 
@@ -163,7 +185,7 @@ public sealed class LibraryShareServer : IDisposable
 
     private async Task ServeArtAsync(TlsHttpServer.Request request, TlsHttpServer.Response response, string id)
     {
-        var track = ResolveTrack(_loadLibrary(), id);
+        var track = ResolveTrack(Snapshot().ById, id);
         if (track?.FilePath is null || AlbumArtWriter.ReadArtwork(track.FilePath) is not { } art)
         {
             // No art is a perfectly ordinary answer - the client shows the placeholder.
@@ -186,7 +208,7 @@ public sealed class LibraryShareServer : IDisposable
 
     private async Task ServeStreamAsync(TlsHttpServer.Request request, TlsHttpServer.Response response, string id)
     {
-        var track = ResolveTrack(_loadLibrary(), id);
+        var track = ResolveTrack(Snapshot().ById, id);
         if (track?.FilePath is null || !File.Exists(track.FilePath))
         {
             response.StatusCode = 404;
@@ -270,12 +292,22 @@ public sealed class LibraryShareServer : IDisposable
     /// </summary>
     internal static MediaItem? ResolveTrack(IReadOnlyList<MediaItem> library, string segment)
     {
+        // List overload kept for the unit tests' convenience; the server's hot path
+        // resolves against the snapshot's id index below.
+        var byId = new Dictionary<string, MediaItem>(library.Count, StringComparer.Ordinal);
         foreach (var track in library)
         {
-            if (string.Equals(track.Id, segment, StringComparison.Ordinal))
-            {
-                return track;
-            }
+            byId.TryAdd(track.Id, track);
+        }
+        return ResolveTrack(byId, segment);
+    }
+
+    /// <inheritdoc cref="ResolveTrack(IReadOnlyList{MediaItem}, string)"/>
+    internal static MediaItem? ResolveTrack(IReadOnlyDictionary<string, MediaItem> byId, string segment)
+    {
+        if (byId.TryGetValue(segment, out var track))
+        {
+            return track;
         }
 
         var dot = segment.LastIndexOf('.');
@@ -284,16 +316,7 @@ public sealed class LibraryShareServer : IDisposable
             return null;
         }
 
-        var stripped = segment[..dot];
-        foreach (var track in library)
-        {
-            if (string.Equals(track.Id, stripped, StringComparison.Ordinal))
-            {
-                return track;
-            }
-        }
-
-        return null;
+        return byId.TryGetValue(segment[..dot], out track) ? track : null;
     }
 
     internal readonly record struct ByteRange(long Start, long End);

@@ -184,7 +184,33 @@ public static class ShareStreamRelay
             if (context.Request.HttpMethod != "HEAD")
             {
                 await using var body = await remote.Content.ReadAsStreamAsync();
-                await body.CopyToAsync(context.Response.OutputStream);
+                // Idle deadline per READ, not per stream: audio bodies are legitimately
+                // hours long, but a healthy remote never goes 30s without producing a
+                // byte. The bare CopyToAsync had no deadline at all (ResponseHeadersRead
+                // scopes the client timeout to the HEADERS), so a stalled host held the
+                // loopback connection open forever.
+                var buffer = new byte[81920];
+                while (true)
+                {
+                    int read;
+                    using (var idle = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+                    {
+                        try
+                        {
+                            read = await body.ReadAsync(buffer, idle.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw new TimeoutException($"remote produced no bytes for 30s: {remoteUrl}");
+                        }
+                    }
+
+                    if (read <= 0)
+                    {
+                        break;
+                    }
+                    await context.Response.OutputStream.WriteAsync(buffer.AsMemory(0, read));
+                }
             }
 
             context.Response.Close();
