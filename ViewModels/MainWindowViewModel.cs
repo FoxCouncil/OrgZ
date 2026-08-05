@@ -4266,6 +4266,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// such a device, the same "already there, adding is a no-op" cue the Add-to-Playlist submenu
     /// gives for the current playlist.
     /// </summary>
+    /// <summary>
+    /// The favorites that can actually be burned or synced: favorited MUSIC with a local file.
+    /// Burn, sync-plan, mirror-prune and the playlist header each spelled this predicate out,
+    /// so a change to what "syncable favorite" means (audiobooks? shared tracks?) had to be
+    /// made five times or the four surfaces would quietly disagree about the same playlist.
+    /// </summary>
+    private List<MediaItem> FavoriteMusicFiles()
+        => _allItems.Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath)).ToList();
+
     internal bool IsItemAlreadyOnDevice(MediaItem item, ConnectedDevice device)
     {
         var key = NormalizeMatchKey(item.Artist, item.Title);
@@ -4951,9 +4960,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         else if (playlistItem.IsFavorites)
         {
-            tracks = _allItems
-                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
-                .ToList();
+            tracks = FavoriteMusicFiles();
         }
         else
         {
@@ -7336,29 +7343,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _downloadOwnsLcd;
 
     private void OnPodcastDownloadStarted(Models.PodcastEpisode ep)
-    {
-        var wasIdle = _activeDownloads.Count == 0;
-        _activeDownloads[ep.Id] = (ep.Title ?? string.Empty, 0);
-        if (wasIdle && !IsBusy)
-        {
-            _downloadOwnsLcd = true;
-            BeginLcdBusy("Downloading");
-        }
-        if (_downloadOwnsLcd)
-        {
-            UpdateDownloadLcd();
-        }
-    }
+        => UpsertDownload(ep.Id, ep.Title ?? string.Empty, 0);
 
     private void OnPodcastDownloadProgress(Services.Podcast.DownloadProgress p)
+        => UpsertDownload(p.EpisodeId, p.Title, p.Fraction);
+
+    /// <summary>
+    /// Records a download's progress and claims the busy LCD on the first one. Started and
+    /// Progress were the same twelve lines apart from which tuple they wrote - so the
+    /// LCD-ownership rule existed twice and could drift on one path only.
+    /// </summary>
+    private void UpsertDownload(long episodeId, string title, double fraction)
     {
         var wasIdle = _activeDownloads.Count == 0;
-        _activeDownloads[p.EpisodeId] = (p.Title, p.Fraction);
+        _activeDownloads[episodeId] = (title, fraction);
+
         if (wasIdle && !IsBusy)
         {
             _downloadOwnsLcd = true;
             BeginLcdBusy("Downloading");
         }
+
         if (_downloadOwnsLcd)
         {
             UpdateDownloadLcd();
@@ -8111,9 +8116,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 ct.ThrowIfCancellationRequested();
                 if (plan.Favorites && ipod.SupportsTrackAdd)
                 {
-                    var favorites = _allItems
-                        .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
-                        .ToList();
+                    var favorites = FavoriteMusicFiles();
                     if (favorites.Count > 0)
                     {
                         await SyncPlaylistToDeviceAsync("Favorites", favorites, dev);
@@ -8206,7 +8209,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (plan.Favorites)
         {
-            foreach (var f in _allItems.Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath)))
+            foreach (var f in FavoriteMusicFiles())
             {
                 Note(f);
             }
@@ -8579,9 +8582,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (SelectedSidebarItem?.IsFavorites == true)
         {
-            return _allItems
-                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
-                .ToList();
+            return FavoriteMusicFiles();
         }
 
         return [];
@@ -8606,9 +8607,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         else if (item?.IsFavorites == true)
         {
-            tracks = _allItems
-                .Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath))
-                .ToList();
+            tracks = FavoriteMusicFiles();
             name = item.Name;
             source = "Favorites";
         }
