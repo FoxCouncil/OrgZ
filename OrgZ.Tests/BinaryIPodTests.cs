@@ -67,6 +67,69 @@ public class BinaryIPodTests
         }
     }
 
+    [Fact]
+    public async Task Batch_write_defers_everything_to_one_commit_on_dispose()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-binbatch-" + Guid.NewGuid().ToString("N"));
+        var iTunesDir = Path.Combine(mount, "iPod_Control", "iTunes");
+        var musicF00 = Path.Combine(mount, "iPod_Control", "Music", "F00");
+        Directory.CreateDirectory(iTunesDir);
+        Directory.CreateDirectory(musicF00);
+        var dbPath = Path.Combine(iTunesDir, "iTunesDB");
+        try
+        {
+            var doc = ITunesDbWriter.CreateEmpty();
+            ITunesDbWriter.AddTrack(doc, Track(1));
+            ITunesDbWriter.AddTrack(doc, Track(2));
+            ITunesDbChunkTree.Normalize(doc.Root);
+            File.WriteAllBytes(dbPath, ITunesDbChunkTree.Serialize(doc));
+            File.WriteAllBytes(Path.Combine(musicF00, "T1.m4a"), new byte[100]);
+            File.WriteAllBytes(Path.Combine(musicF00, "T2.m4a"), new byte[100]);
+
+            var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, IpodGeneration = "1G", Name = "iPod 1G" };
+            var ipod = new BinaryIPod(device);
+            var lib = await ipod.ReadLibraryAsync();
+            var t1 = lib.Tracks.Single(t => t.Title == "Track 1");
+
+            var before = File.ReadAllBytes(dbPath);
+            using (ipod.BeginBatchWrite())
+            {
+                await ipod.CreatePlaylistAsync("Batched PL", [.. lib.Tracks]);
+                await ipod.RemoveTrackAsync(t1);
+
+                // NOTHING may reach the disk mid-batch: the database is untouched and
+                // the removed track's audio still exists (its delete is deferred so a
+                // failed commit can't leave the db pointing at missing audio).
+                Assert.Equal(before, File.ReadAllBytes(dbPath));
+                Assert.True(File.Exists(Path.Combine(musicF00, "T1.m4a")));
+            }
+
+            // ONE commit carried everything: playlist present, track gone (db + audio).
+            ITunesDbReader.ReadAll(dbPath, mount, out var tracks, out var playlists);
+            Assert.Single(tracks);
+            Assert.DoesNotContain(tracks, t => t.Title == "Track 1");
+            Assert.Contains(playlists, p => p.Name == "Batched PL");
+            Assert.False(File.Exists(Path.Combine(musicF00, "T1.m4a")));
+
+            // The scope is reopenable once closed.
+            using (ipod.BeginBatchWrite())
+            {
+            }
+        }
+        finally
+        {
+            Directory.Delete(mount, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_second_batch_on_the_same_mount_is_refused()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-binbatch2-" + Guid.NewGuid().ToString("N"));
+        using var open = IPodTrackImporter.BeginBinaryBatch(mount, null, null);
+        Assert.Throws<InvalidOperationException>(() => IPodTrackImporter.BeginBinaryBatch(mount, null, null));
+    }
+
     private static NewTrack Track(uint id) => new()
     {
         TrackId = id,

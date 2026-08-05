@@ -211,8 +211,10 @@ public static class IPodTrackImporter
             var (hasArt, artSize, _) = await TryWriteArtworkAsync(mountPath, sourceFile, ffmpegPath, dbid, coverFormats, ct);
 
             // --- iTunesDB: parse -> add -> normalize -> verify -> backup -> atomic write ---
+            // (or, under an open batch: add into the ONE parsed doc and let the batch commit.)
             var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
-            var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+            var batch = ActiveBatch(mountPath);
+            var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
 
             uint trackId = ITunesDbWriter.NextTrackId(doc);
             ITunesDbWriter.AddTrack(doc, new NewTrack
@@ -237,11 +239,19 @@ public static class IPodTrackImporter
                 ReplayGainDb = srcReplayGain,   // analyze-at-sync stamps the source before we read it
             });
 
-            var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
-                verify: (vt, _) => vt.Any(t => t.TrackId == trackId),
-                failureMessage: "Re-parse of the new iTunesDB did not contain the added track; aborting write.");
+            if (batch is null)
+            {
+                var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+                    verify: (vt, _) => vt.Any(t => t.TrackId == trackId),
+                    failureMessage: "Re-parse of the new iTunesDB did not contain the added track; aborting write.");
+                _log.Information("Imported '{Title}' as track {Id} -> {IpodPath} ({Bytes} byte DB)", title, trackId, ipodPath, outBytes.Length);
+            }
+            else
+            {
+                batch.RecordTrack(trackId);
+                _log.Information("Imported '{Title}' as track {Id} -> {IpodPath} (batched)", title, trackId, ipodPath);
+            }
 
-            _log.Information("Imported '{Title}' as track {Id} -> {IpodPath} ({Bytes} byte DB)", title, trackId, ipodPath, outBytes.Length);
             return new IPodImportResult(trackId, ipodPath, destFile, title, dbid);
         }
         finally
@@ -262,15 +272,207 @@ public static class IPodTrackImporter
     public static void AddPlaylist(string mountPath, string? generation, string? fireWireGuid, string name, IReadOnlyList<uint> trackIds)
     {
         var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
-        var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+        var batch = ActiveBatch(mountPath);
+        var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
 
         ITunesDbWriter.AddPlaylist(doc, name, trackIds);
 
-        var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
-            verify: (_, playlists) => playlists.Any(p => string.Equals(p.Name, name, StringComparison.Ordinal)),
-            failureMessage: "Re-parse of the new iTunesDB did not contain the playlist; aborting write.");
+        if (batch is null)
+        {
+            var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+                verify: (_, playlists) => playlists.Any(p => string.Equals(p.Name, name, StringComparison.Ordinal)),
+                failureMessage: "Re-parse of the new iTunesDB did not contain the playlist; aborting write.");
+            _log.Information("Wrote playlist '{Name}' ({Count} tracks) to iTunesDB ({Bytes} bytes)", name, trackIds.Count, outBytes.Length);
+        }
+        else
+        {
+            batch.RecordPlaylist(name);
+            _log.Information("Wrote playlist '{Name}' ({Count} tracks) to iTunesDB (batched)", name, trackIds.Count);
+        }
+    }
 
-        _log.Information("Wrote playlist '{Name}' ({Count} tracks) to iTunesDB ({Bytes} bytes)", name, trackIds.Count, outBytes.Length);
+    // ── Binary-tier batch scope ──────────────────────────────
+    // One parsed iTunesDB (and one ArtworkDB rebuild) for a whole sync, committed on
+    // dispose. The per-track shape re-read, re-serialized, re-hashed, and re-verified the
+    // ENTIRE database once per track - the perf cliff every big Classic sync fell off,
+    // and the reason the Nano 5G tier grew BeginCdbBatch. The scope is ambient per MOUNT
+    // (matching the Nano 5G defer): every ImportAsync / AddPlaylist under it participates.
+
+    private static readonly object _batchGate = new();
+    private static readonly Dictionary<string, BinaryBatch> _batches = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static BinaryBatch? ActiveBatch(string mountPath)
+    {
+        lock (_batchGate)
+        {
+            return _batches.TryGetValue(mountPath, out var batch) ? batch : null;
+        }
+    }
+
+    /// <summary>Opens the ambient batch for a mount. One at a time per mount - a second opener is a bug.</summary>
+    public static IDisposable BeginBinaryBatch(string mountPath, string? generation, string? fireWireGuid)
+    {
+        var batch = new BinaryBatch(mountPath, generation, fireWireGuid);
+        lock (_batchGate)
+        {
+            if (!_batches.TryAdd(mountPath, batch))
+            {
+                throw new InvalidOperationException($"A binary iTunesDB batch is already open for {mountPath}.");
+            }
+        }
+        return batch;
+    }
+
+    internal sealed class BinaryBatch(string mountPath, string? generation, string? fireWireGuid) : IDisposable
+    {
+        private ITunesDbDocument? _doc;
+        private bool _dbDirty;
+        private readonly List<uint> _trackIds = [];
+        private readonly List<string> _playlists = [];
+        private readonly List<string> _deferredDeletes = [];
+
+        private List<ArtImage>? _artImages;
+        private bool _artDirty;
+        // .ithmb appends happen live (they're incremental); these remember each file's
+        // pre-batch length so a failed COMMIT can trim the unrecorded bytes back off.
+        private readonly Dictionary<string, long> _ithmbBaselines = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, long> _ithmbEnds = new(StringComparer.OrdinalIgnoreCase);
+
+        private string DbPath => Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
+        private string ArtworkDbPath => Path.Combine(mountPath, "iPod_Control", "Artwork", "ArtworkDB");
+
+        /// <summary>The one parsed database every batched mutation works on.</summary>
+        internal ITunesDbDocument Doc => _doc ??= ITunesDbChunkTree.Parse(File.ReadAllBytes(DbPath));
+
+        internal void RecordTrack(uint trackId)
+        {
+            _trackIds.Add(trackId);
+            _dbDirty = true;
+        }
+
+        internal void RecordPlaylist(string name)
+        {
+            _playlists.Add(name);
+            _dbDirty = true;
+        }
+
+        /// <summary>A doc mutation with nothing to positively verify (a removal): still commits.</summary>
+        internal void MarkDbDirty() => _dbDirty = true;
+
+        /// <summary>
+        /// Defers an audio-file delete until the batch COMMITS. Deleting immediately
+        /// while the batched database still lists the track would - on a failed commit -
+        /// leave a database pointing at audio that no longer exists.
+        /// </summary>
+        internal void DeferFileDelete(string path) => _deferredDeletes.Add(path);
+
+        /// <summary>The ArtworkDB's image list, parsed once; batched art appends into it.</summary>
+        internal List<ArtImage> ArtImages()
+        {
+            if (_artImages is null)
+            {
+                _artImages = [];
+                if (File.Exists(ArtworkDbPath))
+                {
+                    try
+                    {
+                        _artImages = ArtworkDbWriter.ReadImages(ITunesDbChunkTree.Parse(File.ReadAllBytes(ArtworkDbPath)));
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning(ex, "Existing ArtworkDB unreadable; rebuilding from this batch only");
+                    }
+                }
+            }
+            return _artImages;
+        }
+
+        internal void RecordArtImage(ArtImage image)
+        {
+            ArtImages().Add(image);
+            _artDirty = true;
+        }
+
+        /// <summary>Current append offset for an .ithmb file, tracked so batched appends stack correctly.</summary>
+        internal long IthmbEnd(string path)
+        {
+            if (!_ithmbEnds.TryGetValue(path, out var end))
+            {
+                end = File.Exists(path) ? new FileInfo(path).Length : 0;
+                _ithmbBaselines[path] = end;
+                _ithmbEnds[path] = end;
+            }
+            return end;
+        }
+
+        internal void AdvanceIthmb(string path, int bytes) => _ithmbEnds[path] = IthmbEnd(path) + bytes;
+
+        public void Dispose()
+        {
+            lock (_batchGate)
+            {
+                _batches.Remove(mountPath);
+            }
+
+            try
+            {
+                if (_doc is not null && _dbDirty)
+                {
+                    var outBytes = CommitDb(_doc, DbPath, mountPath, generation, fireWireGuid,
+                        verify: (tracks, playlists) =>
+                            _trackIds.All(id => tracks.Any(t => t.TrackId == id))
+                            && _playlists.All(n => playlists.Any(p => string.Equals(p.Name, n, StringComparison.Ordinal))),
+                        failureMessage: "Re-parse of the batched iTunesDB was missing something it added; aborting write.");
+                    _log.Information("Committed batched iTunesDB: {Tracks} track(s), {Playlists} playlist(s), {Bytes} bytes",
+                        _trackIds.Count, _playlists.Count, outBytes.Length);
+                }
+
+                if (_artDirty && _artImages is not null)
+                {
+                    var doc = ArtworkDbWriter.BuildFromImages(_artImages);
+                    ITunesDbChunkTree.Normalize(doc.Root);
+                    var bytes = ITunesDbChunkTree.Serialize(doc);
+                    ITunesDbChunkTree.Parse(bytes);   // sanity: must re-parse
+                    AtomicFile.WriteAllBytes(ArtworkDbPath, bytes, backup: ArtworkDbPath + ".orgzbak");
+                    _log.Information("Committed batched ArtworkDB: {Count} image(s), {Bytes} bytes", _artImages.Count, bytes.Length);
+                }
+
+                // Only a COMMITTED database may lose its audio files (see DeferFileDelete).
+                foreach (var path in _deferredDeletes)
+                {
+                    try
+                    {
+                        if (File.Exists(path))
+                        {
+                            File.Delete(path);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning(ex, "Deferred device-file delete failed for {Path}", path);
+                    }
+                }
+            }
+            catch
+            {
+                // The commit failed: every .ithmb byte appended during this batch is
+                // unrecorded garbage - trim the touched files back to their pre-batch
+                // lengths so a retry starts clean.
+                foreach (var (path, baseline) in _ithmbBaselines)
+                {
+                    try
+                    {
+                        using var trim = new FileStream(path, FileMode.Open, FileAccess.Write);
+                        trim.SetLength(baseline);
+                    }
+                    catch
+                    {
+                        // Best-effort rollback.
+                    }
+                }
+                throw;
+            }
+        }
     }
 
     /// <summary>One downloaded episode to push: local file + the metadata for its podcast MHIT.</summary>
@@ -300,14 +502,28 @@ public static class IPodTrackImporter
             // (Nano 5G+), which this Hash58 path doesn't handle. Fail clearly, don't crash.
             throw new FileNotFoundException($"This iPod has no iTunesDB at '{dbPath}'. Podcast sync currently needs an iTunes-format (binary) database.", dbPath);
         }
-        var dbBytes = File.ReadAllBytes(dbPath);
-        var doc = ITunesDbChunkTree.Parse(dbBytes);
+        // Under an open batch this joins its ONE doc (a private parse would miss the
+        // batch's uncommitted adds and the batch commit would clobber these episodes).
+        var batch = ActiveBatch(mountPath);
+        ITunesDbDocument doc;
+        byte[] dedupBytes;
+        if (batch is null)
+        {
+            dedupBytes = File.ReadAllBytes(dbPath);
+            doc = ITunesDbChunkTree.Parse(dedupBytes);
+        }
+        else
+        {
+            doc = batch.Doc;
+            ITunesDbChunkTree.Normalize(doc.Root);
+            dedupBytes = ITunesDbChunkTree.Serialize(doc);
+        }
 
         // Idempotent re-sync: episodes already on the device (matched by show + title) are skipped so
         // re-syncing the same downloads doesn't duplicate them. Podcast tracks are written with
         // Album = show name, which is the dedup key used below. Reads the same bytes the parse used -
         // no second trip through the file.
-        ITunesDbReader.ReadAll(dbBytes, mountPath, out var existingTracks, out _);
+        ITunesDbReader.ReadAll(dedupBytes, mountPath, out var existingTracks, out _);
         var existing = new HashSet<(string Show, string Title)>(
             existingTracks.Select(t => (t.Album ?? string.Empty, t.Title ?? string.Empty)));
 
@@ -321,9 +537,10 @@ public static class IPodTrackImporter
             {
                 continue;
             }
+            string? destFile = null;
             try
             {
-                var destFile = UniqueTrackPath(destDir, Path.GetExtension(ep.LocalFile));
+                destFile = UniqueTrackPath(destDir, Path.GetExtension(ep.LocalFile));
                 var fileName = Path.GetFileName(destFile);
                 File.Copy(ep.LocalFile, destFile);
 
@@ -353,6 +570,12 @@ public static class IPodTrackImporter
             catch (Exception ex)
             {
                 _log.Warning(ex, "Failed to add podcast {File}", ep.LocalFile);
+                // Don't strand copied audio with no database row behind it - failed
+                // imports used to grow the Music folder with unreachable files forever.
+                if (destFile is not null)
+                {
+                    try { File.Delete(destFile); } catch { /* best-effort */ }
+                }
             }
         }
 
@@ -365,11 +588,22 @@ public static class IPodTrackImporter
         // That show hierarchy is what the iPod's Podcasts menu actually renders.
         ITunesDbWriter.EnsurePodcastPlaylist(doc, podcastEntries);
 
-        var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
-            verify: (vt, _) => vt.Count > 0,
-            failureMessage: "Re-parse of the new iTunesDB produced no tracks; aborting write.");
+        if (batch is null)
+        {
+            var outBytes = CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+                verify: (vt, _) => vt.Count > 0,
+                failureMessage: "Re-parse of the new iTunesDB produced no tracks; aborting write.");
+            _log.Information("Imported {Added} podcast episode(s) to iTunesDB ({Bytes} bytes)", added, outBytes.Length);
+        }
+        else
+        {
+            foreach (var (_, trackId) in podcastEntries)
+            {
+                batch.RecordTrack(trackId);
+            }
+            _log.Information("Imported {Added} podcast episode(s) to iTunesDB (batched)", added);
+        }
 
-        _log.Information("Imported {Added} podcast episode(s) to iTunesDB ({Bytes} bytes)", added, outBytes.Length);
         return added;
     }
 
@@ -394,62 +628,100 @@ public static class IPodTrackImporter
             var artDir = Path.Combine(mountPath, "iPod_Control", "Artwork");
             Directory.CreateDirectory(artDir);
             var dbPath = Path.Combine(artDir, "ArtworkDB");
+            var batch = ActiveBatch(mountPath);
 
-            // Read existing entries so we APPEND this track's art rather than clobber
-            // every other track's (the from-scratch Build would otherwise drop them).
-            var existing = new List<ArtImage>();
-            if (File.Exists(dbPath))
-            {
-                try
-                {
-                    existing = ArtworkDbWriter.ReadImages(ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath)));
-                }
-                catch (Exception ex)
-                {
-                    _log.Warning(ex, "Existing ArtworkDB unreadable; rebuilding from this track only");
-                    existing = [];
-                }
-            }
-            int imageId = ArtworkDbWriter.NextImageId(existing);
-
-            var thumbs = new List<ArtThumb>();
-            int totalSize = 0;
+            // ── Stage phase: extract and validate EVERY format before touching any
+            // .ithmb. The old per-format append meant a failure on format 2 left
+            // format 1's bytes stranded in its file - unrecorded garbage that grew
+            // forever across failed imports.
+            var stagedThumbs = new List<(int FormatId, int W, int H, byte[] Raw)>();
             foreach (var (formatId, w, h) in coverFormats)
             {
                 int expected = w * h * 2;
-                var ithmb = Path.Combine(artDir, $"F{formatId}_1.ithmb");
-                var staged = ithmb + ".new";
-                if (!await ExtractRgb565Async(ffmpegPath, sourceFile, w, h, staged, ct))
+                var stagedPath = Path.Combine(artDir, $"F{formatId}_1.ithmb.new");
+                if (!await ExtractRgb565Async(ffmpegPath, sourceFile, w, h, stagedPath, ct))
                 {
-                    return (false, 0, 0);   // no cover stream / ffmpeg failed
+                    return (false, 0, 0);   // no cover stream / ffmpeg failed - nothing appended
                 }
-                var raw = await File.ReadAllBytesAsync(staged, ct);
-                File.Delete(staged);
+                var raw = await File.ReadAllBytesAsync(stagedPath, ct);
+                File.Delete(stagedPath);
                 if (raw.Length != expected)
                 {
                     _log.Warning("Thumbnail F{Fmt} is {Actual}B, expected {Expected}B", formatId, raw.Length, expected);
                     return (false, 0, 0);
                 }
-                // Append after any existing thumbnails already packed in this format's file.
-                long offset = File.Exists(ithmb) ? new FileInfo(ithmb).Length : 0;
-                try
-                {
-                    await using var fs = new FileStream(ithmb, FileMode.Append, FileAccess.Write);
-                    await fs.WriteAsync(raw, ct);
-                    await fs.FlushAsync(ct);
-                }
-                catch
-                {
-                    // A torn append would leave bytes the about-to-be-written ArtworkDB never
-                    // records; roll the file back to its pre-append length so a retry starts clean.
-                    try { using var t = new FileStream(ithmb, FileMode.Open, FileAccess.Write); t.SetLength(offset); } catch { }
-                    throw;
-                }
-                thumbs.Add(new ArtThumb(formatId, w, h, (int)offset, expected));
-                totalSize += expected;
+                stagedThumbs.Add((formatId, w, h, raw));
             }
 
-            var allImages = new List<ArtImage>(existing) { new(dbid, imageId, thumbs, totalSize) };
+            // Read existing entries so we APPEND this track's art rather than clobber
+            // every other track's (the from-scratch Build would otherwise drop them).
+            // Under a batch the list is parsed once and carried across tracks.
+            List<ArtImage> existing;
+            if (batch is not null)
+            {
+                existing = batch.ArtImages();
+            }
+            else
+            {
+                existing = [];
+                if (File.Exists(dbPath))
+                {
+                    try
+                    {
+                        existing = ArtworkDbWriter.ReadImages(ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath)));
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning(ex, "Existing ArtworkDB unreadable; rebuilding from this track only");
+                        existing = [];
+                    }
+                }
+            }
+            int imageId = ArtworkDbWriter.NextImageId(existing);
+
+            // ── Append phase: every format validated, so appends only fail on I/O -
+            // and then everything appended by THIS call rolls back together.
+            var appended = new List<(string Path, long Offset)>();
+            var thumbs = new List<ArtThumb>();
+            int totalSize = 0;
+            try
+            {
+                foreach (var (formatId, w, h, raw) in stagedThumbs)
+                {
+                    var ithmb = Path.Combine(artDir, $"F{formatId}_1.ithmb");
+                    long offset = batch?.IthmbEnd(ithmb) ?? (File.Exists(ithmb) ? new FileInfo(ithmb).Length : 0);
+
+                    await using (var fs = new FileStream(ithmb, FileMode.Append, FileAccess.Write))
+                    {
+                        await fs.WriteAsync(raw, ct);
+                        await fs.FlushAsync(ct);
+                    }
+
+                    appended.Add((ithmb, offset));
+                    batch?.AdvanceIthmb(ithmb, raw.Length);
+                    thumbs.Add(new ArtThumb(formatId, w, h, (int)offset, raw.Length));
+                    totalSize += raw.Length;
+                }
+            }
+            catch
+            {
+                foreach (var (path, offset) in appended)
+                {
+                    try { using var t = new FileStream(path, FileMode.Open, FileAccess.Write); t.SetLength(offset); } catch { }
+                }
+                throw;
+            }
+
+            var image = new ArtImage(dbid, imageId, thumbs, totalSize);
+
+            if (batch is not null)
+            {
+                batch.RecordArtImage(image);
+                _log.Information("Staged ArtworkDB image {ImageId} (+{Count} thumbnails, {Bytes}B) into the open batch", imageId, thumbs.Count, totalSize);
+                return (true, totalSize, imageId);
+            }
+
+            var allImages = new List<ArtImage>(existing) { image };
             var doc = ArtworkDbWriter.BuildFromImages(allImages);
             ITunesDbChunkTree.Normalize(doc.Root);
             var bytes = ITunesDbChunkTree.Serialize(doc);

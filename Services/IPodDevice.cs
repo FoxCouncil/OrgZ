@@ -380,6 +380,14 @@ public sealed class BinaryIPod : IPodDevice
     public override bool SupportsAudiobooks => true;   // media_type=8 in the binary iTunesDB MHIT
     public override bool SupportsTrackAdd => true;
 
+    /// <summary>
+    /// One parsed iTunesDB (and one ArtworkDB rebuild) for the whole scope - an M-track
+    /// sync used to re-read, re-serialize, re-hash58, and re-verify the entire database
+    /// M times. Same contract the Nano 5G tier's CDB batch has carried since it shipped.
+    /// </summary>
+    public override IDisposable? BeginBatchWrite()
+        => IPodTrackImporter.BeginBinaryBatch(MountPath, Generation, Device.FireWireGuid);
+
     /// <summary>Mirrors <see cref="IPodTrackImporter.ImportAsync"/>'s decision: non-native formats
     /// transcode, and on the ALAC-less 1G/2G an ALAC-in-.m4a source re-encodes to AAC too.</summary>
     public override bool WillTranscode(MediaItem libraryTrack)
@@ -414,18 +422,33 @@ public sealed class BinaryIPod : IPodDevice
                 throw new FileNotFoundException($"This iPod has no iTunesDB at '{dbPath}'.", dbPath);
             }
 
-            var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+            // Under an open batch the removal edits the batch's ONE doc (a fresh parse
+            // here would miss its uncommitted adds, and the batch commit would then
+            // resurrect this track); the audio delete defers until that commit lands.
+            var batch = IPodTrackImporter.ActiveBatch(MountPath);
+            var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
             if (!ITunesDbWriter.RemoveTrack(doc, trackId))
             {
                 throw new InvalidOperationException($"“{item.Title}” isn't in the iPod database.");
             }
 
-            // Same write discipline as the add path: checksum, one-time backup, atomic swap.
-            IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
-
-            if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
+            if (batch is null)
             {
-                File.Delete(item.FilePath);
+                // Same write discipline as the add path: checksum, one-time backup, atomic swap.
+                IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+
+                if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
+                {
+                    File.Delete(item.FilePath);
+                }
+            }
+            else
+            {
+                batch.MarkDbDirty();
+                if (!string.IsNullOrEmpty(item.FilePath))
+                {
+                    batch.DeferFileDelete(item.FilePath);
+                }
             }
         }, ct);
 
@@ -484,9 +507,18 @@ public sealed class BinaryIPod : IPodDevice
             }
             // Reuse the proven drop-by-name (the same call the idempotent playlist re-sync makes), then
             // the standard commit discipline - checksum, one-time backup, atomic swap. Masters are safe.
-            var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+            // Inside an open batch the drop edits the batch doc and rides its single commit.
+            var batch = IPodTrackImporter.ActiveBatch(MountPath);
+            var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
             ITunesDbWriter.RemovePlaylistsByName(doc, name);
-            IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+            if (batch is null)
+            {
+                IPodTrackImporter.CommitDb(doc, dbPath, MountPath, Device.IpodGeneration, Device.FireWireGuid);
+            }
+            else
+            {
+                batch.MarkDbDirty();
+            }
         }, ct);
 
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
