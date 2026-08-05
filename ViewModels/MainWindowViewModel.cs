@@ -5904,7 +5904,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         UpdateMainStatus("Scanning files...");
 
-        var diskFiles = await FileScanner.ScanDirectoryAsync(App.FolderPath, recursive: true);
+        var scan = await FileScanner.ScanDirectoryAsync(App.FolderPath, recursive: true);
+        var diskFiles = scan.Items;
 
         var libraryLookup = _allItems
             .Where(IsLocalLibraryFile)
@@ -5935,13 +5936,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        var deletedItems = _allItems
-            .Where(i => IsLocalLibraryFile(i) && !diskPaths.Contains(i.FilePath!))
-            .ToList();
-
-        foreach (var item in deletedItems)
+        // Deletions are only reconciled from a COMPLETE walk. A partial scan (locked folder,
+        // yanked drive, cancelled) is indistinguishable from a mass delete by content alone -
+        // acting on one wiped ratings, play counts, and playlist rows before this guard existed.
+        List<MediaItem> deletedItems = [];
+        if (scan.Complete)
         {
-            _allItems.Remove(item);
+            deletedItems = _allItems
+                .Where(i => IsLocalLibraryFile(i) && !diskPaths.Contains(i.FilePath!))
+                .ToList();
+
+            foreach (var item in deletedItems)
+            {
+                _allItems.Remove(item);
+            }
+        }
+        else
+        {
+            _log.Warning("Library scan was incomplete; skipping deletion reconciliation this pass");
         }
 
         ApplyFilter();
@@ -5957,9 +5969,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Fold the scanned audiobook files against the acquisition records: adopt user-dropped
         // books (dropping a file into .audiobooks IS the acquire gesture) and forget user-provided
         // records whose files are gone. Store downloads are left as re-downloadable records here.
-        var audiobookFiles = diskFiles.Where(f => f.Kind == MediaKind.Audiobook).Select(f => f.Id).ToList();
-        await Task.Run(() => Services.Audiobooks.AudiobookLibrary.ReconcileUserFiles(App.FolderPath, audiobookFiles));
-        Audiobooks.RefreshOwned();
+        // Same authority rule as above: "forget records whose files are gone" must never run
+        // against a partial file list.
+        if (scan.Complete)
+        {
+            var audiobookFiles = diskFiles.Where(f => f.Kind == MediaKind.Audiobook).Select(f => f.Id).ToList();
+            await Task.Run(() => Services.Audiobooks.AudiobookLibrary.ReconcileUserFiles(App.FolderPath, audiobookFiles));
+            Audiobooks.RefreshOwned();
+        }
 
         UpdateData();
     }

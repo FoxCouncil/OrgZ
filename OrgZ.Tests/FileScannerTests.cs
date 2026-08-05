@@ -111,18 +111,25 @@ public class FileScannerTests : IDisposable
     // ===== ScanDirectoryAsync =====
 
     [Fact]
-    public async Task ScanDirectoryAsync_returns_empty_for_missing_directory()
+    public async Task ScanDirectoryAsync_missing_directory_is_empty_and_NOT_authoritative()
     {
+        // A missing folder can be an unplugged external drive. The result must never read as
+        // "the library is empty now" - that is how every row got mass-deleted once.
         var nonExistent = Path.Combine(_tempDir, "does-not-exist");
-        var items = await FileScanner.ScanDirectoryAsync(nonExistent);
-        Assert.Empty(items);
+        var result = await FileScanner.ScanDirectoryAsync(nonExistent);
+        Assert.Empty(result.Items);
+        Assert.False(result.Complete);
     }
 
     [Fact]
-    public async Task ScanDirectoryAsync_returns_empty_for_null_or_empty_path()
+    public async Task ScanDirectoryAsync_null_or_empty_path_is_empty_and_NOT_authoritative()
     {
-        Assert.Empty(await FileScanner.ScanDirectoryAsync(""));
-        Assert.Empty(await FileScanner.ScanDirectoryAsync(null!));
+        var empty = await FileScanner.ScanDirectoryAsync("");
+        var nul = await FileScanner.ScanDirectoryAsync(null!);
+        Assert.Empty(empty.Items);
+        Assert.False(empty.Complete);
+        Assert.Empty(nul.Items);
+        Assert.False(nul.Complete);
     }
 
     [Fact]
@@ -133,8 +140,10 @@ public class FileScannerTests : IDisposable
         Touch("notes.txt");
         Touch("cover.jpg");
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir);
+        var result = await FileScanner.ScanDirectoryAsync(_tempDir);
+        var items = result.Items;
 
+        Assert.True(result.Complete);
         Assert.Equal(2, items.Count);
         Assert.Contains(items, i => i.FileName == "a.mp3");
         Assert.Contains(items, i => i.FileName == "b.flac");
@@ -147,7 +156,7 @@ public class FileScannerTests : IDisposable
         Touch(Path.Combine("sub", "deep.flac"));
         Touch(Path.Combine("sub", "deeper", "ogg-track.ogg"));
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+        var items = (await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true)).Items;
 
         Assert.Equal(3, items.Count);
         Assert.Contains(items, i => i.FileName == "top.mp3");
@@ -161,7 +170,7 @@ public class FileScannerTests : IDisposable
         Touch("top.mp3");
         Touch(Path.Combine("sub", "deep.flac"));
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: false);
+        var items = (await FileScanner.ScanDirectoryAsync(_tempDir, recursive: false)).Items;
 
         Assert.Single(items);
         Assert.Equal("top.mp3", items[0].FileName);
@@ -180,11 +189,13 @@ public class FileScannerTests : IDisposable
 
         // Task.Run(_, ct) with a pre-cancelled token throws TaskCanceledException before
         // the work runs. If the token is cancelled mid-scan, the inner loop bails on the
-        // next iteration and returns a partial list. Either is correct cancellation behavior.
+        // next iteration and returns a partial list. Either is correct cancellation behavior -
+        // but a partial list must NEVER claim to be complete.
         try
         {
-            var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true, cts.Token);
-            Assert.True(items.Count < 50, $"Expected partial result, got {items.Count} items");
+            var result = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true, cts.Token);
+            Assert.True(result.Items.Count < 50, $"Expected partial result, got {result.Items.Count} items");
+            Assert.False(result.Complete);
         }
         catch (TaskCanceledException)
         {
@@ -199,8 +210,10 @@ public class FileScannerTests : IDisposable
         Touch("cover.jpg");
         Touch(Path.Combine("sub", "doc.pdf"));
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir);
-        Assert.Empty(items);
+        var result = await FileScanner.ScanDirectoryAsync(_tempDir);
+        Assert.Empty(result.Items);
+        // An existing-but-empty folder IS authoritative: the user really emptied it.
+        Assert.True(result.Complete);
     }
 
     // ===== dot-folder skip: only .podcasts is managed; dotted albums are NOT hidden =====
@@ -213,7 +226,7 @@ public class FileScannerTests : IDisposable
         Touch(Path.Combine("...Baby One More Time", "track.mp3"));
         Touch(Path.Combine("...And Justice for All", "one.flac"));
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+        var items = (await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true)).Items;
 
         Assert.Equal(2, items.Count);
         Assert.Contains(items, i => i.FileName == "track.mp3");
@@ -226,7 +239,7 @@ public class FileScannerTests : IDisposable
         Touch("real-track.mp3");
         Touch(Path.Combine(".podcasts", "feed-123", "episode.mp3"));
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+        var items = (await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true)).Items;
 
         Assert.Single(items);
         Assert.Equal("real-track.mp3", items[0].FileName);
@@ -240,7 +253,7 @@ public class FileScannerTests : IDisposable
         Touch(Path.Combine(".audiobooks", "Some Author", "book.m4b"));
         Touch(Path.Combine(".tools", "stashed.mp3"));
 
-        var items = await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true);
+        var items = (await FileScanner.ScanDirectoryAsync(_tempDir, recursive: true)).Items;
 
         Assert.Equal(2, items.Count);
         Assert.Contains(items, i => i.FileName == "book.m4b");

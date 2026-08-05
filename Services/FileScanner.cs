@@ -1,9 +1,22 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using Serilog;
+
 namespace OrgZ.Services;
+
+/// <summary>
+/// The outcome of a library folder walk. <see cref="Complete"/> is the authority bit: only a scan
+/// that walked the whole tree may be used to decide a file is GONE. A missing folder (an unplugged
+/// external drive), a cancelled scan, or an enumeration that died mid-walk all return whatever was
+/// found so far with <c>Complete = false</c> - treating any of those as "the library is empty now"
+/// is how ratings, play counts, and playlist memberships get mass-deleted.
+/// </summary>
+public sealed record FileScanResult(List<MediaItem> Items, bool Complete);
 
 public class FileScanner
 {
+    private static readonly ILogger _log = Logging.For("FileScanner");
+
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".flac",
@@ -18,27 +31,38 @@ public class FileScanner
         ".opus"
     };
 
-    public static async Task<List<MediaItem>> ScanDirectoryAsync(string directoryPath, bool recursive = true, CancellationToken cancellationToken = default)
+    public static async Task<FileScanResult> ScanDirectoryAsync(string directoryPath, bool recursive = true, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(directoryPath) || !Directory.Exists(directoryPath))
         {
-            return [];
+            // "Couldn't look" is not "nothing there": the folder may be an unplugged drive.
+            return new FileScanResult([], Complete: false);
         }
 
         return await Task.Run(() =>
         {
             List<MediaItem> audioFiles = [];
+            var complete = true;
 
-            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            var options = new EnumerationOptions
+            {
+                // One locked folder skips itself instead of aborting the whole walk - the old
+                // eager GetFiles threw on the first inaccessible directory and returned NOTHING,
+                // which the reconciler read as "every track was deleted".
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = recursive,
+                // GetFiles never skipped hidden/system entries; keep that (the default here
+                // would silently drop hidden files that have always been scanned).
+                AttributesToSkip = 0,
+            };
 
             try
             {
-                var files = Directory.GetFiles(directoryPath, "*.*", searchOption);
-
-                foreach (var filePath in files)
+                foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*", options))
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
+                        complete = false;
                         break;
                     }
 
@@ -57,16 +81,15 @@ public class FileScanner
                     }
                 }
             }
-            catch (UnauthorizedAccessException)
+            catch (Exception ex)
             {
-                // Skip directories we don't have access to
-            }
-            catch (Exception)
-            {
-                throw;
+                // The enumerator itself died mid-walk (drive yanked, IO error). The list is
+                // partial; hand it back for display but never let it drive deletions.
+                complete = false;
+                _log.Warning(ex, "Library scan of {Directory} aborted mid-walk; results are partial", directoryPath);
             }
 
-            return audioFiles;
+            return new FileScanResult(audioFiles, complete);
         }, cancellationToken);
     }
 

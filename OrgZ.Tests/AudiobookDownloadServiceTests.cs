@@ -55,7 +55,7 @@ public class AudiobookDownloadServiceTests
             File.WriteAllBytes(inBooks, new byte[16]);
             File.WriteAllBytes(inPodcasts, new byte[16]);
 
-            var items = await FileScanner.ScanDirectoryAsync(root);
+            var items = (await FileScanner.ScanDirectoryAsync(root)).Items;
 
             var book = Assert.Single(items);   // the podcast stays hidden
             Assert.Equal(inBooks, book.FilePath);
@@ -79,7 +79,7 @@ public class AudiobookDownloadServiceTests
             Directory.CreateDirectory(Path.GetDirectoryName(track)!);
             File.WriteAllBytes(track, new byte[16]);
 
-            var items = await FileScanner.ScanDirectoryAsync(root);
+            var items = (await FileScanner.ScanDirectoryAsync(root)).Items;
 
             var found = Assert.Single(items);
             Assert.Equal(track, found.FilePath);
