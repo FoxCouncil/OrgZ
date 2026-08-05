@@ -41,8 +41,10 @@
 				</DataTemplate>
 			</ItemsControl.ItemTemplate>
 		</ItemsControl>
+		<!-- !Count, not ObjectConverters.Equal with ConverterParameter=0: the parameter arrives
+		     as the STRING "0" and Equals(int, string) is always false - the label never showed. -->
 		<TextBlock Text="You haven't subscribed to anything yet. Use the Store to find shows."
-		           IsVisible="{Binding Subscriptions.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}"
+		           IsVisible="{Binding !Subscriptions.Count}"
 		           Opacity="0.6" HorizontalAlignment="Center" Margin="0,40" />
 	</StackPanel>
 </UserControl>

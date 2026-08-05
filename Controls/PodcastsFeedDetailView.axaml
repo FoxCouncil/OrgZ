@@ -178,9 +178,12 @@
 		           HorizontalAlignment="Center" VerticalAlignment="Center"
 		           Opacity="0.6" FontSize="14" IsHitTestVisible="False">
 			<TextBlock.IsVisible>
+				<!-- !Count, not ObjectConverters.Equal with ConverterParameter=0: the parameter
+				     arrives as the STRING "0" and Equals(int, string) is always false, so the
+				     label could never appear. Sidebar.axaml uses the same !Count pattern. -->
 				<MultiBinding Converter="{x:Static BoolConverters.And}">
 					<Binding Path="!IsLoadingFeed" />
-					<Binding Path="SelectedFeedEpisodes.Count" Converter="{x:Static ObjectConverters.Equal}" ConverterParameter="0" />
+					<Binding Path="!SelectedFeedEpisodes.Count" />
 				</MultiBinding>
 			</TextBlock.IsVisible>
 		</TextBlock>

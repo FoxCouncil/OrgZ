@@ -74,9 +74,12 @@
 		           HorizontalAlignment="Center" Opacity="0.6" Margin="0,24" />
 		<TextBlock Text="No podcasts found." HorizontalAlignment="Center" Opacity="0.6" Margin="0,24">
 			<TextBlock.IsVisible>
+				<!-- !Count, not ObjectConverters.Equal with ConverterParameter=0: the parameter
+				     arrives as the STRING "0" and Equals(int, string) is always false, so the
+				     label could never appear. -->
 				<MultiBinding Converter="{x:Static BoolConverters.And}">
 					<Binding Path="!IsLoadingFeedList" />
-					<Binding Path="FeedListItems.Count" Converter="{x:Static ObjectConverters.Equal}" ConverterParameter="0" />
+					<Binding Path="!FeedListItems.Count" />
 				</MultiBinding>
 			</TextBlock.IsVisible>
 		</TextBlock>
