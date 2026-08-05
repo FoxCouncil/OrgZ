@@ -135,29 +135,28 @@ public sealed class DeviceDetectionService : IDisposable
     private void OnMacVolumeCreated(object sender, FileSystemEventArgs e)
     {
         // cddafs synthesizes the .aiff files lazily; give the kernel a beat to
-        // finish publishing the new volume before we ask DriveInfo about it.
+        // finish publishing the new volume before we ask DriveInfo about it. The DriveType
+        // classification is volume I/O, so it stays on the continuation's pool thread -
+        // only the CD event itself hops to the UI thread.
         _ = Task.Delay(TimeSpan.FromMilliseconds(600)).ContinueWith(_ =>
         {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            try
             {
-                try
+                var drive = new DriveInfo(e.FullPath);
+                if (drive.DriveType == DriveType.CDRom)
                 {
-                    var drive = new DriveInfo(e.FullPath);
-                    if (drive.DriveType == DriveType.CDRom)
-                    {
-                        // CDs route through ScanForCdAsync just like the startup scan.
-                        CdDriveEvent?.Invoke();
-                    }
-                    else
-                    {
-                        TryAddDrive(drive);
-                    }
+                    // CDs route through ScanForCdAsync just like the startup scan.
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => CdDriveEvent?.Invoke());
                 }
-                catch (Exception ex)
+                else
                 {
-                    _log.Warning(ex, "Volume {MountPath} not readable shortly after mount-create event", e.FullPath);
+                    TryAddDrive(drive);
                 }
-            });
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Volume {MountPath} not readable shortly after mount-create event", e.FullPath);
+            }
         });
     }
 
@@ -244,17 +243,16 @@ public sealed class DeviceDetectionService : IDisposable
             }
         }
 
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        // Already off the UI thread (await continuation); TryAddDrive fingerprints on the
+        // pool and hops to the UI thread only to register.
+        try
         {
-            try
-            {
-                TryAddDrive(new DriveInfo(e.FullPath));
-            }
-            catch (Exception ex)
-            {
-                _log.Warning(ex, "Drive {MountPath} not readable 600ms after mount-create event", e.FullPath);
-            }
-        });
+            TryAddDrive(new DriveInfo(e.FullPath));
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Drive {MountPath} not readable 600ms after mount-create event", e.FullPath);
+        }
     }
 
     private void OnLinuxMountDeleted(object sender, FileSystemEventArgs e)
@@ -321,23 +319,44 @@ public sealed class DeviceDetectionService : IDisposable
         });
     }
 
+    /// <summary>
+    /// Fingerprints a drive on the thread pool, then registers it on the UI thread. Identify
+    /// does volume I/O, WMI queries, and (elevated) SCSI reads with multi-second timeouts - an
+    /// iFlash bridge can hold it for 30s - so it may NEVER run on the UI thread. The startup
+    /// scan learned that live (see <see cref="EnumerateExistingDrives"/>); the hot-plug paths
+    /// carried the same freeze until they were routed through here. Safe to call from any thread.
+    /// </summary>
     private void TryAddDrive(DriveInfo drive)
     {
-        try
+        _ = Task.Run(() =>
         {
-            var device = DeviceFingerprint.Identify(drive);
-            if (device == null)
+            try
             {
-                _log.Verbose("Drive {DriveName} did not fingerprint as a known device", drive.Name);
-                return;
-            }
+                var device = DeviceFingerprint.Identify(drive);
+                if (device == null)
+                {
+                    _log.Verbose("Drive {DriveName} did not fingerprint as a known device", drive.Name);
+                    return;
+                }
 
-            RegisterIdentifiedDevice(device);
-        }
-        catch (Exception ex)
-        {
-            _log.Error(ex, "TryAddDrive failed for {DriveName}", drive.Name);
-        }
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    // The user can yank a device faster than Identify returns - a late
+                    // registration would resurrect a phantom the removal event already cleared.
+                    if (!Directory.Exists(device.MountPath))
+                    {
+                        _log.Information("Device at {MountPath} vanished while being identified — not registering", device.MountPath);
+                        return;
+                    }
+
+                    RegisterIdentifiedDevice(device);
+                });
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "TryAddDrive failed for {DriveName}", drive.Name);
+            }
+        });
     }
 
     /// <summary>
@@ -483,40 +502,38 @@ public sealed class DeviceDetectionService : IDisposable
 
         _log.Debug("WMI volume event: EventType={EventType} MountPath={MountPath}", eventType, mountPath);
 
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        _ = Task.Run(async () =>
         {
             // CD-ROM drives go through a separate path: we fire CdDriveEvent and let the
             // subscriber re-scan disc media. Removable drives (iPods, Rockbox) go through
-            // the DeviceFingerprint identification flow.
+            // the DeviceFingerprint identification flow. The classification itself
+            // (DriveInfo.DriveType) is volume I/O, which is exactly what must never touch
+            // the UI thread - a wedged drive blocks it for minutes.
             if (IsCdDrive(mountPath))
             {
                 _log.Debug("CD drive event for {MountPath} — deferring CD scan 750ms", mountPath);
                 // Small delay so Windows has time to finish mounting the disc filesystem
-                Avalonia.Threading.DispatcherTimer.RunOnce(() =>
-                {
-                    CdDriveEvent?.Invoke();
-                }, TimeSpan.FromMilliseconds(750));
+                await Task.Delay(TimeSpan.FromMilliseconds(750));
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => CdDriveEvent?.Invoke());
                 return;
             }
 
             if (eventType == 2)
             {
                 // Give the drive a moment to fully mount before fingerprinting
-                Avalonia.Threading.DispatcherTimer.RunOnce(() =>
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                try
                 {
-                    try
-                    {
-                        TryAddDrive(new DriveInfo(mountPath));
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.Warning(ex, "Drive {MountPath} not mountable 500ms after WMI arrival event", mountPath);
-                    }
-                }, TimeSpan.FromMilliseconds(500));
+                    TryAddDrive(new DriveInfo(mountPath));
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Drive {MountPath} not mountable 500ms after WMI arrival event", mountPath);
+                }
             }
             else if (eventType == 3)
             {
-                RemoveDrive(mountPath);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => RemoveDrive(mountPath));
             }
         });
     }
