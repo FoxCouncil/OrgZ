@@ -182,14 +182,6 @@ public partial class PodcastsFeedDetailView : UserControl
         vm.DownloadEpisode(row.Episode);
     }
 
-    private void StreamEpisode_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Button b && ResolveRow(b) is { } row && ViewModel is { } vm)
-        {
-            vm.StreamEpisode(row.Episode);
-        }
-    }
-
     /// <summary>
     /// Buttons inside a DataGridTemplateColumn end up with a DataContext that
     /// looks like the row but is missing observable updates from the source --

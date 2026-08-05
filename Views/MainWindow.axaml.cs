@@ -1268,7 +1268,7 @@ public partial class MainWindow : Window
     private static readonly HashSet<string> _selectionAwareCommands =
     [
         "PlayNext", "AddToQueue", "Favorite", "RemoveFromPlaylist",
-        "RemoveFromLibrary", "RemoveFromDevice", "RestoreFromIgnored", "BurnToCd",
+        "RemoveFromLibrary", "RemoveFromDevice", "BurnToCd",
     ];
 
     private void BuildContextMenuOn(DataGrid grid, List<ContextMenuItemDef> defs)

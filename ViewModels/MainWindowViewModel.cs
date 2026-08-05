@@ -789,18 +789,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // -- Radio Management --
 
     internal ObservableCollection<string> Messages { get; } = [];
-
-    [ObservableProperty]
-    private bool _isLoading;
-
-    [ObservableProperty]
-    private bool _isSyncing;
-
     // -- Computed --
 
     private IEnumerable<MediaItem> MusicItems => _allItems.Where(i => i.Kind == MediaKind.Music);
 
-    internal bool IsMediaLoaded => _player?.Media != null;
 
     internal Action? ScrollToSelectedRequested;
     internal Func<MediaItem?>? GetScrollAnchor;
@@ -911,24 +903,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private MiniPlayerWindow? _miniPlayer;
-
-    /// <summary>
-    /// Brings the main window back from the mini-player (iTunes-style) hidden
-    /// state.  Works whether the mini-player is currently open or not - useful
-    /// as a Window-menu fallback if the mini-player was closed while main was
-    /// still hidden and the user lost track of the app.
-    /// </summary>
-    [RelayCommand]
-    internal void ShowMainWindow()
-    {
-        _window.Show();
-        _window.Activate();
-
-        if (_miniPlayer != null)
-        {
-            _miniPlayer.Close();
-        }
-    }
 
     /// <summary>
     /// Opens the mini-player.  In <see cref="MiniPlayerMode.Replace"/> (iTunes-style)
@@ -2026,36 +2000,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _pauseWhenNextTrackStarts = IsPausedNow;
         var next = _playbackContext.MoveNext()!;
         ExecutePlayItem(next);
-    }
-
-    [RelayCommand]
-    private async Task ChangeLibraryFolder()
-    {
-        var folders = await _window.StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions
-            {
-                Title = "Select OrgZ Folder",
-                AllowMultiple = false
-            });
-
-        if (folders.Count == 0)
-        {
-            return;
-        }
-
-        Stop();
-        ClearPlayback();
-
-        App.FolderPath = folders[0].Path.LocalPath;
-        Settings.Set("OrgZ.FolderPath", App.FolderPath);
-        Settings.Save();
-
-        _allItems.RemoveAll(i => i.Kind == MediaKind.Music);
-        FilteredItems = [];
-
-        _folderWatcher?.Stop();
-        await ScanAndAnalyzeLibraryAsync();
-        StartFolderWatcher();
     }
 
     [RelayCommand]
@@ -7017,8 +6961,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     // --- CD Rip / Burn ------------------------------------------------------
-
-    private static readonly char[] _cdIdDriveSep = [':'];
 
     /// <summary>
     /// Extracts the drive path ("D:") from a CD track ID ("cd:D::3").

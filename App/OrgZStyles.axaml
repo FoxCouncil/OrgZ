@@ -169,13 +169,6 @@
 		<SolidColorBrush x:Key="OrgZMetalRimBrush" Color="#7A7A7A" />
 		<SolidColorBrush x:Key="OrgZMetalTextBrush" Color="#2B2B2B" />
 
-		<!-- Glossy aqua transport button body -->
-		<LinearGradientBrush x:Key="OrgZAquaBrush" StartPoint="0%,0%" EndPoint="0%,100%">
-			<GradientStop Offset="0" Color="#6F6F6F" />
-			<GradientStop Offset="0.45" Color="#2A2A2A" />
-			<GradientStop Offset="0.55" Color="#101010" />
-			<GradientStop Offset="1" Color="#3A3A3A" />
-		</LinearGradientBrush>
 	</Styles.Resources>
 
 	<!-- Truncation tooltips: any TextBlock whose text is trimmed (CharacterEllipsis, etc.)

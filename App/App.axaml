@@ -5,7 +5,6 @@
 			 Name="OrgZ"
 			 RequestedThemeVariant="Dark">
 	<Application.Resources>
-		<converters:SecondsToMinutesConverter x:Key="SecondsToMinutesConverter" />
 	</Application.Resources>
 	<!-- OrgZStyles.axaml is hand-authored dark-only (dark bg/fg color constants), so the
 	     FluentTheme variant is pinned to Dark to match. Switch to "Default" / "Light" only

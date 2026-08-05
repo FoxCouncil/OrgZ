@@ -591,51 +591,12 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>
-    /// Marks a media item as ignored: it disappears from normal views, is removed from every
-    /// playlist it was in, and will NOT be re-added by the scanner (UPSERT preserves IsIgnored).
-    /// The file itself is never touched.
-    /// </summary>
-    public static void IgnoreMedia(string id)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var tx = connection.BeginTransaction();
-
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = "UPDATE Media SET IsIgnored = 1 WHERE Id = @Id";
-            cmd.Parameters.AddWithValue("@Id", id);
-            cmd.ExecuteNonQuery();
-        }
-
-        using (var cmd = connection.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = "DELETE FROM PlaylistTracks WHERE MediaId = @Id";
-            cmd.Parameters.AddWithValue("@Id", id);
-            cmd.ExecuteNonQuery();
-        }
-
-        tx.Commit();
-    }
-
-    /// <summary>
-    /// Clears the ignored flag. The item will reappear in its normal views. Playlist memberships
-    /// are NOT automatically restored (they were destroyed when the item was ignored).
-    /// </summary>
-    public static void RestoreMedia(string id)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "UPDATE Media SET IsIgnored = 0 WHERE Id = @Id";
-        cmd.Parameters.AddWithValue("@Id", id);
-        cmd.ExecuteNonQuery();
-    }
+    // IgnoreMedia / RestoreMedia lived here until the Ignored VIEW was replaced by the
+    // iTunes-style row tick (0.9.16). Nothing in the app had called them since, and their
+    // semantics actively CONTRADICTED the live SetIgnored above: ignoring used to purge the
+    // track from every playlist it belonged to, and restoring couldn't put it back. Leaving
+    // that reachable was a trap - one call from a future feature and a user's playlists lose
+    // their tracks silently. The tick is the whole feature now.
 
     public static void SetLastPlayed(string id, DateTime lastPlayed)
     {

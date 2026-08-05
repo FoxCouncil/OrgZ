@@ -247,58 +247,28 @@ public class MediaCacheTests : IDisposable
         Assert.Single(MediaCache.GetPlaylistTrackIds(p2));
     }
 
-    // -- Ignore / Restore --
+    // -- The row tick (IsIgnored) --
+    // The old IgnoreMedia / RestoreMedia pair went with the Ignored view in 0.9.16; what
+    // remains is SetIgnored, whose contract is that playlists are left ALONE.
 
     [Fact]
-    public void IgnoreMedia_SetsIsIgnoredFlag()
-    {
-        SeedMedia("x");
-        MediaCache.IgnoreMedia("x");
-
-        var loaded = MediaCache.LoadAll().Single(m => m.Id == "x");
-        Assert.True(loaded.IsIgnored);
-    }
-
-    [Fact]
-    public void RestoreMedia_ClearsIsIgnoredFlag()
-    {
-        SeedMedia("x");
-        MediaCache.IgnoreMedia("x");
-        MediaCache.RestoreMedia("x");
-
-        var loaded = MediaCache.LoadAll().Single(m => m.Id == "x");
-        Assert.False(loaded.IsIgnored);
-    }
-
-    [Fact]
-    public void IgnoreMedia_RemovesItemFromEveryPlaylistItBelongsTo()
+    public void SetIgnored_toggles_the_flag_and_leaves_playlists_alone()
     {
         SeedMedia("shared", "a");
         var p1 = MediaCache.CreatePlaylist("One");
-        var p2 = MediaCache.CreatePlaylist("Two");
         MediaCache.AddTrackToPlaylist(p1, "shared");
         MediaCache.AddTrackToPlaylist(p1, "a");
-        MediaCache.AddTrackToPlaylist(p2, "shared");
 
-        MediaCache.IgnoreMedia("shared");
+        MediaCache.SetIgnored("shared", true);
 
-        var p1Ids = MediaCache.GetPlaylistTrackIds(p1);
-        var p2Ids = MediaCache.GetPlaylistTrackIds(p2);
+        Assert.True(MediaCache.LoadAll().Single(m => m.Id == "shared").IsIgnored);
+        // Unticking a row must never cost the user their playlist membership - that was
+        // exactly the old Ignore behaviour, and why it couldn't be allowed to linger.
+        Assert.Contains("shared", MediaCache.GetPlaylistTrackIds(p1));
+        Assert.Contains("a", MediaCache.GetPlaylistTrackIds(p1));
 
-        Assert.DoesNotContain("shared", p1Ids);
-        Assert.DoesNotContain("shared", p2Ids);
-        Assert.Contains("a", p1Ids);
-    }
-
-    [Fact]
-    public void IgnoreMedia_DoesNotDeleteTheMediaRow()
-    {
-        SeedMedia("x");
-        MediaCache.IgnoreMedia("x");
-
-        // The row must still exist (so Restore works, and so UPSERT on rescan preserves IsIgnored)
-        var loaded = MediaCache.LoadAll().SingleOrDefault(m => m.Id == "x");
-        Assert.NotNull(loaded);
+        MediaCache.SetIgnored("shared", false);
+        Assert.False(MediaCache.LoadAll().Single(m => m.Id == "shared").IsIgnored);
     }
 
     [Fact]
@@ -308,8 +278,8 @@ public class MediaCacheTests : IDisposable
         var item = Music("x", title: "Original Title");
         MediaCache.UpsertMusic(item);
 
-        // User marks it ignored
-        MediaCache.IgnoreMedia("x");
+        // User unticks the row
+        MediaCache.SetIgnored("x", true);
 
         // Scanner re-sees the file and upserts with updated metadata (this mirrors a real rescan)
         var rescanned = Music("x", title: "New Title");
@@ -355,17 +325,4 @@ public class MediaCacheTests : IDisposable
         Assert.Empty(MediaCache.GetPlaylistTrackIds(p));
     }
 
-    [Fact]
-    public void RestoreMedia_DoesNotRestorePlaylistMemberships()
-    {
-        SeedMedia("x");
-        var p = MediaCache.CreatePlaylist("MyList");
-        MediaCache.AddTrackToPlaylist(p, "x");
-
-        MediaCache.IgnoreMedia("x");
-        MediaCache.RestoreMedia("x");
-
-        // Playlist membership was destroyed at ignore time; restore only flips the flag
-        Assert.Empty(MediaCache.GetPlaylistTrackIds(p));
-    }
 }
