@@ -148,7 +148,9 @@ public static class MusicBrainzService
     {
         try
         {
-            var doc = JsonDocument.Parse(json);
+            // JsonDocument rents pooled buffers - undisposed, every disc lookup leaked
+            // one rental until finalization. Every element read completes inside here.
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
             // Direct disc lookup returns a single release list
@@ -271,13 +273,31 @@ public static class MusicBrainzService
         try
         {
             await EnforceRateLimit();
-            var response = await _http.GetAsync(url);
+            using var response = await _http.GetAsync(url);
+
+            // 503 is MusicBrainz throttling us, and it says when to come back. Honouring
+            // Retry-After once turns a failed lookup into a slightly slower successful
+            // one; the old code mapped every non-success to null and gave up.
+            if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                var after = response.Headers.RetryAfter?.Delta
+                    ?? (response.Headers.RetryAfter?.Date is { } when ? when - DateTimeOffset.UtcNow : (TimeSpan?)null)
+                    ?? TimeSpan.FromSeconds(2);
+                var wait = TimeSpan.FromMilliseconds(Math.Clamp(after.TotalMilliseconds, 0, 10_000));
+                _log.Information("MusicBrainz asked us to back off {Seconds:0.#}s; retrying once", wait.TotalSeconds);
+
+                await Task.Delay(wait);
+                await EnforceRateLimit();
+                using var retry = await _http.GetAsync(url);
+                return retry.IsSuccessStatusCode ? await retry.Content.ReadAsStringAsync() : null;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 return null;
             }
-            var body = await response.Content.ReadAsStringAsync();
-            return body;
+
+            return await response.Content.ReadAsStringAsync();
         }
         catch (Exception ex)
         {

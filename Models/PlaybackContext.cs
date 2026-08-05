@@ -289,10 +289,47 @@ public partial class PlaybackContext : ObservableObject
 
     private void RebuildUpcoming()
     {
+        var start = CurrentIndex + 1;
+        var wanted = Math.Max(0, _playOrder.Count - start);
+
+        // Already correct - every caller funnels through here, and most calls don't
+        // actually change the tail.
+        if (wanted == UpcomingItems.Count && SuffixMatches(0))
+        {
+            return;
+        }
+
+        // Advancing a track only drops items off the FRONT; everything after is the
+        // same object in the same order. Removing those few beats clearing and
+        // re-adding the remainder, which fired one CollectionChanged per row - on a
+        // shuffled 10k-track queue that was ~10k UI notifications at every song end.
+        if (wanted < UpcomingItems.Count && SuffixMatches(UpcomingItems.Count - wanted))
+        {
+            for (var i = UpcomingItems.Count - wanted; i > 0; i--)
+            {
+                UpcomingItems.RemoveAt(0);
+            }
+            return;
+        }
+
         UpcomingItems.Clear();
-        for (int i = CurrentIndex + 1; i < _playOrder.Count; i++)
+        for (var i = start; i < _playOrder.Count; i++)
         {
             UpcomingItems.Add(_playOrder[i]);
+        }
+
+        // Whether the last `wanted` entries of UpcomingItems (starting at `offset`)
+        // already are the play order's tail.
+        bool SuffixMatches(int offset)
+        {
+            for (var i = 0; i < wanted; i++)
+            {
+                if (!ReferenceEquals(UpcomingItems[offset + i], _playOrder[start + i]))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }

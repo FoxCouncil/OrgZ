@@ -123,6 +123,9 @@ internal static class Settings
                 Directory.CreateDirectory(SettingsDirectory);
                 string json = JsonSerializer.Serialize(_settings, JsonOptions);
                 File.WriteAllText(SettingsFilePath, json);
+
+                // Anything caching a settings-derived value re-reads after a save.
+                Models.MediaItem.BadFormatCriteria.Invalidate();
             }
         }
         catch (Exception ex)

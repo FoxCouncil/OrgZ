@@ -267,35 +267,56 @@ public partial class MediaItem : ObservableObject
                 return "";
             }
 
+            var criteria = BadFormatCriteria.Current;
             var issues = new List<string>();
 
-            if (Settings.Get("OrgZ.BadFormat.NoTitle", true) && string.IsNullOrWhiteSpace(Title))
+            if (criteria.NoTitle && string.IsNullOrWhiteSpace(Title))
             {
                 issues.Add("No Title");
             }
 
-            if (Settings.Get("OrgZ.BadFormat.NoArtist", true) && string.IsNullOrWhiteSpace(Artist))
+            if (criteria.NoArtist && string.IsNullOrWhiteSpace(Artist))
             {
                 issues.Add("No Artist");
             }
 
-            if (Settings.Get("OrgZ.BadFormat.NoYear", true) && (Year == null || Year == 0))
+            if (criteria.NoYear && (Year == null || Year == 0))
             {
                 issues.Add("No Year");
             }
 
-            if (Settings.Get("OrgZ.BadFormat.NoAlbumArt", true) && HasAlbumArt != true)
+            if (criteria.NoAlbumArt && HasAlbumArt != true)
             {
                 issues.Add("No Album Art");
             }
 
-            if (Settings.Get("OrgZ.BadFormat.LossyFormats", true) && Extension != null && LossyExtensions.Contains(Extension))
+            if (criteria.LossyFormats && Extension != null && LossyExtensions.Contains(Extension))
             {
                 issues.Add($"Lossy Format ({Extension.ToLowerInvariant()})");
             }
 
             return string.Join(", ", issues);
         }
+    }
+
+    /// <summary>
+    /// The Bad Format view's criteria, read from Settings ONCE per change rather than five
+    /// times per item. <see cref="FormatIssues"/> is the view's BaseFilter *and* SearchFilter,
+    /// so a keystroke over a 30k-track library used to take ~150,000 lock-and-deserialize
+    /// trips through Settings. <see cref="Settings.Save"/> invalidates this.
+    /// </summary>
+    internal sealed record BadFormatCriteria(bool NoTitle, bool NoArtist, bool NoYear, bool NoAlbumArt, bool LossyFormats)
+    {
+        private static BadFormatCriteria? _current;
+
+        public static BadFormatCriteria Current => _current ??= new(
+            Settings.Get("OrgZ.BadFormat.NoTitle", true),
+            Settings.Get("OrgZ.BadFormat.NoArtist", true),
+            Settings.Get("OrgZ.BadFormat.NoYear", true),
+            Settings.Get("OrgZ.BadFormat.NoAlbumArt", true),
+            Settings.Get("OrgZ.BadFormat.LossyFormats", true));
+
+        public static void Invalidate() => _current = null;
     }
 
     // -- Radio-only (nullable for music) --

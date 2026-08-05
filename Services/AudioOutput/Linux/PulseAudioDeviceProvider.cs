@@ -23,12 +23,43 @@ internal sealed class PulseAudioDeviceProvider : IAudioSinkProvider
 
     public event EventHandler? DevicesChanged;
 
+    // Enumeration means standing up a whole pa_threaded_mainloop, connecting to the
+    // server, listing sinks, and tearing it all down. The hotplug poll calls this every
+    // 5 s for the life of the app - 12 connection cycles a minute, forever - so results
+    // are cached for a few seconds. Hotplug still surfaces within one poll of the TTL.
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(20);
+    private readonly object _cacheLock = new();
+    private List<AudioDeviceInfo>? _cached;
+    private long _cachedUntil;
+
     public IReadOnlyList<AudioDeviceInfo> EnumerateDevices()
     {
         if (!IsSupported)
         {
             return [];
         }
+
+        lock (_cacheLock)
+        {
+            if (_cached is not null && Environment.TickCount64 < _cachedUntil)
+            {
+                return _cached;
+            }
+        }
+
+        var enumerated = EnumerateUncached();
+
+        lock (_cacheLock)
+        {
+            _cached = enumerated;
+            _cachedUntil = Environment.TickCount64 + (long)CacheTtl.TotalMilliseconds;
+        }
+
+        return enumerated;
+    }
+
+    private List<AudioDeviceInfo> EnumerateUncached()
+    {
 
         var result = new List<AudioDeviceInfo>
         {

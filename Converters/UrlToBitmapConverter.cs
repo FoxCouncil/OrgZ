@@ -43,6 +43,34 @@ public static class RemoteImage
     private static readonly ConcurrentDictionary<string, Bitmap?> _cache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, Task<Bitmap?>> _inFlight = new(StringComparer.Ordinal);
 
+    // The memory cache is BOUNDED (insertion-order eviction). It used to grow forever:
+    // every artwork URL a browsing session touched kept its decoded bitmap alive for the
+    // process lifetime, and the podcast store shows 60+ tiles per screen. 300 decoded
+    // 240px bitmaps is a few MB - comfortably more than any one view needs.
+    private const int MaxCachedBitmaps = 300;
+    private static readonly ConcurrentQueue<string> _cacheOrder = new();
+
+    private static void CacheBitmap(string key, Bitmap? bmp)
+    {
+        if (_cache.TryAdd(key, bmp))
+        {
+            _cacheOrder.Enqueue(key);
+        }
+        else
+        {
+            _cache[key] = bmp;
+        }
+
+        while (_cache.Count > MaxCachedBitmaps && _cacheOrder.TryDequeue(out var evicted))
+        {
+            // Dropped, NEVER disposed: a live Image may still be rendering this bitmap,
+            // and disposing one under a render pass is a hard crash (the ref-counting
+            // lesson from the album-art path). The GC reclaims it once nothing shows it,
+            // and the disk cache makes re-decoding a re-visited tile cheap.
+            _cache.TryRemove(evicted, out _);
+        }
+    }
+
     // Prefer the library-root .podcasts/images/ so the cache travels with the
     // user's library and stays visible (hidden by leading dot but inspectable).
     // Fall back to %AppData% when no library folder is configured -- that's the
@@ -134,7 +162,7 @@ public static class RemoteImage
                     {
                         await using var fs = new FileStream(diskPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                         var diskBmp = new Bitmap(fs);
-                        _cache[key] = diskBmp;
+                        CacheBitmap(key, diskBmp);
                         return diskBmp;
                     }
                     catch
@@ -155,13 +183,13 @@ public static class RemoteImage
                     var bmp = Helpers.ImageDecoder.Decode(bytes, DecodeTargetWidth);
                     if (bmp == null)
                     {
-                        _cache[key] = null;
+                        CacheBitmap(key, null);
                         return null;
                     }
                     // Persist the downscaled bitmap (PNG) so the next launch
                     // skips both the HTTP fetch AND the heavyweight re-decode.
                     try { bmp.Save(diskPath); } catch { }
-                    _cache[key] = bmp;
+                    CacheBitmap(key, bmp);
                     return bmp;
                 }
                 finally
@@ -171,7 +199,7 @@ public static class RemoteImage
             }
             catch
             {
-                _cache[key] = null;
+                CacheBitmap(key, null);
                 return null;
             }
             finally
