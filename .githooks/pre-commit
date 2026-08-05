@@ -7,12 +7,46 @@
 #
 # Release configuration on purpose: a running Debug OrgZ.exe locks its own output and would block
 # the build; Release stays isolated from the dev-run loop.
+#
+# The suite runs against the STAGED tree, not the working tree. Testing the working tree is the
+# classic false green: with unstaged edits present (a fix you haven't added yet, or debris you
+# never meant to commit), the run can pass on code the commit doesn't contain — or fail on code
+# it doesn't contain either. `git stash --keep-index` puts the working tree in exactly the state
+# the commit will create, and the trap restores it however the hook exits.
 
 echo "pre-commit: running the test suite (Release)..."
+
+# Only stash when there IS something unstaged to hide; stashing nothing is a no-op that would
+# still pop somebody else's stash on the way out.
+stashed=0
+if ! git diff --quiet; then
+    if git stash push --keep-index --include-untracked --quiet --message "pre-commit: working tree"; then
+        stashed=1
+    else
+        echo "pre-commit: could not stash unstaged changes - testing the working tree instead." >&2
+    fi
+fi
+
+restore() {
+    if [ "$stashed" -eq 1 ]; then
+        # --index so anything that was staged stays staged after the pop.
+        git stash pop --index --quiet || {
+            echo "pre-commit: WARNING - could not restore your unstaged changes automatically." >&2
+            echo "pre-commit: they are safe in 'git stash list' - recover with: git stash pop" >&2
+        }
+        stashed=0
+    fi
+}
+
+# Restore on any exit path, including Ctrl-C.
+trap 'restore' EXIT INT TERM
+
 dotnet test OrgZ.Tests/OrgZ.Tests.csproj -c Release --nologo
 status=$?
+
 if [ $status -ne 0 ]; then
     echo "pre-commit: TESTS FAILED (exit $status) - commit blocked." >&2
     exit $status
 fi
+
 echo "pre-commit: suite green - proceeding."

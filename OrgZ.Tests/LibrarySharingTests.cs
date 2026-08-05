@@ -481,11 +481,16 @@ public class LibrarySharingTests
     [Fact]
     public void Port_and_name_resolution_rejects_abuse_and_falls_back()
     {
-        Assert.Equal(ShareServiceOps.DefaultPort, ShareServiceOps.ResolvePort(null));
-        Assert.Equal(ShareServiceOps.DefaultPort, ShareServiceOps.ResolvePort(0));
-        Assert.Equal(ShareServiceOps.DefaultPort, ShareServiceOps.ResolvePort(80));       // privileged
-        Assert.Equal(ShareServiceOps.DefaultPort, ShareServiceOps.ResolvePort(-1));
-        Assert.Equal(ShareServiceOps.DefaultPort, ShareServiceOps.ResolvePort(70000));
+        // The literal, not the constant: comparing DefaultPort to itself would stay green
+        // if someone retyped it as 80 - which this very test declares privileged. The port
+        // is also baked into the installer's firewall rule, so it isn't free to change.
+        Assert.Equal(7391, ShareServiceOps.DefaultPort);
+
+        Assert.Equal(7391, ShareServiceOps.ResolvePort(null));
+        Assert.Equal(7391, ShareServiceOps.ResolvePort(0));
+        Assert.Equal(7391, ShareServiceOps.ResolvePort(80));       // privileged
+        Assert.Equal(7391, ShareServiceOps.ResolvePort(-1));
+        Assert.Equal(7391, ShareServiceOps.ResolvePort(70000));
         Assert.Equal(8080, ShareServiceOps.ResolvePort(8080));
 
         Assert.Equal("Fox Library", ShareServiceOps.ResolveName("  Fox Library  "));

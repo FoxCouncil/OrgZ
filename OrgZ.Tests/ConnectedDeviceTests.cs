@@ -1,5 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using Xunit;
+
 namespace OrgZ.Tests;
 
 public class ConnectedDeviceTests
@@ -171,28 +173,28 @@ public class ConnectedDeviceTests
     // The runtime check inside SidebarLabel keys off OperatingSystem.Is* so we can only
     // assert the branch matching the host. Tests use OS-conditional skip.
 
-    [Fact]
+    [SkippableFact]
     public void SidebarLabel_includes_drive_letter_on_Windows()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only label rule");
 
         var d = MakeDevice("L:\\", name: "FOXPOD");
         Assert.Equal("FOXPOD (L:)", d.SidebarLabel);
     }
 
-    [Fact]
+    [SkippableFact]
     public void SidebarLabel_falls_back_to_name_when_mount_empty_on_Windows()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows-only label rule");
 
         var d = MakeDevice("\\", name: "FOXPOD");
         Assert.Equal("FOXPOD", d.SidebarLabel);
     }
 
-    [Fact]
+    [SkippableFact]
     public void SidebarLabel_just_name_on_Linux()
     {
-        if (!OperatingSystem.IsLinux()) return;
+        Skip.IfNot(OperatingSystem.IsLinux(), "Linux-only label rule");
 
         // Mount paths like "/media/fox/FOXPOD" aren't helpful next to the volume label
         // the way a Windows drive letter is. Linux shows just the name.
@@ -200,10 +202,10 @@ public class ConnectedDeviceTests
         Assert.Equal("FOXPOD", d.SidebarLabel);
     }
 
-    [Fact]
+    [SkippableFact]
     public void SidebarLabel_just_name_on_macOS()
     {
-        if (!OperatingSystem.IsMacOS()) return;
+        Skip.IfNot(OperatingSystem.IsMacOS(), "macOS-only label rule");
 
         var d = MakeDevice("/Volumes/FOXPOD", name: "FOXPOD");
         Assert.Equal("FOXPOD", d.SidebarLabel);

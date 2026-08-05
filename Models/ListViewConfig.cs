@@ -56,7 +56,13 @@ public record ListViewConfig
 
 public static class ListViewConfigs
 {
-    private static readonly Dictionary<string, ListViewConfig> _configs = new()
+    // Concurrent, not a plain Dictionary. Device connect/disconnect registers and removes
+    // view configs while other code reads them, and the test suite drives Register/Remove
+    // from several classes xunit runs in PARALLEL - concurrent write+read on a plain
+    // Dictionary is undefined behaviour (torn enumeration, spurious
+    // InvalidOperationException, or silent corruption), which is exactly the kind of
+    // once-in-a-hundred-runs flake nobody can reproduce on demand.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ListViewConfig> _configs = new()
     {
         ["Music"] = BuildMusicConfig(),
         ["Radio"] = BuildRadioConfig(),
@@ -147,7 +153,7 @@ public static class ListViewConfigs
 
     public static void Remove(string key)
     {
-        _configs.Remove(key);
+        _configs.TryRemove(key, out _);
     }
 
     /// <summary>
@@ -158,11 +164,11 @@ public static class ListViewConfigs
     /// </summary>
     public static void RemoveWithSubViews(string key)
     {
-        _configs.Remove(key);
+        _configs.TryRemove(key, out _);
         var prefix = $"{key}:";
         foreach (var sub in _configs.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
         {
-            _configs.Remove(sub);
+            _configs.TryRemove(sub, out _);
         }
     }
 

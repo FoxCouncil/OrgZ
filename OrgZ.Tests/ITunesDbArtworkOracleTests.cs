@@ -3,6 +3,8 @@
 using System.Diagnostics;
 using OrgZ.Services;
 
+using Xunit;
+
 namespace OrgZ.Tests;
 
 /// <summary>
@@ -91,14 +93,12 @@ public class ITunesDbArtworkOracleTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void Libgpod_reads_the_artwork_back_for_the_track()
     {
         var oracle = Environment.GetEnvironmentVariable("ORGZ_ARTWORK_DUMP");
-        if (string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
-        {
-            return;   // gated - needs a built artwork_dump (libgpod + gdk-pixbuf); see oracle/README.md
-        }
+        Skip.If(string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle),
+            "ORGZ_ARTWORK_DUMP unset/missing - needs a built artwork_dump (libgpod + gdk-pixbuf); see oracle/README.md");
 
         var (mount, _) = EmitArtwork("oracle");
         try
@@ -130,15 +130,13 @@ public class ITunesDbArtworkOracleTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void Libgpod_reads_artwork_added_to_a_real_library()
     {
         var path = Environment.GetEnvironmentVariable("ORGZ_REAL_ITUNESDB");
         var oracle = Environment.GetEnvironmentVariable("ORGZ_ARTWORK_DUMP");
-        if (path is null || !File.Exists(path) || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
-        {
-            return;   // gated - needs a real 5.5G DB + a built artwork_dump
-        }
+        Skip.If(path is null || !File.Exists(path) || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle),
+            "ORGZ_REAL_ITUNESDB / ORGZ_ARTWORK_DUMP unset - needs a real 5.5G DB + a built artwork_dump");
 
         const ulong artDbid = 0x00A2_0126_0126_0126;   // distinct from any real track's dbid
         var original = File.ReadAllBytes(path);

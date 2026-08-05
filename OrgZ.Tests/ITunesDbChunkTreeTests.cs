@@ -2,6 +2,8 @@
 
 using System.Text;
 
+using Xunit;
+
 namespace OrgZ.Tests;
 
 /// <summary>
@@ -147,14 +149,12 @@ public class ITunesDbChunkTreeTests
     /// (e.g. a copy of E:\iPod_Control\iTunes\iTunesDB). Skipped otherwise so CI
     /// stays hermetic and no personal library data is committed.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void RoundTrip_and_normalize_are_byte_identical_for_real_db()
     {
         var path = Environment.GetEnvironmentVariable("ORGZ_REAL_ITUNESDB");
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return;   // not provided - nothing to validate against
-        }
+        Skip.If(string.IsNullOrWhiteSpace(path) || !File.Exists(path),
+            "ORGZ_REAL_ITUNESDB unset/missing - nothing to validate against");
 
         var original = File.ReadAllBytes(path);
 

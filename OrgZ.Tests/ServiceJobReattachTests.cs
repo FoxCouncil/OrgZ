@@ -89,8 +89,16 @@ public class ServiceJobReattachTests
             Assert.Equal("sync", job.Kind);
             Assert.Equal(@"E:\", job.Target);
 
+            // Wait for the fake runner to actually drain before the finally restores
+            // SyncServiceOps.Runner - a bare sleep raced it under load.
             release.Set();
-            await Task.Delay(100);
+            var drained = false;
+            for (int i = 0; i < 100 && !drained; i++)
+            {
+                await Task.Delay(50);
+                drained = SyncServiceOps.CurrentJob is null;
+            }
+            Assert.True(drained, "sync job never drained");
         }
         finally
         {

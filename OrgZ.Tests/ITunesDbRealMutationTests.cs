@@ -3,6 +3,8 @@
 using System.Diagnostics;
 using OrgZ.Services;
 
+using Xunit;
+
 namespace OrgZ.Tests;
 
 /// <summary>
@@ -57,14 +59,11 @@ public class ITunesDbRealMutationTests
         return ITunesDbChunkTree.Serialize(doc);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Mutating_a_real_itunes_db_preserves_the_datasets_it_does_not_model()
     {
         var path = RealDbPath;
-        if (path is null)
-        {
-            return;   // gated - see class summary
-        }
+        Skip.If(path is null, "ORGZ_REAL_ITUNESDB unset/missing - see the class summary");
         var original = File.ReadAllBytes(path);
 
         var origAlbums = DatasetBytes(original, 4);      // album table
@@ -85,15 +84,13 @@ public class ITunesDbRealMutationTests
         Assert.Contains(newPlaylists, pl => pl.Name == NewTitle);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Libgpod_accepts_the_mutated_real_db_and_sees_the_changes()
     {
         var path = RealDbPath;
         var oracle = Environment.GetEnvironmentVariable("ORGZ_GPOD_DUMP");
-        if (path is null || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
-        {
-            return;   // gated - needs both a real DB and a built gpod_dump (see oracle/README.md)
-        }
+        Skip.If(path is null || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle),
+            "ORGZ_REAL_ITUNESDB / ORGZ_GPOD_DUMP unset - needs both a real DB and a built gpod_dump (see oracle/README.md)");
 
         var original = File.ReadAllBytes(path);
         ITunesDbReader.ReadAll(original, @"X:\", out var origTracks, out _);
@@ -112,15 +109,13 @@ public class ITunesDbRealMutationTests
                                     && l.Contains($"[{addedId}]"));                  // new playlist over the new track
     }
 
-    [Fact]
+    [SkippableFact]
     public void Libgpod_reads_podcasts_and_audiobooks_added_to_a_real_library()
     {
         var path = RealDbPath;
         var oracle = Environment.GetEnvironmentVariable("ORGZ_GPOD_DUMP");
-        if (path is null || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
-        {
-            return;   // gated - see class summary
-        }
+        Skip.If(path is null || string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle),
+            "ORGZ_REAL_ITUNESDB / ORGZ_GPOD_DUMP unset - see the class summary");
 
         var original = File.ReadAllBytes(path);
         ITunesDbReader.ReadAll(original, @"X:\", out var origTracks, out _);
