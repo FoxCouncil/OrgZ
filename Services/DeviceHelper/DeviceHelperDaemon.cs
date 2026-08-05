@@ -58,10 +58,24 @@ public static class DeviceHelperDaemon
     {
         var ownerUid = ReadOwnerUid();
 
-        // A stale socket file from a previous run blocks bind - remove it first.
+        // A stale socket file from a previous run blocks bind - remove it first. But only
+        // if it's actually DEAD: unlinking a live daemon's socket would yank the endpoint
+        // out from under it and leave two daemons, one unreachable. A quick connect probe
+        // distinguishes the two - a live owner accepts, a stale file refuses.
         if (File.Exists(DeviceHelperProtocol.Endpoint))
         {
-            File.Delete(DeviceHelperProtocol.Endpoint);
+            try
+            {
+                using var probe = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                await probe.ConnectAsync(new UnixDomainSocketEndPoint(DeviceHelperProtocol.Endpoint), new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token);
+                _log.Error("Another daemon is already serving {Endpoint} — refusing to start a second instance", DeviceHelperProtocol.Endpoint);
+                return;
+            }
+            catch
+            {
+                // Nobody home - it's a stale file from a dead process.
+                File.Delete(DeviceHelperProtocol.Endpoint);
+            }
         }
 
         using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -279,12 +293,31 @@ public static class DeviceHelperDaemon
         var response = Handle(request);
         await DeviceHelperProtocol.WriteMessageAsync(stream, response, ct);
 
-        if (request.Op == DeviceHelperProtocol.OpReload)
+        if (request.Op == DeviceHelperProtocol.OpReload && response.Ok)
         {
             await stream.FlushAsync(ct);
             _log.Information("Reload requested — exiting so launchd relaunches the updated binary");
             Environment.Exit(0);
         }
+    }
+
+    /// <summary>
+    /// Reload restarts the process, and a burn or sync mid-flight would die with it -
+    /// a half-burned coaster or a half-written device database. Busy means "not now";
+    /// the caller retries once the job drains. The exit itself only happens when this
+    /// handler answered Ok (see the gate in ServeAsync).
+    /// </summary>
+    private static DeviceHelperProtocol.Response HandleReload(DeviceHelperProtocol.Request _)
+    {
+        if (CdServiceOps.CurrentJob is not null)
+        {
+            return Fail("busy: a disc job is in progress — reload refused");
+        }
+        if (SyncServiceOps.CurrentJob is not null)
+        {
+            return Fail("busy: a device sync is in progress — reload refused");
+        }
+        return Ok();
     }
 
     // ── Op registry ──────────────────────────────────────────
@@ -295,7 +328,7 @@ public static class DeviceHelperDaemon
     private static readonly Dictionary<string, Func<DeviceHelperProtocol.Request, DeviceHelperProtocol.Response>> _ops = new(StringComparer.Ordinal)
     {
         [DeviceHelperProtocol.OpPing] = _ => Ok(),
-        [DeviceHelperProtocol.OpReload] = _ => Ok(),
+        [DeviceHelperProtocol.OpReload] = HandleReload,
         [DeviceHelperProtocol.OpStatus] = HandleStatus,
         [DeviceHelperProtocol.OpReadIdentity] = HandleReadIdentity,
     };

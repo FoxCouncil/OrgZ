@@ -425,6 +425,13 @@ public static class DeviceHelperInstaller
                 return new(false, "failed to start cmd.exe");
             }
 
+            // Drain BOTH pipes concurrently, then wait for exit. Waiting first deadlocks:
+            // a child that fills a redirected pipe blocks on write, never exits, and the
+            // timeout below then reports a FAILED install for a service that actually
+            // registered fine.
+            var stdoutTask = p.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var stderrTask = p.StandardError.ReadToEndAsync(CancellationToken.None);
+
             using var cts = new CancellationTokenSource(HookTimeout);
             try
             {
@@ -435,8 +442,8 @@ public static class DeviceHelperInstaller
                 return new(false, $"timed out after {HookTimeout.TotalSeconds:0}s");
             }
 
-            var stdout = await p.StandardOutput.ReadToEndAsync(CancellationToken.None);
-            var stderr = await p.StandardError.ReadToEndAsync(CancellationToken.None);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
             _log.Information("service command exited {Code}: {Out} {Err}", p.ExitCode, stdout.Trim(), stderr.Trim());
 
             return p.ExitCode == 0 ? new(true, "ok") : new(false, $"exited {p.ExitCode}: {stderr.Trim()}{stdout.Trim()}");
@@ -552,10 +559,12 @@ public static class DeviceHelperInstaller
             return (-1, string.Empty, $"failed to start {fileName}");
         }
 
-        var stdout = await p.StandardOutput.ReadToEndAsync();
-        var stderr = await p.StandardError.ReadToEndAsync();
+        // Both pipes drain concurrently: reading stdout to end while stderr's buffer fills
+        // deadlocks a chatty child (same shape as RunShellAsync's fix).
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
         await p.WaitForExitAsync();
-        return (p.ExitCode, stdout, stderr);
+        return (p.ExitCode, await stdoutTask, await stderrTask);
     }
 
     private static async Task<InstallResult> RunElevatedMacAsync(string shellScript, string prompt)

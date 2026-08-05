@@ -99,6 +99,52 @@ public class ServiceJobReattachTests
         }
     }
 
+    // ── Reload safety ─────────────────────────────────────────
+
+    [Fact]
+    public async Task Reload_is_refused_while_a_disc_job_is_in_flight()
+    {
+        var spec = Path.GetTempFileName();
+        var release = new ManualResetEventSlim(false);
+        var started = new ManualResetEventSlim(false);
+        var original = CdServiceOps.Runner;
+
+        try
+        {
+            CdServiceOps.Runner = (_, _) => { started.Set(); release.Wait(TimeSpan.FromSeconds(10)); return 0; };
+
+            var payload = $$"""{"specPath":{{System.Text.Json.JsonSerializer.Serialize(spec)}},"progressPath":"C:\\p.jsonl"}""";
+            Assert.True(CdServiceOps.HandleCdRun(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, CdServiceOps.OpCdRun, "", null, payload)).Ok);
+            Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+
+            // Mid-burn, a reload restarts the process and the job dies with it - refuse.
+            var refused = DeviceHelperDaemon.Handle(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, DeviceHelperProtocol.OpReload, "", null));
+            Assert.False(refused.Ok);
+            Assert.Contains("busy", refused.Error, StringComparison.OrdinalIgnoreCase);
+
+            release.Set();
+            var cleared = false;
+            for (int i = 0; i < 100 && !cleared; i++)
+            {
+                await Task.Delay(50);
+                cleared = CdServiceOps.CurrentJob is null;
+            }
+            Assert.True(cleared, "disc job never drained");
+
+            // Idle again: reload proceeds.
+            Assert.True(DeviceHelperDaemon.Handle(new DeviceHelperProtocol.Request(
+                DeviceHelperProtocol.Version, DeviceHelperProtocol.OpReload, "", null)).Ok);
+        }
+        finally
+        {
+            release.Set();
+            CdServiceOps.Runner = original;
+            File.Delete(spec);
+        }
+    }
+
     // ── Wire parsing ──────────────────────────────────────────
 
     [Theory]
