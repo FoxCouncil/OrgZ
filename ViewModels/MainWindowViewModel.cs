@@ -5013,16 +5013,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return Path.GetFullPath(Path.Combine(mountPath, rel));
     }
 
-    internal static string SanitizeFileName(string name)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var sb = new System.Text.StringBuilder(name.Length);
-        foreach (var c in name)
-        {
-            sb.Append(invalid.Contains(c) ? '_' : c);
-        }
-        return sb.ToString().Trim();
-    }
+    internal static string SanitizeFileName(string name) => Helpers.SafeName.For(name, Helpers.SafeName.Style.Replace);
 
     internal async Task ExportPlaylist(SidebarItem item, string format)
     {
@@ -5815,7 +5806,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return false;
     }
 
-    private static string SanitizeFolderName(string s) => string.Join("_", s.Split(Path.GetInvalidFileNameChars())).TrimEnd('.', ' ');
+    private static string SanitizeFolderName(string s) => Helpers.SafeName.For(s, Helpers.SafeName.Style.ReplaceTrimTrailing);
 
     #endregion
 

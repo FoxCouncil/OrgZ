@@ -206,12 +206,7 @@ public sealed class AudiobookDownloadService
     // ── pure pieces (unit-tested) ──────────────────────────────────────────────
 
     /// <summary>A path segment safe on every filesystem OrgZ writes to; never empty.</summary>
-    internal static string SanitizeSegment(string s)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var cleaned = new string(s.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
-        return cleaned.Length > 0 ? cleaned : "Unknown";
-    }
+    internal static string SanitizeSegment(string s) => Helpers.SafeName.For(s, Helpers.SafeName.Style.ReplaceOrUnknown);
 
     /// <summary>archive.org file names keep their extension; everything else gets segment rules.</summary>
     internal static string SanitizeFileName(string name)

@@ -422,26 +422,5 @@ public static class CdRipService
         return baseName + RipEncoder.ExtensionFor(format);
     }
 
-    internal static string SanitizeForFileName(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var invalid = Path.GetInvalidFileNameChars();
-        var result = new char[value.Length];
-        int len = 0;
-        foreach (var ch in value)
-        {
-            if (ch < 0x20 || Array.IndexOf(invalid, ch) >= 0)
-            {
-                continue;
-            }
-
-            result[len++] = ch;
-        }
-
-        return new string(result, 0, len).Trim().TrimEnd('.');
-    }
+    internal static string SanitizeForFileName(string? value) => Helpers.SafeName.For(value, Helpers.SafeName.Style.Drop);
 }

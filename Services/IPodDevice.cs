@@ -577,12 +577,12 @@ public sealed class RockboxIPod : IPodDevice
         {
             var e = episodes[i];
             onProgress?.Invoke(i + 1, episodes.Count);
-            var showDir = Path.Combine(podRoot, Sanitize(e.Show));
+            var showDir = Path.Combine(podRoot, Helpers.SafeName.ReplaceOnly(e.Show));
             Directory.CreateDirectory(showDir);
-            var dest = Path.Combine(showDir, Sanitize(e.Title) + Path.GetExtension(e.LocalFile));
+            var dest = Path.Combine(showDir, Helpers.SafeName.ReplaceOnly(e.Title) + Path.GetExtension(e.LocalFile));
             File.Copy(e.LocalFile, dest, overwrite: true);
 
-            var entry = "/Podcasts/" + Sanitize(e.Show) + "/" + Path.GetFileName(dest);
+            var entry = "/Podcasts/" + Helpers.SafeName.ReplaceOnly(e.Show) + "/" + Path.GetFileName(dest);
             if (!lines.Contains(entry))
             {
                 lines.Add(entry);
@@ -666,7 +666,7 @@ public sealed class RockboxIPod : IPodDevice
             // match that (it reads .m3u too, but .m3u8 is the convention and handles non-ASCII names).
             var playlistsDir = Path.Combine(MountPath, "Playlists");
             Directory.CreateDirectory(playlistsDir);
-            var target = Path.Combine(playlistsDir, Sanitize(name) + ".m3u8");
+            var target = Path.Combine(playlistsDir, Helpers.SafeName.ReplaceOnly(name) + ".m3u8");
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("#EXTM3U");
             sb.Append("#PLAYLIST:").AppendLine(name);
@@ -684,7 +684,7 @@ public sealed class RockboxIPod : IPodDevice
     public override Task RemovePlaylistAsync(string name, CancellationToken ct = default)
         => Task.Run(() =>
         {
-            var target = Path.Combine(MountPath, "Playlists", Sanitize(name) + ".m3u8");
+            var target = Path.Combine(MountPath, "Playlists", Helpers.SafeName.ReplaceOnly(name) + ".m3u8");
             if (File.Exists(target))
             {
                 File.Delete(target);
@@ -709,13 +709,12 @@ public sealed class RockboxIPod : IPodDevice
 
     private static string BuildMusicRelativePath(MediaItem track)
     {
-        var artist = Sanitize(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
-        var album = Sanitize(string.IsNullOrWhiteSpace(track.Album) ? "Unknown Album" : track.Album!);
-        var file = Sanitize(!string.IsNullOrEmpty(track.FileName) ? track.FileName! : Path.GetFileName(track.FilePath ?? "track"));
+        var artist = Helpers.SafeName.ReplaceOnly(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
+        var album = Helpers.SafeName.ReplaceOnly(string.IsNullOrWhiteSpace(track.Album) ? "Unknown Album" : track.Album!);
+        var file = Helpers.SafeName.ReplaceOnly(!string.IsNullOrEmpty(track.FileName) ? track.FileName! : Path.GetFileName(track.FilePath ?? "track"));
         return $"/Music/{artist}/{album}/{file}";
     }
 
-    private static string Sanitize(string s) => string.Join("_", s.Split(Path.GetInvalidFileNameChars()));
 }
 
 /// <summary>
@@ -1164,7 +1163,6 @@ public sealed class ShuffleIPod : IPodDevice
         }
     }
 
-    private static string Sanitize(string s) => string.Join("_", s.Split(Path.GetInvalidFileNameChars()));
 }
 
 /// <summary>Detected but not safely writable yet (Nano 6G/7G HashAB - no open-source signer - plus
