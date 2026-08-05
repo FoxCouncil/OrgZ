@@ -32,10 +32,23 @@ internal sealed class CoreAudioSink : IAudioSink
     private const int PoolSize = 24;
 
     private readonly string? _deviceUid;
+
+    // Lock discipline (the same Write-vs-Close race WaveOutSink and PulseAudioSink each
+    // fixed after a live crash): every NATIVE AudioQueue call happens under _lifecycle with
+    // a fresh _queue check, so Close can never dispose the queue between another thread's
+    // check and its call. The pool WAIT deliberately happens OUTSIDE _lifecycle - only the
+    // enqueue itself takes the lock - so Volume/Pause from the UI thread never stall behind
+    // the audio thread's backpressure wait (the stall WaveOutSink's coarser locking has).
+    // Order when both are needed: _lifecycle, then _poolLock - never the reverse.
     private readonly object _lifecycle = new();
     private readonly object _poolLock = new();
     private readonly Queue<IntPtr> _freeBuffers = new();
     private readonly List<IntPtr> _allBuffers = new(PoolSize);
+    // AudioQueueBuffer's data pointer and capacity are fixed at allocation - read them once
+    // there instead of reflect-marshaling the whole struct on every chunk of every Write.
+    private readonly Dictionary<IntPtr, IntPtr> _bufferData = new(PoolSize);
+    private int _bufferCapacity;
+    private static readonly int ByteSizeOffset = (int)Marshal.OffsetOf<CoreAudioNative.AudioQueueBuffer>(nameof(CoreAudioNative.AudioQueueBuffer.mAudioDataByteSize));
     private readonly CoreAudioNative.AudioQueueOutputCallback _callback;
 
     private IntPtr _queue;
@@ -129,6 +142,9 @@ internal sealed class CoreAudioSink : IAudioSink
                 {
                     if (CoreAudioNative.AudioQueueAllocateBuffer(_queue, (uint)bufferBytes, out var bufPtr) == 0)
                     {
+                        var buf = Marshal.PtrToStructure<CoreAudioNative.AudioQueueBuffer>(bufPtr);
+                        _bufferData[bufPtr] = buf.mAudioData;
+                        _bufferCapacity = (int)buf.mAudioDataBytesCapacity;
                         _freeBuffers.Enqueue(bufPtr);
                         _allBuffers.Add(bufPtr);
                     }
@@ -201,97 +217,99 @@ internal sealed class CoreAudioSink : IAudioSink
         int written = 0;
         while (written < pcm.Length)
         {
-            IntPtr bufPtr;
+            // Wait for the AudioQueue callback to return a buffer. SetAudioCallbacks
+            // works on backpressure - the LibVLC decoder thread is *meant* to block
+            // here while playback drains the pool. Dropping samples on timeout caused
+            // audible speed wobble. Monitor.Wait (pulsed by OnBufferComplete) replaces
+            // the old 2ms poll: the normal steady state no longer burns ~500 lock
+            // acquisitions a second on the audio thread. 5 s ceiling keeps us from
+            // hanging forever if the AudioQueue truly stopped responding.
+            IntPtr bufPtr = IntPtr.Zero;
             lock (_poolLock)
             {
-                if (_freeBuffers.Count == 0)
+                var deadline = Environment.TickCount64 + 5000;
+                while (_freeBuffers.Count == 0 && !_disposed && _queue != IntPtr.Zero && Environment.TickCount64 < deadline)
                 {
-                    bufPtr = IntPtr.Zero;
+                    System.Threading.Monitor.Wait(_poolLock, 250);
                 }
-                else
+                if (_freeBuffers.Count > 0)
                 {
                     bufPtr = _freeBuffers.Dequeue();
                 }
             }
 
-            // Wait for the AudioQueue callback to return a buffer. SetAudioCallbacks
-            // works on backpressure - the LibVLC decoder thread is *meant* to
-            // block here while playback drains the pool. Dropping samples on
-            // timeout caused audible speed wobble (skipped samples sped up,
-            // late samples slowed down). 5 s ceiling keeps us from hanging
-            // forever if the AudioQueue truly stopped responding.
             if (bufPtr == IntPtr.Zero)
             {
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                while (bufPtr == IntPtr.Zero && sw.ElapsedMilliseconds < 5000 && !_disposed)
+                if (_disposed || _queue == IntPtr.Zero)
                 {
-                    System.Threading.Thread.Sleep(2);
-                    lock (_poolLock)
-                    {
-                        if (_freeBuffers.Count > 0)
-                        {
-                            bufPtr = _freeBuffers.Dequeue();
-                        }
-                    }
+                    return;   // closed underneath us mid-wait - not a wedge, nothing to report
                 }
 
-                if (bufPtr == IntPtr.Zero)
+                // AudioQueue stopped returning buffers for 5 s - something
+                // is genuinely wrong (queue stopped, hardware unplugged).
+                var dropped = System.Threading.Interlocked.Increment(ref _droppedBuffers);
+                var nowTicks = Environment.TickCount64;
+                var lastTicks = System.Threading.Interlocked.Read(ref _lastDropLogTicks);
+                if (nowTicks - lastTicks > 1000)
                 {
-                    // AudioQueue stopped returning buffers for 5 s - something
-                    // is genuinely wrong (queue stopped, hardware unplugged).
-                    var dropped = System.Threading.Interlocked.Increment(ref _droppedBuffers);
-                    var nowTicks = Environment.TickCount64;
-                    var lastTicks = System.Threading.Interlocked.Read(ref _lastDropLogTicks);
-                    if (nowTicks - lastTicks > 1000)
-                    {
-                        System.Threading.Interlocked.Exchange(ref _lastDropLogTicks, nowTicks);
-                        _log.Warning("CoreAudioSink {Id}: AudioQueue pool wedged for 5 s, dropping {Bytes} byte(s) (total drops: {Total})", Id, pcm.Length - written, dropped);
-                    }
-                    return;
+                    System.Threading.Interlocked.Exchange(ref _lastDropLogTicks, nowTicks);
+                    _log.Warning("CoreAudioSink {Id}: AudioQueue pool wedged for 5 s, dropping {Bytes} byte(s) (total drops: {Total})", Id, pcm.Length - written, dropped);
                 }
-            }
-
-            var buf = Marshal.PtrToStructure<CoreAudioNative.AudioQueueBuffer>(bufPtr);
-            int chunkLen = Math.Min(pcm.Length - written, (int)buf.mAudioDataBytesCapacity);
-            var chunk = pcm.Slice(written, chunkLen);
-
-            if (_muted)
-            {
-                new Span<byte>((void*)buf.mAudioData, chunkLen).Clear();
-            }
-            else if (_volume < 0.999f && CurrentFormat is { BitsPerSample: > 16 })
-            {
-                ScaleS32(chunk, new Span<byte>((void*)buf.mAudioData, chunkLen), _volume);
-            }
-            else if (_volume < 0.999f)
-            {
-                ScaleS16(chunk, new Span<byte>((void*)buf.mAudioData, chunkLen), _volume);
-            }
-            else
-            {
-                chunk.CopyTo(new Span<byte>((void*)buf.mAudioData, chunkLen));
-            }
-
-            // Patch the mAudioDataByteSize field in place on the native buffer.
-            Marshal.WriteInt32(bufPtr, (int)Marshal.OffsetOf<CoreAudioNative.AudioQueueBuffer>(nameof(CoreAudioNative.AudioQueueBuffer.mAudioDataByteSize)), chunkLen);
-
-            var rc = CoreAudioNative.AudioQueueEnqueueBuffer(_queue, bufPtr, 0, IntPtr.Zero);
-            if (rc != 0)
-            {
-                // Enqueue failed - return the buffer to the pool so we don't
-                // leak it permanently. Most common cause is the queue having
-                // been Stop()'d underneath us; the next Open/Resume cycle
-                // will get it going again.
-                lock (_poolLock)
-                {
-                    _freeBuffers.Enqueue(bufPtr);
-                }
-                _log.Warning("CoreAudioSink {Id}: AudioQueueEnqueueBuffer failed: OSStatus {Rc}", Id, rc);
                 return;
             }
 
-            written += chunkLen;
-            _bufferedSinceStart++;
+            lock (_lifecycle)
+            {
+                // Close can win the race between our entry check and here - the queue (and
+                // this buffer) are gone, so the only safe move is to walk away.
+                if (_disposed || _queue == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                var dataPtr = _bufferData[bufPtr];
+                int chunkLen = Math.Min(pcm.Length - written, _bufferCapacity);
+                var chunk = pcm.Slice(written, chunkLen);
+
+                if (_muted)
+                {
+                    new Span<byte>((void*)dataPtr, chunkLen).Clear();
+                }
+                else if (_volume < 0.999f && CurrentFormat is { BitsPerSample: > 16 })
+                {
+                    ScaleS32(chunk, new Span<byte>((void*)dataPtr, chunkLen), _volume);
+                }
+                else if (_volume < 0.999f)
+                {
+                    ScaleS16(chunk, new Span<byte>((void*)dataPtr, chunkLen), _volume);
+                }
+                else
+                {
+                    chunk.CopyTo(new Span<byte>((void*)dataPtr, chunkLen));
+                }
+
+                // Patch the mAudioDataByteSize field in place on the native buffer.
+                Marshal.WriteInt32(bufPtr, ByteSizeOffset, chunkLen);
+
+                var rc = CoreAudioNative.AudioQueueEnqueueBuffer(_queue, bufPtr, 0, IntPtr.Zero);
+                if (rc != 0)
+                {
+                    // Enqueue failed - return the buffer to the pool so we don't
+                    // leak it permanently. Most common cause is the queue having
+                    // been Stop()'d underneath us; the next Open/Resume cycle
+                    // will get it going again.
+                    lock (_poolLock)
+                    {
+                        _freeBuffers.Enqueue(bufPtr);
+                        System.Threading.Monitor.Pulse(_poolLock);
+                    }
+                    _log.Warning("CoreAudioSink {Id}: AudioQueueEnqueueBuffer failed: OSStatus {Rc}", Id, rc);
+                    return;
+                }
+
+                written += chunkLen;
+                _bufferedSinceStart++;
+            }
         }
 
         // Delay AudioQueueStart until we've buffered enough audio that the
@@ -300,8 +318,14 @@ internal sealed class CoreAudioSink : IAudioSink
         // first-callback variance, but short enough that play feels instant.
         if (!_started && _bufferedSinceStart >= 3)
         {
-            _started = true;
-            CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
+            lock (_lifecycle)
+            {
+                if (!_disposed && _queue != IntPtr.Zero && !_started)
+                {
+                    _started = true;
+                    CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
+                }
+            }
         }
     }
 
@@ -327,11 +351,16 @@ internal sealed class CoreAudioSink : IAudioSink
 
     private void ApplyVolume()
     {
-        if (_queue == IntPtr.Zero)
+        // Fast native call, so holding _lifecycle is safe from the UI thread - Write only
+        // holds it per-enqueue, never across its backpressure wait.
+        lock (_lifecycle)
         {
-            return;
+            if (_disposed || _queue == IntPtr.Zero)
+            {
+                return;
+            }
+            CoreAudioNative.AudioQueueSetParameter(_queue, CoreAudioNative.kAudioQueueParam_Volume, _muted ? 0f : _volume);
         }
-        CoreAudioNative.AudioQueueSetParameter(_queue, CoreAudioNative.kAudioQueueParam_Volume, _muted ? 0f : _volume);
     }
 
     private static void OnBufferComplete(IntPtr userData, IntPtr audioQueue, IntPtr buffer)
@@ -347,83 +376,96 @@ internal sealed class CoreAudioSink : IAudioSink
             lock (sink._poolLock)
             {
                 sink._freeBuffers.Enqueue(buffer);
+                System.Threading.Monitor.Pulse(sink._poolLock);   // wake a Write waiting on backpressure
             }
         }
     }
 
     public void Pause()
     {
-        if (_queue == IntPtr.Zero) return;
-        // AudioQueuePause: instant pause without draining buffered audio.
-        // AudioQueueStop(immediate=false) used to play out the entire ~1.2s
-        // of pool buffering before honoring the pause - audibly laggy.
-        CoreAudioNative.AudioQueuePause(_queue);
+        lock (_lifecycle)
+        {
+            if (_disposed || _queue == IntPtr.Zero) return;
+            // AudioQueuePause: instant pause without draining buffered audio.
+            // AudioQueueStop(immediate=false) used to play out the entire ~1.2s
+            // of pool buffering before honoring the pause - audibly laggy.
+            CoreAudioNative.AudioQueuePause(_queue);
+        }
     }
 
     public void Resume()
     {
-        if (_queue == IntPtr.Zero) return;
-        CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
+        lock (_lifecycle)
+        {
+            if (_disposed || _queue == IntPtr.Zero) return;
+            CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
+        }
     }
 
     public void Flush()
     {
-        if (_queue == IntPtr.Zero) return;
-        // AudioQueueReset clears pending audio without stopping the queue;
-        // playback can resume immediately on the next AudioQueueEnqueueBuffer.
-        // Stop(immediate=true) followed by Start used to leave some buffers
-        // stranded - neither in our free list nor being played - because the
-        // OnBufferComplete callback isn't guaranteed to fire for them.
-        CoreAudioNative.AudioQueueReset(_queue);
-        lock (_poolLock)
+        lock (_lifecycle)
         {
-            _freeBuffers.Clear();
-            foreach (var ptr in _allBuffers)
+            if (_disposed || _queue == IntPtr.Zero) return;
+            // AudioQueueReset clears pending audio without stopping the queue;
+            // playback can resume immediately on the next AudioQueueEnqueueBuffer.
+            // Stop(immediate=true) followed by Start used to leave some buffers
+            // stranded - neither in our free list nor being played - because the
+            // OnBufferComplete callback isn't guaranteed to fire for them.
+            CoreAudioNative.AudioQueueReset(_queue);
+            lock (_poolLock)
             {
-                _freeBuffers.Enqueue(ptr);
+                _freeBuffers.Clear();
+                foreach (var ptr in _allBuffers)
+                {
+                    _freeBuffers.Enqueue(ptr);
+                }
+                System.Threading.Monitor.PulseAll(_poolLock);   // every waiter can proceed
             }
+            // After a flush we re-enter the buffer-up-before-Start state so the
+            // next track's beginning also pre-rolls and doesn't pop.
+            _bufferedSinceStart = 0;
+            _started = false;
         }
-        // After a flush we re-enter the buffer-up-before-Start state so the
-        // next track's beginning also pre-rolls and doesn't pop.
-        _bufferedSinceStart = 0;
-        _started = false;
     }
 
     public void Drain()
     {
-        if (_queue == IntPtr.Zero)
+        lock (_lifecycle)
         {
-            return;
-        }
-
-        // A short track can end before Write ever reached the 3-buffer
-        // pre-roll threshold - start the queue now or the tail never plays.
-        if (!_started && _bufferedSinceStart > 0)
-        {
-            _started = true;
-            CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
-        }
-
-        // AudioQueueFlush pushes any partially-filled internal buffer toward
-        // the hardware; then wait for OnBufferComplete to hand every pool
-        // buffer back, which means all enqueued audio has actually played.
-        CoreAudioNative.AudioQueueFlush(_queue);
-        var deadline = Environment.TickCount64 + 5000;
-        while (!_disposed)
-        {
-            lock (_poolLock)
+            if (_disposed || _queue == IntPtr.Zero)
             {
-                if (_freeBuffers.Count >= _allBuffers.Count)
-                {
-                    return;
-                }
-            }
-            if (Environment.TickCount64 > deadline)
-            {
-                _log.Warning("CoreAudioSink {Id}: drain timed out with audio still queued", Id);
                 return;
             }
-            System.Threading.Thread.Sleep(5);
+
+            // A short track can end before Write ever reached the 3-buffer
+            // pre-roll threshold - start the queue now or the tail never plays.
+            if (!_started && _bufferedSinceStart > 0)
+            {
+                _started = true;
+                CoreAudioNative.AudioQueueStart(_queue, IntPtr.Zero);
+            }
+
+            // AudioQueueFlush pushes any partially-filled internal buffer toward
+            // the hardware.
+            CoreAudioNative.AudioQueueFlush(_queue);
+        }
+
+        // Then wait (OUTSIDE the lock, so Pause/Volume stay responsive) for
+        // OnBufferComplete to hand every pool buffer back, which means all
+        // enqueued audio has actually played. The callback pulses on each return.
+        var deadline = Environment.TickCount64 + 5000;
+        lock (_poolLock)
+        {
+            while (!_disposed && _queue != IntPtr.Zero && _freeBuffers.Count < _allBuffers.Count)
+            {
+                if (Environment.TickCount64 > deadline)
+                {
+                    _log.Warning("CoreAudioSink {Id}: drain timed out with audio still queued", Id);
+                    return;
+                }
+                System.Threading.Monitor.Wait(_poolLock, 100);
+            }
         }
     }
 
@@ -445,6 +487,10 @@ internal sealed class CoreAudioSink : IAudioSink
             {
                 _freeBuffers.Clear();
                 _allBuffers.Clear();
+                _bufferData.Clear();
+                // Wake any Write blocked on backpressure so it can observe the queue is
+                // gone and bail instead of sitting out its full 5 s deadline.
+                System.Threading.Monitor.PulseAll(_poolLock);
             }
             CurrentFormat = null;
         }
