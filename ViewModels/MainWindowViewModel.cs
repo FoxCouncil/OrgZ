@@ -285,6 +285,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _shareScanning;
     private Avalonia.Threading.DispatcherTimer? _shareScanTimer;
 
+    // Handlers on process-wide singletons, kept so Dispose can detach them (see the ctor).
+    private Action? _onSubscriptionsRefreshed;
+    private Action<Models.PodcastFeed, Models.PodcastEpisode>? _onDownloadStarted;
+    private Action<Services.Podcast.DownloadProgress>? _onDownloadProgress;
+    private Action<Models.PodcastFeed, Models.PodcastEpisode>? _onDownloadCompleted;
+    private Action<long, Exception>? _onDownloadFailed;
+
     /// <summary>
     public PodcastsViewModel Podcasts { get; private set; } = null!;
 
@@ -1226,7 +1233,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(ShowCdInfoBar));
 
-        _ = BuildPlaylistHeaderAsync(value);
+        FireAndForget(BuildPlaylistHeaderAsync(value), "playlist header build");
 
         _activeViewConfig = ListViewConfigs.Get(value?.ViewConfigKey);
 
@@ -1504,7 +1511,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Apply the global podcast rules on a cadence: on startup, when a check is due,
         // refresh every subscription (auto-download new episodes + prune per the Keep
         // policy). Reload the panel's subscription tiles once a pass finishes.
-        Services.Podcast.PodcastSubscriptionService.Instance.RefreshCompleted += () => UI(() => Podcasts.ReloadSubscriptions());
+        // These are PROCESS-WIDE singletons, so the handlers are kept in fields and detached
+        // in Dispose. Subscribing with throwaway lambdas leaked a whole ViewModel per
+        // subscription - which the docs-screenshot runner (several VMs per process) turned
+        // from theory into a real pile of live objects driving a dead window.
+        _onSubscriptionsRefreshed = () => UI(() => Podcasts.ReloadSubscriptions());
+        Services.Podcast.PodcastSubscriptionService.Instance.RefreshCompleted += _onSubscriptionsRefreshed;
         if (Services.Podcast.PodcastSettings.IsDueForCheck)
         {
             _ = Services.Podcast.PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath);
@@ -1513,10 +1525,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // Surface podcast download progress on the LCD busy display (same as ripping/import).
         // The service's events fire from background threads, so marshal each to the UI thread.
         var podcastDownloads = Services.Podcast.PodcastDownloadService.Instance;
-        podcastDownloads.Started += (_, ep) => UI(() => OnPodcastDownloadStarted(ep));
-        podcastDownloads.ProgressChanged += p => UI(() => OnPodcastDownloadProgress(p));
-        podcastDownloads.Completed += (_, ep) => UI(() => OnPodcastDownloadFinished(ep.Id));
-        podcastDownloads.Failed += (epId, _) => UI(() => OnPodcastDownloadFinished(epId));
+        _onDownloadStarted = (_, ep) => UI(() => OnPodcastDownloadStarted(ep));
+        _onDownloadProgress = p => UI(() => OnPodcastDownloadProgress(p));
+        _onDownloadCompleted = (_, ep) => UI(() => OnPodcastDownloadFinished(ep.Id));
+        _onDownloadFailed = (epId, _) => UI(() => OnPodcastDownloadFinished(epId));
+        podcastDownloads.Started += _onDownloadStarted;
+        podcastDownloads.ProgressChanged += _onDownloadProgress;
+        podcastDownloads.Completed += _onDownloadCompleted;
+        podcastDownloads.Failed += _onDownloadFailed;
 
         // Initialize shuffle/repeat visual state from saved settings
         ShuffleOpacity = ShuffleMode == ShuffleMode.On ? 1.0 : 0.4;
@@ -4323,8 +4339,36 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return false;
         }
+
+        return DeviceMatchKeys(device).Contains(key);
+    }
+
+    // Per-device "artist+title already here" sets. Building the Sync submenu asks this once
+    // per device per SELECTED ROW, and the old scan walked all of _allItems (re-normalizing
+    // every device row's artist+title) for each of those questions - so opening a context
+    // menu over a big library with a device attached was O(rows x devices) string work.
+    // Keyed by mount + the library's version counter, so a stale set can't outlive an edit.
+    private readonly Dictionary<string, (int Version, HashSet<string> Keys)> _deviceMatchKeys = new(StringComparer.Ordinal);
+
+    private HashSet<string> DeviceMatchKeys(ConnectedDevice device)
+    {
         var source = $"device:{device.MountPath}";
-        return _allItems.Any(i => i.Source == source && NormalizeMatchKey(i.Artist, i.Title) == key);
+        if (_deviceMatchKeys.TryGetValue(source, out var cached) && cached.Version == _dataVersion)
+        {
+            return cached.Keys;
+        }
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var i in _allItems)
+        {
+            if (i.Source == source && NormalizeMatchKey(i.Artist, i.Title) is { Length: > 0 } k)
+            {
+                keys.Add(k);
+            }
+        }
+
+        _deviceMatchKeys[source] = (_dataVersion, keys);
+        return keys;
     }
 
     /// <summary>
@@ -5880,7 +5924,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // The header may have been built in the constructor against an empty library
         // (the saved view is restored before this async load runs) - rebuild it now that
         // _allItems is populated so a first-run playlist/Favorites header isn't blank.
-        _ = BuildPlaylistHeaderAsync(SelectedSidebarItem);
+        FireAndForget(BuildPlaylistHeaderAsync(SelectedSidebarItem), "playlist header build");
 
         // Scan and analyze the library folder (music + audiobooks)
         await ScanAndAnalyzeLibraryAsync();
@@ -5892,11 +5936,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // CD drive arrival/removal also routes through the same WMI watcher -
         // no separate polling timer required.
         _deviceDetection = new DeviceDetectionService();
-        _deviceDetection.DeviceConnected += device => UI(() => _ = HandleDeviceConnectedAsync(device));
+        _deviceDetection.DeviceConnected += device => UI(() => FireAndForget(HandleDeviceConnectedAsync(device), "device connect"));
         _deviceDetection.DeviceDisconnected += mountPath => UI(() => HandleDeviceDisconnected(mountPath));
         _deviceDetection.DeviceEjectedByHost += name => UI(() =>
             UpdateMainStatus($"iTunes ejected {name} — replug it to reconnect (enable “disk use” in iTunes to stop the auto-eject)."));
-        _deviceDetection.CdDriveEvent += () => UI(() => _ = ScanForCdAsync());
+        _deviceDetection.CdDriveEvent += () => UI(() => FireAndForget(ScanForCdAsync(), "CD scan"));
         _deviceDetection.Start();
 
         // Work the service kept running while we were closed - pick it back up before
@@ -5905,9 +5949,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // LAN share discovery: one browse at startup, then every 30 s. Shares come and
         // go with other people's apps, so the sidebar reconciles rather than assuming.
-        _ = ScanForSharesAsync();
+        FireAndForget(ScanForSharesAsync(), "LAN share scan");
         _shareScanTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-        _shareScanTimer.Tick += (_, _) => _ = ScanForSharesAsync();
+        _shareScanTimer.Tick += (_, _) => FireAndForget(ScanForSharesAsync(), "LAN share scan");
         _shareScanTimer.Start();
     }
 
@@ -6299,6 +6343,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // "collection was modified" crash whenever the library changed mid-analysis.
         UI(() =>
         {
+            // Whole-library totals are only the truth when NOTHING is filtering the Music
+            // view. With a search active the footer belongs to UpdateViewStats (which sums
+            // the filtered set) - both used to write these three, so whichever dispatcher
+            // post landed last won and a searched footer got silently stomped with
+            // library-wide numbers.
+            if (StatusBar.ActiveKind == MediaKind.Music && !string.IsNullOrWhiteSpace(SearchText))
+            {
+                return;
+            }
+
             StatusBar.TotalSongs = MusicItems.Count();
             StatusBar.TotalDuration = TimeSpan.FromTicks(MusicItems.Sum(x => x.Duration?.Ticks ?? 0));
             StatusBar.TotalFileSize = MusicItems.Sum(x => x.FileSize ?? 0L);
@@ -6654,6 +6708,20 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 _log.Error(ex, "Async UI task faulted");
             }
         });
+    }
+
+    /// <summary>
+    /// Starts a task nobody awaits and OBSERVES its failure. A bare <c>_ = SomethingAsync()</c>
+    /// discards the fault entirely: at best it's an unobserved-task exception nobody sees, at
+    /// worst it's half-finished sidebar or device state with no trace of why.
+    /// </summary>
+    private static void FireAndForget(Task task, string what)
+    {
+        _ = task.ContinueWith(
+            t => _log.Error(t.Exception, "{What} failed", what),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
     }
 
     private static byte[]? ExtractAlbumArtBytes(string filePath)
@@ -9295,6 +9363,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _vmCts.Cancel();   // stop background loops (job reattach polling) before teardown
+
+        // Detach from the process-wide singletons FIRST: they outlive this ViewModel, and a
+        // handler left attached keeps the whole VM (and its window) alive and reachable.
+        if (_onSubscriptionsRefreshed is not null)
+        {
+            Services.Podcast.PodcastSubscriptionService.Instance.RefreshCompleted -= _onSubscriptionsRefreshed;
+        }
+        var downloads = Services.Podcast.PodcastDownloadService.Instance;
+        if (_onDownloadStarted is not null) { downloads.Started -= _onDownloadStarted; }
+        if (_onDownloadProgress is not null) { downloads.ProgressChanged -= _onDownloadProgress; }
+        if (_onDownloadCompleted is not null) { downloads.Completed -= _onDownloadCompleted; }
+        if (_onDownloadFailed is not null) { downloads.Failed -= _onDownloadFailed; }
+
+        // The share browse ticks every 30s against MediaCache and the sidebar; left running
+        // it kept scanning through a disposed VM.
+        _shareScanTimer?.Stop();
+        _shareScanTimer = null;
+
+        // In-flight jobs stop with the window that started them.
+        _ripCts?.Cancel();
+        _burnCts?.Cancel();
+        _deviceSyncCts?.Cancel();
+
+        // The bit-perfect engine owns a decoder process and a pump thread.
+        _flacEngine?.Dispose();
+
         _folderWatcher?.Dispose();
         _deviceDetection?.Dispose();
         foreach (var scanCts in _deviceScanCts.Values)
