@@ -10,10 +10,11 @@ public static class MediaCache
 {
     private static readonly ILogger _log = Logging.For("MediaCache");
 
-    private static readonly string DefaultCacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
-    private static string CacheDirectory { get; set; } = DefaultCacheDirectory;
-    private static string CacheFilePath { get; set; } = Path.Combine(DefaultCacheDirectory, "library.db");
-    private static string ConnectionString => $"Data Source={CacheFilePath}";
+    // All three library.db consumers resolve through LibraryDb, so redirecting one
+    // (the service adopting its owner's library) redirects all of them.
+    private static string CacheDirectory => LibraryDb.Directory;
+    private static string CacheFilePath => LibraryDb.FilePath;
+    private static string ConnectionString => LibraryDb.ConnectionString;
 
     /// <summary>
     /// Where the library database lives right now. A GUI hands this to the background
@@ -43,19 +44,7 @@ public static class MediaCache
     /// <summary>
     /// Test hook: redirect the cache to a custom file path. Pass null to restore the default location.
     /// </summary>
-    internal static void OverrideCachePath(string? path)
-    {
-        if (path == null)
-        {
-            CacheDirectory = DefaultCacheDirectory;
-            CacheFilePath = Path.Combine(DefaultCacheDirectory, "library.db");
-        }
-        else
-        {
-            CacheFilePath = path;
-            CacheDirectory = Path.GetDirectoryName(path) ?? DefaultCacheDirectory;
-        }
-    }
+    internal static void OverrideCachePath(string? path) => LibraryDb.OverrideFilePath(path);
 
     public static void EnsureCreated()
     {

@@ -10,6 +10,7 @@ namespace OrgZ.Tests;
 /// and listen history (record / resume position / completed / recents). Redirects the cache
 /// DB to a temp directory so it never touches the real library.db.
 /// </summary>
+[Collection(LibraryDbCollection.Name)]
 public class PodcastCacheTests : IDisposable
 {
     private readonly string _tempDir;

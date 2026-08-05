@@ -13,17 +13,16 @@ namespace OrgZ.Services.Podcast;
 /// </summary>
 public static class PodcastCache
 {
-    private static readonly string DefaultCacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OrgZ");
-    private static string CacheDirectory { get; set; } = DefaultCacheDirectory;
-    private static string ConnectionString =>
-        $"Data Source={Path.Combine(CacheDirectory, "library.db")}";
+    // Shared with MediaCache and AcquisitionStore - see LibraryDb for why one locator.
+    private static string CacheDirectory => LibraryDb.Directory;
+    private static string ConnectionString => LibraryDb.ConnectionString;
 
     /// <summary>
     /// Test hook: redirect the cache DB to a custom directory (pass null to restore the
     /// default %APPDATA%/OrgZ location). Call <see cref="EnsureCreated"/> afterward to build
-    /// the schema in the new location.
+    /// the schema in the new location. Moves EVERY library.db consumer together.
     /// </summary>
-    internal static void OverrideCacheDirectory(string? directory) => CacheDirectory = directory ?? DefaultCacheDirectory;
+    internal static void OverrideCacheDirectory(string? directory) => LibraryDb.OverrideDirectory(directory);
 
     public static void EnsureCreated()
     {

@@ -13,7 +13,7 @@ namespace OrgZ.Tests;
 /// In the MediaCache collection because the adopt-database test swings the cache's
 /// global path - unserialized, that race corrupts whichever cache test runs beside it.
 /// </summary>
-[Collection("MediaCache")]
+[Collection(LibraryDbCollection.Name)]
 public class ShareHostingTests : IDisposable
 {
     private readonly Func<string, int, LibraryShareServer> _originalFactory = ShareServiceOps.ServerFactory;

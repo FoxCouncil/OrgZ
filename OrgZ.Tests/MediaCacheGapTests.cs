@@ -9,7 +9,7 @@ namespace OrgZ.Tests;
 /// Targets: SetFavorite, SetRating, IncrementPlayCount, SetLastPlayed, RemoveLibraryFiles,
 /// UpsertRadioStations, GetCdMetadata + SaveCdMetadata.
 /// </summary>
-[Collection("MediaCache")]
+[Collection(LibraryDbCollection.Name)]
 public class MediaCacheGapTests : IDisposable
 {
     private readonly string _tempDbPath;

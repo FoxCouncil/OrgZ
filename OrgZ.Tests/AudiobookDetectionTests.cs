@@ -267,7 +267,7 @@ public class AudiobookDetectionTests
 /// Audiobook rows through the library cache - needs the shared MediaCache DB override, hence the
 /// collection (same isolation pattern as the other MediaCache test classes).
 /// </summary>
-[Collection("MediaCache")]
+[Collection(LibraryDbCollection.Name)]
 public class AudiobookMediaCacheTests : IDisposable
 {
     private readonly string _tempDbPath;

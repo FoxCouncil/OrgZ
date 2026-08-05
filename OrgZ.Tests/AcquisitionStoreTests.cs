@@ -11,7 +11,7 @@ namespace OrgZ.Tests;
 /// library.db. Identity is (Kind, SourceKey); the same key under two kinds must not collide, and
 /// re-acquiring must refresh the mutable fields without resetting AcquiredAt.
 /// </summary>
-[Collection("AcquisitionStore")]
+[Collection(LibraryDbCollection.Name)]
 public class AcquisitionStoreTests : IDisposable
 {
     private readonly string _tempDir;

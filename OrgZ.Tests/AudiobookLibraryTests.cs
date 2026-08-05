@@ -12,7 +12,7 @@ namespace OrgZ.Tests;
 /// adopted as its own record and truly forgotten once removed. Redirects the acquisition DB to a
 /// temp directory and works entirely off a temp library root - no network.
 /// </summary>
-[Collection("AcquisitionStore")]
+[Collection(LibraryDbCollection.Name)]
 public class AudiobookLibraryTests : IDisposable
 {
     private readonly string _dbDir;
