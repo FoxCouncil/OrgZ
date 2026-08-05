@@ -377,10 +377,12 @@ public partial class MainWindow : Window
         _viewStates[_lastViewConfigKey] = (anchor?.Id, _viewModel.SelectedItem);
         _log.Debug("View state save: {ViewKey} anchor={Anchor}", _lastViewConfigKey, anchor?.Id ?? "<none>");
 
-        // Persist to settings
+        // Persist to settings - deferred, because this runs on every sidebar switch and
+        // a synchronous whole-file write per click is disk churn for no benefit. The
+        // in-memory state above is what the session actually restores from.
         Settings.Set($"OrgZ.View.{_lastViewConfigKey}.TopId", anchor?.Id ?? string.Empty);
         Settings.Set($"OrgZ.View.{_lastViewConfigKey}.SelectedId", selectedId ?? string.Empty);
-        Settings.Save();
+        Settings.SaveDeferred();
     }
 
     /// <summary>

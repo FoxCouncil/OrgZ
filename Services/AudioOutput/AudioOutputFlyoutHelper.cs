@@ -91,7 +91,20 @@ internal static class AudioOutputFlyoutHelper
 
         slider.PropertyChanged += (_, ev) =>
         {
-            if (ev.Property.Name == nameof(Slider.Value))
+            if (ev.Property.Name != nameof(Slider.Value))
+            {
+                return;
+            }
+
+            // A drag fires this per tick. Set the live sink's gain directly and let the
+            // persist trail behind (deferred) - the old path rebuilt the entire selection
+            // set, re-enumerated providers, and rewrote settings.json once per pixel.
+            if (manager.Bus.Sinks.FirstOrDefault(s => s.Id == device.QualifiedId) is { } live)
+            {
+                live.Volume = (float)(slider.Value / 100.0);
+                manager.SavePersistedSelections(deferred: true);
+            }
+            else
             {
                 ApplySelection(manager, device, check, slider);
             }

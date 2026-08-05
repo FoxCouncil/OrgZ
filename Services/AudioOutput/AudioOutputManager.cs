@@ -300,7 +300,7 @@ public sealed class AudioOutputManager : IDisposable
     /// restores it.  Called by the Settings dialog after the user changes
     /// selections and by the ViewModel on shutdown as a safety net.
     /// </summary>
-    public void SavePersistedSelections()
+    public void SavePersistedSelections(bool deferred = false)
     {
         var selections = _bus.Sinks
             .Select(s => new SinkSelection
@@ -312,7 +312,17 @@ public sealed class AudioOutputManager : IDisposable
             .ToList();
 
         Settings.Set(SettingsKey, JsonSerializer.Serialize(selections));
-        Settings.Save();
+
+        // Deferred for per-tick callers (volume drags); immediate at natural boundaries
+        // (dialog close, shutdown) so nothing pending can be lost.
+        if (deferred)
+        {
+            Settings.SaveDeferred();
+        }
+        else
+        {
+            Settings.Save();
+        }
     }
 
     public void Dispose()

@@ -2448,7 +2448,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         UpdateMasterVolume();
         Settings.Set("OrgZ.Volume", (int)CurrentVolume);
-        Settings.Save();
+        // Deferred: a volume drag calls this per slider tick, and Save is a synchronous
+        // whole-file write on the UI thread - dozens of disk writes per drag. The gain
+        // change above is immediate; only the persistence trails.
+        Settings.SaveDeferred();
     }
 
     private void UpdateMasterVolume()

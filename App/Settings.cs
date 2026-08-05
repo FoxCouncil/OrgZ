@@ -115,6 +115,10 @@ internal static class Settings
         {
             lock (_lock)
             {
+                // A direct Save supersedes any pending deferred one - everything it
+                // would have written is going out right now.
+                _deferredSave?.Change(Timeout.Infinite, Timeout.Infinite);
+
                 EnsureLoadedLocked();
                 Directory.CreateDirectory(SettingsDirectory);
                 string json = JsonSerializer.Serialize(_settings, JsonOptions);
@@ -125,6 +129,33 @@ internal static class Settings
         {
             Console.WriteLine($"Error saving settings to {SettingsFilePath}: {ex.Message}");
             throw;
+        }
+    }
+
+    // ── Debounced persistence ─────────────────────────────────
+    // Save() is a synchronous whole-file JSON write. Hot paths (a volume drag fires per
+    // slider tick, a sidebar switch per click) must update the in-memory value and let
+    // the DISK write trail behind; anything that saves at a natural boundary (dialog
+    // close, shutdown) keeps calling Save(), which also supersedes any pending deferral.
+    private static Timer? _deferredSave;
+
+    /// <summary>Schedules a Save ~500ms after the LAST call - one write per burst.</summary>
+    public static void SaveDeferred()
+    {
+        lock (_lock)
+        {
+            _deferredSave ??= new Timer(_ =>
+            {
+                try
+                {
+                    Save();
+                }
+                catch
+                {
+                    // Save() already reported it; a deferred failure has no caller to throw to.
+                }
+            }, null, Timeout.Infinite, Timeout.Infinite);
+            _deferredSave.Change(TimeSpan.FromMilliseconds(500), Timeout.InfiniteTimeSpan);
         }
     }
 
