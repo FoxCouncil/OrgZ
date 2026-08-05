@@ -20,6 +20,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private static readonly ILogger _log = Logging.For<MainWindowViewModel>();
 
+    // Cancelled by Dispose: the lifetime token for background loops (job reattach polling,
+    // and anything else that must not outlive the window that started it).
+    private readonly CancellationTokenSource _vmCts = new();
+
     private const string ICON_PLAY = "fa-solid fa-play";
 
     private readonly Thickness ICON_PLAY_PADDING = new(4, 0, 0, 0);
@@ -4437,7 +4441,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             BeginLcdBusy(DescribeResumedJob(job), "Reconnected");
             _burnWritePhase = job.Kind == "disc";   // a running burn is still uncancellable
 
-            await FollowJobProgressAsync(job);
+            await FollowJobProgressAsync(job, _vmCts.Token);
         }
         catch (Exception ex)
         {
@@ -4450,7 +4454,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task FollowJobProgressAsync(Services.DeviceHelper.JobsServiceOps.RunningJob job)
+    private async Task FollowJobProgressAsync(Services.DeviceHelper.JobsServiceOps.RunningJob job, CancellationToken ct)
     {
         if (!File.Exists(job.ProgressPath))
         {
@@ -4460,9 +4464,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         using var fs = new FileStream(job.ProgressPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(fs);
 
-        while (true)
+        // Cancellation is the VM's lifetime: this loop is started fire-and-forget from
+        // LoadAsync, and without the token a service that never reports idle (or a hung
+        // RPC) would keep it polling for the rest of the process.
+        while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync(ct);
             if (line is null)
             {
                 // Caught up: the job is still going, so wait for more. Stop once the
@@ -4474,7 +4481,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     return;
                 }
 
-                await Task.Delay(500);
+                await Task.Delay(500, ct);
                 continue;
             }
 
@@ -6254,15 +6261,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     internal void UpdateData()
     {
-        int totalSongs = MusicItems.Count();
-        TimeSpan totalDuration = TimeSpan.FromTicks(MusicItems.Sum(x => x.Duration?.Ticks ?? 0));
-        long totalFileSize = MusicItems.Sum(x => x.FileSize ?? 0L);
-
+        // The enumeration lives INSIDE the UI post (same shape as UpdateTitle): _allItems is
+        // UI-thread-only, and this method gets called from Task.Run bodies (analysis loop,
+        // rip completion). Enumerating on the calling thread here was a live
+        // "collection was modified" crash whenever the library changed mid-analysis.
         UI(() =>
         {
-            StatusBar.TotalSongs = totalSongs;
-            StatusBar.TotalDuration = totalDuration;
-            StatusBar.TotalFileSize = totalFileSize;
+            StatusBar.TotalSongs = MusicItems.Count();
+            StatusBar.TotalDuration = TimeSpan.FromTicks(MusicItems.Sum(x => x.Duration?.Ticks ?? 0));
+            StatusBar.TotalFileSize = MusicItems.Sum(x => x.FileSize ?? 0L);
         });
     }
 
@@ -6594,6 +6601,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private static void UI(Action action)
     {
         Dispatcher.UIThread.Post(action);
+    }
+
+    /// <summary>
+    /// Async overload: an <c>async</c> lambda handed to the Action overload becomes
+    /// async-void - its exceptions bypass every handler and take the process down (or
+    /// vanish, depending on the runtime's mood). This overload awaits the task and turns
+    /// a fault into a log line instead.
+    /// </summary>
+    private static void UI(Func<Task> action)
+    {
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Async UI task faulted");
+            }
+        });
     }
 
     private static byte[]? ExtractAlbumArtBytes(string filePath)
@@ -9212,6 +9240,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _vmCts.Cancel();   // stop background loops (job reattach polling) before teardown
         _folderWatcher?.Dispose();
         _deviceDetection?.Dispose();
         foreach (var scanCts in _deviceScanCts.Values)
