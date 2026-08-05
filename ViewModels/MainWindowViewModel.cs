@@ -2697,7 +2697,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             artBytes = IPodArtworkReader.LoadThumbnail(file.Source["device:".Length..], dbid);
         }
-        artBytes ??= file.FilePath is { Length: > 0 } artPath ? ExtractAlbumArtBytes(artPath) : null;
+
+        // One TagLib open serves BOTH the art and the engine's format probe below.
+        (int SampleRate, int? BitDepth, int Channels)? probed = null;
+        if (file.FilePath is { Length: > 0 } artPath)
+        {
+            var read = ReadArtAndProperties(artPath);
+            artBytes ??= read.Art;
+            probed = (read.SampleRate, read.BitDepth, read.Channels);
+        }
+
         CurrentAlbumArt = artBytes != null ? BitmapFromBytes(artBytes) : null;
 
         _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtUri: string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri, ArtBytes: artBytes));
@@ -2720,18 +2729,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // The engine parses the decoder's raw output with the file's exact
         // bit depth / rate / channel count - guessing corrupts audio. Items
-        // scanned before BitDepth existed get a quick TagLib probe here; if
-        // the numbers can't be established, VLC keeps the track.
+        // scanned before BitDepth existed take the numbers from the single read
+        // above; if they can't be established, VLC keeps the track.
         if (useEngine && (file.BitDepth is null or 0 || file.SampleRate is null or 0 || file.AudioChannels is null or 0))
         {
-            try
+            if (probed is { } p && p.SampleRate > 0)
             {
-                using var probe = TagLib.File.Create(file.FilePath!);
-                file.SampleRate = probe.Properties.AudioSampleRate;
-                file.BitDepth = probe.Properties.BitsPerSample > 0 ? probe.Properties.BitsPerSample : null;
-                file.AudioChannels = probe.Properties.AudioChannels;
+                file.SampleRate = p.SampleRate;
+                file.BitDepth = p.BitDepth;
+                file.AudioChannels = p.Channels;
             }
-            catch
+            else
             {
                 useEngine = false;
             }
@@ -4103,36 +4111,46 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (doCopy)
             {
-                int copied = 0;
-
-                foreach (var sourcePath in unmatched)
+                // Copy + analyze + upsert off the UI thread - importing a playlist's worth
+                // of tracks is seconds of file I/O and TagLib work per track, and it used
+                // to run inline on the dispatcher. Only the _allItems join comes back.
+                var imported = await Task.Run(() =>
                 {
-                    copied++;
-                    var destPath = Path.Combine(App.FolderPath, Path.GetFileName(sourcePath));
-
-                    try
+                    var results = new List<MediaItem>();
+                    foreach (var sourcePath in unmatched)
                     {
-                        if (!File.Exists(destPath))
+                        var destPath = Path.Combine(App.FolderPath, Path.GetFileName(sourcePath));
+                        try
                         {
-                            File.Copy(sourcePath, destPath);
-                        }
+                            if (!File.Exists(destPath))
+                            {
+                                File.Copy(sourcePath, destPath);
+                            }
 
-                        var newItem = FileScanner.CreateMediaItemFromPath(destPath);
-                        if (newItem != null)
+                            var newItem = FileScanner.CreateMediaItemFromPath(destPath);
+                            if (newItem != null)
+                            {
+                                AudioFileAnalyzer.AnalyzeFile(newItem);
+                                results.Add(newItem);
+                            }
+                        }
+                        catch (Exception ex)
                         {
-                            AudioFileAnalyzer.AnalyzeFile(newItem);
-                            MediaCache.UpsertMusic(newItem);
-                            _allItems.Add(newItem);
-                            matched.Add(newItem);
+                            _log.Warning(ex, "Failed to copy {Source} into the library", sourcePath);
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        _log.Warning(ex, "Failed to copy {Source} into the library", sourcePath);
-                    }
+
+                    MediaCache.UpsertMusicBatch(results);
+                    return results;
+                });
+
+                foreach (var newItem in imported)
+                {
+                    _allItems.Add(newItem);
+                    matched.Add(newItem);
                 }
 
-                _log.Information("Copied {Count} track(s) into the library", copied);
+                _log.Information("Copied {Count} track(s) into the library", imported.Count);
             }
         }
 
@@ -4645,8 +4663,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
-                AudioFileAnalyzer.AnalyzeFile(newItem);
-                MediaCache.UpsertMusic(newItem);
+                // Analysis (TagLib) + the DB write go to the pool: this loop runs per
+                // imported track between awaits, so inline they stuttered the window
+                // for the whole import.
+                await Task.Run(() =>
+                {
+                    AudioFileAnalyzer.AnalyzeFile(newItem);
+                    MediaCache.UpsertMusic(newItem);
+                });
+
                 if (_allItems.All(i => i.Id != newItem.Id))
                 {
                     _allItems.Add(newItem);
@@ -6653,6 +6678,28 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         catch { }
 
         return null;
+    }
+
+    /// <summary>
+    /// Embedded art AND the audio properties the bit-perfect engine needs, from ONE
+    /// TagLib open. The play path used to open the same file twice on the UI thread -
+    /// once for art, once to probe an item that predates the BitDepth column - which on
+    /// a sleeping disk is two spin-ups at the moment of a double-click.
+    /// </summary>
+    private static (byte[]? Art, int SampleRate, int? BitDepth, int Channels) ReadArtAndProperties(string filePath)
+    {
+        try
+        {
+            using var file = TagLib.File.Create(filePath);
+            var art = file.Tag.Pictures?.Length > 0 ? file.Tag.Pictures[0].Data.Data : null;
+            return (art, file.Properties.AudioSampleRate,
+                file.Properties.BitsPerSample > 0 ? file.Properties.BitsPerSample : null,
+                file.Properties.AudioChannels);
+        }
+        catch
+        {
+            return (null, 0, null, 0);
+        }
     }
 
     private static Bitmap? BitmapFromBytes(byte[] bytes)

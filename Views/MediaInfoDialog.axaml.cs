@@ -120,15 +120,20 @@ public partial class MediaInfoDialog : Window
         // from a URL (FaviconUrl carries the feed/episode image for podcasts).
         if (isMusic && !string.IsNullOrEmpty(item.FilePath))
         {
-            SummaryArt.Source = LoadAlbumArtBitmap(item.FilePath);
+            Converters.RemoteImage.SetUrl(SummaryArt, null);
+            _ = ShowAlbumArtAsync(SummaryArt, item.FilePath);
         }
         else if ((isRadio || isPodcast) && !string.IsNullOrWhiteSpace(item.FaviconUrl))
         {
             SummaryArt.Source = null;
-            _ = LoadSummaryArtFromUrlAsync(item.FaviconUrl!);
+            // RemoteImage owns remote artwork everywhere else: memory + disk cache, a
+            // 6-way fetch gate, SVG handling, and the browser UA. The dialog used to
+            // new up its own HttpClient per open and duplicate the UA string.
+            Converters.RemoteImage.SetUrl(SummaryArt, item.FaviconUrl);
         }
         else
         {
+            Converters.RemoteImage.SetUrl(SummaryArt, null);
             SummaryArt.Source = null;
         }
 
@@ -171,32 +176,6 @@ public partial class MediaInfoDialog : Window
         }
     }
 
-    private async Task LoadSummaryArtFromUrlAsync(string url)
-    {
-        try
-        {
-            using var http = new System.Net.Http.HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(10),
-            };
-            http.DefaultRequestHeaders.Add("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-            var bytes = await http.GetByteArrayAsync(url);
-
-            // Handles SVG station logos too - Avalonia's own decoder is raster-only.
-            var bmp = Helpers.ImageDecoder.Decode(bytes, 200);
-
-            if (bmp is not null && SummaryArt is not null)
-            {
-                SummaryArt.Source = bmp;
-            }
-        }
-        catch
-        {
-            // Best-effort: if the image host is down, leave the placeholder.
-        }
-    }
-
     private void LoadMusicSummary(MediaItem item)
     {
         SummaryMediaKind.Text = item.Kind.ToString();
@@ -205,23 +184,36 @@ public partial class MediaInfoDialog : Window
         SummaryR1C2Label.Text = "Channels:";
         SummaryR1C2Value.Text = !string.IsNullOrEmpty(item.ChannelsLabel) ? item.ChannelsLabel : "-";
 
-        // Items scanned before BitDepth existed have null here - probe the
-        // file once on dialog open so the field fills without a full rescan.
-        if (item.BitDepth is null && !string.IsNullOrEmpty(item.FilePath))
-        {
-            try
-            {
-                using var f = TagLib.File.Create(item.FilePath);
-                item.BitDepth = f.Properties.BitsPerSample > 0 ? f.Properties.BitsPerSample : null;
-            }
-            catch
-            {
-                // Unreadable file - leave the dash.
-            }
-        }
-
         SummaryR2C0Label.Text = "Bit Depth:";
         SummaryR2C0Value.Text = item.BitDepth is > 0 ? $"{item.BitDepth}-bit" : "-";
+
+        // Items scanned before BitDepth existed have null here - probe the file so the
+        // field fills without a full rescan. Off-thread: this is a second TagLib open of
+        // a possibly-sleeping disk, and it used to block the dialog's first paint.
+        if (item.BitDepth is null && !string.IsNullOrEmpty(item.FilePath))
+        {
+            var probePath = item.FilePath;
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    using var f = TagLib.File.Create(probePath);
+                    return f.Properties.BitsPerSample > 0 ? f.Properties.BitsPerSample : (int?)null;
+                }
+                catch
+                {
+                    return null;   // Unreadable file - leave the dash.
+                }
+            }).ContinueWith(t =>
+            {
+                if (t.Result is not int bits || !string.Equals(_item.FilePath, probePath, StringComparison.Ordinal))
+                {
+                    return;
+                }
+                item.BitDepth = bits;
+                SummaryR2C0Value.Text = $"{bits}-bit";
+            }, CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.FromCurrentSynchronizationContext());
+        }
         SummaryR2C2Label.Text = "Genre:";
         SummaryR2C2Value.Text = !string.IsNullOrEmpty(item.Genre) ? item.Genre : "-";
 
@@ -504,20 +496,23 @@ public partial class MediaInfoDialog : Window
 
     private void LoadArtwork(MediaItem item)
     {
+        // Art lives in the file: no local file, nothing to edit.
+        var editable = item.Kind == MediaKind.Music && !string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath);
+        ArtworkAddButton.IsEnabled = editable;
+        ArtworkStatusText.Text = editable ? string.Empty : "This track has no local file to store artwork in.";
+
         if (item.Kind == MediaKind.Music && !string.IsNullOrEmpty(item.FilePath))
         {
-            ArtworkImage.Source = LoadAlbumArtBitmap(item.FilePath);
+            // Served from the same per-file cache the Summary tab filled; Delete's
+            // enabled state settles with the image (see ShowAlbumArtAsync).
+            ArtworkDeleteButton.IsEnabled = false;
+            _ = ShowAlbumArtAsync(ArtworkImage, item.FilePath);
         }
         else
         {
             ArtworkImage.Source = null;
+            ArtworkDeleteButton.IsEnabled = false;
         }
-
-        // Art lives in the file: no local file, nothing to edit.
-        var editable = item.Kind == MediaKind.Music && !string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath);
-        ArtworkAddButton.IsEnabled = editable;
-        ArtworkDeleteButton.IsEnabled = editable && ArtworkImage.Source is not null;
-        ArtworkStatusText.Text = editable ? string.Empty : "This track has no local file to store artwork in.";
     }
 
     private async void ArtworkAdd_Click(object? sender, RoutedEventArgs e)
@@ -565,7 +560,10 @@ public partial class MediaInfoDialog : Window
             return;
         }
 
-        // Art is read straight from the file, so re-reading IS the invalidation.
+        // The file's art just changed under the per-file cache - drop it, or the
+        // reload below would serve the pre-edit bitmap straight back.
+        _artCachePath = null;
+        _artCacheBitmap = null;
         LoadArtwork(_item);
         ArtworkStatusText.Text = successMessage;
         ItemChanged = true;
@@ -746,6 +744,39 @@ public partial class MediaInfoDialog : Window
 
     #region Helpers
 
+    // Embedded art, read ONCE per file and shared by the Summary and Artwork tabs.
+    // Both tabs used to call the synchronous reader on the UI thread for the same file,
+    // so every open and every Previous/Next paid two TagLib opens and two full-size
+    // decodes - on a sleeping disk that froze the dialog outright.
+    private string? _artCachePath;
+    private Bitmap? _artCacheBitmap;
+
+    private async Task<Bitmap?> AlbumArtAsync(string filePath)
+    {
+        if (string.Equals(_artCachePath, filePath, StringComparison.Ordinal))
+        {
+            return _artCacheBitmap;
+        }
+
+        var bitmap = await Task.Run(() => LoadAlbumArtBitmap(filePath));
+        _artCachePath = filePath;
+        _artCacheBitmap = bitmap;
+        return bitmap;
+    }
+
+    /// <summary>Loads embedded art off-thread and shows it - unless the user already navigated on.</summary>
+    private async Task ShowAlbumArtAsync(Image target, string filePath)
+    {
+        var bitmap = await AlbumArtAsync(filePath);
+
+        // Previous/Next can land while the read is in flight; the newest item wins.
+        if (string.Equals(_item.FilePath, filePath, StringComparison.Ordinal))
+        {
+            target.Source = bitmap;
+            ArtworkDeleteButton.IsEnabled = ArtworkAddButton.IsEnabled && bitmap is not null;
+        }
+    }
+
     private static Bitmap? LoadAlbumArtBitmap(string filePath)
     {
         try
@@ -753,9 +784,10 @@ public partial class MediaInfoDialog : Window
             using var file = TagLib.File.Create(filePath);
             if (file.Tag.Pictures?.Length > 0)
             {
-                var data = file.Tag.Pictures[0].Data.Data;
-                using var stream = new MemoryStream(data);
-                return new Bitmap(stream);
+                // Decoded to the largest size the dialog can show rather than the source's
+                // full resolution - a 3000×3000 cover became a 36 MB GPU upload to fill a
+                // 200px box.
+                return Helpers.ImageDecoder.Decode(file.Tag.Pictures[0].Data.Data, 400);
             }
         }
         catch { }
