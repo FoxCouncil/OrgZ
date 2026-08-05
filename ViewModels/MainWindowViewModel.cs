@@ -5925,6 +5925,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
+                // The file changed on disk (retag, ReplayGain write, re-encode) - the replacement
+                // row must keep the user's rating/plays/options, not reset them to factory.
+                diskFile.AdoptUserStateFrom(existing);
                 _allItems.Remove(existing);
                 _allItems.Add(diskFile);
                 filesToAnalyze.Add(diskFile);
@@ -6157,6 +6160,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 {
                     if (existing != null)
                     {
+                        // Same rule as the full rescan: a changed file keeps its user state.
+                        item.AdoptUserStateFrom(existing);
                         _allItems.Remove(existing);
                     }
 

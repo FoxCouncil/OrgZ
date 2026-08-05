@@ -624,6 +624,13 @@ public static class MediaCache
                  @Rating, @PlayCount,
                  @VolumeAdjustment, @EqPreset, @StartTime, @StopTime, @UseStartTime, @UseStopTime)
             ON CONFLICT(Id) DO UPDATE SET
+                -- Deliberately NOT updated on conflict: IsFavorite, LastPlayed, DateAdded,
+                -- IsIgnored, and PlayCount. Those are the user's history, owned by their
+                -- dedicated setters (SetFavorite / SetLastPlayed / SetIgnored /
+                -- IncrementPlayCount) - a rescan's upsert carrying stale copies must never
+                -- win a race against them. Rating and the Options-tab columns DO update:
+                -- the MediaInfo dialog persists them through this upsert, and the scan path
+                -- adopts the user's values onto its items first (MediaItem.AdoptUserStateFrom).
                 Title = excluded.Title,
                 Artist = excluded.Artist,
                 Album = excluded.Album,
@@ -668,7 +675,6 @@ public static class MediaCache
                 ClickCount = excluded.ClickCount,
                 IsHls = excluded.IsHls,
                 Rating = excluded.Rating,
-                PlayCount = excluded.PlayCount,
                 VolumeAdjustment = excluded.VolumeAdjustment,
                 EqPreset = excluded.EqPreset,
                 StartTime = excluded.StartTime,

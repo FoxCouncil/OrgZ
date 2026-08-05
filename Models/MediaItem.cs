@@ -86,7 +86,33 @@ public partial class MediaItem : ObservableObject
     [ObservableProperty]
     private int _playCount;
 
-    public DateTime DateAdded { get; init; } = DateTime.UtcNow;
+    // Settable (not init) so a rescan's replacement item can adopt the ORIGINAL added date -
+    // otherwise every metadata change resets the row to "added just now" until restart.
+    public DateTime DateAdded { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Carries the user's own state from the item being replaced onto this freshly-scanned one.
+    /// A rescan rebuilds file facts (tags, size, duration) but must never reset what the USER
+    /// did: rating, play history, favorites, the row tick, and the Options-tab playback
+    /// settings. The DB upsert preserves some of these on conflict; this keeps the in-memory
+    /// row honest too, and covers the columns the upsert legitimately overwrites.
+    /// </summary>
+    public void AdoptUserStateFrom(MediaItem existing)
+    {
+        IsFavorite = existing.IsFavorite;
+        IsIgnored = existing.IsIgnored;
+        LastPlayed = existing.LastPlayed;
+        DateAdded = existing.DateAdded;
+        Rating = existing.Rating;
+        PlayCount = existing.PlayCount;
+        VolumeAdjustment = existing.VolumeAdjustment;
+        EqPreset = existing.EqPreset;
+        StartTime = existing.StartTime;
+        StopTime = existing.StopTime;
+        UseStartTime = existing.UseStartTime;
+        UseStopTime = existing.UseStopTime;
+        LastPositionMs = existing.LastPositionMs;
+    }
 
     // -- Music-only (nullable for radio) --
 

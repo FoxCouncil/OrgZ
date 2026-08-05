@@ -322,6 +322,26 @@ public class MediaCacheTests : IDisposable
     }
 
     [Fact]
+    public void UpsertMusic_PreservesPlayCountOnConflict()
+    {
+        var item = Music("x", title: "Original Title");
+        MediaCache.UpsertMusic(item);
+
+        // The user plays it twice
+        MediaCache.IncrementPlayCount("x");
+        MediaCache.IncrementPlayCount("x");
+
+        // Scanner re-sees the file and upserts fresh metadata; its item carries PlayCount 0.
+        // The count is the user's history - the rescan must not zero it.
+        var rescanned = Music("x", title: "New Title");
+        MediaCache.UpsertMusic(rescanned);
+
+        var loaded = MediaCache.LoadAll().Single(m => m.Id == "x");
+        Assert.Equal(2, loaded.PlayCount);
+        Assert.Equal("New Title", loaded.Title);
+    }
+
+    [Fact]
     public void RestoreMedia_DoesNotRestorePlaylistMemberships()
     {
         SeedMedia("x");

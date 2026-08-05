@@ -4,6 +4,49 @@ namespace OrgZ.Tests;
 
 public class MediaItemTests
 {
+    // -- AdoptUserStateFrom --
+
+    [Fact]
+    public void AdoptUserStateFrom_carries_every_user_owned_field()
+    {
+        var existing = new MediaItem
+        {
+            Id = "x",
+            Kind = MediaKind.Music,
+            IsFavorite = true,
+            IsIgnored = true,
+            LastPlayed = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+            DateAdded = new DateTime(2020, 6, 7, 8, 9, 10, DateTimeKind.Utc),
+            Rating = 4,
+            PlayCount = 17,
+            VolumeAdjustment = -20,
+            EqPreset = "Rock",
+            StartTime = TimeSpan.FromSeconds(3),
+            StopTime = TimeSpan.FromSeconds(180),
+            UseStartTime = true,
+            UseStopTime = true,
+            LastPositionMs = 42_000,
+        };
+
+        var rescanned = new MediaItem { Id = "x", Kind = MediaKind.Music, Title = "Fresh Tags" };
+        rescanned.AdoptUserStateFrom(existing);
+
+        Assert.True(rescanned.IsFavorite);
+        Assert.True(rescanned.IsIgnored);
+        Assert.Equal(existing.LastPlayed, rescanned.LastPlayed);
+        Assert.Equal(existing.DateAdded, rescanned.DateAdded);
+        Assert.Equal(4, rescanned.Rating);
+        Assert.Equal(17, rescanned.PlayCount);
+        Assert.Equal(-20, rescanned.VolumeAdjustment);
+        Assert.Equal("Rock", rescanned.EqPreset);
+        Assert.Equal(TimeSpan.FromSeconds(3), rescanned.StartTime);
+        Assert.Equal(TimeSpan.FromSeconds(180), rescanned.StopTime);
+        Assert.True(rescanned.UseStartTime);
+        Assert.True(rescanned.UseStopTime);
+        Assert.Equal(42_000, rescanned.LastPositionMs);
+        Assert.Equal("Fresh Tags", rescanned.Title);   // file facts stay from the rescan
+    }
+
     // -- KindLabel --
 
     [Theory]
