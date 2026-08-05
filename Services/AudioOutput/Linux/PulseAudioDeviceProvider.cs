@@ -47,6 +47,15 @@ internal sealed class PulseAudioDeviceProvider : IAudioSinkProvider
         IntPtr mainloop = IntPtr.Zero;
         IntPtr context = IntPtr.Zero;
 
+        // Declared at method scope (not inside the try) so the delegates stay strongly
+        // referenced for the whole native session: libpulse holds only raw function
+        // pointers, and the mainloop THREAD invokes them during pa_threaded_mainloop_wait -
+        // after this method's last managed use. A GC collecting a local-scoped delegate at
+        // that point hands native code a freed trampoline (the classic waveOutOpen-callback
+        // bug). The GC.KeepAlives in the finally pin them until the mainloop is torn down.
+        PulseNative.pa_context_notify_cb? stateCallback = null;
+        PulseNative.pa_sink_info_cb? sinkCallback = null;
+
         try
         {
             mainloop = PulseNative.pa_threaded_mainloop_new();
@@ -61,7 +70,7 @@ internal sealed class PulseAudioDeviceProvider : IAudioSinkProvider
             var api = PulseNative.pa_threaded_mainloop_get_api(mainloop);
             context = PulseNative.pa_context_new(api, "OrgZ-Enumerator");
 
-            var stateCallback = new PulseNative.pa_context_notify_cb((c, ud) =>
+            stateCallback = new PulseNative.pa_context_notify_cb((c, ud) =>
             {
                 PulseNative.pa_threaded_mainloop_signal(mainloop, 0);
             });
@@ -84,7 +93,7 @@ internal sealed class PulseAudioDeviceProvider : IAudioSinkProvider
             }
 
             var sinks = new List<(string Name, string Description)>();
-            var sinkCallback = new PulseNative.pa_sink_info_cb((c, info, eol, ud) =>
+            sinkCallback = new PulseNative.pa_sink_info_cb((c, info, eol, ud) =>
             {
                 if (eol > 0 || info == IntPtr.Zero)
                 {
@@ -138,6 +147,10 @@ internal sealed class PulseAudioDeviceProvider : IAudioSinkProvider
                 PulseNative.pa_threaded_mainloop_stop(mainloop);
                 PulseNative.pa_threaded_mainloop_free(mainloop);
             }
+            // Only past this point is it safe for the GC to collect the delegates - the
+            // mainloop thread that called them is stopped and freed.
+            GC.KeepAlive(stateCallback);
+            GC.KeepAlive(sinkCallback);
         }
 
         return result;

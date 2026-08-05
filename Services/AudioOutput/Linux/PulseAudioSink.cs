@@ -154,11 +154,29 @@ internal sealed class PulseAudioSink : IAudioSink
             {
                 fixed (byte* p = output)
                 {
-                    PulseNative.pa_simple_write(_stream, (IntPtr)p, (UIntPtr)output.Length, out _);
+                    int rc = PulseNative.pa_simple_write(_stream, (IntPtr)p, (UIntPtr)output.Length, out var err);
+                    // A dead server (pulseaudio restart, pipewire crash) fails every write from
+                    // here on while IsOpen stays true - without this check the sink plays
+                    // nothing, silently, forever. Log the transition once, not per buffer.
+                    if (rc < 0)
+                    {
+                        if (!_writeFailing)
+                        {
+                            _writeFailing = true;
+                            _log.Warning("PulseAudioSink {Id}: pa_simple_write failed (err={Err}) — audio is not reaching the server", Id, err);
+                        }
+                    }
+                    else if (_writeFailing)
+                    {
+                        _writeFailing = false;
+                        _log.Information("PulseAudioSink {Id}: pa_simple_write recovered", Id);
+                    }
                 }
             }
         }
     }
+
+    private bool _writeFailing;
 
     private static void ScaleS16(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
     {
