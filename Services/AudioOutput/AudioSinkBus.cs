@@ -49,6 +49,12 @@ public sealed class AudioSinkBus : IDisposable
 
     private readonly object _lock = new();
     private readonly List<IAudioSink> _sinks = [];
+
+    // Immutable snapshot of _sinks, swapped on every mutation. The fan-out reads it
+    // without taking a lock or allocating - it used to ToArray() under _lock ~20×/second
+    // for the life of playback, and the flyout took three more snapshots per slider tick.
+    private volatile IAudioSink[] _sinkSnapshot = [];
+
     private AudioFormat? _format;
     private float _masterVolume = 1f;
     private float _normalizationGain = 1f;
@@ -85,10 +91,7 @@ public sealed class AudioSinkBus : IDisposable
         set => _normalizationGain = Math.Clamp(value, 0f, 4f);
     }
 
-    public IReadOnlyList<IAudioSink> Sinks
-    {
-        get { lock (_lock) { return [.. _sinks]; } }
-    }
+    public IReadOnlyList<IAudioSink> Sinks => _sinkSnapshot;
 
     public AudioFormat? Format => _format;
 
@@ -129,6 +132,7 @@ public sealed class AudioSinkBus : IDisposable
             }
 
             _sinks.Add(sink);
+            _sinkSnapshot = [.. _sinks];
             if (_format.HasValue)
             {
                 TryOpen(sink, _format.Value);
@@ -149,6 +153,7 @@ public sealed class AudioSinkBus : IDisposable
                 {
                     removed = _sinks[i];
                     _sinks.RemoveAt(i);
+                    _sinkSnapshot = [.. _sinks];
                     break;
                 }
             }
@@ -194,21 +199,33 @@ public sealed class AudioSinkBus : IDisposable
     /// </summary>
     public void DrainAll()
     {
+        // COPY the tail inside the lock rather than handing _accum out: Write reuses
+        // that same array from offset 0 the moment the fill is reset, so a concurrent
+        // writer (the FLAC engine's pump drains while VLC's thread can still write)
+        // would overwrite bytes the fan-out was still reading and scaling.
         byte[]? tail = null;
         int tailLength = 0;
         lock (_accumLock)
         {
             if (_accumFill > 0)
             {
-                tail = _accum;
                 tailLength = _accumFill;
+                tail = System.Buffers.ArrayPool<byte>.Shared.Rent(tailLength);
+                _accum.AsSpan(0, tailLength).CopyTo(tail);
                 _accumFill = 0;
             }
         }
 
         if (tail != null)
         {
-            FanOut(tail.AsSpan(0, tailLength));
+            try
+            {
+                FanOut(tail.AsSpan(0, tailLength));
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(tail);
+            }
         }
 
         ForEachSink(s => s.Drain());
@@ -216,17 +233,7 @@ public sealed class AudioSinkBus : IDisposable
 
     private void ForEachSink(Action<IAudioSink> action)
     {
-        IAudioSink[] sinks;
-        lock (_lock)
-        {
-            if (_sinks.Count == 0)
-            {
-                return;
-            }
-            sinks = _sinks.ToArray();
-        }
-
-        foreach (var sink in sinks)
+        foreach (var sink in _sinkSnapshot)
         {
             try
             {
@@ -246,6 +253,7 @@ public sealed class AudioSinkBus : IDisposable
         {
             drained = [.. _sinks];
             _sinks.Clear();
+            _sinkSnapshot = [];
         }
 
         foreach (var sink in drained)
@@ -305,17 +313,17 @@ public sealed class AudioSinkBus : IDisposable
     /// </summary>
     private void FanOut(ReadOnlySpan<byte> pcm)
     {
-        // Snapshot the sink list so we don't hold the lock across the
-        // potentially-slow sink writes.
-        IAudioSink[] sinks;
-        lock (_lock)
+        // The snapshot is immutable and swapped whole on mutation, so the fan-out
+        // neither locks nor allocates - it runs on the audio thread ~20×/second.
+        var sinks = _sinkSnapshot;
+        if (sinks.Length == 0)
         {
-            if (_sinks.Count == 0)
-            {
-                return;
-            }
-            sinks = _sinks.ToArray();
+            return;
         }
+
+        // One read of the nullable format for the whole call: a torn read across an
+        // engine swap could otherwise pick the wrong scaling branch for one buffer.
+        var format = _format;
 
         // Apply master volume × normalization gain if the product isn't unity.  Scaling is done
         // on a per-call scratch array so sinks receive the adjusted data and can still apply their
@@ -324,16 +332,16 @@ public sealed class AudioSinkBus : IDisposable
         ReadOnlySpan<byte> buffer = pcm;
         byte[]? scratch = null;
         var effectiveGain = _masterVolume * _normalizationGain;
-        if (Math.Abs(effectiveGain - 1f) > 0.001f && _format is { Encoding: AudioSampleEncoding.PcmSigned, BitsPerSample: 16 or 32 })
+        if (Math.Abs(effectiveGain - 1f) > 0.001f && format is { Encoding: AudioSampleEncoding.PcmSigned, BitsPerSample: 16 or 32 })
         {
             scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(pcm.Length);
-            if (_format is { BitsPerSample: 32 })
+            if (format is { BitsPerSample: 32 })
             {
-                ScaleS32(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
+                PcmMath.ScaleS32(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
             }
             else
             {
-                ScaleS16(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
+                PcmMath.ScaleS16(pcm, scratch.AsSpan(0, pcm.Length), effectiveGain);
             }
             buffer = scratch.AsSpan(0, pcm.Length);
         }
@@ -358,28 +366,6 @@ public sealed class AudioSinkBus : IDisposable
             {
                 System.Buffers.ArrayPool<byte>.Shared.Return(scratch);
             }
-        }
-    }
-
-    private static void ScaleS16(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
-    {
-        var src = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, short>(source);
-        var dst = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, short>(dest);
-        for (int i = 0; i < src.Length; i++)
-        {
-            dst[i] = (short)Math.Clamp(src[i] * gain, short.MinValue, short.MaxValue);
-        }
-    }
-
-    private static void ScaleS32(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
-    {
-        // Double math: float32's 24-bit mantissa can't hold a scaled 32-bit
-        // sample exactly; double keeps the hi-res path honest under gain.
-        var src = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(source);
-        var dst = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(dest);
-        for (int i = 0; i < src.Length; i++)
-        {
-            dst[i] = (int)Math.Clamp(src[i] * (double)gain, int.MinValue, int.MaxValue);
         }
     }
 

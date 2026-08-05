@@ -28,11 +28,23 @@ internal sealed class WaveOutSink : IAudioSink
     private IntPtr _handle;
     private readonly GCHandle[] _bufferHandles = new GCHandle[RingSize];
     private readonly byte[][] _buffers = new byte[RingSize][];
+
+    // Native WAVEHDRs live as long as the ring, not as long as one write. They used to be
+    // AllocHGlobal'd and freed per buffer (~20 allocs/second for the whole session);
+    // now each slot's block is allocated on first use and released only in Close.
     private readonly IntPtr[] _headerPtrs = new IntPtr[RingSize];
+    private readonly bool[] _slotInFlight = new bool[RingSize];
+    private static readonly int HeaderSize = Marshal.SizeOf<WaveNative.WAVEHDR>();
+    private static readonly int DwFlagsOffset = (int)Marshal.OffsetOf<WaveNative.WAVEHDR>(nameof(WaveNative.WAVEHDR.dwFlags));
+
     private int _next;
     private float _volume = 1f;
     private bool _muted;
     private bool _disposed;
+
+    // Set by the UI thread, applied by whoever can take the lifecycle lock without
+    // waiting - see ApplyVolumeToDevice.
+    private volatile bool _volumeDirty;
 
     public WaveOutSink(uint deviceId, string displayName, string qualifiedId)
     {
@@ -117,7 +129,10 @@ internal sealed class WaveOutSink : IAudioSink
             }
 
             CurrentFormat = format;
-            ApplyVolumeToDevice();
+            // Already under _lifecycle - apply directly rather than going through the
+            // try-lock path (which would see the lock held and merely mark it pending).
+            _volumeDirty = true;
+            ApplyPendingVolumeLocked();
             _log.Information("WaveOutSink opened: device={Device} name={Name} {Rate}Hz {Channels}ch {Bits}bit", _deviceId, DisplayName, format.SampleRate, format.Channels, format.BitsPerSample);
         }
     }
@@ -144,10 +159,14 @@ internal sealed class WaveOutSink : IAudioSink
             return;
         }
 
+        // A volume change queued by the UI thread rides in on the audio thread, which
+        // already holds the lock - so the setter never has to wait for it.
+        ApplyPendingVolumeLocked();
+
         var slot = _next;
         _next = (_next + 1) % RingSize;
 
-        if (_headerPtrs[slot] != IntPtr.Zero)
+        if (_slotInFlight[slot])
         {
             var deadline = Environment.TickCount64 + 1000;
             while (!IsSlotDone(slot))
@@ -178,70 +197,99 @@ internal sealed class WaveOutSink : IAudioSink
 
         pcm.CopyTo(_buffers[slot]);
 
+        // The slot's header block is reused; only its two live fields are rewritten.
+        var headerPtr = _headerPtrs[slot];
+        if (headerPtr == IntPtr.Zero)
+        {
+            headerPtr = Marshal.AllocHGlobal(HeaderSize);
+            _headerPtrs[slot] = headerPtr;
+        }
+
         var header = new WaveNative.WAVEHDR
         {
             lpData = _bufferHandles[slot].AddrOfPinnedObject(),
             dwBufferLength = (uint)pcm.Length,
         };
-
-        var headerPtr = Marshal.AllocHGlobal(Marshal.SizeOf<WaveNative.WAVEHDR>());
         Marshal.StructureToPtr(header, headerPtr, fDeleteOld: false);
 
-        var prep = WaveNative.waveOutPrepareHeader(_handle, headerPtr, (uint)Marshal.SizeOf<WaveNative.WAVEHDR>());
+        var prep = WaveNative.waveOutPrepareHeader(_handle, headerPtr, (uint)HeaderSize);
         if (prep != WaveNative.MMSYSERR_NOERROR)
         {
-            Marshal.FreeHGlobal(headerPtr);
             return;
         }
 
-        var wr = WaveNative.waveOutWrite(_handle, headerPtr, (uint)Marshal.SizeOf<WaveNative.WAVEHDR>());
+        var wr = WaveNative.waveOutWrite(_handle, headerPtr, (uint)HeaderSize);
         if (wr != WaveNative.MMSYSERR_NOERROR)
         {
-            WaveNative.waveOutUnprepareHeader(_handle, headerPtr, (uint)Marshal.SizeOf<WaveNative.WAVEHDR>());
-            Marshal.FreeHGlobal(headerPtr);
+            WaveNative.waveOutUnprepareHeader(_handle, headerPtr, (uint)HeaderSize);
             return;
         }
 
-        _headerPtrs[slot] = headerPtr;
+        _slotInFlight[slot] = true;
     }
 
     private bool IsSlotDone(int slot)
     {
-        var ptr = _headerPtrs[slot];
-        if (ptr == IntPtr.Zero)
+        if (!_slotInFlight[slot] || _headerPtrs[slot] == IntPtr.Zero)
         {
             return true;
         }
-        var hdr = Marshal.PtrToStructure<WaveNative.WAVEHDR>(ptr);
-        return (hdr.dwFlags & WaveNative.WHDR_DONE) != 0;
+        // Only dwFlags matters - marshaling the whole 8-field struct (which the
+        // spin-wait did thousands of times a second) to read one int was pure waste.
+        return (Marshal.ReadInt32(_headerPtrs[slot], DwFlagsOffset) & WaveNative.WHDR_DONE) != 0;
     }
 
     private void UnprepareSlot(int slot)
     {
-        var ptr = _headerPtrs[slot];
-        if (ptr == IntPtr.Zero)
+        if (!_slotInFlight[slot] || _headerPtrs[slot] == IntPtr.Zero)
         {
             return;
         }
-        WaveNative.waveOutUnprepareHeader(_handle, ptr, (uint)Marshal.SizeOf<WaveNative.WAVEHDR>());
-        Marshal.FreeHGlobal(ptr);
-        _headerPtrs[slot] = IntPtr.Zero;
+        WaveNative.waveOutUnprepareHeader(_handle, _headerPtrs[slot], (uint)HeaderSize);
+        _slotInFlight[slot] = false;
     }
 
+    /// <summary>
+    /// Pushes a pending volume/mute to the device. Caller must hold <c>_lifecycle</c>.
+    /// </summary>
+    private void ApplyPendingVolumeLocked()
+    {
+        if (!_volumeDirty || _handle == IntPtr.Zero)
+        {
+            return;
+        }
+        _volumeDirty = false;
+
+        // waveOutSetVolume packs left-right as two uint16 halves; we set
+        // both to the same value for stereo.  When muted, send 0 to both.
+        ushort amp = _muted ? (ushort)0 : (ushort)(_volume * 0xFFFF);
+        uint stereo = (uint)amp | ((uint)amp << 16);
+        WaveNative.waveOutSetVolume(_handle, stereo);
+    }
+
+    /// <summary>
+    /// Never blocks the caller. The lifecycle lock is held by the audio thread across
+    /// its slot-wait (up to 1 s) and by Drain (up to 2 s), so a volume drag - which
+    /// fires this per slider tick from the UI thread - used to freeze the window for
+    /// as long as end-of-track drain took. If the lock is free we apply immediately;
+    /// otherwise the audio thread picks the change up on its next buffer (~50 ms).
+    /// </summary>
     private void ApplyVolumeToDevice()
     {
-        lock (_lifecycle)
-        {
-            if (_handle == IntPtr.Zero)
-            {
-                return;
-            }
+        _volumeDirty = true;
 
-            // waveOutSetVolume packs left-right as two uint16 halves; we set
-            // both to the same value for stereo.  When muted, send 0 to both.
-            ushort amp = _muted ? (ushort)0 : (ushort)(_volume * 0xFFFF);
-            uint stereo = (uint)amp | ((uint)amp << 16);
-            WaveNative.waveOutSetVolume(_handle, stereo);
+        if (!System.Threading.Monitor.TryEnter(_lifecycle))
+        {
+            return;
+        }
+
+        try
+        {
+            ApplyPendingVolumeLocked();
+        }
+        finally
+        {
+            System.Threading.Monitor.Exit(_lifecycle);
         }
     }
 
@@ -321,6 +369,13 @@ internal sealed class WaveOutSink : IAudioSink
             for (int i = 0; i < RingSize; i++)
             {
                 UnprepareSlot(i);
+                // The header blocks outlive individual writes but NOT the open handle -
+                // Close is the one place they're released.
+                if (_headerPtrs[i] != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(_headerPtrs[i]);
+                    _headerPtrs[i] = IntPtr.Zero;
+                }
                 if (_bufferHandles[i].IsAllocated)
                 {
                     _bufferHandles[i].Free();

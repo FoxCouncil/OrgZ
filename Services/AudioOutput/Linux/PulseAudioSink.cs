@@ -141,11 +141,11 @@ internal sealed class PulseAudioSink : IAudioSink
                 }
                 else if (CurrentFormat is { BitsPerSample: > 16 })
                 {
-                    ScaleS32(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
+                    PcmMath.ScaleS32(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
                 }
                 else
                 {
-                    ScaleS16(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
+                    PcmMath.ScaleS16(pcm, _scratch.AsSpan(0, pcm.Length), _volume);
                 }
                 output = _scratch.AsSpan(0, pcm.Length);
             }
@@ -178,25 +178,6 @@ internal sealed class PulseAudioSink : IAudioSink
 
     private bool _writeFailing;
 
-    private static void ScaleS16(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
-    {
-        var src = MemoryMarshal.Cast<byte, short>(source);
-        var dst = MemoryMarshal.Cast<byte, short>(dest);
-        for (int i = 0; i < src.Length; i++)
-        {
-            dst[i] = (short)Math.Clamp(src[i] * gain, short.MinValue, short.MaxValue);
-        }
-    }
-
-    private static void ScaleS32(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
-    {
-        var src = MemoryMarshal.Cast<byte, int>(source);
-        var dst = MemoryMarshal.Cast<byte, int>(dest);
-        for (int i = 0; i < src.Length; i++)
-        {
-            dst[i] = (int)Math.Clamp(src[i] * (double)gain, int.MinValue, int.MaxValue);
-        }
-    }
 
     public void Pause()
     {

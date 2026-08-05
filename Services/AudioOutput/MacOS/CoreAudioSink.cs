@@ -277,11 +277,11 @@ internal sealed class CoreAudioSink : IAudioSink
                 }
                 else if (_volume < 0.999f && CurrentFormat is { BitsPerSample: > 16 })
                 {
-                    ScaleS32(chunk, new Span<byte>((void*)dataPtr, chunkLen), _volume);
+                    PcmMath.ScaleS32(chunk, new Span<byte>((void*)dataPtr, chunkLen), _volume);
                 }
                 else if (_volume < 0.999f)
                 {
-                    ScaleS16(chunk, new Span<byte>((void*)dataPtr, chunkLen), _volume);
+                    PcmMath.ScaleS16(chunk, new Span<byte>((void*)dataPtr, chunkLen), _volume);
                 }
                 else
                 {
@@ -329,25 +329,6 @@ internal sealed class CoreAudioSink : IAudioSink
         }
     }
 
-    private static void ScaleS16(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
-    {
-        var src = MemoryMarshal.Cast<byte, short>(source);
-        var dst = MemoryMarshal.Cast<byte, short>(dest);
-        for (int i = 0; i < src.Length; i++)
-        {
-            dst[i] = (short)Math.Clamp(src[i] * gain, short.MinValue, short.MaxValue);
-        }
-    }
-
-    private static void ScaleS32(ReadOnlySpan<byte> source, Span<byte> dest, float gain)
-    {
-        var src = MemoryMarshal.Cast<byte, int>(source);
-        var dst = MemoryMarshal.Cast<byte, int>(dest);
-        for (int i = 0; i < src.Length; i++)
-        {
-            dst[i] = (int)Math.Clamp(src[i] * (double)gain, int.MinValue, int.MaxValue);
-        }
-    }
 
     private void ApplyVolume()
     {
