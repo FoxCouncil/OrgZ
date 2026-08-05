@@ -440,26 +440,25 @@ public partial class MediaInfoDialog : Window
         }
     }
 
-    private int GetCurrentRating()
-    {
-        int rating = 0;
-        for (int i = 0; i < RatingPanel.Children.Count; i++)
-        {
-            if (RatingPanel.Children[i] is Ellipse e && e.Fill is SolidColorBrush b && b.Color == Color.Parse("#FFD700"))
-            {
-                rating = i + 1;
-            }
-        }
-        return rating;
-    }
+    // The rating is DATA, held here; the ellipses only draw it. It used to be stored in
+    // their fill colours and recovered by parsing "#FFD700" back out of every star on each
+    // read - so restyling the gold would have silently broken rating persistence, and each
+    // read re-parsed five colour strings.
+    private int _rating;
+
+    private static readonly SolidColorBrush RatedBrush = new(Color.Parse("#FFD700"));
+    private static readonly SolidColorBrush UnratedBrush = new(Color.Parse("#444"));
+
+    private int GetCurrentRating() => _rating;
 
     private void SetRatingDisplay(int rating)
     {
+        _rating = rating;
         for (int i = 0; i < RatingPanel.Children.Count; i++)
         {
             if (RatingPanel.Children[i] is Ellipse e)
             {
-                e.Fill = new SolidColorBrush(i < rating ? Color.Parse("#FFD700") : Color.Parse("#444"));
+                e.Fill = i < rating ? RatedBrush : UnratedBrush;
             }
         }
     }

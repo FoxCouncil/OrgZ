@@ -230,7 +230,7 @@
 							<i:Icon Value="fa-solid fa-list" FontSize="16" />
 						</Button>
 						<i:Icon Value="fa-solid fa-search" Margin="5,10,5,10" />
-						<TextBox x:Name="SearchBox" Width="200" Watermark="{Binding SearchPlaceholder}" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
+						<TextBox x:Name="SearchBox" Width="200" PlaceholderText="{Binding SearchPlaceholder}" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="5,10,0,10" />
 						<Button Command="{Binding ClearSearchCommand}" Background="Transparent" BorderThickness="0" Padding="4" Margin="2,10,10,10" VerticalAlignment="Center" Cursor="Hand" IsVisible="{Binding SearchText.Length}">
 							<i:Icon Value="fa-solid fa-xmark" FontSize="14" />
 						</Button>

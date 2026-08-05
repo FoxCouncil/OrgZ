@@ -31,8 +31,8 @@ public partial class RadioFilterPanel : UserControl
             return;
         }
 
-        var nameBox = new TextBox { Watermark = "Station Name", Margin = new Avalonia.Thickness(0, 0, 0, 8) };
-        var urlBox = new TextBox { Watermark = "Stream URL (http://...)", Margin = new Avalonia.Thickness(0, 0, 0, 8) };
+        var nameBox = new TextBox { PlaceholderText = "Station Name", Margin = new Avalonia.Thickness(0, 0, 0, 8) };
+        var urlBox = new TextBox { PlaceholderText = "Stream URL (http://...)", Margin = new Avalonia.Thickness(0, 0, 0, 8) };
         var genreBox = new ComboBox
         {
             PlaceholderText = "Genre",
@@ -73,7 +73,7 @@ public partial class RadioFilterPanel : UserControl
             }
         };
 
-        string? result = null;
+        ViewModels.MainWindowViewModel.NewUserStation? result = null;
 
         if (dialog.Content is StackPanel panel && panel.Children[^1] is StackPanel buttons)
         {
@@ -91,7 +91,7 @@ public partial class RadioFilterPanel : UserControl
 
                             if (!string.IsNullOrEmpty(url))
                             {
-                                result = $"{(string.IsNullOrEmpty(name) ? url : name)}|{url}|{genre}";
+                                result = new ViewModels.MainWindowViewModel.NewUserStation(name, url, genre);
                             }
                         }
 

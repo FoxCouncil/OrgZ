@@ -3738,33 +3738,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>A station the user typed in: three separate fields, never one packed string.</summary>
+    public sealed record NewUserStation(string? Name, string Url, string? Genre);
+
     [RelayCommand]
-    internal void AddUserStation(string? input)
+    internal void AddUserStation(NewUserStation? input)
     {
-        if (string.IsNullOrWhiteSpace(input))
+        // Was a pipe-delimited "name|url|genre" string, which quietly corrupted any station
+        // whose NAME contained a '|' - the split handed the rest of the name to the URL
+        // field and the station silently failed to add.
+        if (input is null || string.IsNullOrWhiteSpace(input.Url))
         {
             return;
         }
 
-        string name;
-        string url;
-        string genre = string.Empty;
-
-        var parts = input.Split('|', 3);
-        if (parts.Length >= 2)
-        {
-            name = parts[0].Trim();
-            url = parts[1].Trim();
-            if (parts.Length == 3)
-            {
-                genre = parts[2].Trim();
-            }
-        }
-        else
-        {
-            url = parts[0].Trim();
-            name = url;
-        }
+        var url = input.Url.Trim();
+        var name = string.IsNullOrWhiteSpace(input.Name) ? url : input.Name.Trim();
+        var genre = input.Genre?.Trim() ?? string.Empty;
 
         if (!Uri.TryCreate(url, UriKind.Absolute, out _))
         {

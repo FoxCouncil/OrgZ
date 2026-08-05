@@ -326,6 +326,26 @@ public partial class Sidebar : UserControl
         e.Handled = true;
     }
 
+    /// <summary>
+    /// The sidebar's four lists are one logical selection: whichever was clicked keeps it and
+    /// the other three clear. Each handler used to spell that out itself - four copies of the
+    /// suppress-flag dance, where forgetting one list leaves two rows looking selected.
+    /// </summary>
+    private void SelectOnly(object? owner, SidebarItem item)
+    {
+        _suppressSelectionChange = true;
+        if (!ReferenceEquals(owner, LibraryListBox)) { LibraryListBox.SelectedItem = null; }
+        if (!ReferenceEquals(owner, DeviceTreeView)) { DeviceTreeView.SelectedItem = null; }
+        if (!ReferenceEquals(owner, PlaylistListBox)) { PlaylistListBox.SelectedItem = null; }
+        if (!ReferenceEquals(owner, ShareTreeView)) { ShareTreeView.SelectedItem = null; }
+        _suppressSelectionChange = false;
+
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.SelectedSidebarItem = item;
+        }
+    }
+
     private void LibraryListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionChange)
@@ -335,16 +355,7 @@ public partial class Sidebar : UserControl
 
         if (LibraryListBox.SelectedItem is SidebarItem item)
         {
-            _suppressSelectionChange = true;
-            DeviceTreeView.SelectedItem = null;
-            PlaylistListBox.SelectedItem = null;
-            ShareTreeView.SelectedItem = null;
-            _suppressSelectionChange = false;
-
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.SelectedSidebarItem = item;
-            }
+            SelectOnly(LibraryListBox, item);
         }
     }
 
@@ -358,16 +369,7 @@ public partial class Sidebar : UserControl
 
         if (ShareTreeView.SelectedItem is SidebarItem item)
         {
-            _suppressSelectionChange = true;
-            LibraryListBox.SelectedItem = null;
-            DeviceTreeView.SelectedItem = null;
-            PlaylistListBox.SelectedItem = null;
-            _suppressSelectionChange = false;
-
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.SelectedSidebarItem = item;
-            }
+            SelectOnly(ShareTreeView, item);
         }
     }
 
@@ -425,16 +427,7 @@ public partial class Sidebar : UserControl
             item = firstChild;
         }
 
-        _suppressSelectionChange = true;
-        LibraryListBox.SelectedItem = null;
-        PlaylistListBox.SelectedItem = null;
-        ShareTreeView.SelectedItem = null;
-        _suppressSelectionChange = false;
-
-        if (DataContext is MainWindowViewModel vm)
-        {
-            vm.SelectedSidebarItem = item;
-        }
+        SelectOnly(DeviceTreeView, item);
     }
 
     private void PlaylistListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -458,17 +451,7 @@ public partial class Sidebar : UserControl
                 return;
             }
 
-
-            _suppressSelectionChange = true;
-            LibraryListBox.SelectedItem = null;
-            DeviceTreeView.SelectedItem = null;
-            ShareTreeView.SelectedItem = null;
-            _suppressSelectionChange = false;
-
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.SelectedSidebarItem = item;
-            }
+            SelectOnly(PlaylistListBox, item);
         }
     }
 }
