@@ -6240,14 +6240,27 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             int idx = 0;
 
+            // One transaction per chunk instead of one per FILE: a first scan of a big
+            // library used to pay a connection + journal fsync per track. 200 keeps the
+            // window a crash could lose to a few seconds of re-analysis.
+            const int FlushEvery = 200;
+            var pending = new List<MediaItem>(FlushEvery);
+
             foreach (MediaItem item in filesToAnalyze)
             {
                 AudioFileAnalyzer.AnalyzeFile(item);
 
-                MediaCache.UpsertMusic(item);
+                pending.Add(item);
+                if (pending.Count >= FlushEvery)
+                {
+                    MediaCache.UpsertMusicBatch(pending);
+                    pending.Clear();
+                }
 
                 UpdateMainStatus($"Analyzing file {++idx} of {filesToAnalyze.Count}");
             }
+
+            MediaCache.UpsertMusicBatch(pending);
 
             UpdateMainStatus($"Analyzing file {idx} of {filesToAnalyze.Count} | COMPLETE!");
 

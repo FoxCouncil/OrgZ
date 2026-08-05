@@ -127,7 +127,11 @@ public static class MediaCache
                     StartTime               INTEGER,
                     StopTime                INTEGER,
                     UseStartTime            INTEGER NOT NULL DEFAULT 0,
-                    UseStopTime             INTEGER NOT NULL DEFAULT 0
+                    UseStopTime             INTEGER NOT NULL DEFAULT 0,
+
+                    DiscId                  TEXT,
+                    LastPositionMs          INTEGER NOT NULL DEFAULT 0,
+                    ReplayGainTrackGain     REAL
                 )
                 """;
             cmd.ExecuteNonQuery();
@@ -221,19 +225,7 @@ public static class MediaCache
             "Source TEXT NOT NULL DEFAULT 'Library'",
         };
 
-        foreach (var col in columns)
-        {
-            try
-            {
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = $"ALTER TABLE Playlists ADD COLUMN {col}";
-                cmd.ExecuteNonQuery();
-            }
-            catch (SqliteException)
-            {
-                // Column already exists
-            }
-        }
+        AddMissingColumns(connection, "Playlists", columns);
     }
 
     private static void MigrateOldTables(SqliteConnection connection)
@@ -301,9 +293,45 @@ public static class MediaCache
         transaction.Commit();
     }
 
+    /// <summary>The column names a table actually has, per PRAGMA table_info.</summary>
+    private static HashSet<string> ExistingColumns(SqliteConnection connection, string table)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table})";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            names.Add(reader.GetString(1));
+        }
+        return names;
+    }
+
+    /// <summary>
+    /// Adds only the columns a table is actually missing. The old shape - attempt every
+    /// historical ALTER and swallow the SqliteException - also swallowed REAL failures
+    /// (locked file, read-only db, corruption), which then surfaced as a crash deep in
+    /// ReadMediaItem instead of a clear one here.
+    /// </summary>
+    private static void AddMissingColumns(SqliteConnection connection, string table, string[] columns)
+    {
+        var existing = ExistingColumns(connection, table);
+        foreach (var col in columns)
+        {
+            var name = col[..col.IndexOf(' ')];
+            if (existing.Contains(name))
+            {
+                continue;
+            }
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {col}";
+            cmd.ExecuteNonQuery();
+        }
+    }
+
     private static void MigrateAddColumns(SqliteConnection connection)
     {
-        // Idempotent: ADD COLUMN throws if column already exists, which we catch
         var columns = new[]
         {
             "Rating INTEGER",
@@ -330,19 +358,7 @@ public static class MediaCache
             "ReplayGainTrackGain REAL",
         };
 
-        foreach (var col in columns)
-        {
-            try
-            {
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = $"ALTER TABLE Media ADD COLUMN {col}";
-                cmd.ExecuteNonQuery();
-            }
-            catch (SqliteException)
-            {
-                // Column already exists
-            }
-        }
+        AddMissingColumns(connection, "Media", columns);
     }
 
     /// <summary>
@@ -357,19 +373,7 @@ public static class MediaCache
             "Genre TEXT",
         };
 
-        foreach (var col in columns)
-        {
-            try
-            {
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = $"ALTER TABLE CdMetadataCache ADD COLUMN {col}";
-                cmd.ExecuteNonQuery();
-            }
-            catch (SqliteException)
-            {
-                // Column already exists
-            }
-        }
+        AddMissingColumns(connection, "CdMetadataCache", columns);
     }
 
     private static bool TableExists(SqliteConnection connection, string tableName)
@@ -393,9 +397,19 @@ public static class MediaCache
         cmd.CommandText = "SELECT * FROM Media";
 
         using var reader = cmd.ExecuteReader();
+
+        // Name→ordinal resolved ONCE per reader: SqliteDataReader.GetOrdinal scans column
+        // names linearly per call, and ~58 columns × ~58 reads × every row made a big
+        // library's load quadratic in string compares.
+        var ordinals = new Dictionary<string, int>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            ordinals[reader.GetName(i)] = i;
+        }
+
         while (reader.Read())
         {
-            result.Add(ReadMediaItem(reader));
+            result.Add(ReadMediaItem(reader, ordinals));
         }
 
         return result;
@@ -408,6 +422,30 @@ public static class MediaCache
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
         ExecuteUpsertMedia(connection, item);
+    }
+
+    /// <summary>
+    /// Batch upsert: ONE connection, ONE transaction, one journal fsync for the whole
+    /// set. The per-item overload autocommits - fine for a dialog save, ruinous for a
+    /// first scan, where per-file connections + fsyncs made 25k tracks cost 25k journal
+    /// flushes. Same shape UpsertRadioStations has always used.
+    /// </summary>
+    public static void UpsertMusicBatch(IReadOnlyList<MediaItem> items)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var transaction = connection.BeginTransaction();
+        foreach (var item in items)
+        {
+            ExecuteUpsertMedia(connection, item);
+        }
+        transaction.Commit();
     }
 
     /// <summary>
@@ -782,75 +820,75 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
-    private static MediaItem ReadMediaItem(SqliteDataReader reader)
+    private static MediaItem ReadMediaItem(SqliteDataReader reader, Dictionary<string, int> o)
     {
-        var kind = Enum.Parse<MediaKind>(reader.GetString(reader.GetOrdinal("Kind")));
+        var kind = Enum.Parse<MediaKind>(reader.GetString(o["Kind"]));
 
         var item = new MediaItem
         {
-            Id = reader.GetString(reader.GetOrdinal("Id")),
+            Id = reader.GetString(o["Id"]),
             Kind = kind,
-            DateAdded = DateTime.Parse(reader.GetString(reader.GetOrdinal("DateAdded")), null, System.Globalization.DateTimeStyles.RoundtripKind),
+            DateAdded = DateTime.Parse(reader.GetString(o["DateAdded"]), null, System.Globalization.DateTimeStyles.RoundtripKind),
 
             // Music-only
-            FilePath = GetNullableString(reader, "FilePath"),
-            FileName = GetNullableString(reader, "FileName"),
-            Extension = GetNullableString(reader, "Extension"),
-            FileSize = GetNullableLong(reader, "FileSize"),
-            LastModified = GetNullableDateTime(reader, "LastModified"),
+            FilePath = GetNullableString(reader, o, "FilePath"),
+            FileName = GetNullableString(reader, o, "FileName"),
+            Extension = GetNullableString(reader, o, "Extension"),
+            FileSize = GetNullableLong(reader, o, "FileSize"),
+            LastModified = GetNullableDateTime(reader, o, "LastModified"),
 
             // Radio-only
-            StreamUrl = GetNullableString(reader, "StreamUrl"),
-            Source = GetNullableString(reader, "Source"),
-            SourceId = GetNullableString(reader, "SourceId"),
-            HomepageUrl = GetNullableString(reader, "HomepageUrl"),
-            FaviconUrl = GetNullableString(reader, "FaviconUrl"),
-            Country = GetNullableString(reader, "Country"),
-            CountryCode = GetNullableString(reader, "CountryCode"),
-            Tags = GetNullableString(reader, "Tags"),
-            Codec = GetNullableString(reader, "Codec"),
-            Bitrate = GetNullableInt(reader, "Bitrate"),
-            Votes = GetNullableInt(reader, "Votes"),
-            ClickCount = GetNullableInt(reader, "ClickCount"),
-            IsHls = reader.GetInt32(reader.GetOrdinal("IsHls")) != 0,
+            StreamUrl = GetNullableString(reader, o, "StreamUrl"),
+            Source = GetNullableString(reader, o, "Source"),
+            SourceId = GetNullableString(reader, o, "SourceId"),
+            HomepageUrl = GetNullableString(reader, o, "HomepageUrl"),
+            FaviconUrl = GetNullableString(reader, o, "FaviconUrl"),
+            Country = GetNullableString(reader, o, "Country"),
+            CountryCode = GetNullableString(reader, o, "CountryCode"),
+            Tags = GetNullableString(reader, o, "Tags"),
+            Codec = GetNullableString(reader, o, "Codec"),
+            Bitrate = GetNullableInt(reader, o, "Bitrate"),
+            Votes = GetNullableInt(reader, o, "Votes"),
+            ClickCount = GetNullableInt(reader, o, "ClickCount"),
+            IsHls = reader.GetInt32(o["IsHls"]) != 0,
         };
 
         // Mutable shared properties
-        item.Title = GetNullableString(reader, "Title");
-        item.Artist = GetNullableString(reader, "Artist");
-        item.Album = GetNullableString(reader, "Album");
-        item.IsFavorite = reader.GetInt32(reader.GetOrdinal("IsFavorite")) != 0;
+        item.Title = GetNullableString(reader, o, "Title");
+        item.Artist = GetNullableString(reader, o, "Artist");
+        item.Album = GetNullableString(reader, o, "Album");
+        item.IsFavorite = reader.GetInt32(o["IsFavorite"]) != 0;
 
-        var durationOrd = reader.GetOrdinal("Duration");
+        var durationOrd = o["Duration"];
         item.Duration = reader.IsDBNull(durationOrd) ? null : TimeSpan.FromTicks(reader.GetInt64(durationOrd));
 
-        var lastPlayedOrd = reader.GetOrdinal("LastPlayed");
+        var lastPlayedOrd = o["LastPlayed"];
         item.LastPlayed = reader.IsDBNull(lastPlayedOrd) ? null : DateTime.Parse(reader.GetString(lastPlayedOrd), null, System.Globalization.DateTimeStyles.RoundtripKind);
 
         // Music-only mutable
-        item.Year = GetNullableUint(reader, "Year");
-        item.Track = GetNullableUint(reader, "Track");
-        item.TotalTracks = GetNullableUint(reader, "TotalTracks");
-        item.Disc = GetNullableUint(reader, "Disc");
-        item.TotalDiscs = GetNullableUint(reader, "TotalDiscs");
-        item.DiscId = GetNullableString(reader, "DiscId");
-        item.HasAlbumArt = GetNullableBool(reader, "HasAlbumArt");
-        item.FileNameMatchesHeaders = GetNullableBool(reader, "FileNameMatchesHeaders");
-        item.MimeType = GetNullableString(reader, "MimeType");
-        item.Genre = GetNullableString(reader, "Genre");
-        item.Composer = GetNullableString(reader, "Composer");
-        item.Comment = GetNullableString(reader, "Comment");
-        item.Bpm = GetNullableUint(reader, "BPM");
-        item.AudioBitrate = GetNullableInt(reader, "AudioBitrate");
-        item.SampleRate = GetNullableInt(reader, "SampleRate");
-        item.BitDepth = GetNullableInt(reader, "BitDepth");
-        item.AudioChannels = GetNullableInt(reader, "AudioChannels");
-        item.EncoderSettings = GetNullableString(reader, "EncoderSettings");
-        item.CodecDescription = GetNullableString(reader, "CodecDescription");
-        var rgOrd = reader.GetOrdinal("ReplayGainTrackGain");
+        item.Year = GetNullableUint(reader, o, "Year");
+        item.Track = GetNullableUint(reader, o, "Track");
+        item.TotalTracks = GetNullableUint(reader, o, "TotalTracks");
+        item.Disc = GetNullableUint(reader, o, "Disc");
+        item.TotalDiscs = GetNullableUint(reader, o, "TotalDiscs");
+        item.DiscId = GetNullableString(reader, o, "DiscId");
+        item.HasAlbumArt = GetNullableBool(reader, o, "HasAlbumArt");
+        item.FileNameMatchesHeaders = GetNullableBool(reader, o, "FileNameMatchesHeaders");
+        item.MimeType = GetNullableString(reader, o, "MimeType");
+        item.Genre = GetNullableString(reader, o, "Genre");
+        item.Composer = GetNullableString(reader, o, "Composer");
+        item.Comment = GetNullableString(reader, o, "Comment");
+        item.Bpm = GetNullableUint(reader, o, "BPM");
+        item.AudioBitrate = GetNullableInt(reader, o, "AudioBitrate");
+        item.SampleRate = GetNullableInt(reader, o, "SampleRate");
+        item.BitDepth = GetNullableInt(reader, o, "BitDepth");
+        item.AudioChannels = GetNullableInt(reader, o, "AudioChannels");
+        item.EncoderSettings = GetNullableString(reader, o, "EncoderSettings");
+        item.CodecDescription = GetNullableString(reader, o, "CodecDescription");
+        var rgOrd = o["ReplayGainTrackGain"];
         item.ReplayGainTrackGainDb = reader.IsDBNull(rgOrd) ? null : reader.GetDouble(rgOrd);
 
-        var issuesOrd = reader.GetOrdinal("Issues");
+        var issuesOrd = o["Issues"];
         if (!reader.IsDBNull(issuesOrd))
         {
             var issues = JsonSerializer.Deserialize<List<string>>(reader.GetString(issuesOrd));
@@ -863,22 +901,22 @@ public static class MediaCache
             }
         }
 
-        item.Rating = GetNullableInt(reader, "Rating");
-        item.PlayCount = reader.GetInt32(reader.GetOrdinal("PlayCount"));
-        item.IsIgnored = (GetNullableInt(reader, "IsIgnored") ?? 0) != 0;
+        item.Rating = GetNullableInt(reader, o, "Rating");
+        item.PlayCount = reader.GetInt32(o["PlayCount"]);
+        item.IsIgnored = (GetNullableInt(reader, o, "IsIgnored") ?? 0) != 0;
 
-        item.VolumeAdjustment = GetNullableInt(reader, "VolumeAdjustment") ?? 0;
-        item.EqPreset = GetNullableString(reader, "EqPreset");
+        item.VolumeAdjustment = GetNullableInt(reader, o, "VolumeAdjustment") ?? 0;
+        item.EqPreset = GetNullableString(reader, o, "EqPreset");
 
-        var startTimeOrd = reader.GetOrdinal("StartTime");
+        var startTimeOrd = o["StartTime"];
         item.StartTime = reader.IsDBNull(startTimeOrd) ? null : TimeSpan.FromTicks(reader.GetInt64(startTimeOrd));
 
-        var stopTimeOrd = reader.GetOrdinal("StopTime");
+        var stopTimeOrd = o["StopTime"];
         item.StopTime = reader.IsDBNull(stopTimeOrd) ? null : TimeSpan.FromTicks(reader.GetInt64(stopTimeOrd));
 
-        item.UseStartTime = (GetNullableInt(reader, "UseStartTime") ?? 0) != 0;
-        item.UseStopTime = (GetNullableInt(reader, "UseStopTime") ?? 0) != 0;
-        item.LastPositionMs = GetNullableLong(reader, "LastPositionMs") ?? 0;
+        item.UseStartTime = (GetNullableInt(reader, o, "UseStartTime") ?? 0) != 0;
+        item.UseStopTime = (GetNullableInt(reader, o, "UseStopTime") ?? 0) != 0;
+        item.LastPositionMs = GetNullableLong(reader, o, "LastPositionMs") ?? 0;
 
         // A cached local file (music or audiobook) was analyzed before it was saved - mark it so
         // the scan's delta logic doesn't re-run TagLib on unchanged files.
@@ -890,39 +928,39 @@ public static class MediaCache
         return item;
     }
 
-    private static string? GetNullableString(SqliteDataReader reader, string column)
+    private static string? GetNullableString(SqliteDataReader reader, Dictionary<string, int> o, string column)
     {
-        var ord = reader.GetOrdinal(column);
+        var ord = o[column];
         return reader.IsDBNull(ord) ? null : reader.GetString(ord);
     }
 
-    private static long? GetNullableLong(SqliteDataReader reader, string column)
+    private static long? GetNullableLong(SqliteDataReader reader, Dictionary<string, int> o, string column)
     {
-        var ord = reader.GetOrdinal(column);
+        var ord = o[column];
         return reader.IsDBNull(ord) ? null : reader.GetInt64(ord);
     }
 
-    private static int? GetNullableInt(SqliteDataReader reader, string column)
+    private static int? GetNullableInt(SqliteDataReader reader, Dictionary<string, int> o, string column)
     {
-        var ord = reader.GetOrdinal(column);
+        var ord = o[column];
         return reader.IsDBNull(ord) ? null : reader.GetInt32(ord);
     }
 
-    private static uint? GetNullableUint(SqliteDataReader reader, string column)
+    private static uint? GetNullableUint(SqliteDataReader reader, Dictionary<string, int> o, string column)
     {
-        var ord = reader.GetOrdinal(column);
+        var ord = o[column];
         return reader.IsDBNull(ord) ? null : (uint)reader.GetInt64(ord);
     }
 
-    private static bool? GetNullableBool(SqliteDataReader reader, string column)
+    private static bool? GetNullableBool(SqliteDataReader reader, Dictionary<string, int> o, string column)
     {
-        var ord = reader.GetOrdinal(column);
+        var ord = o[column];
         return reader.IsDBNull(ord) ? null : reader.GetInt32(ord) != 0;
     }
 
-    private static DateTime? GetNullableDateTime(SqliteDataReader reader, string column)
+    private static DateTime? GetNullableDateTime(SqliteDataReader reader, Dictionary<string, int> o, string column)
     {
-        var ord = reader.GetOrdinal(column);
+        var ord = o[column];
         return reader.IsDBNull(ord) ? null : DateTime.Parse(reader.GetString(ord), null, System.Globalization.DateTimeStyles.RoundtripKind);
     }
 
