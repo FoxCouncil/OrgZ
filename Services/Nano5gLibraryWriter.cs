@@ -620,7 +620,12 @@ public sealed class Nano5gLibraryWriter
         var cdbPath = Path.Combine(iTunesDir, "iTunesCDB");
         var legacyDbPath = Path.Combine(iTunesDir, "iTunesDB");
 
-        var mountPath = Path.GetPathRoot(_itlpDir)!;   // e.g. "E:\"
+        // This "mount" is only a prefix token, and the value genuinely does not matter: ReadAll
+        // BUILDS every FilePath under it (mount + iPod_Control/Music + location), and ToIpodPath
+        // strips the same prefix back off - so the CDB always receives ":iPod_Control:Music:{loc}"
+        // whether GetPathRoot returned "E:\", "/", or a wrong-looking root under a junction. Do
+        // not "fix" this to the real device mount without changing both ends together.
+        var mountPath = Path.GetPathRoot(_itlpDir)!;
         Nano5gLibraryReader.ReadAll(_itlpDir, mountPath, out var tracks, out _);
 
         // Build on OrgZ's embedded canonical iTunes skeleton (not whatever's on the device); clear its
@@ -669,9 +674,12 @@ public sealed class Nano5gLibraryWriter
         // firmware from the CDB anyway. They live in the SQLite container (CreatePlaylist) only, until
         // the correct CDB form is confirmed (research pending).
 
-        File.WriteAllBytes(cdbPath, Nano5gCdbWriter.Emit(doc, _fireWireGuid));
+        // The MASTER database gets the same torn-write protection as every other on-device
+        // file - a yank mid-write must never leave a half-written CDB for the firmware to
+        // rebuild its library from.
+        AtomicFile.WriteAllBytes(cdbPath, Nano5gCdbWriter.Emit(doc, _fireWireGuid));
         // The firmware won't tolerate a non-empty legacy iTunesDB alongside a CDB.
-        File.WriteAllBytes(legacyDbPath, Array.Empty<byte>());
+        AtomicFile.WriteAllBytes(legacyDbPath, Array.Empty<byte>());
     }
 
     /// <summary>Device-absolute path -> iTunesDB colon form (":iPod_Control:Music:F00:x.m4a").</summary>
