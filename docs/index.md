@@ -12,18 +12,18 @@
   <div class="hero-dots"><span></span><span></span><span></span><span></span></div>
 </div>
 
-OrgZ helps you manage your local music library and discover internet radio stations from Radio Browser and SHOUTcast, all in one place.
+OrgZ manages a local music library, rips CDs, streams internet radio, subscribes to podcasts, and syncs music to iPods.
 
-## Key Features
+## Features
 
-- **Music Library**: Scan and organize your local audio files with full metadata extraction
-- **CD Ripping**: Rip audio CDs to FLAC or MP3 with MusicBrainz metadata and cover art
-- **Radio Stations**: Browse and stream internet radio from Radio Browser and SHOUTcast
-- **Podcasts**: Subscribe to shows, auto-download episodes on your own rules, and resume playback
-- **Favorites**: Star your favorite tracks and stations for quick access
-- **Devices**: Detect iPods (stock firmware and Rockbox) and sync music, playlists, and album art
-- **Playback Continuity**: Navigate freely while your music keeps playing from where you started
-- **System Integration**: Windows media keys, taskbar controls, and System Media Transport Controls
+- **Music library**: scans local audio files and reads tags, album art, and duration.
+- **CD ripping**: rips audio CDs to FLAC or MP3 and fills in titles, artist, album, year, and cover art from MusicBrainz.
+- **Internet radio**: browses and streams stations from Radio Browser and SHOUTcast.
+- **Podcasts**: subscribes to feeds, downloads episodes on configurable rules, and resumes playback where it left off.
+- **Favorites and playlists**: stars tracks and stations, and builds playlists.
+- **iPod and Rockbox**: detects connected iPods (stock firmware and Rockbox) and copies tracks, playlists, and album art to supported models.
+- **Playback**: keeps playing as you move between views; supports shuffle, repeat, and a compact mini-player.
+- **System integration**: media keys, taskbar controls, and System Media Transport Controls on Windows; Now Playing on macOS.
 
 ## Quick Links
 

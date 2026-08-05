@@ -171,7 +171,7 @@ jobs:
 
       - name: Pack with Velopack
         shell: bash
-        # Windows ships the MSI ONLY. It installs PerMachine (Program Files + HKLM) and is
+        # Windows ships the MSI only. It installs PerMachine (Program Files + HKLM) and is
         # therefore elevated, which is the only way OrgZ's after-install hook can register
         # the LocalSystem background service - so every Windows install gets silent disc
         # and iPod access instead of a UAC prompt per operation.
@@ -212,7 +212,7 @@ jobs:
           path: releases/
 
   # Docs follow the release cycle: every tag publishes its own docs version (mike), so an
-  # installed app's Help > Manual link resolves to ITS version's pages forever. Independent of
+  # installed app's Help > Manual link resolves to its own version's pages. Independent of
   # the push-triggered docs workflow, which can be path-filtered away on a tag push.
   docs:
     runs-on: ubuntu-latest

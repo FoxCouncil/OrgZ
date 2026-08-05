@@ -3,9 +3,9 @@
 OrgZ ships unsigned today. That costs real things, and they're measurable:
 
 - **Windows**: SmartScreen warns on first run, and Defender scans every unsigned file it
-  hasn't seen — a meaningful share of the cold first launch measured in `roadmap.md`.
+  hasn't seen - a meaningful share of the cold first launch measured in `roadmap.md`.
 - **macOS**: Gatekeeper *refuses to run* an unsigned, un-notarized app. Not a warning, a
-  hard stop — so the macOS build is effectively undeliverable without this.
+  hard stop - so the macOS build is effectively undeliverable without this.
 
 The release pipeline is wired for both, reusing the **same Azure and Apple accounts as
 NAPLPS**. Every signing step is conditional on its secrets existing, so a release still
@@ -27,7 +27,7 @@ The build job declares `environment: appstore`, matching NAPLPS. Create it under
 **Settings → Environments** and add the secrets below. Using an environment (rather than
 repo secrets) keeps the same human-approval gate NAPLPS has before any certificate is used.
 
-### 2. Add a federated credential for THIS repo — the one genuinely new step
+### 2. Add a federated credential for this repo - the one new step
 
 The Azure App Registration already exists, but its federated credential is scoped to the
 NAPLPS repo. OIDC subjects are per-repo, so add a second credential:
@@ -39,7 +39,7 @@ NAPLPS repo. OIDC subjects are per-repo, so add a second credential:
 Without this, `azure/login` fails with an audience/subject mismatch even though the client
 ID is correct.
 
-### 3. Create a `Developer ID Installer` certificate — probably missing
+### 3. Create a `Developer ID Installer` certificate - probably missing
 
 NAPLPS ships a **.dmg**, which only needs `Developer ID Application`. Velopack ships a
 **.pkg**, which `productbuild` signs with `Developer ID Installer`. If NAPLPS is the only
@@ -61,7 +61,7 @@ Reused from NAPLPS, unchanged:
 
 | Secret | Notes |
 |---|---|
-| `AZURE_CLIENT_ID` | App registration — needs the new federated credential above |
+| `AZURE_CLIENT_ID` | App registration - needs the new federated credential above |
 | `AZURE_TENANT_ID` | |
 | `AZURE_SUBSCRIPTION_ID` | |
 | `AZURE_TS_ENDPOINT` | e.g. `https://wus2.codesigning.azure.net` |
@@ -69,7 +69,7 @@ Reused from NAPLPS, unchanged:
 | `AZURE_TS_PROFILE` | Certificate profile name |
 | `DEVID_CERT_P12` | base64 Developer ID **Application** .p12 |
 | `DEVID_CERT_PASSWORD` | |
-| `ASC_KEY_ID` | App Store Connect API key — used for notarization |
+| `ASC_KEY_ID` | App Store Connect API key - used for notarization |
 | `ASC_ISSUER_ID` | |
 | `ASC_KEY_P8` | base64 of the .p8 |
 
@@ -78,7 +78,7 @@ New for OrgZ:
 | Secret | Notes |
 |---|---|
 | `DEVID_INSTALLER_CERT_P12` | base64 Developer ID **Installer** .p12 (see step 3) |
-| `DEVID_INSTALLER_CERT_PASSWORD` | optional — falls back to `DEVID_CERT_PASSWORD` |
+| `DEVID_INSTALLER_CERT_PASSWORD` | optional - falls back to `DEVID_CERT_PASSWORD` |
 
 Identity *names* aren't secrets and aren't stored: the workflow reads them out of the
 keychain with `security find-identity`, so a renamed certificate can't silently break the
@@ -86,18 +86,18 @@ build.
 
 ## How it works
 
-**Windows** — `azure/login` authenticates via OIDC, the workflow writes the
+**Windows** - `azure/login` authenticates via OIDC, the workflow writes the
 `metadata.json` signtool expects, and passes `--azureTrustedSignFile` to `vpk pack`.
 Velopack bundles a compatible `signtool.exe` and the dlib package, so nothing extra is
 installed on the runner. Artifact Signing certificates carry **instant SmartScreen
 reputation**, which an OV certificate does not.
 
-**macOS** — both .p12s are imported into a throwaway keychain, `set-key-partition-list` is
+**macOS** - both .p12s are imported into a throwaway keychain, `set-key-partition-list` is
 applied (without it `codesign` prompts and hangs a headless runner), notarytool credentials
 are stored from the ASC API key, and `--signAppIdentity` / `--signInstallIdentity` /
 `--notaryProfile` / `--keychain` go to `vpk pack`.
 
-**Linux** — nothing to do. AppImages aren't signed in a way users check.
+**Linux** - nothing to do. AppImages aren't signed in a way users check.
 
 ## Verifying
 

@@ -16,7 +16,7 @@
 	</Design.DataContext>
 
 	<UserControl.Resources>
-		<!-- The audiobooks vertical is GOLDEN - music is blue, podcasts are purple. These are the
+		<!-- The audiobooks vertical is gold - music is blue, podcasts are purple. These are the
 		     podcast carousel colors hue-rotated to gold and scoped to this panel: the embedded
 		     PodcastsCard resolves its OrgZCarousel* keys through the logical tree, so the same
 		     card chrome renders golden here without touching the podcasts surface. -->

@@ -44,9 +44,8 @@ iPod Touch and iPhone are out of scope
 
 ### Burn validation pass
 
-Six `Burn Test N` playlists live in the library for this. Test 1 is ✅ done: burned on the
-BDR-XS07U with CD-TEXT, verified in foobar2000 (disc title + per-track titles/artists read
-back off the disc), TOC sector-exact, plays. The rest need a person with ears and discs.
+Six `Burn Test N` playlists live in the library for this. All six passed on the BDR-XS07U on
+2026-07-25, ear checks included.
 
 Drive quirks this drive taught us, worth re-checking on any new recorder:
 - Cue sheet lead-in **and** lead-out entries must use Data Form `0x01` (device-generated);
@@ -56,29 +55,27 @@ Drive quirks this drive taught us, worth re-checking on any new recorder:
 - WRITE(10) transfers must stay under the USB bridge's 64 KB cap (OrgZ uses 26 sectors).
 - SAO self-finalizes: no explicit CLOSE TRACK/SESSION (5/30/05 on an already-closed disc).
 
-Most of this pass is machine-checkable, and now is: `BurnValidationTests` executes the
-capacity/disc-count arithmetic, the track-boundary sector layout, and real ffmpeg
-downsamples. What's left for a human is the part a test genuinely can't have — ears, and
-a disc in a tray.
+`BurnValidationTests` covers the machine-checkable part: the capacity/disc-count arithmetic,
+the track-boundary sector layout, and real ffmpeg downsamples. The rest needs ears and a disc
+in the tray.
 
 | # | Playlist | What it proves | Result |
 |---|---|---|---|
 | 1 | Smoke (11 min) | End-to-end burn + CD-TEXT | ✅ burned; CD-TEXT verified in foobar2000 |
 | 2 | Track Boundaries (5×5 s + 2 songs, **burn at Gap 0**) | Skip-to-track lands on each song's first note; last track plays to the end | ✅ sector layout automated (gapless starts, gap offsets, 4 s floor) · ✅ **ear check passed** |
 | 3 | Hi-Res Downsample (192k / 96k / 48k sources) | Transcode to 44.1/16, sector-aligned | ✅ automated with real ffmpeg, validated by the burn path's own WAV parser · ⬜ optional listen for artefacts |
-| 4 | Unicode CD-TEXT (Japanese / emoji titles) | Latin-1 fallback renders `?` rather than failing the burn | ✅ burned + read back in foobar2000; **re-burned after the alpha.11 punctuation fix and confirmed** — typographic punctuation now survives, genuinely unrepresentable scripts still `?` |
+| 4 | Unicode CD-TEXT (Japanese / emoji titles) | Latin-1 fallback renders `?` rather than failing the burn | ✅ burned + read back in foobar2000; re-burned after the alpha.11 punctuation fix and confirmed - typographic punctuation now survives, unrepresentable scripts still `?` |
 | 5 | Near Capacity (77.9 min) | Fits; gaps charged against the disc; burn completes | ✅ automated (fits at Gap 0; gap arithmetic can push a set over) |
-| 6 | Overflow (90.2 min) | Burn refused, Discs row reads `2 × 79:57` — never reaches the drive | ✅ automated (refusal, `2 × 79:57`, round-up never undercounts) |
+| 6 | Overflow (90.2 min) | Burn refused, Discs row reads `2 × 79:57` - never reaches the drive | ✅ automated (refusal, `2 × 79:57`, round-up never undercounts) |
 
-**All six passed on 2026-07-25**, ear checks included. Nothing in the burn validation pass is
-outstanding on this drive. Tests 5 and 6 consume no media at all (test 6 should never start a
-burn), so only 1-4 cost discs.
+Nothing in the burn validation pass is outstanding on this drive. Tests 5 and 6 consume no
+media at all (test 6 should never start a burn), so only 1-4 cost discs.
 
 **Found by Test 4, fixed in FoxOrangebook alpha.11 (OrgZ 0.9.17):** the Latin-1 fallback also
 mangled ordinary typographic punctuation - a curly apostrophe read back as `Frankie?s`, an
-em-dash as `Burn Test 4 ?`. Those are Windows-1252/Unicode characters ISO-8859-1 cannot carry,
-and they are common throughout real metadata. They are now transliterated to ASCII before the
-encode (’→' —→- “”→" …→...), while accented Latin still passes through untouched and genuinely
-unrepresentable scripts (Japanese, emoji) still fall back to `?`. **Confirmed on metal** by a
-re-burn of Test 4: `Frankie's First Affair` and `Burn Test 4 - Smoke` read back correctly, with
-the Japanese titles still `?` as designed.
+em-dash as `Burn Test 4 ?`. Those are Windows-1252/Unicode characters ISO-8859-1 can't carry,
+and they're common in real metadata. They're now transliterated to ASCII before the encode
+(’→' —→- “”→" …→...), while accented Latin passes through untouched and unrepresentable
+scripts (Japanese, emoji) still fall back to `?`. Confirmed on metal by a re-burn of Test 4:
+`Frankie's First Affair` and `Burn Test 4 - Smoke` read back correctly, with the Japanese
+titles still `?` as designed.
