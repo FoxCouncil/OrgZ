@@ -212,9 +212,12 @@ jobs:
           path: releases/
 
   # Docs follow the release cycle: every tag publishes its own docs version (mike), so an
-  # installed app's Help > Manual link resolves to its own version's pages. Independent of
-  # the push-triggered docs workflow, which can be path-filtered away on a tag push.
+  # installed app's Help > Manual link resolves to its own version's pages. Gated on the
+  # release job so a version's docs only go live once its installers are actually
+  # downloadable - otherwise a failed build would still move the "latest" alias to a
+  # version nobody can install.
   docs:
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
