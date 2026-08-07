@@ -2850,6 +2850,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _ = LoadFaviconAsync(station.FaviconUrl);
         }
 
+        // Stop the outgoing station HERE, not at the swap. Connecting is real network work
+        // (redirects, playlist walks, TLS) that can run for seconds, and the previous
+        // station's audio used to keep playing across all of it - the user picked a new
+        // station and kept hearing the old one until the new one finished loading.
+        // Suppressing the Stopped event keeps the barber pole running continuously instead
+        // of blinking off, the same way the podcast resolve does it below.
+        if (_player is { } outgoing && outgoing.State is VLCState.Opening or VLCState.Buffering or VLCState.Playing or VLCState.Paused)
+        {
+            _suppressStoppedLoadingClear = true;
+            outgoing.Stop();
+        }
+
         // Connecting is real network work (redirects, playlist walks, TLS) done by OUR
         // StreamSession now, not libvlc - so it runs async with the podcast pattern:
         // epoch-stamp the request, show loading immediately, re-check the epoch when the
@@ -3027,11 +3039,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             thisMedia.MetaChanged += handler;
             _currentMediaMetaHandler = handler;
 
-            // Note: don't call _player.Stop() before Play(thisMedia). libvlcsharp's
-            // Stop+Play sequence triggers two native transitions back-to-back which
-            // is more crash-prone than the single transition Play(newMedia) performs
-            // internally. The 120 ms debounce in PlayRadioStation + the lock here +
-            // the deferred dispose under the same lock is the safe combination.
+            // No Stop() immediately before this Play(). libvlcsharp's Stop+Play back to back
+            // is two native transitions in a row and is more crash-prone than the single
+            // transition Play(newMedia) performs internally. ExecutePlayRadio does stop the
+            // outgoing station, but at the click - a whole network connect earlier - so the
+            // two transitions are never adjacent. The 120 ms debounce in PlayRadioStation +
+            // the lock here + the deferred dispose under the same lock is the safe combination.
             _ = _player.Play(thisMedia);
 
             // Now-playing parsed off the same connection the audio rides, injected on the
