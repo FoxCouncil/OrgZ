@@ -34,6 +34,9 @@ public partial class App : Application
         {
             StartupTrace.Mark("avalonia init");
 
+            // Before any window exists, so a grid can never toggle a row group unguarded.
+            Services.DataGridRowGroupGuard.Install();
+
             var mainWindow = new MainWindow();
             StartupTrace.Mark("main window built");
 
