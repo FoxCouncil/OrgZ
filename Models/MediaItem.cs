@@ -370,6 +370,9 @@ public partial class MediaItem : ObservableObject
         "AUDIO/AAC" => "AAC",
         "AUDIO/OGG" => "OGG",
         "AUDIO/FLAC" => "FLAC",
+        // HLS manifests arrive under several MIME spellings depending on the server.
+        "APPLICATION/VND.APPLE.MPEGURL" or "APPLICATION/X-MPEGURL" or "AUDIO/MPEGURL" or "AUDIO/X-MPEGURL" => "HLS",
+        "UNKNOWN" or "UNDEFINED" => "-",
         var c => c
     };
 

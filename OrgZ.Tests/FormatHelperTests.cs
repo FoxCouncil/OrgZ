@@ -142,4 +142,17 @@ public class FormatHelperTests
     {
         Assert.Equal(expected, FormatHelper.FormatDurationLong(TimeSpan.FromSeconds(totalSeconds)));
     }
+
+    // ===== FormatDurationHuman - library totals as quantities, not clock positions =====
+
+    [Theory]
+    [InlineData(0,      "0m 0s")]
+    [InlineData(192,    "3m 12s")]
+    [InlineData(4338,   "1h 12m 18s")]
+    [InlineData(86400,  "1d 0h 0m")]
+    [InlineData(371015, "4d 7h 3m")]    // seconds dropped once days are in play
+    public void FormatDurationHuman_scales_units_to_magnitude(int totalSeconds, string expected)
+    {
+        Assert.Equal(expected, FormatHelper.FormatDurationHuman(TimeSpan.FromSeconds(totalSeconds)));
+    }
 }

@@ -55,6 +55,26 @@ internal static class FormatHelper
             : $"{ts.Minutes}:{ts.Seconds:00}";
     }
 
+    /// <summary>
+    /// Library-total form: "4d 7h 23m", "1h 12m 18s", "3m 12s". Unit letters instead of a
+    /// colon stack because a summed duration is a quantity, not a clock position - Stats'
+    /// old dd:hh:mm:ss read as a timestamp.
+    /// </summary>
+    public static string FormatDurationHuman(TimeSpan ts)
+    {
+        if (ts.Days > 0)
+        {
+            return $"{ts.Days}d {ts.Hours}h {ts.Minutes}m";
+        }
+
+        if (ts.Hours > 0)
+        {
+            return $"{ts.Hours}h {ts.Minutes}m {ts.Seconds}s";
+        }
+
+        return $"{ts.Minutes}m {ts.Seconds}s";
+    }
+
     public static string FormatDurationCompact(long milliseconds)
         => FormatDurationCompact(TimeSpan.FromMilliseconds(milliseconds));
 

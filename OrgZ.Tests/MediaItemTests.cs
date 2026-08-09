@@ -112,6 +112,12 @@ public class MediaItemTests
     [InlineData("audio/aac", "AAC")]
     [InlineData("audio/ogg", "OGG")]
     [InlineData("audio/flac", "FLAC")]
+    [InlineData("application/vnd.apple.mpegurl", "HLS")]
+    [InlineData("application/x-mpegURL", "HLS")]
+    [InlineData("audio/mpegurl", "HLS")]
+    [InlineData("audio/x-mpegurl", "HLS")]
+    [InlineData("unknown", "-")]
+    [InlineData("UNDEFINED", "-")]
     public void CodecLabel_MapsKnownMimeTypes(string codec, string expected)
     {
         var item = new MediaItem { Id = "x", Kind = MediaKind.Radio, Codec = codec };

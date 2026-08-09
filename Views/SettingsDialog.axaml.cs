@@ -297,7 +297,7 @@ public partial class SettingsDialog : Window
         StatAlbumCount.Text = albums.ToString("N0");
         StatSongCount.Text = musicItems.Count.ToString("N0");
         StatMusicFavorites.Text = musicItems.Count(f => f.IsFavorite).ToString("N0");
-        StatTotalDuration.Text = totalDuration.ToString(@"dd\:hh\:mm\:ss");
+        StatTotalDuration.Text = FormatHelper.FormatDurationHuman(totalDuration);
         StatTotalFileSize.Text = FormatHelper.FormatFileSize(totalBytes);
 
         // File Types (inside Music section)
@@ -458,7 +458,7 @@ public partial class SettingsDialog : Window
         StatBookCount.Text = owned.Count.ToString("N0");
         StatBookAuthors.Text = authors.ToString("N0");
         StatBookChapters.Text = audiobookItems.Count.ToString("N0");
-        StatBookDuration.Text = totalDuration.ToString(@"dd\:hh\:mm\:ss");
+        StatBookDuration.Text = FormatHelper.FormatDurationHuman(totalDuration);
         StatBookSize.Text = FormatHelper.FormatFileSize(totalBytes);
     }
 
@@ -513,7 +513,16 @@ public partial class SettingsDialog : Window
         {
             Text = text,
             Opacity = opacity,
+            // A fixed grid column doesn't clip - an over-long label (a raw codec MIME
+            // type, a mile-long genre) would render straight into the next column.
+            TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
         };
+
+        if (column == 0)
+        {
+            ToolTip.SetTip(tb, text);
+        }
+
         Grid.SetColumn(tb, column);
         return tb;
     }
