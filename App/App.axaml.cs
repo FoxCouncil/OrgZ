@@ -63,7 +63,7 @@ public partial class App : Application
         // no elevation, no prompt - the user starts the install when they choose to.
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime { MainWindow.DataContext: MainWindowViewModel vm })
         {
-            _ = vm.RefreshUpdateStatusAsync();
+            Helpers.TaskObserver.FireAndForget(vm.RefreshUpdateStatusAsync(), "startup update check");
         }
 
         base.OnFrameworkInitializationCompleted();

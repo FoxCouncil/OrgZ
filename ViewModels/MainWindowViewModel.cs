@@ -1531,7 +1531,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         Services.Podcast.PodcastSubscriptionService.Instance.RefreshCompleted += _onSubscriptionsRefreshed;
         if (Services.Podcast.PodcastSettings.IsDueForCheck)
         {
-            _ = Services.Podcast.PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath);
+            FireAndForget(Services.Podcast.PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath), "podcast subscription refresh");
         }
 
         // Surface podcast download progress on the LCD busy display (same as ripping/import).
@@ -1807,7 +1807,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var mpris = new MprisService();
             _nowPlaying = mpris;
             WireNowPlaying(mpris);
-            _ = mpris.InitializeAsync();
+            FireAndForget(mpris.InitializeAsync(), "MPRIS init");
         }
 
         // macOS Control Center / lock screen / media-key widget (MPNowPlayingInfoCenter).
@@ -2431,7 +2431,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             CurrentTrackTime = FormatHelper.FormatDurationCompact(0);
             CurrentTrackTimeNumber = 0;
         }
-        _ = _player.Play(_currentMedia);
+        if (!_player.Play(_currentMedia))
+        {
+            // libvlc's Play returns false on a failed native start - a throw-less failure.
+            _log.Error("libvlc Play returned false for {Title}", track.Title);
+        }
         DeferDispose(previousMedia, previousHandler, previousRadio);
 
         ButtonPlayPauseIcon = ICON_PAUSE;
@@ -2668,7 +2672,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     UI(() =>
                     {
                         item.ReplayGainTrackGainDb = g;
-                        _ = Task.Run(() => MediaCache.UpdateReplayGain(item.Id, g));
+                        FireAndForget(Task.Run(() => MediaCache.UpdateReplayGain(item.Id, g)), "replay-gain persist");
                         // Still playing this track (and Sound Check still on)? Apply its just-measured
                         // gain without waiting for a replay.
                         if (ReferenceEquals(CurrentPlayingItem, item))
@@ -2815,7 +2819,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (fromShare)
             {
-                _ = LoadShareArtAsync(file, epoch);
+                FireAndForget(LoadShareArtAsync(file, epoch), "share art fetch");
             }
 
             // Audiobooks resume where they left off - same applied-once-audio-starts machinery as
@@ -2826,7 +2830,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             _lastAudiobookSaveMs = 0;
 
-            _ = _player.Play(_currentMedia);
+            if (!_player.Play(_currentMedia))
+            {
+                _log.Error("libvlc Play returned false for {Title}", file.Title);
+            }
             DeferDispose(previousMedia, previousHandler, previousRadio);
         }
 
@@ -2921,7 +2928,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // session lands so a superseded connect can't hijack whatever plays by then.
         var epoch = NewPlaybackEpoch();
         BeginPlayback();
-        _ = ConnectRadioAsync(station, epoch);
+        FireAndForget(ConnectRadioAsync(station, epoch), "radio connect");
 
         ApplyPerTrackOptions(station);
 
@@ -2946,7 +2953,23 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>Connects the single upstream pull for a station, then hands the live session to the swap. Resumes on the UI thread (launched from it).</summary>
     private async Task ConnectRadioAsync(MediaItem station, int epoch)
     {
-        var session = await StreamSession.ConnectAsync(station.StreamUrl!, CancellationToken.None);
+        StreamSession session;
+        try
+        {
+            session = await StreamSession.ConnectAsync(station.StreamUrl!, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // A throwing connect (DNS, TLS, socket teardown) used to fault an unobserved
+            // task: the barber pole spun forever and nothing was logged.
+            _log.Error(ex, "Radio connect threw for {Url}", station.StreamUrl);
+            if (epoch == _playbackEpoch)
+            {
+                IsPlaybackLoading = false;
+                UpdateMainStatus("Couldn't connect to this station.");
+            }
+            return;
+        }
 
         // Same guard as the podcast resolve: if the user moved on mid-connect, this session
         // must not start playing over whatever superseded it.
@@ -3108,7 +3131,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // outgoing station, but at the click - a whole network connect earlier - so the
             // two transitions are never adjacent. The 120 ms debounce in PlayRadioStation +
             // the lock here + the deferred dispose under the same lock is the safe combination.
-            _ = _player.Play(thisMedia);
+            if (!_player.Play(thisMedia))
+            {
+                _log.Error("libvlc Play returned false for radio session");
+            }
 
             // Now-playing parsed off the same connection the audio rides, injected on the
             // UI thread under the swap lock, guarded against station switches - an update
@@ -3330,7 +3356,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         // Streamed: resolve the redirect chain off the UI thread, then start VLC.
-        _ = ResolveAndStreamPodcastAsync(feed, episode, rawSource, epoch);
+        FireAndForget(ResolveAndStreamPodcastAsync(feed, episode, rawSource, epoch), "podcast stream start");
     }
 
     /// <summary>
@@ -3456,7 +3482,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     var savedPos = Services.Podcast.PodcastCache.GetListenPosition(episode.Id);
                     _pendingResumeMs = savedPos is { } sp && !sp.Completed && sp.PositionMs > 10000 ? sp.PositionMs : null;
                     _lastPodcastSaveMs = _pendingResumeMs ?? 0;
-                    _ = _player.Play(_currentMedia);
+                    if (!_player.Play(_currentMedia))
+                    {
+                        _log.Error("libvlc Play returned false for episode {Id}", episode.Id);
+                    }
                     DeferDispose(previousMedia, previousHandler, previousRadio);
                 }
             }
@@ -3635,7 +3664,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             finishedBook.LastPositionMs = 0;
             var finishedId = finishedBook.Id;
-            _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(finishedId, 0));
+            FireAndForget(Task.Run(() => MediaCache.UpdatePlaybackPosition(finishedId, 0)), "audiobook finish reset");
         }
 
         if (CurrentStation != null)
@@ -3682,7 +3711,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var episodeId = ps.Episode.Id;
             var posMs = timeMs;
             var completed = lengthMs > 0 && posMs >= lengthMs - 15000;
-            _ = Task.Run(() => Services.Podcast.PodcastCache.UpdateListenPosition(episodeId, posMs, completed));
+            FireAndForget(Task.Run(() => Services.Podcast.PodcastCache.UpdateListenPosition(episodeId, posMs, completed)), "podcast position persist");
         }
 
         // Audiobook resume position, same ~5s throttle (Math.Abs also catches seeks). Within
@@ -3694,7 +3723,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             var pos = lengthMs > 0 && timeMs >= lengthMs - 15000 ? 0 : timeMs;
             book.LastPositionMs = pos;
             var bookId = book.Id;
-            _ = Task.Run(() => MediaCache.UpdatePlaybackPosition(bookId, pos));
+            FireAndForget(Task.Run(() => MediaCache.UpdatePlaybackPosition(bookId, pos)), "audiobook position persist");
         }
 
         // Push pivots to macOS Now Playing: the very first TimeChanged (so
@@ -4514,7 +4543,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (gain is { } g)
             {
                 track.ReplayGainTrackGainDb = g;
-                _ = Task.Run(() => MediaCache.UpdateReplayGain(track.Id, g), CancellationToken.None);
+                FireAndForget(Task.Run(() => MediaCache.UpdateReplayGain(track.Id, g), CancellationToken.None), "replay-gain persist");
             }
         }
 
@@ -6773,28 +6802,42 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Get Info still says "EQ: Rock" - the user must at least be able to grep why it's flat.
+                _log.Warning(ex, "Per-track EQ preset '{Preset}' failed to apply", item.EqPreset);
+            }
         }
         else
         {
-            try { _player.UnsetEqualizer(); } catch { }
+            try
+            {
+                _player.UnsetEqualizer();
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Failed to clear the equalizer");
+            }
         }
 
         // Start time: seek after a brief delay to let playback begin
         if (item.UseStartTime && item.StartTime.HasValue)
         {
-            _ = Task.Run(async () =>
+            // Snapshot the engine: it can be torn down during the 100 ms delay, and the old
+            // null-forgiving deref was an NRE inside a discarded task.
+            var engine = _flacEngine;
+            FireAndForget(Task.Run(async () =>
             {
                 await Task.Delay(100);
                 if (EngineActive)
                 {
-                    _flacEngine!.SeekMs((long)item.StartTime.Value.TotalMilliseconds);
+                    engine?.SeekMs((long)item.StartTime.Value.TotalMilliseconds);
                 }
                 else if (_player.IsPlaying)
                 {
                     _player.Time = (long)item.StartTime.Value.TotalMilliseconds;
                 }
-            });
+            }), "start-time seek");
         }
     }
 
@@ -6834,19 +6877,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
-    /// <summary>
-    /// Starts a task nobody awaits and OBSERVES its failure. A bare <c>_ = SomethingAsync()</c>
-    /// discards the fault entirely: at best it's an unobserved-task exception nobody sees, at
-    /// worst it's half-finished sidebar or device state with no trace of why.
-    /// </summary>
-    private static void FireAndForget(Task task, string what)
-    {
-        _ = task.ContinueWith(
-            t => _log.Error(t.Exception, "{What} failed", what),
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted,
-            TaskScheduler.Default);
-    }
+    /// <summary>Shim over <see cref="TaskObserver.FireAndForget"/> - kept so the VM's many call sites stay short.</summary>
+    private static void FireAndForget(Task task, string what) => TaskObserver.FireAndForget(task, what);
 
 
 
