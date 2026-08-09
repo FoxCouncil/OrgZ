@@ -7353,6 +7353,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         });
 
+        string? ripError = null;
+
         _ripCts = new CancellationTokenSource();
         try
         {
@@ -7371,20 +7373,25 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (unverified.Count == 0)
             {
                 _log.Information("Ripped {Count} track(s) from {DrivePath} — all verified — to {OutputDir}", outcomes.Count, drivePath, outputDir);
+                UpdateMainStatus($"Ripped {Count(outcomes.Count, "track")} — all verified.");
             }
             else
             {
                 var badList = string.Join(", ", unverified.Select(o => o.TrackNumber.ToString("D2")));
                 _log.Warning("Ripped {Count} track(s) from {DrivePath}, {Unverified} unverified: {BadList}", outcomes.Count, drivePath, unverified.Count, badList);
+                // The per-track ⚠ verdict was a transient LCD line - this survives the LCD reset.
+                UpdateMainStatus($"Ripped {Count(outcomes.Count, "track")} — ⚠ {Count(unverified.Count, "track")} unverified: {badList}.");
             }
         }
         catch (OperationCanceledException)
         {
             _log.Information("Rip cancelled by user for {DrivePath}", drivePath);
+            UpdateMainStatus("Rip cancelled.");
         }
         catch (Exception ex)
         {
             _log.Error(ex, "Rip failed for {DrivePath}", drivePath);
+            ripError = ex.Message;
         }
         finally
         {
@@ -7404,6 +7411,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     t.RipStatus = RipState.None;
                 }
             }
+        }
+
+        // Surface the failure once the LCD is back to normal (mirrors the burn path). The
+        // swallowed message was often the deliberately-helpful "encoder not found — install
+        // it like this" text, which users never saw - the progress bar just vanished.
+        if (ripError != null)
+        {
+            UpdateMainStatus($"The rip didn't finish: {ripError}");
+            var dialog = new ConfirmDialog("Can't Rip CD", $"The rip didn't finish: {ripError}", "OK", showCancel: false);
+            await dialog.ShowDialog(_window);
         }
     }
 
