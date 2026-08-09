@@ -415,7 +415,7 @@ public sealed class BinaryIPod : IPodDevice
     }
 
     public override Task<int> AddPodcastsAsync(IReadOnlyList<PodcastPush> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
-        => Task.Run(() => IPodTrackImporter.AddPodcastEpisodes(MountPath, Device.IpodGeneration, Device.FireWireGuid, ToEpisodes(episodes), onProgress), ct);
+        => Task.Run(() => IPodTrackImporter.AddPodcastEpisodesAsync(MountPath, Device.IpodGeneration, Device.FireWireGuid, ToEpisodes(episodes), ffmpegPath, onProgress, ct), ct);
 
     public override Task RemoveTrackAsync(MediaItem item, CancellationToken ct = default)
         => Task.Run(() =>

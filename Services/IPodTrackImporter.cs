@@ -479,12 +479,15 @@ public static class IPodTrackImporter
     public sealed record PodcastEpisodeImport(string LocalFile, string Title, string Show, string? Description, string? RssUrl, DateTime PubDateUtc, int LengthMs, string? CoverImagePath = null);
 
     /// <summary>
-    /// Copies every episode's file (MP3/AAC - passthrough, no transcode) into iPod_Control/Music and
-    /// adds its podcast MHIT into one parsed iTunesDB, then normalizes/checksums/verifies/backs-up
-    /// and writes a single time - loading + committing once rather than re-writing the whole DB per
-    /// episode. Returns the number of episodes written.
+    /// Pushes downloaded episodes into one parsed binary iTunesDB. Natively playable files
+    /// (MP3/AAC/WAV/AIFF) copy as-is; anything else (OGG/Opus/FLAC/...) transcodes first -
+    /// ALAC for dock-connector models, AAC 256k for the 1G/2G that silently skip ALAC - so
+    /// an unplayable codec can never land on the device with a database row pointing at it.
+    /// Episode artwork (the feed cover, falling back to embedded art) renders into the
+    /// ArtworkDB the same way the music path does. Normalizes/checksums/verifies/backs-up
+    /// and writes a single time. Returns the number of episodes written.
     /// </summary>
-    public static int AddPodcastEpisodes(string mountPath, string? generation, string? fireWireGuid, IReadOnlyList<PodcastEpisodeImport> episodes, Action<int, int>? onProgress = null)
+    public static async Task<int> AddPodcastEpisodesAsync(string mountPath, string? generation, string? fireWireGuid, IReadOnlyList<PodcastEpisodeImport> episodes, string ffmpegPath, Action<int, int>? onProgress = null, CancellationToken ct = default)
     {
         if (episodes.Count == 0)
         {
@@ -527,6 +530,10 @@ public static class IPodTrackImporter
         var existing = new HashSet<(string Show, string Title)>(
             existingTracks.Select(t => (t.Album ?? string.Empty, t.Title ?? string.Empty)));
 
+        // Same codec rules as the music import: 1G/2G silently skip ALAC, so they get AAC.
+        bool supportsAlac = generation is not ("1G" or "2G");
+        var coverFormats = IPodCapabilities.CoverFormatsFor(generation);
+
         int added = 0;
         var podcastEntries = new List<(string Show, uint TrackId)>(episodes.Count);
         for (int i = 0; i < episodes.Count; i++)
@@ -537,12 +544,43 @@ public static class IPodTrackImporter
             {
                 continue;
             }
+
+            var ext = Path.GetExtension(ep.LocalFile);
+            bool needsTranscode = !IsNativelyCompatible(ext)
+                || (!supportsAlac
+                    && (ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) || ext.Equals(".m4b", StringComparison.OrdinalIgnoreCase))
+                    && IsAlacFile(ep.LocalFile));
+
+            string produced = ep.LocalFile;
+            bool producedIsTemp = false;
             string? destFile = null;
             try
             {
-                destFile = UniqueTrackPath(destDir, Path.GetExtension(ep.LocalFile));
+                if (needsTranscode)
+                {
+                    produced = Path.Combine(Path.GetTempPath(), "orgz_pcast_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
+                    producedIsTemp = true;
+                    if (supportsAlac)
+                    {
+                        await TranscodeToAlacAsync(ffmpegPath, ep.LocalFile, produced, 44100, ep.LengthMs, null, ct);
+                    }
+                    else
+                    {
+                        await TranscodeToAacAsync(ffmpegPath, ep.LocalFile, produced, 44100, ep.LengthMs, null, ct);
+                    }
+                }
+
+                destFile = UniqueTrackPath(destDir, producedIsTemp ? ".m4a" : ext.ToLowerInvariant());
                 var fileName = Path.GetFileName(destFile);
-                File.Copy(ep.LocalFile, destFile);
+                File.Copy(produced, destFile);
+
+                // Episode artwork: the feed's cover first (podcasts rarely embed art), else the
+                // audio file's embedded cover. The dbid ties the MHIT to the ArtworkDB mhii.
+                ulong dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue);
+                var artSource = !string.IsNullOrEmpty(ep.CoverImagePath) && File.Exists(ep.CoverImagePath)
+                    ? ep.CoverImagePath
+                    : ep.LocalFile;
+                var (hasArt, artSize, _) = await TryWriteArtworkAsync(mountPath, artSource, ffmpegPath, dbid, coverFormats, ct);
 
                 uint trackId = ITunesDbWriter.NextTrackId(doc);
                 // addToMasterPlaylists:false - podcasts must NOT be in the Library/MPL, so they
@@ -557,11 +595,13 @@ public static class IPodTrackImporter
                     FileSize     = new FileInfo(destFile).Length,
                     LengthMs     = ep.LengthMs,
                     DateAddedUtc = DateTime.UtcNow,
-                    Dbid         = (ulong)Random.Shared.NextInt64(1, long.MaxValue),
+                    Dbid         = dbid,
                     IsPodcast    = true,
                     Description  = ep.Description,
                     PodcastRss   = ep.RssUrl,
                     TimeReleased = ep.PubDateUtc,
+                    HasArtwork   = hasArt,
+                    ArtworkSize  = artSize,
                 }, addToMasterPlaylists: false);
                 podcastEntries.Add((ep.Show, trackId));
                 existing.Add((ep.Show, ep.Title));
@@ -575,6 +615,13 @@ public static class IPodTrackImporter
                 if (destFile is not null)
                 {
                     try { File.Delete(destFile); } catch { /* best-effort */ }
+                }
+            }
+            finally
+            {
+                if (producedIsTemp)
+                {
+                    try { File.Delete(produced); } catch { /* best-effort temp cleanup */ }
                 }
             }
         }
