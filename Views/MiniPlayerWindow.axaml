@@ -15,6 +15,15 @@
         TransparencyLevelHint="Transparent"
         WindowStartupLocation="CenterScreen">
 
+    <Window.KeyBindings>
+        <!-- Same chords as MainWindow: in Replace mode the menu bar is gone, so these
+             are the only way back to the full window from the keyboard. -->
+        <KeyBinding Gesture="Ctrl+Q" Command="{Binding ExitApplicationCommand}" />
+        <KeyBinding Gesture="Ctrl+Left" Command="{Binding ButtonPreviousTrackCommand}" />
+        <KeyBinding Gesture="Ctrl+Right" Command="{Binding ButtonNextTrackCommand}" />
+        <KeyBinding Gesture="Alt+Shift+M" Command="{Binding ToggleMiniPlayerCommand}" />
+    </Window.KeyBindings>
+
     <Window.Styles>
 
         <!-- Embedded Cascadia Mono across all text so the mini-player matches the main

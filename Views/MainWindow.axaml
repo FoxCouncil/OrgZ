@@ -18,6 +18,16 @@
 		<converters:MediaKindMatchConverter x:Key="MediaKindMatch" />
 	</Window.Resources>
 
+	<Window.KeyBindings>
+		<!-- The NativeMenu gestures below are display text on the managed (Windows/Linux)
+		     menu bar - these bindings are what actually fires them. macOS consumes a
+		     matching menu chord natively before it reaches here, so no double-fire. -->
+		<KeyBinding Gesture="Ctrl+Q" Command="{Binding ExitApplicationCommand}" />
+		<KeyBinding Gesture="Ctrl+Left" Command="{Binding ButtonPreviousTrackCommand}" />
+		<KeyBinding Gesture="Ctrl+Right" Command="{Binding ButtonNextTrackCommand}" />
+		<KeyBinding Gesture="Alt+Shift+M" Command="{Binding ToggleMiniPlayerCommand}" />
+	</Window.KeyBindings>
+
 	<NativeMenu.Menu>
 		<NativeMenu>
 			<NativeMenuItem Header="File">
