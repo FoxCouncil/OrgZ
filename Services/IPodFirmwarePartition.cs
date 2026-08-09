@@ -542,10 +542,33 @@ public static class IPodFirmwarePartition
 
         if (OperatingSystem.IsWindows())
         {
-            // Windows already recovers the serial from WMI unprivileged; the elevated read
-            // fills the OS version by opening \\.\PhysicalDriveN (LocalSystem has the rights).
-            var version = TryReadOsosVersion(mountPath, ipodGeneration, out var diag);
-            return new MacFirmwareIdentity(version, Serial: null, ModelNumber: null, diag);
+            // LocalSystem can send the Apple 0xC6 INQUIRY pages directly - the richest
+            // identity source on Windows (serial, model number, build id in one plist) and
+            // the wiring the old TODO(device-service) in DeviceFingerprint waited on. The
+            // firmware-partition read stays as the version fallback for bridges that
+            // reject pass-through.
+            var log = new StringBuilder();
+            string? serial = null;
+            string? modelNumber = null;
+            string? version = null;
+
+            var fields = IPodScsiInquiry.TryReadDeviceInfo(mountPath, out _, out var scsiDiag);
+            log.AppendLine(scsiDiag);
+            if (fields is not null)
+            {
+                serial = fields.GetValueOrDefault("SerialNumber");
+                modelNumber = fields.GetValueOrDefault("ModelNumStr");
+                version = IPodScsiInquiry.ExtractOsVersion(fields, ipodGeneration, out var versionDetail);
+                log.AppendLine(versionDetail);
+            }
+
+            if (version is null)
+            {
+                version = TryReadOsosVersion(mountPath, ipodGeneration, out var diag);
+                log.AppendLine(diag);
+            }
+
+            return new MacFirmwareIdentity(version, serial, modelNumber, log.ToString());
         }
 
         return new MacFirmwareIdentity(null, null, null, "unsupported platform");

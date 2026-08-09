@@ -151,21 +151,16 @@ public static class DeviceFingerprint
             PopulateFromDiskInfo(drive, device);
         }
 
-        // TODO(device-service): SCSI INQUIRY pass-through and firmware partition raw
-        // read both need SeManageVolumePrivilege / admin elevation because opening
-        // \\.\PhysicalDriveN with GENERIC_READ|GENERIC_WRITE fails with ACCESS_DENIED
-        // otherwise. They're commented out until we have a Windows service helper
-        // (OrgZDeviceHelper) running as LocalSystem that handles the elevated paths
-        // over a named pipe, mirroring iTunes's AppleMobileDeviceService architecture.
+        // SCSI INQUIRY and the firmware-partition raw read both need admin rights
+        // (opening \\.\PhysicalDriveN fails with ACCESS_DENIED otherwise), so they are
+        // deliberately absent from this non-admin pipeline. The privileged versions run
+        // inside the device-helper service: IPodFirmwarePartition.ReadIdentityElevated
+        // sends the Apple 0xC6 INQUIRY pages (IPodScsiInquiry) and falls back to the
+        // partition read, reached via the read-identity op (DeviceHelperClient).
         //
-        // Once the helper exists, restore:
-        //   PopulateFromScsiInquiry(drive, device);
-        //   IPodFirmwarePartition.TryReadOsosVersion(drive.Name, device.IpodGeneration, ...);
-        //
-        // The current non-admin pipeline (WMI + libgpod serial suffix + /.orgz/device
-        // merge) is sufficient for Model / Serial / Generation / FireWireGuid on every
-        // iPod we care about. AppleFirmwareVersion is the only field that strictly
-        // needs the elevated path.
+        // The non-admin pipeline here (WMI + libgpod serial suffix + /.orgz/device merge)
+        // is sufficient for Model / Serial / Generation / FireWireGuid on every iPod we
+        // care about; AppleFirmwareVersion is the field that needs the elevated path.
 
         // Refresh the drive stats first so we know the physical capacity before we run
         // the libgpod lookup - it needs the actual bytes to detect drive mods.
@@ -352,10 +347,9 @@ public static class DeviceFingerprint
         return string.Equals(na, nb, StringComparison.Ordinal);
     }
 
-    // TODO(device-service): PopulateFromScsiInquiry + IsKnownPassThroughHostileBridge
-    // removed from the non-admin detection pipeline. All SCSI INQUIRY / ATA PASS-THROUGH
-    // / Apple opcode 0xC6 code paths live in IPodScsiInquiry.cs and will be driven by
-    // the elevated helper service once it exists.
+    // All SCSI INQUIRY / ATA PASS-THROUGH / Apple opcode 0xC6 code paths live in
+    // IPodScsiInquiry.cs and run inside the elevated device-helper service (see
+    // IPodFirmwarePartition.ReadIdentityElevated) - never in this non-admin pipeline.
 
     /// <summary>
     /// Queries WMI for the underlying physical disk that backs a drive letter, and lifts
