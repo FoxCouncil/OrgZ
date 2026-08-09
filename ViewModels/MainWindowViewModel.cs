@@ -7719,23 +7719,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var files = BuildDataFileList(sources);
 
-        // Approximate size gate for CD media (2048 bytes per Mode 1 sector; filesystem
-        // overhead comes on top, so the drive still has the final word). DVD+RW doesn't
-        // report a capacity - an oversize image is rejected by the drive itself.
-        if (choice.Mode == BurnDiscMode.DataCd && media.CapacitySectors is { } capSectors)
-        {
-            var capBytes = capSectors * 2048L;
-            var totalBytes = await Task.Run(() => files.Sum(f =>
-            {
-                try { return new FileInfo(f.SourcePath).Length; }
-                catch { return 0L; }
-            }));
-            if (totalBytes > capBytes)
-            {
-                await ShowBurnErrorAsync($"The disc holds {BurnDiscDialog.FormatDataSize(capBytes)} but these files need {BurnDiscDialog.FormatDataSize(totalBytes)}.");
-                return;
-            }
-        }
+        var dataFormat = Settings.Get("OrgZ.Burn.DataFormat", "original");
+        string? convertDir = null;
 
         string? burnError = null;
 
@@ -7743,6 +7728,32 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         BeginLcdBusy($"Burning to {drivePath}", "Preparing data disc");
         try
         {
+            // Settings > Burning > "Convert files to": transcode into a scratch dir first;
+            // sources already in the target format copy straight through.
+            if (Services.DataDiscTranscoder.ExtensionFor(dataFormat) is { } targetExt)
+            {
+                convertDir = Path.Combine(Path.GetTempPath(), "orgz-databurn-" + Guid.NewGuid().ToString("N")[..8]);
+                files = await ConvertDataDiscFilesAsync(files, dataFormat, targetExt, Settings.Get("OrgZ.Burn.LossyQualityKbps", 256), convertDir);
+            }
+
+            // Approximate size gate for CD media (2048 bytes per Mode 1 sector; filesystem
+            // overhead comes on top, so the drive still has the final word). DVD+RW doesn't
+            // report a capacity - an oversize image is rejected by the drive itself. Runs
+            // AFTER conversion so it measures the bytes actually going to disc.
+            if (choice.Mode == BurnDiscMode.DataCd && media.CapacitySectors is { } capSectors)
+            {
+                var capBytes = capSectors * 2048L;
+                var totalBytes = await Task.Run(() => files.Sum(f =>
+                {
+                    try { return new FileInfo(f.SourcePath).Length; }
+                    catch { return 0L; }
+                }));
+                if (totalBytes > capBytes)
+                {
+                    throw new InvalidOperationException($"The disc holds {BurnDiscDialog.FormatDataSize(capBytes)} but these files need {BurnDiscDialog.FormatDataSize(totalBytes)}.");
+                }
+            }
+
             var progress = new Progress<CdBurnProgress>(p => SetLcdBusy($"Writing data disc — {BurnDiscDialog.FormatDataSize(p.TotalSectorsWritten * 2048L)} of {BurnDiscDialog.FormatDataSize(p.TotalDiscSectors * 2048L)}", p.DiscPercent));
 
             await CdBurnService.DataBurnWithElevationAsync(drivePath, files, choice.DiscTitle, progress, choice.TestWrite, CancellationToken.None);
@@ -7774,6 +7785,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             _burnWritePhase = false;
             EndLcdBusy();
+            if (convertDir != null)
+            {
+                try
+                {
+                    Directory.Delete(convertDir, recursive: true);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Failed to clean data-burn convert dir {Dir}", convertDir);
+                }
+            }
         }
 
         if (burnError != null)
@@ -7824,6 +7846,55 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         UpdateMainStatus(message);
         var dialog = new ConfirmDialog("Can't Burn Disc", message, "OK", showCancel: false);
         await dialog.ShowDialog(_window);
+    }
+
+    /// <summary>
+    /// Converts data-disc sources per Settings > Burning: already-target-format files pass
+    /// through untouched, everything else transcodes into <paramref name="convertDir"/> and
+    /// lands on the disc under the new extension. Conversion can collapse two sources into
+    /// one name ("song.flac" and "song.mp3" both become "song.mp3"), so the disc layout is
+    /// re-deduped afterwards.
+    /// </summary>
+    private async Task<List<DataBurnFile>> ConvertDataDiscFilesAsync(List<DataBurnFile> files, string format, string targetExt, int lossyKbps, string convertDir)
+    {
+        Directory.CreateDirectory(convertDir);
+
+        var converted = new List<DataBurnFile>(files.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            var file = files[i];
+
+            string discPath;
+            string sourcePath;
+            if (Services.DataDiscTranscoder.AlreadyTargetFormat(file.SourcePath, format))
+            {
+                discPath = file.DiscPath;
+                sourcePath = file.SourcePath;
+            }
+            else
+            {
+                SetLcdBusy($"Converting {i + 1} of {files.Count} — {Path.GetFileNameWithoutExtension(file.DiscPath)}", (double)i / files.Count);
+                sourcePath = Path.Combine(convertDir, $"{i:D4}{targetExt}");
+                await Services.DataDiscTranscoder.TranscodeAsync(file.SourcePath, sourcePath, format, lossyKbps);
+                discPath = Path.ChangeExtension(file.DiscPath, targetExt);
+            }
+
+            var deduped = discPath;
+            for (int n = 2; !seen.Add(deduped); n++)
+            {
+                var dir = Path.GetDirectoryName(discPath)?.Replace('\\', '/');
+                var stem = Path.GetFileNameWithoutExtension(discPath);
+                var ext = Path.GetExtension(discPath);
+                deduped = string.IsNullOrEmpty(dir) ? $"{stem} ({n}){ext}" : $"{dir}/{stem} ({n}){ext}";
+            }
+
+            converted.Add(new DataBurnFile { DiscPath = deduped, SourcePath = sourcePath });
+        }
+
+        SetLcdBusy("Preparing data disc");
+        return converted;
     }
 
     /// <summary>
