@@ -300,7 +300,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>The audiobook library items (downloaded books' chapter files) the owned-books shelf is built from.</summary>
     internal IEnumerable<MediaItem> AudiobookItems => _allItems.Where(i => i.Kind == MediaKind.Audiobook);
 
-    /// <summary>Plays a whole book - its chapter files queued in order, starting at the first.</summary>
+    /// <summary>
+    /// Plays a whole book - its chapter files queued in order, resuming at the furthest
+    /// chapter the listener reached (the within-chapter seek rides the chapter's own
+    /// LastPositionMs in ExecutePlayMusic). A finished or fresh book starts at chapter one.
+    /// </summary>
     internal void PlayBook(OwnedBook? book)
     {
         if (book is null || book.Chapters.Count == 0)
@@ -309,12 +313,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var chapters = book.Chapters.ToList();
-        var first = chapters[0];
+        var start = chapters[Services.Audiobooks.AudiobookLibrary.ResumeChapterIndex(chapters)];
         _playbackContext?.Release();
-        _playbackContext = new PlaybackContext(chapters, first) { RepeatMode = RepeatMode };
+        _playbackContext = new PlaybackContext(chapters, start) { RepeatMode = RepeatMode };
         _playbackOriginViewKey = SelectedSidebarItem?.ViewConfigKey;
         OnPropertyChanged(nameof(PlaybackContextUpcoming));
-        ExecutePlayMusic(first);
+        ExecutePlayMusic(start);
     }
 
     /// <summary>Removes a book everywhere: its files from disk, its library rows, and its acquisition record.</summary>

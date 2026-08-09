@@ -199,6 +199,7 @@ public static class AudiobookLibrary
                 SourceKey      = acq?.SourceKey,
                 RemoteCoverUrl = acq?.ImageUrl,
                 Chapters       = chapters,
+                Progress       = ListenProgress(chapters),
             });
             seen.Add(group.Key);
         }
@@ -229,6 +230,70 @@ public static class AudiobookLibrary
         }
 
         return books.OrderBy(b => b.Title, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // ── Book-level resume ─────────────────────────────────────
+    // Chapters carry per-FILE state (LastPositionMs saved every ~5s while playing; a
+    // finished chapter's position resets to 0 with LastPlayed stamped). The book-level
+    // view derives from that, assuming linear listening - the audiobook case.
+
+    /// <summary>
+    /// Index of the chapter a book resumes at: the furthest chapter with an in-progress
+    /// position (playback then seeks within it via LastPositionMs); else the one after the
+    /// last finished chapter; else the first. A fully finished book starts over.
+    /// </summary>
+    public static int ResumeChapterIndex(IReadOnlyList<MediaItem> chapters)
+    {
+        for (int i = chapters.Count - 1; i >= 0; i--)
+        {
+            if (chapters[i].LastPositionMs > 10_000)
+            {
+                return i;
+            }
+        }
+
+        for (int i = chapters.Count - 1; i >= 0; i--)
+        {
+            if (chapters[i].LastPlayed is not null)
+            {
+                return i + 1 < chapters.Count ? i + 1 : 0;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// 0..1 listened fraction across the whole book: full chapters before the resume
+    /// point plus the position inside it, over the total runtime.
+    /// </summary>
+    public static double ListenProgress(IReadOnlyList<MediaItem> chapters)
+    {
+        var totalMs = chapters.Sum(c => c.Duration?.TotalMilliseconds ?? 0);
+        if (totalMs <= 0)
+        {
+            return 0;
+        }
+
+        for (int i = chapters.Count - 1; i >= 0; i--)
+        {
+            if (chapters[i].LastPositionMs > 10_000)
+            {
+                var beforeMs = chapters.Take(i).Sum(c => c.Duration?.TotalMilliseconds ?? 0);
+                return Math.Clamp((beforeMs + chapters[i].LastPositionMs) / totalMs, 0, 1);
+            }
+        }
+
+        for (int i = chapters.Count - 1; i >= 0; i--)
+        {
+            if (chapters[i].LastPlayed is not null)
+            {
+                var throughMs = chapters.Take(i + 1).Sum(c => c.Duration?.TotalMilliseconds ?? 0);
+                return Math.Clamp(throughMs / totalMs, 0, 1);
+            }
+        }
+
+        return 0;
     }
 
     /// <summary>The book directory a file belongs to - the canonical Title folder, or its own directory when it sits outside the standard layout.</summary>

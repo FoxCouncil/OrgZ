@@ -354,6 +354,7 @@
 							<DataGridTextColumn Header="Author" Binding="{Binding Author}" Width="220" />
 							<DataGridTextColumn Header="Chapters" Binding="{Binding ChaptersLabel}" Width="90" />
 							<DataGridTextColumn Header="Length" Binding="{Binding DurationLabel}" Width="110" />
+							<DataGridTextColumn Header="Progress" Binding="{Binding ProgressLabel}" Width="100" />
 							<DataGridTextColumn Header="Status" Binding="{Binding StatusLabel}" Width="140" />
 						</DataGrid.Columns>
 					</DataGrid>

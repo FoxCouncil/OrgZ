@@ -54,4 +54,10 @@ public sealed class OwnedBook
 
     /// <summary>Downloaded / not-downloaded state for the grid's status column.</summary>
     public string StatusLabel => IsDownloaded ? "Downloaded" : "Not downloaded";
+
+    /// <summary>0..1 listened fraction across the whole book (AudiobookLibrary.ListenProgress).</summary>
+    public double Progress { get; init; }
+
+    /// <summary>"37%" mid-book, "Finished" at the end, em dash when unstarted.</summary>
+    public string ProgressLabel => Progress <= 0 ? "—" : Progress >= 0.995 ? "Finished" : $"{(int)Math.Round(Progress * 100)}%";
 }
