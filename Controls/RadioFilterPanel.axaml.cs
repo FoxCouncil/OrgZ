@@ -39,6 +39,13 @@ public partial class RadioFilterPanel : UserControl
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
             ItemsSource = RadioGenres.All.Select(g => g.DisplayName()).ToList(),
         };
+        var errorText = new TextBlock
+        {
+            Foreground = Avalonia.Media.Brushes.OrangeRed,
+            FontSize = 12,
+            IsVisible = false,
+            Margin = new Avalonia.Thickness(0, 8, 0, 0),
+        };
 
         var dialog = new Window
         {
@@ -57,6 +64,7 @@ public partial class RadioFilterPanel : UserControl
                     nameBox,
                     urlBox,
                     genreBox,
+                    errorText,
                     new StackPanel
                     {
                         Orientation = Avalonia.Layout.Orientation.Horizontal,
@@ -89,10 +97,18 @@ public partial class RadioFilterPanel : UserControl
                             var url = urlBox.Text?.Trim() ?? string.Empty;
                             var genre = genreBox.SelectedItem as string ?? string.Empty;
 
-                            if (!string.IsNullOrEmpty(url))
+                            // A bad URL used to close the dialog silently and nothing
+                            // appeared - keep it open and say what's wrong instead.
+                            if (string.IsNullOrEmpty(url)
+                                || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                                || uri.Scheme is not ("http" or "https"))
                             {
-                                result = new ViewModels.MainWindowViewModel.NewUserStation(name, url, genre);
+                                errorText.Text = "Enter a valid http(s) stream URL.";
+                                errorText.IsVisible = true;
+                                return;
                             }
+
+                            result = new ViewModels.MainWindowViewModel.NewUserStation(name, url, genre);
                         }
 
                         dialog.Close();

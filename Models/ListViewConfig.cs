@@ -595,7 +595,8 @@ public static class ListViewConfigs
         Header(withArtist: false),
         Playback(queueable: false),
         Info(),
-        Items(Cmd("Toggle Favorite", "Favorite"), Cmd("Copy Stream URL", "CopyUrl"), Cmd("Visit Homepage", "Homepage")));
+        Items(Cmd("Toggle Favorite", "Favorite"), Cmd("Copy Stream URL", "CopyUrl"), Cmd("Visit Homepage", "Homepage")),
+        Items(Cmd("Remove Station", "RemoveStation")));
 
     private static List<ContextMenuItemDef> BuildPlaylistContextMenu() => Menu(
         Header(),

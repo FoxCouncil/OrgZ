@@ -326,6 +326,14 @@ public partial class MediaInfoDialog : Window
 
     private void LoadRadioInfo(MediaItem item)
     {
+        // A user's own station is fully editable; a bundled station's catalogue fields
+        // reload from the shipped JSON every launch (they'd overwrite any edit), so only
+        // the name persists for those - via the RadioState overlay.
+        var editable = item.Source == "user";
+        RadioInfoTags.IsReadOnly = !editable;
+        RadioInfoStreamUrl.IsReadOnly = !editable;
+        RadioInfoHomepage.IsReadOnly = !editable;
+
         RadioInfoName.Text = item.Title ?? "";
         RadioInfoTags.Text = item.Tags ?? "";
         RadioInfoStreamUrl.Text = item.StreamUrl ?? "";
@@ -655,8 +663,19 @@ public partial class MediaInfoDialog : Window
     private void SaveRadioItem()
     {
         _item.Title = RadioInfoName.Text?.Trim();
-        // Tags is init-only on MediaItem, so we can't set it here.
-        // For now, radio name is the only editable field.
+
+        // User stations save the rest too; bundled ones reload catalogue values at launch.
+        if (_item.Source == "user")
+        {
+            var url = RadioInfoStreamUrl.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out _))
+            {
+                _item.StreamUrl = url;
+            }
+
+            _item.Tags = string.IsNullOrWhiteSpace(RadioInfoTags.Text) ? null : RadioInfoTags.Text.Trim();
+            _item.HomepageUrl = string.IsNullOrWhiteSpace(RadioInfoHomepage.Text) ? null : RadioInfoHomepage.Text.Trim();
+        }
     }
 
     private void SaveOptions()

@@ -157,6 +157,7 @@ public partial class MainWindow : Window
             ["RipTrack"] = async (s, e) => await _viewModel.RipSelectedCdTrackAsync(),
             ["RipCd"] = async (s, e) => await _viewModel.RipCurrentCdAsync(),
             ["BurnToCd"] = ContextMenu_BurnToCd,
+            ["RemoveStation"] = async (s, e) => await _viewModel.RemoveUserStationAsync(_viewModel.SelectedItem),
         };
 
         _viewModel.PropertyChanging += ViewModel_PropertyChanging;

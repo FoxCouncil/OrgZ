@@ -3893,6 +3893,37 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>A station the user typed in: three separate fields, never one packed string.</summary>
     public sealed record NewUserStation(string? Name, string Url, string? Genre);
 
+    /// <summary>
+    /// Removes a user-added station, with confirmation. Bundled stations aren't removable -
+    /// they're the shipped catalogue - so those get a status line instead of a dialog.
+    /// </summary>
+    internal async Task RemoveUserStationAsync(MediaItem? station)
+    {
+        if (station is null || station.Kind != MediaKind.Radio)
+        {
+            return;
+        }
+
+        if (station.Source != "user")
+        {
+            UpdateMainStatus("Only stations you added can be removed — bundled ones are the shipped catalogue.");
+            return;
+        }
+
+        var dialog = new ConfirmDialog("Remove Station", $"Remove “{station.Title}” from your stations?", "Remove");
+        if (await dialog.ShowDialog<bool>(_window) != true)
+        {
+            return;
+        }
+
+        MediaCache.RemoveUserStation(station.Id);
+        _allItems.Remove(station);
+        _viewCache.Remove("Radio");
+        _viewCache.Remove("Favorites");
+        ApplyFilter();
+        UpdateMainStatus($"Removed “{station.Title}”.");
+    }
+
     [RelayCommand]
     internal void AddUserStation(NewUserStation? input)
     {
@@ -3901,6 +3932,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // field and the station silently failed to add.
         if (input is null || string.IsNullOrWhiteSpace(input.Url))
         {
+            UpdateMainStatus("Station not added — a stream URL is required.");
             return;
         }
 
@@ -3910,6 +3942,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (!Uri.TryCreate(url, UriKind.Absolute, out _))
         {
+            UpdateMainStatus($"Station not added — “{url}” isn't a valid URL.");
             return;
         }
 

@@ -321,13 +321,14 @@ public partial class MediaItem : ObservableObject
 
     // -- Radio-only (nullable for music) --
 
-    public string? StreamUrl { get; init; }
+    // Settable (not init): a USER station's URL/tags/homepage are editable from Get Info.
+    public string? StreamUrl { get; set; }
 
     public string? Source { get; init; }
 
     public string? SourceId { get; init; }
 
-    public string? HomepageUrl { get; init; }
+    public string? HomepageUrl { get; set; }
 
     public string? FaviconUrl { get; init; }
 
@@ -358,7 +359,7 @@ public partial class MediaItem : ObservableObject
         }
     }
 
-    public string? Tags { get; init; }
+    public string? Tags { get; set; }
 
     public string? Codec { get; init; }
 

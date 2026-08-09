@@ -610,6 +610,21 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Deletes a user-added station's row (bundled stations have no row to delete -
+    /// their scope guard is the Source clause). True when a row actually went.
+    /// </summary>
+    public static bool RemoveUserStation(string id)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM Media WHERE Id = @Id AND Kind = 'Radio' AND Source = 'user'";
+        cmd.Parameters.AddWithValue("@Id", id);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
     // ── Bundled-station user state ────────────────────────────
 
     /// <summary>One bundled station's persisted user state - see the RadioState DDL comment.</summary>
