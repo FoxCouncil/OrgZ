@@ -2822,6 +2822,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         file.PlayCount++;
         MediaCache.SetLastPlayed(file.Id, file.LastPlayed.Value);
         MediaCache.IncrementPlayCount(file.Id);
+        RememberLastTrack(file);
 
         UpdateNavigationButtons();
     }
@@ -2914,6 +2915,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         station.PlayCount++;
         MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
         MediaCache.IncrementPlayCount(station.Id);
+        RememberLastTrack(station);
 
         UpdateNavigationButtons();
     }
@@ -5965,6 +5967,64 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _shareScanTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _shareScanTimer.Tick += (_, _) => FireAndForget(ScanForSharesAsync(), "LAN share scan");
         _shareScanTimer.Start();
+
+        RestoreLastTrack();
+    }
+
+    /// <summary>Persists the started item's id (Settings > General > Remember last played track).</summary>
+    private static void RememberLastTrack(MediaItem item)
+    {
+        if (!Settings.Get("OrgZ.RememberLastTrack", false) || string.IsNullOrEmpty(item.Id))
+        {
+            return;
+        }
+
+        Settings.Set("OrgZ.LastTrack.Id", item.Id);
+        Settings.SaveDeferred();
+    }
+
+    /// <summary>
+    /// Startup counterpart of <see cref="RememberLastTrack"/>: cue the remembered item -
+    /// selected in the current view and on the LCD, with the play button starting it.
+    /// Launching an app must never start audio on its own, so nothing plays.
+    /// </summary>
+    private void RestoreLastTrack()
+    {
+        if (!Settings.Get("OrgZ.RememberLastTrack", false))
+        {
+            return;
+        }
+
+        var id = Settings.Get("OrgZ.LastTrack.Id", "");
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        var item = _allItems.FirstOrDefault(i => i.Id == id);
+        if (item == null)
+        {
+            return;
+        }
+
+        UI(() =>
+        {
+            // Something else already owns playback (service reattach, a fast user) -
+            // the cue must not stomp a live LCD.
+            if (CurrentPlayingItem != null || CurrentStation != null)
+            {
+                return;
+            }
+
+            if (FilteredItems.Contains(item))
+            {
+                SelectedItem = item;
+            }
+
+            CurrentTrackLine1 = item.Title ?? "Unknown Title";
+            var artist = item.Artist ?? "Unknown Artist";
+            CurrentTrackLine2 = string.IsNullOrWhiteSpace(item.Album) ? artist : $"{artist} — {item.Album}";
+        });
     }
 
     /// <summary>
