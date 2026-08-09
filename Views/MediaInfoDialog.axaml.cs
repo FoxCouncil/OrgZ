@@ -123,6 +123,13 @@ public partial class MediaInfoDialog : Window
             Converters.RemoteImage.SetUrl(SummaryArt, null);
             _ = ShowAlbumArtAsync(SummaryArt, item.FilePath);
         }
+        else if (isMusic && Services.Sharing.ShareDiscovery.ArtUrlFor(item) is { } shareArtUrl)
+        {
+            // A mounted share's track has no local file - its cover rides the share's
+            // /art route, served by the peer.
+            SummaryArt.Source = null;
+            Converters.RemoteImage.SetUrl(SummaryArt, shareArtUrl);
+        }
         else if ((isRadio || isPodcast) && !string.IsNullOrWhiteSpace(item.FaviconUrl))
         {
             SummaryArt.Source = null;

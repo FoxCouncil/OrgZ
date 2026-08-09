@@ -280,6 +280,10 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     // withdrawn from the live list without disturbing anything else.
     private readonly Dictionary<string, List<MediaItem>> _shareTracks = new(StringComparer.OrdinalIgnoreCase);
 
+    // When each mounted share's catalogue was last fetched - drives the periodic refresh.
+    private readonly Dictionary<string, DateTime> _shareFetchedAt = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan ShareRefreshInterval = TimeSpan.FromMinutes(5);
+
     // Share-playlist view key -> the remote playlist it shows, for the Import verb.
     private readonly Dictionary<string, Services.Sharing.ShareDiscovery.SharePlaylist> _sharePlaylists = new(StringComparer.Ordinal);
     private bool _shareScanning;
@@ -4747,6 +4751,39 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 var playlists = await Services.Sharing.ShareDiscovery.FetchPlaylistsAsync(share);
                 MountShare(share, tracks, playlists);
             }
+
+            // Refresh stale catalogues on already-mounted shares: new tracks on the peer
+            // used to appear only after it vanished from mDNS and came back. Remount only
+            // when the content actually changed, so the sidebar doesn't churn every pass.
+            foreach (var share in found.Where(s => _shareTracks.ContainsKey(s.Key)))
+            {
+                if (_shareFetchedAt.TryGetValue(share.Key, out var fetchedAt)
+                    && DateTime.UtcNow - fetchedAt < ShareRefreshInterval)
+                {
+                    continue;
+                }
+
+                var tracks = await Services.Sharing.ShareDiscovery.FetchCatalogueAsync(share);
+                _shareFetchedAt[share.Key] = DateTime.UtcNow;
+                if (tracks.Count == 0)
+                {
+                    continue;   // transient fetch failure - keep the catalogue we have
+                }
+
+                var current = _shareTracks[share.Key];
+                var unchanged = current.Count == tracks.Count
+                    && current.Select(t => t.Id).ToHashSet(StringComparer.Ordinal)
+                        .SetEquals(tracks.Select(t => t.Id));
+                if (unchanged)
+                {
+                    continue;
+                }
+
+                var playlists = await Services.Sharing.ShareDiscovery.FetchPlaylistsAsync(share);
+                UnmountShare(share.Key);
+                MountShare(share, tracks, playlists);
+                _log.Information("Refreshed share {Key}: now {Count} track(s)", share.Key, tracks.Count);
+            }
         }
         catch (Exception ex)
         {
@@ -4764,6 +4801,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         ListViewConfigs.Register(viewKey, ListViewConfigs.BuildShareConfig(share.Key));
 
         _shareTracks[share.Key] = tracks;
+        _shareFetchedAt[share.Key] = DateTime.UtcNow;
         _allItems.AddRange(tracks);
 
         var node = new SidebarItem
