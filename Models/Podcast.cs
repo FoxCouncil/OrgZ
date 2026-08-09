@@ -102,6 +102,13 @@ public sealed record PodcastFeedsResponse
     [JsonPropertyName("count")]  public int    Count   { get; init; }
 }
 
+/// <summary>Upstream response wrapper for /api/podcasts/byfeedurl - "feed" is singular there.</summary>
+public sealed record PodcastFeedResponse
+{
+    [JsonPropertyName("status")] public string? Status { get; init; }
+    [JsonPropertyName("feed")]   public PodcastFeed? Feed { get; init; }
+}
+
 /// <summary>Upstream response wrapper for /api/episodes/byfeedid.</summary>
 public sealed record PodcastEpisodesResponse
 {

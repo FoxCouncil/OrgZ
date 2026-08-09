@@ -202,6 +202,13 @@ public partial class PodcastsViewModel : ObservableObject
     public ObservableCollection<PodcastCategory> Categories { get; } = [];
     public ObservableCollection<PodcastCategoryRail> CategoryRails { get; } = [];
 
+    /// <summary>Six spotlight categories for the store's browse-tile grid (the old placeholder mosaic slot).</summary>
+    public ObservableCollection<PodcastCategory> CategoryTiles { get; } = [];
+
+    /// <summary>Status line for the subscriptions view's add-RSS / OPML actions.</summary>
+    [ObservableProperty]
+    private string? _subscriptionsStatus;
+
     // Full category list from the last store load (not just the popularity-ranked
     // top-40 shown in the left column). Lets a carousel's "See All" resolve its
     // title back to a category and browse it identically to a left-column click.
@@ -455,6 +462,79 @@ public partial class PodcastsViewModel : ObservableObject
             IsLoadingFeed = false;
         }
     }
+
+    /// <summary>Subscribes to a feed by its RSS URL, resolved through the PodcastIndex directory.</summary>
+    internal async Task AddByRssUrlAsync(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        SubscriptionsStatus = "Looking up feed…";
+        var feed = await PodcastIndexClient.GetPodcastByFeedUrlAsync(url);
+        if (feed is null || feed.Id <= 0)
+        {
+            SubscriptionsStatus = "That RSS URL isn't in the PodcastIndex directory.";
+            return;
+        }
+
+        if (!PodcastCache.IsSubscribed(feed.Id))
+        {
+            PodcastCache.AddSubscription(feed);
+        }
+        ReloadSubscriptions();
+        SubscriptionsStatus = $"Subscribed to “{feed.Title}”.";
+    }
+
+    /// <summary>Subscribes to every feed URL in an OPML document (resolved through the directory).</summary>
+    internal async Task ImportOpmlAsync(string opmlXml)
+    {
+        List<string> urls;
+        try
+        {
+            urls = Opml.ParseFeedUrls(opmlXml);
+        }
+        catch (Exception ex)
+        {
+            SubscriptionsStatus = $"Couldn't read that OPML: {ex.Message}";
+            return;
+        }
+
+        if (urls.Count == 0)
+        {
+            SubscriptionsStatus = "No feeds found in that OPML.";
+            return;
+        }
+
+        int added = 0, already = 0, unknown = 0;
+        for (int i = 0; i < urls.Count; i++)
+        {
+            SubscriptionsStatus = $"Importing {i + 1} of {urls.Count}…";
+            var feed = await PodcastIndexClient.GetPodcastByFeedUrlAsync(urls[i]);
+            if (feed is null || feed.Id <= 0)
+            {
+                unknown++;
+                continue;
+            }
+            if (PodcastCache.IsSubscribed(feed.Id))
+            {
+                already++;
+                continue;
+            }
+            PodcastCache.AddSubscription(feed);
+            added++;
+        }
+
+        ReloadSubscriptions();
+        SubscriptionsStatus = $"Imported {added} feed(s)"
+            + (already > 0 ? $", {already} already subscribed" : "")
+            + (unknown > 0 ? $", {unknown} not in the directory" : "")
+            + ".";
+    }
+
+    /// <summary>The current subscriptions as an OPML 2.0 document.</summary>
+    internal string ExportOpml() => Opml.Export(PodcastCache.GetSubscriptions());
 
     [RelayCommand]
     internal void ToggleSubscribe()
@@ -800,6 +880,29 @@ public partial class PodcastsViewModel : ObservableObject
                 .Take(40))
             {
                 Categories.Add(c);
+            }
+
+            // Spotlight tiles: a curated six, backfilled from the popularity ranking
+            // when a name is missing from the directory's list.
+            CategoryTiles.Clear();
+            string[] spotlight = ["Technology", "Comedy", "News", "Science", "History", "Music"];
+            foreach (var name in spotlight)
+            {
+                if (cats.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)) is { } match)
+                {
+                    CategoryTiles.Add(match);
+                }
+            }
+            foreach (var c in Categories)
+            {
+                if (CategoryTiles.Count >= 6)
+                {
+                    break;
+                }
+                if (!CategoryTiles.Contains(c))
+                {
+                    CategoryTiles.Add(c);
+                }
             }
 
             // Category-driven carousels stacked under the three-column row.

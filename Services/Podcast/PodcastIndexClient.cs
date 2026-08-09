@@ -113,6 +113,29 @@ public static class PodcastIndexClient
         return null;
     }
 
+    /// <summary>
+    /// Resolves an RSS feed URL to its PodcastIndex feed (add-by-RSS / OPML import).
+    /// Upstream answers with "feed" singular; the proxy may normalize to feeds[0] -
+    /// both shapes are read. Null when the directory doesn't know the URL.
+    /// </summary>
+    public static async Task<PodcastFeed?> GetPodcastByFeedUrlAsync(string feedUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(feedUrl))
+        {
+            return null;
+        }
+
+        var url = $"{BaseUrl}/podcasts/byfeedurl?url={Uri.EscapeDataString(feedUrl.Trim())}";
+        var single = await GetAsync<PodcastFeedResponse>(url, ct);
+        if (single?.Feed is { Id: > 0 } feed)
+        {
+            return feed;
+        }
+
+        var plural = await GetAsync<PodcastFeedsResponse>(url, ct);
+        return plural?.Feeds?.FirstOrDefault(f => f.Id > 0);
+    }
+
     public static async Task<PodcastFeed?> GetPodcastByFeedIdAsync(long feedId, CancellationToken ct = default)
     {
         var url = $"{BaseUrl}/podcasts/byfeedid?id={feedId}";
@@ -171,6 +194,7 @@ public static class PodcastIndexClient
     private static bool HasContent<T>(T value) => value switch
     {
         PodcastFeedsResponse f      => f.Feeds is { Count: > 0 },
+        PodcastFeedResponse s       => s.Feed is { Id: > 0 },
         PodcastEpisodesResponse e   => e.Items is { Count: > 0 },
         PodcastCategoriesResponse c => c.Feeds is { Count: > 0 },
         _                            => true,

@@ -122,17 +122,30 @@
 				<controls:PodcastsCarousel Title="New" Items="{Binding NewAndNotable}" />
 				<controls:PodcastsCarousel Title="Non-Profit" Items="{Binding NonProfitFeeds}" />
 
-				<!-- Placeholder 2x3 grid of colored borders. Aspect / chrome
-				     finalized later; for now just six tinted cells so the
-				     vertical rhythm of the column is visible. -->
-				<UniformGrid Rows="2" Columns="3" Height="160">
-					<Border Background="{StaticResource OrgZAccentBlueBrush}"           CornerRadius="6" Margin="0,0,8,8" />
-					<Border Background="{StaticResource OrgZCarouselButtonBrush}"       CornerRadius="6" Margin="4,0,4,8" />
-					<Border Background="{StaticResource OrgZSuccessBrush}"              CornerRadius="6" Margin="8,0,0,8" />
-					<Border Background="{StaticResource OrgZWarningBrush}"              CornerRadius="6" Margin="0,8,8,0" />
-					<Border Background="{StaticResource OrgZErrorBrush}"                CornerRadius="6" Margin="4,8,4,0" />
-					<Border Background="{StaticResource OrgZCarouselDotInactiveBrush}"  CornerRadius="6" Margin="8,8,0,0" />
-				</UniformGrid>
+				<!-- Browse tiles: six spotlight categories in the slot the old placeholder
+				     mosaic held. Same navigation as the Categories list rows. -->
+				<ItemsControl ItemsSource="{Binding CategoryTiles}" Height="160">
+					<ItemsControl.ItemsPanel>
+						<ItemsPanelTemplate>
+							<UniformGrid Rows="2" Columns="3" />
+						</ItemsPanelTemplate>
+					</ItemsControl.ItemsPanel>
+					<ItemsControl.ItemTemplate>
+						<DataTemplate DataType="models:PodcastCategory">
+							<Button Click="CategoryItem_Click" Tag="{Binding}"
+							        Background="Transparent" BorderThickness="0" Padding="0"
+							        Cursor="Hand" Margin="4"
+							        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+							        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+								<Border Background="{StaticResource OrgZTileSurfaceBrush}" CornerRadius="6">
+									<TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14"
+									           Foreground="{StaticResource OrgZCarouselTextBrush}"
+									           HorizontalAlignment="Center" VerticalAlignment="Center" />
+								</Border>
+							</Button>
+						</DataTemplate>
+					</ItemsControl.ItemTemplate>
+				</ItemsControl>
 
 				<controls:PodcastsCarousel Title="News"  Items="{Binding NewsFeeds}" />
 				<controls:PodcastsCarousel Title="Music" Items="{Binding MusicFeeds}" />
