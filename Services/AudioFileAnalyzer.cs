@@ -43,6 +43,10 @@ public class AudioFileAnalyzer
             // this to decide precise-tag vs real-time normalization.
             item.ReplayGainTrackGainDb = double.IsNaN(file.Tag.ReplayGainTrackGain) ? null : file.Tag.ReplayGainTrackGain;
 
+            // Ratings ride in the file too (POPM / vorbis RATING): an incoming library keeps
+            // its stars, and a DB the user already rated in wins over the tag (??=).
+            item.Rating ??= TagRating.Read(file);
+
             // Codec description from the file's codec info (e.g. "MPEG Audio Version 1 Layer 3")
             item.CodecDescription = file.Properties.Codecs?
                 .OfType<TagLib.IAudioCodec>()

@@ -585,6 +585,15 @@ public partial class MediaInfoDialog : Window
 
         SaveOptions();
 
+        // The Options tab's rating lands in the file as well as the DB (POPM / vorbis
+        // RATING) - local library files only.
+        if (_item.Kind is MediaKind.Music or MediaKind.Audiobook && _item.Source == null && !string.IsNullOrEmpty(_item.FilePath))
+        {
+            var ratingPath = _item.FilePath;
+            var rating = _item.Rating;
+            Helpers.TaskObserver.FireAndForget(Task.Run(() => Services.TagRating.WriteToFile(ratingPath, rating)), "rating tag write");
+        }
+
         if (_item.Kind == MediaKind.Radio && _item.Source != "user")
         {
             // A bundled station reloads from the embedded catalogue every launch, and an

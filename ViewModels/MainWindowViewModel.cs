@@ -5336,6 +5336,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         item.Rating = rating;
         MediaCache.SetRating(item.Id, rating);
+        PersistRatingToTag(item);
+    }
+
+    /// <summary>
+    /// Ratings ride in the file too (POPM / vorbis RATING) - library.db is a cache, not
+    /// the only copy. Local library files only: a device or share track's bytes belong to
+    /// their own store, and streams have no file.
+    /// </summary>
+    private static void PersistRatingToTag(MediaItem item)
+    {
+        if (item.Kind is not (MediaKind.Music or MediaKind.Audiobook) || item.Source != null || string.IsNullOrEmpty(item.FilePath))
+        {
+            return;
+        }
+
+        var path = item.FilePath;
+        var rating = item.Rating;
+        TaskObserver.FireAndForget(Task.Run(() => Services.TagRating.WriteToFile(path, rating)), "rating tag write");
     }
 
     /// <summary>
