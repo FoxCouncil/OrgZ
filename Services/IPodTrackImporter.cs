@@ -393,6 +393,20 @@ public static class IPodTrackImporter
             _artDirty = true;
         }
 
+        /// <summary>
+        /// Batched counterpart of the artwork GC: the removed track's entry leaves the
+        /// list this batch rebuilds the ArtworkDB from. Its .ithmb bytes stay orphaned
+        /// (a mid-batch compaction would invalidate the offsets of this batch's own
+        /// appends) - the next non-batched removal's compaction reclaims them.
+        /// </summary>
+        internal void RemoveArtForDbid(ulong dbid)
+        {
+            if (ArtImages().RemoveAll(i => i.Dbid == dbid) > 0)
+            {
+                _artDirty = true;
+            }
+        }
+
         /// <summary>Current append offset for an .ithmb file, tracked so batched appends stack correctly.</summary>
         internal long IthmbEnd(string path)
         {

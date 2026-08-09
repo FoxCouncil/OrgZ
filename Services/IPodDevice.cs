@@ -435,6 +435,10 @@ public sealed class BinaryIPod : IPodDevice
             // resurrect this track); the audio delete defers until that commit lands.
             var batch = IPodTrackImporter.ActiveBatch(MountPath);
             var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+
+            // The dbid is the artwork link - read it while the row still exists.
+            var dbid = IPodArtworkGc.DbidForTrack(doc, trackId);
+
             if (!ITunesDbWriter.RemoveTrack(doc, trackId))
             {
                 throw new InvalidOperationException($"“{item.Title}” isn't in the iPod database.");
@@ -449,6 +453,11 @@ public sealed class BinaryIPod : IPodDevice
                 {
                     File.Delete(item.FilePath);
                 }
+
+                if (dbid is ulong d && d != 0)
+                {
+                    IPodArtworkGc.RemoveArt(MountPath, [d]);
+                }
             }
             else
             {
@@ -456,6 +465,11 @@ public sealed class BinaryIPod : IPodDevice
                 if (!string.IsNullOrEmpty(item.FilePath))
                 {
                     batch.DeferFileDelete(item.FilePath);
+                }
+
+                if (dbid is ulong d && d != 0)
+                {
+                    batch.RemoveArtForDbid(d);
                 }
             }
         }, ct);
