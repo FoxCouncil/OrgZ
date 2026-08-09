@@ -539,6 +539,52 @@ public sealed class Nano5gLibraryWriter
     }
 
     /// <summary>
+    /// Deletes a user playlist by name: its item links and container row in Library.itdb, and
+    /// its container_ui state row in Dynamic.itdb. Distinguished containers and the primary
+    /// (hidden library) container are never candidates. Neither database is covered by the
+    /// cbk, so no re-sign is needed. Returns true when a playlist was actually removed.
+    /// </summary>
+    public bool RemovePlaylist(string name)
+    {
+        long pid;
+        using (var lib = Open(Path.Combine(_itlpDir, "Library.itdb")))
+        {
+            var columns = GetColumns(lib, "container");
+            if (!columns.Contains("name", StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            long primaryPid = ScalarLong(lib, "SELECT primary_container_pid FROM db_info LIMIT 1");
+            var distinguishedClause = columns.Contains("distinguished_kind", StringComparer.OrdinalIgnoreCase) ? " AND distinguished_kind=0" : "";
+            pid = ScalarLong(lib, $"SELECT pid FROM container WHERE name=$n AND pid<>$primary{distinguishedClause} LIMIT 1",
+                ("$n", name), ("$primary", primaryPid));
+            if (pid == 0)
+            {
+                return false;
+            }
+
+            using var tx = lib.BeginTransaction();
+            Exec(lib, "DELETE FROM item_to_container WHERE container_pid=$p", ("$p", pid));
+            Exec(lib, "DELETE FROM container WHERE pid=$p", ("$p", pid));
+            tx.Commit();
+        }
+
+        // The playlist's UI-state row would otherwise dangle; clean it up like iTunes does.
+        var dynDbPath = Path.Combine(_itlpDir, "Dynamic.itdb");
+        if (File.Exists(dynDbPath))
+        {
+            using var dyn = Open(dynDbPath);
+            using var dtx = dyn.BeginTransaction();
+            Exec(dyn, "DELETE FROM container_ui WHERE container_pid=$c", ("$c", pid));
+            dtx.Commit();
+        }
+
+        RegenerateCdbUnlessDeferred();
+        return true;
+    }
+
+    /// <summary>
     /// Removes a track: deletes its rows from all three databases, deletes the audio file under
     /// <paramref name="musicRoot"/>, prunes now-orphaned artist/album/track_artist/genre rows, and
     /// re-signs the cbk. Safe no-op if the item isn't present.

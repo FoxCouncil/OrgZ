@@ -321,6 +321,54 @@ public class Nano5gLibraryWriterTests
 
     [Theory]
     [MemberData(nameof(FixtureDirs))]
+    public void RemovePlaylist_deletes_container_links_and_ui_row(string src)
+    {
+
+        var tmp = NewDeviceDir();
+        try
+        {
+            foreach (var f in new[] { "Library.itdb", "Locations.itdb", "Locations.itdb.cbk", "Dynamic.itdb" })
+            {
+                File.Copy(Path.Combine(src, f), Path.Combine(tmp, f));
+            }
+
+            var writer = new Nano5gLibraryWriter(tmp);
+            long musicPid = writer.AddTrack(new Nano5gLibraryWriter.TrackInsert(
+                Title: "RM Music", Artist: "RM Artist", Album: "RM Album", AlbumArtist: null, Genre: "Eurobeat",
+                DurationMs: 180_000, TrackNumber: 1, DiscNumber: 1, Year: 2026, AudioFormat: 301, BitRate: 256,
+                SampleRate: 44100, Channels: 2, FileSize: 5_000_000, LocationRelative: "F00/RMM.mp3",
+                ExtensionFourCc: 0x4D503320, KindString: "MPEG audio file"));
+            long plPid = writer.CreatePlaylist("OrgZ Remove Me", new[] { musicPid });
+
+            Assert.True(writer.RemovePlaylist("OrgZ Remove Me"));
+
+            using (var c = OpenRo(Path.Combine(tmp, "Library.itdb")))
+            {
+                Assert.Equal(0, Count(c, "container", $"pid={plPid}"));
+                Assert.Equal(0, Count(c, "item_to_container", $"container_pid={plPid}"));
+                // Removing a playlist never removes its members.
+                Assert.Equal(1, Count(c, "item", $"pid={musicPid}"));
+                // The primary (hidden library) container is never a deletion candidate.
+                Assert.Equal(1, Count(c, "container", "pid=(SELECT primary_container_pid FROM db_info LIMIT 1)"));
+            }
+
+            using (var c = OpenRo(Path.Combine(tmp, "Dynamic.itdb")))
+            {
+                Assert.Equal(0, Count(c, "container_ui", $"container_pid={plPid}"));
+            }
+
+            // Unknown names report false rather than pretending.
+            Assert.False(writer.RemovePlaylist("No Such Playlist"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            CleanupDeviceDir(tmp);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(FixtureDirs))]
     public void WipeLibrary_empties_tracks_podcasts_locations_and_resigns_cbk(string src)
     {
 

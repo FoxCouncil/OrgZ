@@ -353,6 +353,14 @@ public sealed class Nano5gIPod : IPodDevice
             }
         }, ct);
 
+    public override Task RemovePlaylistAsync(string name, CancellationToken ct = default)
+        => Task.Run(() =>
+        {
+            // Was the one silent gap on this tier: the base no-op let mirror-sync "remove" a
+            // playlist that then resurrected on the next connect.
+            new Nano5gLibraryWriter(IPodPaths.Itlp(MountPath), Device.FireWireGuid).RemovePlaylist(name);
+        }, ct);
+
     public override Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => Task.Run(() =>
         {
