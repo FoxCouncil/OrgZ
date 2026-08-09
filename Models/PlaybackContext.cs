@@ -43,10 +43,12 @@ public partial class PlaybackContext : ObservableObject
 
     public bool IsShuffled { get; private set; }
 
+    public ShuffleBy ShuffleBy { get; private set; } = ShuffleBy.Song;
+
     [ObservableProperty]
     private ObservableCollection<MediaItem> _upcomingItems = [];
 
-    public PlaybackContext(List<MediaItem> sourceList, MediaItem startItem, bool shuffle = false)
+    public PlaybackContext(List<MediaItem> sourceList, MediaItem startItem, bool shuffle = false, ShuffleBy shuffleBy = ShuffleBy.Song)
     {
         _originalOrder = new List<MediaItem>(sourceList);
         _playOrder = new List<MediaItem>(sourceList);
@@ -63,7 +65,7 @@ public partial class PlaybackContext : ObservableObject
 
         if (shuffle)
         {
-            ApplyShuffle();
+            ApplyShuffle(shuffleBy);
         }
 
         RebuildUpcoming();
@@ -233,11 +235,11 @@ public partial class PlaybackContext : ObservableObject
         RebuildUpcoming();
     }
 
-    public void SetShuffle(bool enabled)
+    public void SetShuffle(bool enabled, ShuffleBy by = ShuffleBy.Song)
     {
-        if (enabled && !IsShuffled)
+        if (enabled && (!IsShuffled || by != ShuffleBy))
         {
-            ApplyShuffle();
+            ApplyShuffle(by);
         }
         else if (!enabled && IsShuffled)
         {
@@ -253,23 +255,82 @@ public partial class PlaybackContext : ObservableObject
         RebuildUpcoming();
     }
 
-    private void ApplyShuffle()
+    private void ApplyShuffle(ShuffleBy by)
     {
         var current = CurrentItem;
+
+        _playOrder = by == ShuffleBy.Album ? AlbumShuffleOrder(current) : SongShuffleOrder(current);
+        CurrentIndex = _playOrder.IndexOf(current);
+        IsShuffled = true;
+        ShuffleBy = by;
+        RebuildUpcoming();
+    }
+
+    private List<MediaItem> SongShuffleOrder(MediaItem current)
+    {
         var rng = Random.Shared;
 
-        _playOrder = new List<MediaItem>(_originalOrder);
-        for (int i = _playOrder.Count - 1; i > 0; i--)
+        var order = new List<MediaItem>(_originalOrder);
+        for (int i = order.Count - 1; i > 0; i--)
         {
             int j = rng.Next(i + 1);
-            (_playOrder[i], _playOrder[j]) = (_playOrder[j], _playOrder[i]);
+            (order[i], order[j]) = (order[j], order[i]);
         }
 
-        _playOrder.Remove(current);
-        _playOrder.Insert(0, current);
-        CurrentIndex = 0;
-        IsShuffled = true;
-        RebuildUpcoming();
+        order.Remove(current);
+        order.Insert(0, current);
+        return order;
+    }
+
+    /// <summary>
+    /// Album shuffle: albums land in random order, each keeping its tracks in source-list
+    /// order, and the current track's album leads so playback continues through it (its
+    /// earlier tracks stay behind the current one, so Previous walks back through the album).
+    /// Untagged tracks shuffle individually. Grouping is by album name alone - MediaItem has
+    /// no album-artist tag, and merging two same-named albums is the lesser evil next to
+    /// splitting every various-artists compilation per track.
+    /// </summary>
+    private List<MediaItem> AlbumShuffleOrder(MediaItem current)
+    {
+        var groups = new List<List<MediaItem>>();
+        var byAlbum = new Dictionary<string, List<MediaItem>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in _originalOrder)
+        {
+            if (string.IsNullOrWhiteSpace(item.Album))
+            {
+                groups.Add([item]);
+                continue;
+            }
+
+            if (!byAlbum.TryGetValue(item.Album, out var group))
+            {
+                group = [];
+                byAlbum[item.Album] = group;
+                groups.Add(group);
+            }
+
+            group.Add(item);
+        }
+
+        var rng = Random.Shared;
+        for (int i = groups.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (groups[i], groups[j]) = (groups[j], groups[i]);
+        }
+
+        var currentGroup = groups.First(g => g.Contains(current));
+        groups.Remove(currentGroup);
+        groups.Insert(0, currentGroup);
+
+        var order = new List<MediaItem>(_originalOrder.Count);
+        foreach (var group in groups)
+        {
+            order.AddRange(group);
+        }
+
+        return order;
     }
 
     private void RemoveShuffle()

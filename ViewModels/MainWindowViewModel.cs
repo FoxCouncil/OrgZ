@@ -801,10 +801,34 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     // -- Change Handlers --
 
+    /// <summary>
+    /// Shuffle-by preference (Settings > Playback). Read fresh each use so an OK'd
+    /// settings dialog applies without a restart.
+    /// </summary>
+    private static ShuffleBy ShuffleByPreference => Settings.Get("OrgZ.ShuffleBy", ShuffleBy.Song);
+
+    /// <summary>
+    /// Streaming Buffer Size (Settings > Playback) as libvlc caching milliseconds.
+    /// Each call site passes its tuned Medium value; the other tiers scale around it,
+    /// so the LAN-share and internet-stream baselines keep their ratio.
+    /// </summary>
+    private static long StreamingBufferMs(long mediumMs)
+    {
+        var factor = Settings.Get("OrgZ.StreamingBufferSize", "Medium") switch
+        {
+            "Small" => 0.5,
+            "Large" => 2.0,
+            "Extra Large" => 4.0,
+            _ => 1.0,
+        };
+
+        return (long)(mediumMs * factor);
+    }
+
     partial void OnShuffleModeChanged(ShuffleMode value)
     {
         ShuffleOpacity = value == ShuffleMode.On ? 1.0 : 0.4;
-        _playbackContext?.SetShuffle(value == ShuffleMode.On);
+        _playbackContext?.SetShuffle(value == ShuffleMode.On, ShuffleByPreference);
         Settings.Set("OrgZ.ShuffleMode", value);
         Settings.Save();
         UpdateNavigationButtons();
@@ -2215,6 +2239,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // closes, not only on the next track.
         SetupNormalization(CurrentPlayingItem);
 
+        // Shuffle by Song/Album may have changed - a live shuffled queue reorders to match.
+        if (ShuffleMode == ShuffleMode.On)
+        {
+            _playbackContext?.SetShuffle(true, ShuffleByPreference);
+        }
+
         if (dialog.SettingsReset)
         {
             Stop();
@@ -2513,7 +2543,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             _playbackContext?.Release();
-            _playbackContext = new PlaybackContext(FilteredItems, file, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+            _playbackContext = new PlaybackContext(FilteredItems, file, ShuffleMode == ShuffleMode.On, ShuffleByPreference) { RepeatMode = RepeatMode };
             OnPropertyChanged(nameof(PlaybackContextUpcoming));
             ExecutePlayMusic(file);
         });
@@ -2563,7 +2593,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
 
                 _playbackContext?.Release();
-                _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On) { RepeatMode = RepeatMode };
+                _playbackContext = new PlaybackContext(FilteredItems, station, ShuffleMode == ShuffleMode.On, ShuffleByPreference) { RepeatMode = RepeatMode };
                 // See PlayMusicItem: the origin is the view the user picked in.
                 OnPropertyChanged(nameof(PlaybackContextUpcoming));
                 ExecutePlayRadio(station);
@@ -2748,7 +2778,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             if (fromShare)
             {
                 _currentMedia = new Media(_vlc, file.StreamUrl!, FromType.FromLocation);
-                _currentMedia.AddOption(":network-caching=1500");
+                _currentMedia.AddOption($":network-caching={StreamingBufferMs(1500)}");
             }
             else
             {
@@ -2930,8 +2960,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             // Callback media reads through libvlc's imem-style access, so file-caching is
             // the buffering knob (network-caching only governs VLC's own network access,
             // which radio no longer uses - the session is the network client, with its own
-            // reconnect logic replacing :http-reconnect). 3s matches the CD path.
-            _currentMedia.AddOption(":file-caching=3000");
+            // reconnect logic replacing :http-reconnect). Medium = 3s, matching the CD path.
+            _currentMedia.AddOption($":file-caching={StreamingBufferMs(3000)}");
 
             // Capture this specific Media instance. When the user switches stations rapidly,
             // LibVLC can still deliver late MetaChanged events from the previous (disposed)
@@ -3375,7 +3405,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                         // Streamed only: podcasts have Content-Length so we omit
                         // :http-continuous (a live-stream option). Network caching
                         // and reconnect still help on flaky CDN edges.
-                        _currentMedia.AddOption(":network-caching=3000");
+                        _currentMedia.AddOption($":network-caching={StreamingBufferMs(3000)}");
                         _currentMedia.AddOption(":http-reconnect");
                         // Force a standard browser UA -- libvlc's default
                         // ("VLC/3.x LibVLC/3.x") gets blocked or fingerprinted
@@ -3582,6 +3612,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Settings > Playback > Auto-advance: off means a finished track ends the
+        // session rather than walking the queue.
+        if (!Settings.Get("OrgZ.AutoAdvance", true))
+        {
+            ClearPlayback();
+            UpdateMainStatus("Finished");
+            return;
+        }
+
         if (_playbackContext != null && _playbackContext.HasNext)
         {
             var next = _playbackContext.MoveNext()!;
@@ -3650,7 +3689,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (timeMs >= (long)playing.StopTime.Value.TotalMilliseconds)
             {
-                ButtonNextTrack();
+                // The stop point ends the track; OrgZ.AutoAdvance decides whether the
+                // queue continues, same as a natural end.
+                if (Settings.Get("OrgZ.AutoAdvance", true))
+                {
+                    ButtonNextTrack();
+                }
+                else
+                {
+                    Stop();
+                    ClearPlayback();
+                    UpdateMainStatus("Finished");
+                }
             }
         }
     }

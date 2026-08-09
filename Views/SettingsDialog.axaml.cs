@@ -58,9 +58,11 @@ public partial class SettingsDialog : Window
             _ => 1
         };
 
-        var shuffleMode = Settings.Get("OrgZ.ShuffleMode", "Song");
-        ShuffleSongRadio.IsChecked = shuffleMode == "Song";
-        ShuffleAlbumRadio.IsChecked = shuffleMode == "Album";
+        // NOT "OrgZ.ShuffleMode" - that key is the transport's Off/On toggle. This one is
+        // how shuffle orders the queue when it IS on.
+        var shuffleBy = Settings.Get("OrgZ.ShuffleBy", ShuffleBy.Song);
+        ShuffleSongRadio.IsChecked = shuffleBy == ShuffleBy.Song;
+        ShuffleAlbumRadio.IsChecked = shuffleBy == ShuffleBy.Album;
 
         AutoAdvanceCheck.IsChecked = Settings.Get("OrgZ.AutoAdvance", true);
         NormalizeVolumeCheck.IsChecked = Settings.Get("OrgZ.NormalizeVolume", false);
@@ -557,7 +559,7 @@ public partial class SettingsDialog : Window
         };
         Settings.Set("OrgZ.StreamingBufferSize", bufferSize);
 
-        Settings.Set("OrgZ.ShuffleMode", ShuffleAlbumRadio.IsChecked == true ? "Album" : "Song");
+        Settings.Set("OrgZ.ShuffleBy", ShuffleAlbumRadio.IsChecked == true ? ShuffleBy.Album : ShuffleBy.Song);
         Settings.Set("OrgZ.AutoAdvance", AutoAdvanceCheck.IsChecked == true);
         Settings.Set("OrgZ.NormalizeVolume", NormalizeVolumeCheck.IsChecked == true);
 

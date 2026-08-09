@@ -362,6 +362,111 @@ public class PlaybackContextTests
         Assert.Equal(list[2], ctx.CurrentItem);
     }
 
+    // -- Album shuffle --
+
+    /// <summary>3 albums x 3 tracks, in-order, plus one untagged single at the end.</summary>
+    private static List<MediaItem> MakeAlbumList()
+    {
+        var list = new List<MediaItem>();
+        foreach (var album in new[] { "Alpha", "Beta", "Gamma" })
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                list.Add(Music($"{album}-{i}", title: $"{album} {i}", album: album));
+            }
+        }
+
+        list.Add(Music("single", title: "Single"));
+        return list;
+    }
+
+    [Fact]
+    public void AlbumShuffle_KeepsAlbumsContiguousAndInTrackOrder()
+    {
+        var list = MakeAlbumList();
+        var ctx = new PlaybackContext(list, list[0], shuffle: true, shuffleBy: ShuffleBy.Album);
+
+        Assert.True(ctx.IsShuffled);
+        Assert.Equal(ShuffleBy.Album, ctx.ShuffleBy);
+        Assert.Equal(list.Count, ctx.Playlist.Count);
+
+        // Every album's tracks appear as one contiguous run, in 0,1,2 order.
+        foreach (var album in new[] { "Alpha", "Beta", "Gamma" })
+        {
+            var positions = ctx.Playlist
+                .Select((item, index) => (item, index))
+                .Where(x => x.item.Album == album)
+                .Select(x => x.index)
+                .ToList();
+
+            Assert.Equal(3, positions.Count);
+            Assert.Equal(positions[0] + 1, positions[1]);
+            Assert.Equal(positions[1] + 1, positions[2]);
+            Assert.Equal($"{album}-0", ctx.Playlist[positions[0]].Id);
+            Assert.Equal($"{album}-1", ctx.Playlist[positions[1]].Id);
+            Assert.Equal($"{album}-2", ctx.Playlist[positions[2]].Id);
+        }
+    }
+
+    [Fact]
+    public void AlbumShuffle_CurrentTracksAlbumLeadsAndPreviousWalksBack()
+    {
+        var list = MakeAlbumList();
+        var beta1 = list.First(i => i.Id == "Beta-1");
+        var ctx = new PlaybackContext(list, beta1, shuffle: true, shuffleBy: ShuffleBy.Album);
+
+        // Beta leads: current is its middle track, so index 1, with Beta-0 behind it.
+        Assert.Equal(beta1, ctx.CurrentItem);
+        Assert.Equal(1, ctx.CurrentIndex);
+        Assert.Equal("Beta-0", ctx.Playlist[0].Id);
+        Assert.Equal("Beta-2", ctx.Playlist[2].Id);
+
+        Assert.Equal("Beta-0", ctx.MovePrevious()!.Id);
+    }
+
+    [Fact]
+    public void SetShuffle_SwitchingShuffleByReordersLiveQueue()
+    {
+        var list = MakeAlbumList();
+        var ctx = new PlaybackContext(list, list[0], shuffle: true, shuffleBy: ShuffleBy.Song);
+        Assert.Equal(ShuffleBy.Song, ctx.ShuffleBy);
+
+        ctx.SetShuffle(true, ShuffleBy.Album);
+
+        Assert.Equal(ShuffleBy.Album, ctx.ShuffleBy);
+        Assert.True(ctx.IsShuffled);
+        Assert.Equal(list[0], ctx.CurrentItem);
+        Assert.Equal(list.Count, ctx.Playlist.Count);
+
+        // Current track's album must lead after the reorder too.
+        Assert.Equal("Alpha", ctx.Playlist[ctx.CurrentIndex].Album);
+    }
+
+    [Fact]
+    public void AlbumShuffle_UntaggedTrackSurvivesAsSingleton()
+    {
+        var list = MakeAlbumList();
+        var ctx = new PlaybackContext(list, list[0], shuffle: true, shuffleBy: ShuffleBy.Album);
+
+        Assert.Single(ctx.Playlist, i => i.Id == "single");
+    }
+
+    [Fact]
+    public void AlbumShuffle_ThenOff_RestoresOriginalOrder()
+    {
+        var list = MakeAlbumList();
+        var ctx = new PlaybackContext(list, list[4], shuffle: true, shuffleBy: ShuffleBy.Album);
+
+        ctx.SetShuffle(false);
+
+        Assert.False(ctx.IsShuffled);
+        for (int i = 0; i < list.Count; i++)
+        {
+            Assert.Equal(list[i], ctx.Playlist[i]);
+        }
+        Assert.Equal(4, ctx.CurrentIndex);
+    }
+
     // -- Release --
 
     [Fact]
