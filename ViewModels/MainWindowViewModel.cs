@@ -8680,16 +8680,19 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    // First-sync cap: only the most recent N downloaded episodes get pushed, so a real library
-    // (e.g. 1800+ downloads) doesn't dump everything onto the iPod before we've verified podcasts
-    // even show up. Raised/made per-show + unplayed-aware once the format is confirmed on hardware.
-    private const int PodcastSyncCap = 5;
+    // Per-show sync window: the newest N unplayed downloads of EACH show. (The old global
+    // newest-5 cap predated on-hardware verification of the podcast format; per-show keeps
+    // a chatty daily show from starving everything else, and finished episodes never ride.)
+    private const int PodcastSyncPerShowCap = 10;
 
     /// <summary>
     /// Syncs DOWNLOADED podcast episodes to a connected iPod through the <see cref="IPodDevice"/>
     /// abstraction, which picks the right format + database for the model (binary iTunesDB, Nano 5G
-    /// SQLite, or Rockbox filesystem). Gathers files under {library}/.podcasts/{feedId}/, newest
-    /// first, capped at <see cref="PodcastSyncCap"/>. Show grouping + resume are follow-ups.
+    /// SQLite, or Rockbox filesystem). Selection is per show: the newest
+    /// <see cref="PodcastSyncPerShowCap"/> unplayed downloads of each feed under
+    /// {library}/.podcasts/{feedId}/. Afterwards, episodes of SUBSCRIBED shows that are no longer
+    /// downloaded locally (retention pruned them, or they finished) are removed from the device;
+    /// shows OrgZ isn't subscribed to - an iTunes-managed feed, say - are never touched.
     /// </summary>
     private async Task SyncPodcastsToDeviceAsync(ConnectedDevice dev, IPodDevice ipod)
     {
@@ -8712,96 +8715,138 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         BeginLcdBusy($"Syncing podcasts to {dev.Name}");
         int added = 0;
+        int pruned = 0;
+        List<PodcastPush> episodes;
+        HashSet<string> localKeys;
         try
         {
-            // Gather episodes (newest first, capped) off the UI thread.
-            var episodes = await Task.Run(() =>
+            // Gather per-show selections off the UI thread. localKeys carries EVERY downloaded
+            // episode's "{show}\n{title}" - the prune step below matches device rows against it.
+            (episodes, localKeys) = await Task.Run(() =>
             {
-                var candidates = new List<(string File, DateTime Mtime, long FeedId)>();
+                var pushes = new List<PodcastPush>();
+                var allKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var artByFeed = new Dictionary<long, string?>();   // show cover, fetched once per feed
+
                 foreach (var feedDir in Directory.EnumerateDirectories(podcastsDir))
                 {
                     if (!long.TryParse(Path.GetFileName(feedDir), out var feedId))
                     {
                         continue;
                     }
-                    foreach (var file in Directory.EnumerateFiles(feedDir))
-                    {
-                        if (!file.EndsWith(".partial", StringComparison.OrdinalIgnoreCase))
-                        {
-                            candidates.Add((file, File.GetLastWriteTimeUtc(file), feedId));
-                        }
-                    }
-                }
-
-                var picked = candidates.OrderByDescending(c => c.Mtime).Take(PodcastSyncCap).ToList();
-                SetLcdBusy($"Reading {picked.Count} episode(s)…", 0.3);
-                var list = new List<PodcastPush>(picked.Count);
-                var artByFeed = new Dictionary<long, string?>();   // show cover, fetched once per feed
-                var pubByFeed = new Dictionary<long, Dictionary<long, DateTime>>();   // feedId -> episodeId -> RSS publish date
-                var titleByFeed = new Dictionary<long, Dictionary<long, string>>();   // feedId -> episodeId -> RSS episode title
-                foreach (var (file, mtime, feedId) in picked)
-                {
                     subs.TryGetValue(feedId, out var sub);
+                    var show = sub?.Title ?? "Podcast";
 
                     // Downloaded files are named {episodeId}; map back to the local RSS feed cache
                     // (offline) once per feed for the real publish date + episode title.
-                    if (!pubByFeed.TryGetValue(feedId, out var pubMap))
+                    var pubMap = new Dictionary<long, DateTime>();
+                    var rssTitles = new Dictionary<long, string>();
+                    foreach (var ep in Services.Podcast.PodcastIndexClient.GetCachedEpisodesByFeedId(feedId) ?? [])
                     {
-                        pubMap = new Dictionary<long, DateTime>();
-                        var titles = new Dictionary<long, string>();
-                        foreach (var ep in Services.Podcast.PodcastIndexClient.GetCachedEpisodesByFeedId(feedId) ?? [])
+                        if (ep.DatePublishedEpoch > 0) { pubMap[ep.Id] = DateTimeOffset.FromUnixTimeSeconds(ep.DatePublishedEpoch).UtcDateTime; }
+                        if (!string.IsNullOrWhiteSpace(ep.Title)) { rssTitles[ep.Id] = ep.Title!; }
+                    }
+
+                    var perFeed = new List<(PodcastPush Push, DateTime Pub, bool Played)>();
+                    foreach (var file in Directory.EnumerateFiles(feedDir))
+                    {
+                        if (file.EndsWith(".partial", StringComparison.OrdinalIgnoreCase))
                         {
-                            if (ep.DatePublishedEpoch > 0) { pubMap[ep.Id] = DateTimeOffset.FromUnixTimeSeconds(ep.DatePublishedEpoch).UtcDateTime; }
-                            if (!string.IsNullOrWhiteSpace(ep.Title)) { titles[ep.Id] = ep.Title!; }
+                            continue;
                         }
-                        pubByFeed[feedId] = pubMap;
-                        titleByFeed[feedId] = titles;
-                    }
-                    var haveEpId = long.TryParse(Path.GetFileNameWithoutExtension(file), out var epId);
 
-                    // Title precedence: the file's own ID3 tag, then the RSS episode title (so tagless
-                    // MP3s don't surface as their bare numeric episode id), then the filename.
-                    var title = Path.GetFileNameWithoutExtension(file);
-                    var lengthMs = 0;
-                    string? desc = null;
-                    try
-                    {
-                        using var tf = TagLib.File.Create(file);
-                        if (!string.IsNullOrWhiteSpace(tf.Tag.Title)) { title = tf.Tag.Title; }
-                        lengthMs = (int)tf.Properties.Duration.TotalMilliseconds;
-                        desc = tf.Tag.Comment;
-                    }
-                    catch
-                    {
-                        // tagless file - fall back to the RSS title / filename + zero duration
-                    }
-                    if (haveEpId && title == epId.ToString()
-                        && titleByFeed[feedId].TryGetValue(epId, out var rssTitle))
-                    {
-                        title = rssTitle;
+                        var haveEpId = long.TryParse(Path.GetFileNameWithoutExtension(file), out var epId);
+
+                        // Title precedence: the file's own ID3 tag, then the RSS episode title (so
+                        // tagless MP3s don't surface as their bare numeric id), then the filename.
+                        var title = Path.GetFileNameWithoutExtension(file);
+                        var lengthMs = 0;
+                        string? desc = null;
+                        try
+                        {
+                            using var tf = TagLib.File.Create(file);
+                            if (!string.IsNullOrWhiteSpace(tf.Tag.Title)) { title = tf.Tag.Title; }
+                            lengthMs = (int)tf.Properties.Duration.TotalMilliseconds;
+                            desc = tf.Tag.Comment;
+                        }
+                        catch
+                        {
+                            // tagless file - fall back to the RSS title / filename + zero duration
+                        }
+                        if (haveEpId && title == epId.ToString() && rssTitles.TryGetValue(epId, out var rssTitle))
+                        {
+                            title = rssTitle;
+                        }
+
+                        allKeys.Add($"{show}\n{title}");
+
+                        if (!artByFeed.TryGetValue(feedId, out var coverPath))
+                        {
+                            coverPath = ArtworkSource.DownloadShowArtToTempFile(sub?.ImageUrl);
+                            artByFeed[feedId] = coverPath;
+                        }
+
+                        var mtime = File.GetLastWriteTimeUtc(file);
+                        var pubDate = haveEpId && pubMap.TryGetValue(epId, out var pd) ? pd : mtime;
+                        var played = haveEpId
+                            && Services.Podcast.PodcastCache.GetListenPosition(epId) is { Completed: true };
+
+                        perFeed.Add((new PodcastPush(file, title, show, desc, sub?.FeedUrl, pubDate, lengthMs, coverPath), pubDate, played));
                     }
 
-                    if (!artByFeed.TryGetValue(feedId, out var coverPath))
-                    {
-                        coverPath = ArtworkSource.DownloadShowArtToTempFile(sub?.ImageUrl);
-                        artByFeed[feedId] = coverPath;
-                    }
-
-                    var pubDate = haveEpId && pubMap.TryGetValue(epId, out var pd) ? pd : mtime;
-
-                    list.Add(new PodcastPush(file, title, sub?.Title ?? "Podcast", desc, sub?.FeedUrl, pubDate, lengthMs, coverPath));
+                    pushes.AddRange(perFeed
+                        .Where(e => !e.Played)
+                        .OrderByDescending(e => e.Pub)
+                        .Take(PodcastSyncPerShowCap)
+                        .Select(e => e.Push));
                 }
-                return list;
+
+                return (pushes, allKeys);
             });
 
-            if (episodes.Count == 0)
+            if (episodes.Count > 0)
+            {
+                added = await ipod.AddPodcastsAsync(episodes, ffmpeg ?? "ffmpeg",
+                    (done, total) => SetLcdBusy($"Copying episode {done} of {total} to {dev.Name}…", total == 0 ? 0.6 : (double)done / total));
+            }
+
+            // Mirror pruning within SUBSCRIBED shows: an episode retention deleted locally (or
+            // one that finished and fell out of the window) leaves the device too, so the iPod
+            // tracks the subscription window instead of accreting forever.
+            var deviceSource = $"device:{dev.MountPath}";
+            var subscribedShows = new HashSet<string>(
+                subs.Values.Select(s => s.Title).Where(t => !string.IsNullOrEmpty(t))!,
+                StringComparer.OrdinalIgnoreCase);
+            var stale = _allItems.Where(i => i.Source == deviceSource
+                                             && i.Kind == MediaKind.Podcast
+                                             && i.Album is { } show && subscribedShows.Contains(show)
+                                             && !localKeys.Contains($"{show}\n{i.Title}"))
+                                 .ToList();
+            foreach (var staleEp in stale)
+            {
+                try
+                {
+                    SetLcdBusy($"Removing “{staleEp.Title}”…");
+                    await ipod.RemoveTrackAsync(staleEp);
+                    _allItems.Remove(staleEp);
+                    pruned++;
+                    _log.Information("Pruned stale device episode {Show} / {Title}", staleEp.Album, staleEp.Title);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Couldn't prune device episode {Title}", staleEp.Title);
+                }
+            }
+            if (pruned > 0)
+            {
+                ApplyFilter();
+            }
+
+            if (episodes.Count == 0 && pruned == 0)
             {
                 UpdateMainStatus("No downloaded podcasts to sync.");
                 return;
             }
-
-            added = await ipod.AddPodcastsAsync(episodes, ffmpeg ?? "ffmpeg",
-                (done, total) => SetLcdBusy($"Copying episode {done} of {total} to {dev.Name}…", total == 0 ? 0.6 : (double)done / total));
         }
         catch (Exception ex)
         {
@@ -8822,8 +8867,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             await ReloadStockIPodLibraryAsync(dev);
         }
 
-        _log.Information("Synced podcasts to {Device}: added={Added}", dev.MountPath, added);
-        UpdateMainStatus(added > 0 ? $"Synced {added} podcast episode(s) to {dev.Name}." : "No downloaded podcasts to sync.");
+        _log.Information("Synced podcasts to {Device}: added={Added} pruned={Pruned}", dev.MountPath, added, pruned);
+        UpdateMainStatus((added, pruned) switch
+        {
+            (> 0, > 0) => $"Synced {Count(added, "episode")} to {dev.Name}, removed {Count(pruned, "stale one")}.",
+            (> 0, _)   => $"Synced {Count(added, "episode")} to {dev.Name}.",
+            (_, > 0)   => $"Removed {Count(pruned, "stale episode")} from {dev.Name}.",
+            _          => "Podcasts are already in sync.",
+        });
     }
 
     /// <summary>
