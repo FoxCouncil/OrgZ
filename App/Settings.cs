@@ -64,7 +64,10 @@ internal static class Settings
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error loading settings from {SettingsFilePath}: {ex.Message}");
+            // Falling back to empty settings resets every preference - that MUST leave a trail.
+            // Logging.For is resolved lazily: if this runs before Logging.Initialize, Serilog's
+            // default silent logger absorbs it rather than throwing.
+            Services.Logging.For("Settings").Error(ex, "Failed to load settings from {Path} - starting with empty settings", SettingsFilePath);
         }
 
         _settings = [];
@@ -122,7 +125,10 @@ internal static class Settings
                 EnsureLoadedLocked();
                 Directory.CreateDirectory(SettingsDirectory);
                 string json = JsonSerializer.Serialize(_settings, JsonOptions);
-                File.WriteAllText(SettingsFilePath, json);
+
+                // Atomic: SaveDeferred fires this on a 500ms timer during volume drags, so a
+                // crash mid-write would otherwise truncate settings.json and reset everything.
+                Helpers.AtomicFile.WriteAllBytes(SettingsFilePath, System.Text.Encoding.UTF8.GetBytes(json));
 
                 // Anything caching a settings-derived value re-reads after a save.
                 Models.MediaItem.BadFormatCriteria.Invalidate();
@@ -130,7 +136,7 @@ internal static class Settings
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error saving settings to {SettingsFilePath}: {ex.Message}");
+            Services.Logging.For("Settings").Error(ex, "Failed to save settings to {Path}", SettingsFilePath);
             throw;
         }
     }
