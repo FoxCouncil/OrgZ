@@ -37,6 +37,14 @@ public partial class SettingsDialog : Window
     {
         // General
         FolderPathText.Text = string.IsNullOrEmpty(App.FolderPath) ? "(No folder selected)" : App.FolderPath;
+
+        // Same feature, per-platform vocabulary: Windows trays, macOS menu-bars,
+        // Linux notification-areas.
+        MinimizeToTrayCheck.Content = OperatingSystem.IsMacOS()
+            ? "Keep running in the menu bar on close"
+            : OperatingSystem.IsLinux()
+                ? "Minimize to notification area on close"
+                : "Minimize to system tray on close";
         MinimizeToTrayCheck.IsChecked = Settings.Get("OrgZ.MinimizeToTray", false);
         RememberLastTrackCheck.IsChecked = Settings.Get("OrgZ.RememberLastTrack", false);
 

@@ -1784,8 +1784,81 @@ public partial class MainWindow : Window
         }
     }
 
+    // -- Minimize to tray (Settings > General) --
+
+    private TrayIcon? _trayIcon;
+
+    /// <summary>
+    /// "Minimize to system tray on close": the title-bar X hides to the tray instead of
+    /// quitting; playback keeps running. Explicit exits (File > Exit, the tray menu, OS or
+    /// app shutdown) arrive with a different CloseReason and pass through untouched.
+    /// </summary>
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        if (e.CloseReason == WindowCloseReason.WindowClosing && Settings.Get("OrgZ.MinimizeToTray", false))
+        {
+            e.Cancel = true;
+            ShowTrayIcon();
+            Hide();
+            return;
+        }
+
+        base.OnClosing(e);
+    }
+
+    private void ShowTrayIcon()
+    {
+        if (_trayIcon == null)
+        {
+            var open = new NativeMenuItem("Open OrgZ");
+            open.Click += (_, _) => RestoreFromTray();
+
+            var playPause = new NativeMenuItem("Play / Pause");
+            playPause.Click += (_, _) => _viewModel.ButtonPlayPause();
+
+            var exit = new NativeMenuItem("Exit");
+            exit.Click += (_, _) =>
+            {
+                if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                {
+                    desktop.Shutdown();
+                }
+            };
+
+            var menu = new NativeMenu();
+            menu.Items.Add(open);
+            menu.Items.Add(playPause);
+            menu.Items.Add(new NativeMenuItemSeparator());
+            menu.Items.Add(exit);
+
+            _trayIcon = new TrayIcon
+            {
+                ToolTipText = "OrgZ",
+                Icon = new WindowIcon(Avalonia.Platform.AssetLoader.Open(new Uri("avares://OrgZ/Assets/app.ico"))),
+                Menu = menu,
+            };
+            _trayIcon.Clicked += (_, _) => RestoreFromTray();
+        }
+
+        _trayIcon.IsVisible = true;
+    }
+
+    private void RestoreFromTray()
+    {
+        if (_trayIcon != null)
+        {
+            _trayIcon.IsVisible = false;
+        }
+
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        _trayIcon?.Dispose();
+        _trayIcon = null;
         SaveViewState();
         _viewModel.Dispose();
         base.OnClosed(e);

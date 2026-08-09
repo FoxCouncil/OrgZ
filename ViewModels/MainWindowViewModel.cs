@@ -2029,6 +2029,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ExitApplication()
     {
+        // Shutdown rather than Close: the minimize-to-tray Closing intercept only
+        // swallows plain window closes, and an explicit File > Exit must actually exit.
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+            return;
+        }
+
         _window.Close();
     }
 
