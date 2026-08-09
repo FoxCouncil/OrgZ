@@ -785,11 +785,15 @@ public partial class SettingsDialog : Window
         FolderPathText.Text = "(No folder selected)";
     }
 
+    private bool _resetWindowSizesPending;
+
     private void ResetWindowSizesButton_Click(object? sender, RoutedEventArgs e)
     {
-        WindowSizeTracker.ResetAll();
+        // Deferred to OK so both Maintenance buttons share commit semantics - Cancel
+        // used to undo one but not the other.
+        _resetWindowSizesPending = true;
         ResetWindowSizesButton.IsEnabled = false;
-        ResetWindowSizesButton.Content = "Reset";
+        ResetWindowSizesButton.Content = "Will reset on OK";
     }
 
     private void ResetSettingsButton_Click(object? sender, RoutedEventArgs e)
@@ -801,6 +805,11 @@ public partial class SettingsDialog : Window
 
     private void OkButton_Click(object? sender, RoutedEventArgs e)
     {
+        if (_resetWindowSizesPending)
+        {
+            WindowSizeTracker.ResetAll();
+        }
+
         if (SettingsReset)
         {
             Settings.Clear();
