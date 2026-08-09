@@ -799,6 +799,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal Action<MediaItem?>? RestoreScrollAnchor;
     internal Action? PlaylistsChanged;
 
+    /// <summary>
+    /// Rebuilds the window's chrome (host visibility, grid columns, context menu) for the
+    /// incoming sidebar view. Invoked from OnSelectedSidebarItemChanged BEFORE ApplyFilter
+    /// binds the view's source, so rows realize under the right columns the first time.
+    /// </summary>
+    internal Action<SidebarItem?>? ApplyViewChrome;
+
     // -- Change Handlers --
 
     /// <summary>
@@ -1238,8 +1245,15 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrEmpty(value?.ViewConfigKey))
         {
             Settings.Set("OrgZ.ActiveView", value.ViewConfigKey);
-            Settings.Save();
+
+            // Deferred: a synchronous whole-file write per sidebar click stalls the switch for
+            // disk I/O; the in-memory value is what this session reads back.
+            Settings.SaveDeferred();
         }
+
+        // The window swaps its chrome now, before the bind below, so the incoming rows realize
+        // under the incoming view's columns instead of being laid out twice.
+        ApplyViewChrome?.Invoke(value);
 
         // A view switch changes nothing about content - reuse the target view's cached collection
         // view if it's still valid (same library version + filter signature). This is the path that

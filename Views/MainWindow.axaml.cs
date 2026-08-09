@@ -160,7 +160,24 @@ public partial class MainWindow : Window
         };
 
         _viewModel.PropertyChanging += ViewModel_PropertyChanging;
-        _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+        // Chrome for the incoming view - host visibility, grid columns, context menu - is
+        // rebuilt from INSIDE the view model's sidebar-changed callback, before it binds the
+        // incoming collection view. It used to happen from PropertyChanged, which the toolkit
+        // raises only after that callback returns - so every switch bound the new rows under
+        // the OUTGOING view's columns, laid them out, then replaced the columns and laid out
+        // again; and BuildColumnsOn looked up saved column order/visibility under the outgoing
+        // key, because _lastViewConfigKey only flipped at the very end.
+        _viewModel.ApplyViewChrome = sidebarItem =>
+        {
+            _lastViewConfigKey = sidebarItem?.ViewConfigKey;
+
+            var config = ListViewConfigs.Get(sidebarItem?.ViewConfigKey);
+            if (config != null)
+            {
+                ApplyViewConfig(config);
+            }
+        };
         _viewModel.ScrollToSelectedRequested = () =>
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -241,30 +258,6 @@ public partial class MainWindow : Window
         {
             SaveViewState();
         }
-    }
-
-    private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName != nameof(MainWindowViewModel.SelectedSidebarItem))
-        {
-            return;
-        }
-
-        // NOTE: the outgoing view's scroll/selection is saved from PropertyChanging, not here -
-        // see ViewModel_PropertyChanging.
-
-        var sidebarItem = _viewModel.SelectedSidebarItem;
-        var config = ListViewConfigs.Get(sidebarItem?.ViewConfigKey);
-
-        if (config != null)
-        {
-            ApplyViewConfig(config);
-        }
-
-        // The incoming view's state was already restored, synchronously, when its collection view
-        // was bound - see OnGridItemsSourceChanged. Doing it from here would be a frame late and
-        // visibly jump.
-        _lastViewConfigKey = sidebarItem?.ViewConfigKey;
     }
 
     private DataGrid GetActiveDataGrid()
@@ -601,6 +594,7 @@ public partial class MainWindow : Window
         PodcastsPanel.IsVisible = isPodcasts;
         AudiobooksHost.IsVisible = isAudiobooks;
         MediaDataGrid.IsVisible = config.Host == ViewHost.Grid;
+        MediaGridBackdrop.IsVisible = config.Host == ViewHost.Grid;
 
         // Set RadioFilterPanel visibility before any early-return so a previous
         // Radio view doesn't leave its country/genre dropdowns hanging in the
@@ -627,18 +621,19 @@ public partial class MainWindow : Window
         BuildContextMenu(config.ContextMenuItems);
 
         // Collapse state is applied where the source is bound (OnGridItemsSourceChanged), not
-        // here: the view model assigns FilteredItemsView from its own property-changed callback,
-        // which runs before this handler, and it also reassigns on search/filter changes that
-        // never reach ApplyViewConfig at all. Keying off the bind covers both, in order.
+        // here: this runs BEFORE the view model binds the incoming view's source, and the source
+        // is also reassigned on search/filter changes that never reach ApplyViewConfig at all.
+        // Keying off the bind covers both; loading the expansion dictionary here just has it
+        // ready when that bind lands.
         EnsureGroupExpansionFor(config);
     }
 
     /// <summary>
     /// Loads the persisted expand/collapse dictionary for a view, if it isn't already loaded.
     ///
-    /// Keyed on the config being applied - NOT <see cref="_lastViewConfigKey"/>, which at
-    /// ApplyViewConfig time is still the view being LEFT. Getting that wrong made the radio
-    /// groups load and save their state under whichever view you arrived from.
+    /// Keyed on the config being applied, never inferred from window fields - inferring it
+    /// once made the radio groups load and save their state under whichever view you
+    /// arrived from.
     /// </summary>
     private void EnsureGroupExpansionFor(ListViewConfig? config)
     {

@@ -369,6 +369,13 @@
 							     area - as Dock=Left children they only got their desired width, which
 							     collapsed the near-empty podcast feed list into a narrow strip. -->
 							<Grid>
+							<!-- Opaque backdrop under the media grid. The scroll-restore path hides the
+							     grid itself for a frame (Opacity=0, see QueueViewStateRestore) - with
+							     nothing opaque in the slot behind it, that frame showed the grey metal
+							     page texture where the black grid had been, a full-contrast flash on
+							     every switch. Toggled alongside the grid in ApplyViewConfig so the
+							     Podcasts/Audiobooks panels still sit on the page like before. -->
+							<Border x:Name="MediaGridBackdrop" Background="{DynamicResource SystemAltHighColor}" />
 							<!-- The one media grid: every list view, flat or grouped, library or device or
 							     radio or CD or share. Columns and grouping come from the view's
 							     ListViewConfig; MediaGrid (Controls/MediaGrid.cs) owns the two Avalonia
