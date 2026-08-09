@@ -89,7 +89,8 @@ public partial class SettingsDialog : Window
         ShareEnabledCheck.IsChecked = Settings.Get("OrgZ.Services.Sharing.Enabled", false);
         _ = RefreshShareStatusAsync();
 
-        ServiceKeepBurningCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Burning", false);
+        // No "Disc burning" row: a burn always survives the GUI (the service or the elevated
+        // helper process owns the write), and stopping one mid-write would only ruin the disc.
         ServiceKeepSyncCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false);
         ServiceKeepSharingCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Sharing", false);
 
@@ -590,7 +591,6 @@ public partial class SettingsDialog : Window
         Settings.Set("OrgZ.Services.Sharing.Enabled", ShareEnabledCheck.IsChecked == true);
         Settings.Set("OrgZ.Services.Sharing.Name", string.IsNullOrWhiteSpace(ShareNameInput.Text) ? $"{Environment.MachineName} Library" : ShareNameInput.Text.Trim());
 
-        Settings.Set("OrgZ.Services.KeepAlive.Burning", ServiceKeepBurningCheck.IsChecked == true);
         Settings.Set("OrgZ.Services.KeepAlive.IPodSync", ServiceKeepSyncCheck.IsChecked == true);
         Settings.Set("OrgZ.Services.KeepAlive.Sharing", ServiceKeepSharingCheck.IsChecked == true);
 

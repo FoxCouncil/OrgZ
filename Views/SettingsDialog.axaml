@@ -204,7 +204,6 @@
 						<Border BorderBrush="{StaticResource OrgZBorderColorBrush}" BorderThickness="1" CornerRadius="4" Padding="12">
 							<StackPanel Spacing="10">
 								<TextBlock Text="Keep Running After OrgZ Closes" FontWeight="Bold" FontSize="13" />
-								<CheckBox x:Name="ServiceKeepBurningCheck" Content="Disc burning" />
 								<CheckBox x:Name="ServiceKeepSyncCheck" Content="iPod sync" />
 								<CheckBox x:Name="ServiceKeepSharingCheck" Content="Library sharing" />
 							</StackPanel>

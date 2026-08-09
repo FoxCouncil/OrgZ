@@ -5961,6 +5961,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // anything else claims the LCD.
         _ = ReattachToServiceJobsAsync();
 
+        // Share This Library: the service owns the socket but the intent lives in settings -
+        // re-assert it at launch. A keep-alive=off exit stopped the share; a service restart
+        // may have restored it already, in which case this is a no-op.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!Settings.Get("OrgZ.Services.Sharing.Enabled", false)
+                    || !await Services.DeviceHelper.DeviceHelperClient.IsAvailableAsync()
+                    || await Services.DeviceHelper.DeviceHelperClient.ShareStatusAsync() is { Sharing: true })
+                {
+                    return;
+                }
+
+                var shareName = Settings.Get("OrgZ.Services.Sharing.Name", $"{Environment.MachineName} Library");
+                await Services.DeviceHelper.DeviceHelperClient.StartShareAsync(shareName, Services.Sharing.ShareServiceOps.DefaultPort);
+                _log.Information("Share \"{Name}\" re-asserted at launch", shareName);
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "Share re-assert at launch failed");
+            }
+        });
+
         // LAN share discovery: one browse at startup, then every 30 s. Shares come and
         // go with other people's apps, so the sidebar reconciles rather than assuming.
         FireAndForget(ScanForSharesAsync(), "LAN share scan");
@@ -7989,15 +8013,42 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var ipod = IPodDevice.For(device);
-        // One batch scope around the whole sync: tiers with deferrable per-write work (the Nano 5G's
-        // full-CDB regeneration) rebuild once at the end instead of once per track.
-        using var batch = ipod.BeginBatchWrite();
-        var (ct, owns) = BeginSyncScope();
         var deviceSource = $"device:{device.MountPath}";
         var deviceByAT = _allItems
             .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
             .GroupBy(i => NormalizeMatchKey(i.Artist, i.Title), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        // Opt-in (Settings > Services > Keep Running After OrgZ Closes): offer the tracks the
+        // device is missing to the background service, which owns the copy from there - it
+        // keeps running if OrgZ closes. Tracks only: a native playlist (on tiers that have
+        // them) is written by the next in-app sync, which matches the already-copied tracks
+        // and skips straight to the playlist write. Nested sub-syncs of a full device plan
+        // (_deviceSyncCts held) never hand off - the plan owns the whole gesture.
+        if (_deviceSyncCts == null && Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false))
+        {
+            var missing = tracks.Where(t =>
+            {
+                var key = NormalizeMatchKey(t.Artist, t.Title);
+                return string.IsNullOrEmpty(key) || !deviceByAT.ContainsKey(key);
+            }).ToList();
+
+            var progressPath = Path.Combine(Path.GetTempPath(), $"orgz-sync-{Guid.NewGuid():N}.jsonl");
+            if (await TryHandOffSyncToServiceAsync(device.MountPath, missing,
+                    (mount, ids) => Services.DeviceHelper.DeviceHelperClient.RunSyncAsync(mount, progressPath, ids),
+                    keepAliveEnabled: true))
+            {
+                _log.Information("Sync of {Name} to {Device} handed to the background service ({Count} track(s))", name, device.MountPath, missing.Count);
+                UpdateMainStatus($"Syncing “{name}” to {device.Name} in the background — it keeps going even if OrgZ closes.");
+                await ReattachToServiceJobsAsync();
+                return;
+            }
+        }
+
+        // One batch scope around the whole sync: tiers with deferrable per-write work (the Nano 5G's
+        // full-CDB regeneration) rebuild once at the end instead of once per track.
+        using var batch = ipod.BeginBatchWrite();
+        var (ct, owns) = BeginSyncScope();
 
         var playlistItems = new List<MediaItem>(tracks.Count);   // matched-or-imported device items, in order
         int matched = 0, added = 0, failed = 0;
@@ -9415,6 +9466,21 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // it kept scanning through a disposed VM.
         _shareScanTimer?.Stop();
         _shareScanTimer = null;
+
+        // Keep Running After OrgZ Closes > Library sharing: unchecked means the share dies
+        // with the app (LoadAsync re-asserts it next launch while the setting stays on).
+        // Bounded wait - shutdown must not hang on a dead service socket.
+        if (Settings.Get("OrgZ.Services.Sharing.Enabled", false) && !Settings.Get("OrgZ.Services.KeepAlive.Sharing", false))
+        {
+            try
+            {
+                Services.DeviceHelper.DeviceHelperClient.StopShareAsync().Wait(TimeSpan.FromSeconds(2));
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "Stopping the share on exit failed");
+            }
+        }
 
         // In-flight jobs stop with the window that started them.
         _ripCts?.Cancel();
