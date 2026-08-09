@@ -2927,8 +2927,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         station.LastPlayed = DateTime.UtcNow;
         station.PlayCount++;
-        MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
-        MediaCache.IncrementPlayCount(station.Id);
+        if (station.Source == "user")
+        {
+            MediaCache.SetLastPlayed(station.Id, station.LastPlayed.Value);
+            MediaCache.IncrementPlayCount(station.Id);
+        }
+        else
+        {
+            // Bundled stations have no Media row - the UPDATEs above would hit zero rows
+            // and this play would vanish at restart. Their state lives in RadioState.
+            MediaCache.BumpRadioPlay(station.Id, station.LastPlayed.Value);
+        }
         RememberLastTrack(station);
 
         UpdateNavigationButtons();
@@ -3783,6 +3792,22 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     #region Radio Station Management
 
     [RelayCommand]
+    /// <summary>
+    /// Routes a favorite flip to the store that can actually hold it: bundled stations
+    /// have no Media row (the UPDATE would hit zero rows and the flag would evaporate
+    /// at restart), so theirs goes to the RadioState overlay.
+    /// </summary>
+    private static void PersistFavorite(MediaItem item)
+    {
+        if (item.Kind == MediaKind.Radio && item.Source != "user")
+        {
+            MediaCache.SetRadioFavorite(item.Id, item.IsFavorite);
+            return;
+        }
+
+        MediaCache.SetFavorite(item.Id, item.IsFavorite);
+    }
+
     internal void ToggleFavorite(MediaItem? station)
     {
         if (station == null)
@@ -3791,7 +3816,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         station.IsFavorite = !station.IsFavorite;
-        MediaCache.SetFavorite(station.Id, station.IsFavorite);
+        PersistFavorite(station);
 
         // Same stale-cache hole as playlists: switching views never bumps the version, so the
         // Favorites cache must die now or the next visit serves the pre-toggle list.
@@ -3817,7 +3842,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
         item.IsFavorite = true;
-        MediaCache.SetFavorite(item.Id, true);
+        PersistFavorite(item);
         _viewCache.Remove("Favorites");   // see ToggleFavorite - a view switch alone reuses stale caches
         if (SelectedSidebarItem?.IsFavorites == true)
         {
@@ -5921,12 +5946,30 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             var bundled = await Task.Run(() => BundledStationsService.LoadAll());
+
+            // Re-apply persisted user state (favorites, plays, renames) over the freshly
+            // loaded catalogue - bundled stations have no Media rows to remember it in.
+            var radioState = await Task.Run(MediaCache.LoadRadioState);
+            foreach (var s in bundled)
+            {
+                if (radioState.TryGetValue(s.Id, out var st))
+                {
+                    s.IsFavorite = st.IsFavorite;
+                    s.PlayCount = st.PlayCount;
+                    s.LastPlayed = st.LastPlayed;
+                    if (!string.IsNullOrWhiteSpace(st.TitleOverride))
+                    {
+                        s.Title = st.TitleOverride;
+                    }
+                }
+            }
+
             var ordered = bundled
                 .OrderBy(s => s.Tags, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(s => s.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             _allItems.AddRange(ordered);
-            _log.Information("BundledStations: loaded {Count} into memory", ordered.Count);
+            _log.Information("BundledStations: loaded {Count} into memory ({StateCount} with saved state)", ordered.Count, radioState.Count);
         }
         catch (Exception ex)
         {

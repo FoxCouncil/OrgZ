@@ -585,11 +585,18 @@ public partial class MediaInfoDialog : Window
 
         SaveOptions();
 
+        if (_item.Kind == MediaKind.Radio && _item.Source != "user")
+        {
+            // A bundled station reloads from the embedded catalogue every launch, and an
+            // upserted Media row would be purged at startup anyway (RemoveLegacyRadioSources).
+            // Its rename persists in the RadioState overlay instead.
+            Services.MediaCache.SetRadioTitle(_item.Id, _item.Title);
+        }
         // Podcasts aren't persisted in the main library cache yet, so skip the
         // upsert -- saving an Options edit on a podcast still updates the live
         // MediaItem, just not the DB. (The deeper consolidation will route
         // podcasts through MediaCache like everything else.)
-        if (_item.Kind != MediaKind.Podcast)
+        else if (_item.Kind != MediaKind.Podcast)
         {
             Services.MediaCache.UpsertMusic(_item);
         }

@@ -173,6 +173,20 @@ public static class MediaCache
                     CachedAt    TEXT NOT NULL
                 );
 
+                -- User state for BUNDLED radio stations. The catalogue itself reloads fresh
+                -- from the embedded JSON every launch (never persisted; the startup purge
+                -- deletes any stray non-user radio rows), so favorites / play counts /
+                -- renames live here, keyed by the station's stable catalogue id, and are
+                -- re-applied over the freshly loaded list. User-added stations ('user'
+                -- Source) keep their real Media rows and never touch this table.
+                CREATE TABLE IF NOT EXISTS RadioState (
+                    Id            TEXT PRIMARY KEY,
+                    IsFavorite    INTEGER NOT NULL DEFAULT 0,
+                    PlayCount     INTEGER NOT NULL DEFAULT 0,
+                    LastPlayed    TEXT,
+                    TitleOverride TEXT
+                );
+
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -596,11 +610,88 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
+    // ── Bundled-station user state ────────────────────────────
+
+    /// <summary>One bundled station's persisted user state - see the RadioState DDL comment.</summary>
+    public sealed record RadioUserState(bool IsFavorite, int PlayCount, DateTime? LastPlayed, string? TitleOverride);
+
+    public static Dictionary<string, RadioUserState> LoadRadioState()
+    {
+        var result = new Dictionary<string, RadioUserState>(StringComparer.Ordinal);
+
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT Id, IsFavorite, PlayCount, LastPlayed, TitleOverride FROM RadioState";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var lastPlayed = reader.IsDBNull(3) ? (DateTime?)null
+                : DateTime.TryParse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind, out var lp) ? lp : null;
+            result[reader.GetString(0)] = new RadioUserState(
+                reader.GetInt64(1) != 0,
+                (int)reader.GetInt64(2),
+                lastPlayed,
+                reader.IsDBNull(4) ? null : reader.GetString(4));
+        }
+
+        return result;
+    }
+
+    public static void SetRadioFavorite(string id, bool isFavorite)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO RadioState (Id, IsFavorite) VALUES (@Id, @Fav)
+            ON CONFLICT(Id) DO UPDATE SET IsFavorite = @Fav
+            """;
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.Parameters.AddWithValue("@Fav", isFavorite ? 1 : 0);
+        cmd.ExecuteNonQuery();
+    }
+
+    public static void BumpRadioPlay(string id, DateTime lastPlayed)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO RadioState (Id, PlayCount, LastPlayed) VALUES (@Id, 1, @Lp)
+            ON CONFLICT(Id) DO UPDATE SET PlayCount = RadioState.PlayCount + 1, LastPlayed = @Lp
+            """;
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.Parameters.AddWithValue("@Lp", lastPlayed.ToString("O"));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Null or blank clears the override, falling back to the catalogue name.</summary>
+    public static void SetRadioTitle(string id, string? titleOverride)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO RadioState (Id, TitleOverride) VALUES (@Id, @Title)
+            ON CONFLICT(Id) DO UPDATE SET TitleOverride = @Title
+            """;
+        cmd.Parameters.AddWithValue("@Id", id);
+        cmd.Parameters.AddWithValue("@Title", string.IsNullOrWhiteSpace(titleOverride) ? DBNull.Value : titleOverride);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>
     /// Drops every non-user radio row. Bundled stations live in memory only -
     /// anything in SQLite that isn't <c>Source = 'user'</c> is stale (legacy
     /// radio-browser/SHOUTcast sync rows, or bundled rows from when we
     /// briefly persisted the curated list). NULL Source counts as legacy too.
+    /// User state for bundled stations survives in RadioState, which this
+    /// purge never touches.
     /// </summary>
     public static int RemoveLegacyRadioSources()
     {
