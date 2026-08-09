@@ -464,6 +464,14 @@ public partial class PodcastsViewModel : ObservableObject
         if (PodcastCache.IsSubscribed(feed.Id))
         {
             PodcastCache.RemoveSubscription(feed.Id);
+
+            // One gesture, one meaning: unsubscribing removes the show's local footprint
+            // too - its downloads under {root}/.podcasts/{feedId}/ would otherwise orphan
+            // forever. Resubscribing re-downloads per the episode policy.
+            var root = App.FolderPath;
+            Helpers.TaskObserver.FireAndForget(
+                Task.Run(() => PodcastSettings.ClearDownloadsForFeed(root, feed.Id)),
+                "unsubscribe download sweep");
         }
         else
         {

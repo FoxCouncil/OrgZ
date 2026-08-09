@@ -285,6 +285,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _shareScanning;
     private Avalonia.Threading.DispatcherTimer? _shareScanTimer;
 
+    private Avalonia.Threading.DispatcherTimer? _podcastCheckTimer;
+
     // Handlers on process-wide singletons, kept so Dispose can detach them (see the ctor).
     private Action? _onSubscriptionsRefreshed;
     private Action<Models.PodcastFeed, Models.PodcastEpisode>? _onDownloadStarted;
@@ -1536,6 +1538,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (Services.Podcast.PodcastSettings.IsDueForCheck)
         {
             FireAndForget(Services.Podcast.PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath), "podcast subscription refresh");
+        }
+        else if (Services.Podcast.PodcastSettings.IsRetentionDue)
+        {
+            // Manual check mode still prunes: the Keep policy is housekeeping, not a fetch.
+            FireAndForget(Services.Podcast.PodcastSubscriptionService.Instance.ApplyRetentionNowAsync(App.FolderPath), "podcast retention pass");
         }
 
         // Surface podcast download progress on the LCD busy display (same as ripping/import).
@@ -6100,6 +6107,24 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _shareScanTimer.Tick += (_, _) => FireAndForget(ScanForSharesAsync(), "LAN share scan");
         _shareScanTimer.Start();
 
+        // The podcast check cadence used to be evaluated exactly once, at construction - an
+        // hourly interval never re-fired in a running session, and Manual mode never enforced
+        // the Keep policy at all. Tick every 5 minutes: due → full refresh; otherwise a daily
+        // offline retention-only pass keeps Manual libraries pruned.
+        _podcastCheckTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+        _podcastCheckTimer.Tick += (_, _) =>
+        {
+            if (Services.Podcast.PodcastSettings.IsDueForCheck)
+            {
+                FireAndForget(Services.Podcast.PodcastSubscriptionService.Instance.RefreshNowAsync(App.FolderPath), "podcast subscription refresh");
+            }
+            else if (Services.Podcast.PodcastSettings.IsRetentionDue)
+            {
+                FireAndForget(Services.Podcast.PodcastSubscriptionService.Instance.ApplyRetentionNowAsync(App.FolderPath), "podcast retention pass");
+            }
+        };
+        _podcastCheckTimer.Start();
+
         RestoreLastTrack();
     }
 
@@ -9645,6 +9670,8 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // it kept scanning through a disposed VM.
         _shareScanTimer?.Stop();
         _shareScanTimer = null;
+        _podcastCheckTimer?.Stop();
+        _podcastCheckTimer = null;
 
         // Keep Running After OrgZ Closes > Library sharing: unchecked means the share dies
         // with the app (LoadAsync re-asserts it next launch while the setting stays on).

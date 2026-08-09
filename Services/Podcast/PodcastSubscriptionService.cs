@@ -74,6 +74,7 @@ public sealed class PodcastSubscriptionService
             }
 
             PodcastSettings.MarkChecked();
+            PodcastSettings.MarkRetentionApplied();   // every refresh applied retention per feed
         }
         catch (OperationCanceledException)
         {
@@ -83,6 +84,68 @@ public sealed class PodcastSubscriptionService
         {
             Volatile.Write(ref _running, 0);
             RefreshCompleted?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Applies the Keep policies WITHOUT fetching anything: episode lists come from the
+    /// local RSS cache, so retention runs offline and under the Manual check policy -
+    /// deleting past-the-window downloads is housekeeping, not a fetch. Same single-flight
+    /// guard as a refresh (they share the download directory).
+    /// </summary>
+    public async Task ApplyRetentionNowAsync(string? libraryRoot, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(libraryRoot))
+        {
+            return;
+        }
+        if (Interlocked.Exchange(ref _running, 1) != 0)
+        {
+            _log.Information("Retention pass skipped: a refresh is already running");
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                foreach (var sub in PodcastCache.GetSubscriptions())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        var cached = PodcastIndexClient.GetCachedEpisodesByFeedId(sub.FeedId);
+                        if (cached is not { Count: > 0 })
+                        {
+                            continue;
+                        }
+                        cached.Sort((a, b) => b.DatePublishedEpoch.CompareTo(a.DatePublishedEpoch));
+                        var feed = new PodcastFeed
+                        {
+                            Id      = sub.FeedId,
+                            Title   = sub.Title,
+                            Author  = sub.Author,
+                            Image   = sub.ImageUrl,
+                            Artwork = sub.ImageUrl,
+                        };
+                        ApplyRetention(feed, cached, PodcastSettings.KeepFor(sub.FeedId), libraryRoot);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Warning(ex, "Retention pass failed for feed {Id} ({Title})", sub.FeedId, sub.Title);
+                    }
+                }
+
+                PodcastSettings.MarkRetentionApplied();
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Information("Retention pass cancelled");
+        }
+        finally
+        {
+            Volatile.Write(ref _running, 0);
         }
     }
 
@@ -109,6 +172,14 @@ public sealed class PodcastSubscriptionService
         var episodes = await PodcastIndexClient.GetEpisodesByFeedIdAsync(sub.FeedId, max: 200, ct);
         if (episodes.Count == 0)
         {
+            // Fetch failed or the feed came back empty: retention still runs from the local
+            // RSS cache - being offline must not suspend the Keep policy.
+            var cached = PodcastIndexClient.GetCachedEpisodesByFeedId(sub.FeedId);
+            if (cached is { Count: > 0 })
+            {
+                cached.Sort((a, b) => b.DatePublishedEpoch.CompareTo(a.DatePublishedEpoch));
+                ApplyRetention(feed, cached, keep, libraryRoot);
+            }
             return;
         }
 

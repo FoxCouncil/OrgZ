@@ -145,6 +145,27 @@ public static class PodcastSettings
         Settings.Save();
     }
 
+    /// <summary>
+    /// Retention is housekeeping, not a fetch - it runs even under the Manual check policy,
+    /// on its own daily cadence tracked separately from LastCheck. A Manual user's Keep
+    /// policy applies without OrgZ ever hitting the network for them.
+    /// </summary>
+    public static bool IsRetentionDue
+    {
+        get
+        {
+            var raw = Settings.Get("OrgZ.Podcasts.LastRetention", "");
+            return !DateTime.TryParse(raw, null, DateTimeStyles.RoundtripKind, out var last)
+                || DateTime.UtcNow - last.ToUniversalTime() >= TimeSpan.FromDays(1);
+        }
+    }
+
+    public static void MarkRetentionApplied()
+    {
+        Settings.Set("OrgZ.Podcasts.LastRetention", DateTime.UtcNow.ToString("O"));
+        Settings.Save();
+    }
+
     /// <summary>The <c>{libraryRoot}/.podcasts</c> download root, or null if the root is unset.</summary>
     public static string? DownloadDir(string? libraryRoot) =>
         string.IsNullOrWhiteSpace(libraryRoot) ? null : Path.Combine(libraryRoot, ".podcasts");
@@ -173,6 +194,34 @@ public static class PodcastSettings
     }
 
     /// <summary>Deletes every downloaded episode under the download root. Returns bytes freed.</summary>
+    /// <summary>
+    /// Deletes one feed's download directory ({root}/.podcasts/{feedId}/) - the unsubscribe
+    /// sweep. Best-effort like ClearDownloads; an in-use file survives until the next pass.
+    /// </summary>
+    public static void ClearDownloadsForFeed(string? libraryRoot, long feedId)
+    {
+        var dir = DownloadDir(libraryRoot);
+        if (dir is null)
+        {
+            return;
+        }
+
+        var feedDir = Path.Combine(dir, feedId.ToString());
+        if (!Directory.Exists(feedDir))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(feedDir, recursive: true);
+        }
+        catch
+        {
+            // Best-effort; a currently-playing episode holds its file open.
+        }
+    }
+
     public static long ClearDownloads(string? libraryRoot)
     {
         var dir = DownloadDir(libraryRoot);
