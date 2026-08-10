@@ -137,9 +137,21 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             _cachedAt = DateTime.UtcNow;
         }
 
+        // A silent sweep left "are there receivers, or is discovery broken?" unanswerable
+        // from the log. Report the outcome once per sweep - Information when the set
+        // changed, Debug for the steady state (which includes a first sweep finding none).
+        var summary = result.Count == 0
+            ? "no AirPlay receivers on this network"
+            : string.Join(", ", result.Select(d => $"{d.DisplayName}{(d.IsAvailable ? "" : " (unresolved)")}"));
+
         if (changed)
         {
+            _log.Information("AirPlay sweep: {Count} receiver(s) - {Summary}", result.Count, summary);
             DevicesChanged?.Invoke(this, EventArgs.Empty);
+        }
+        else
+        {
+            _log.Debug("AirPlay sweep: unchanged, {Count} receiver(s)", result.Count);
         }
     }
 
