@@ -175,6 +175,13 @@ public static class CdAudioService
     /// Reads the TOC from an audio CD via FoxRedbook (cross-platform SCSI passthrough).
     /// Builds cdda:// URIs for LibVLC playback and enriches via MusicBrainz + Cover Art Archive.
     /// </summary>
+    /// <summary>
+    /// Optional chooser for the MusicBrainz multi-release case: given every candidate
+    /// pressing, returns the one this physical disc is (null = take the first, the old
+    /// behavior). The VM passes a dialog-backed chooser; headless callers pass nothing.
+    /// </summary>
+    public static Func<IReadOnlyList<DiscLookupResult>, Task<DiscLookupResult?>>? ChooseRelease { get; set; }
+
     public static async Task<CdDiscInfo> ReadDiscAsync(LibVLC vlc, DriveInfo drive)
     {
         var drivePath = drive.Name.TrimEnd('\\', '/');
@@ -358,12 +365,12 @@ public static class CdAudioService
         }
 
         var cached = MediaCache.GetCdMetadata(info.DiscId);
-        // Force a fresh MusicBrainz hit when the cached row is missing data
-        // that a newer version of OrgZ now fetches - cover art via the
-        // release-group CAA fallback, and genre from MB's voted genres.
-        // Won't loop: the next save either fills the gap or persists a real
-        // null, and we don't retry until the row is invalidated.
-        bool needsRefetch = cached != null && (cached.CoverArt == null || string.IsNullOrEmpty(cached.Genre));
+        // Re-fetch only when the row predates the current lookup pipeline. The old rule
+        // ("missing art or genre → refetch") re-ran the full MB+CAA round trip - with its
+        // 1.1s rate-limit stalls - on EVERY insertion of a disc that genuinely has no
+        // cover in the archive. A row saved at the current version is the settled answer,
+        // art or no art.
+        bool needsRefetch = cached != null && cached.LookupVersion < CachedCdMetadata.CurrentLookupVersion;
         if (cached != null && !needsRefetch)
         {
             ApplyCachedMetadata(info, cached);
@@ -371,25 +378,27 @@ public static class CdAudioService
         }
         if (cached != null)
         {
-            _log.Information("Cached CD metadata for disc {DiscId} missing {Missing} — re-running MusicBrainz lookup", info.DiscId,
-                cached.CoverArt == null && string.IsNullOrEmpty(cached.Genre) ? "cover art and genre"
-                : cached.CoverArt == null ? "cover art"
-                : "genre");
+            _log.Information("Cached CD metadata for disc {DiscId} is lookup-version {Version} (current {Current}) — re-running MusicBrainz", info.DiscId, cached.LookupVersion, CachedCdMetadata.CurrentLookupVersion);
         }
 
-        var result = await MusicBrainzService.LookupByDiscIdAsync(info.DiscId);
-
-        if (result == null && !string.IsNullOrEmpty(info.TocString))
+        var candidates = await MusicBrainzService.LookupReleasesByDiscIdAsync(info.DiscId);
+        if (candidates.Count == 0 && !string.IsNullOrEmpty(info.TocString))
         {
-            result = await MusicBrainzService.LookupByTocAsync(info.TocString);
+            candidates = await MusicBrainzService.LookupReleasesByTocAsync(info.TocString);
         }
 
-        if (result == null)
+        if (candidates.Count == 0)
         {
             return;
         }
 
-        _log.Information("MusicBrainz match: Artist={Artist} Title={Title} Year={Year}", result.Artist, result.Title, result.Year);
+        // Multiple pressings match this disc: ask which one it is (a cancelled picker
+        // takes the first, the old behavior). The choice is cached, so it's asked once.
+        var result = candidates.Count > 1 && ChooseRelease is { } choose
+            ? await choose(candidates) ?? candidates[0]
+            : candidates[0];
+
+        _log.Information("MusicBrainz match ({Count} candidate(s)): Artist={Artist} Title={Title} Year={Year}", candidates.Count, result.Artist, result.Title, result.Year);
         info.ReleaseMbid = result.ReleaseMbid;
 
         byte[]? coverArt = null;
@@ -409,6 +418,7 @@ public static class CdAudioService
             Genre = result.Genre,
             TracksJson = tracksJson,
             CoverArt = coverArt,
+            LookupVersion = CachedCdMetadata.CurrentLookupVersion,
         });
 
         ApplyLookupResult(info, result, coverArt);

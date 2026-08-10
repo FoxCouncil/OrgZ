@@ -35,32 +35,33 @@ public static class MusicBrainzService
     /// Look up a CD by its MusicBrainz DiscID. Returns null on miss.
     /// </summary>
     public static async Task<DiscLookupResult?> LookupByDiscIdAsync(string discId)
-    {
-        var json = await RateLimitedGetAsync($"discid/{discId}?inc=recordings+artist-credits+release-groups+genres&fmt=json");
-        if (json == null)
-        {
-            return null;
-        }
-
-        return ParseDiscResponse(json);
-    }
+        => (await LookupReleasesByDiscIdAsync(discId)) is { Count: > 0 } all ? all[0] : null;
 
     /// <summary>
     /// Fuzzy lookup by TOC string when exact DiscID misses.
-    /// Returns candidate releases - caller should present for user confirmation if multiple.
     /// </summary>
     public static async Task<DiscLookupResult?> LookupByTocAsync(string tocString)
+        => (await LookupReleasesByTocAsync(tocString)) is { Count: > 0 } all ? all[0] : null;
+
+    /// <summary>
+    /// Every candidate release for a DiscID - the same album's pressings differ by
+    /// year / country / track titles, and the caller can ask the user which one this
+    /// physical disc actually is.
+    /// </summary>
+    public static async Task<List<DiscLookupResult>> LookupReleasesByDiscIdAsync(string discId)
+    {
+        var json = await RateLimitedGetAsync($"discid/{discId}?inc=recordings+artist-credits+release-groups+genres&fmt=json");
+        return json == null ? [] : ParseDiscResponseAll(json);
+    }
+
+    /// <summary>Every candidate release for a TOC fuzzy match.</summary>
+    public static async Task<List<DiscLookupResult>> LookupReleasesByTocAsync(string tocString)
     {
         // TOC separators must be literal + in the URL, not decoded as spaces.
         // Uri.EscapeDataString encodes + as %2B which MusicBrainz also accepts.
         var url = $"discid/-?toc={Uri.EscapeDataString(tocString)}&inc=recordings+artist-credits+release-groups+genres&fmt=json";
         var json = await RateLimitedGetAsync(url);
-        if (json == null)
-        {
-            return null;
-        }
-
-        return ParseDiscResponse(json);
+        return json == null ? [] : ParseDiscResponseAll(json);
     }
 
     /// <summary>
@@ -145,32 +146,31 @@ public static class MusicBrainzService
     }
 
     internal static DiscLookupResult? ParseDiscResponse(string json)
+        => ParseDiscResponseAll(json) is { Count: > 0 } all ? all[0] : null;
+
+    internal static List<DiscLookupResult> ParseDiscResponseAll(string json)
     {
         try
         {
             // JsonDocument rents pooled buffers - undisposed, every disc lookup leaked
             // one rental until finalization. Every element read completes inside here.
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            // Direct disc lookup returns a single release list
-            JsonElement releases;
-            if (root.TryGetProperty("releases", out releases))
+            if (!doc.RootElement.TryGetProperty("releases", out var releases))
             {
-                // Use the first release
-                if (releases.GetArrayLength() == 0)
-                {
-                    return null;
-                }
-
-                return ParseRelease(releases[0]);
+                return [];
             }
 
-            return null;
+            var results = new List<DiscLookupResult>();
+            foreach (var release in releases.EnumerateArray())
+            {
+                results.Add(ParseRelease(release));
+            }
+
+            return results;
         }
         catch
         {
-            return null;
+            return [];
         }
     }
 
@@ -206,6 +206,11 @@ public static class MusicBrainzService
             {
                 result.Year = year;
             }
+        }
+
+        if (release.TryGetProperty("country", out var country))
+        {
+            result.Country = country.GetString();
         }
 
         // Artist from artist-credit
@@ -333,7 +338,29 @@ public class DiscLookupResult
     public string? Artist { get; set; }
     public string? Genre { get; set; }
     public uint? Year { get; set; }
+    public string? Country { get; set; }
     public List<TrackInfo> Tracks { get; set; } = [];
+
+    /// <summary>Release-picker line: "Album — Artist (1994, DE, 12 tracks)".</summary>
+    public string DisplayLabel
+    {
+        get
+        {
+            var details = new List<string>();
+            if (Year is { } y)
+            {
+                details.Add(y.ToString());
+            }
+            if (!string.IsNullOrWhiteSpace(Country))
+            {
+                details.Add(Country);
+            }
+            details.Add($"{Tracks.Count} track{(Tracks.Count == 1 ? "" : "s")}");
+
+            var head = string.IsNullOrWhiteSpace(Artist) ? Title : $"{Title} — {Artist}";
+            return $"{head} ({string.Join(", ", details)})";
+        }
+    }
 }
 
 public class TrackInfo

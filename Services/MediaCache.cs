@@ -374,6 +374,8 @@ public static class MediaCache
         var columns = new[]
         {
             "Genre TEXT",
+            // 0 = pre-versioned row: re-fetches once, then records the version it settled at.
+            "LookupVersion INTEGER NOT NULL DEFAULT 0",
         };
 
         AddMissingColumns(connection, "CdMetadataCache", columns);
@@ -1197,7 +1199,7 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, Genre FROM CdMetadataCache WHERE DiscId = @id";
+        cmd.CommandText = "SELECT ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, Genre, LookupVersion FROM CdMetadataCache WHERE DiscId = @id";
         cmd.Parameters.AddWithValue("@id", discId);
 
         using var reader = cmd.ExecuteReader();
@@ -1216,6 +1218,7 @@ public static class MediaCache
             TracksJson = reader.IsDBNull(4) ? null : reader.GetString(4),
             CoverArt = reader.IsDBNull(5) ? null : (byte[])reader[5],
             Genre = reader.IsDBNull(6) ? null : reader.GetString(6),
+            LookupVersion = reader.IsDBNull(7) ? 0 : (int)reader.GetInt64(7),
         };
     }
 
@@ -1227,9 +1230,9 @@ public static class MediaCache
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT OR REPLACE INTO CdMetadataCache
-                (DiscId, ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, Genre, CachedAt)
+                (DiscId, ReleaseMbid, Artist, Album, Year, TracksJson, CoverArt, Genre, LookupVersion, CachedAt)
             VALUES
-                (@id, @mbid, @artist, @album, @year, @tracks, @art, @genre, @now)
+                (@id, @mbid, @artist, @album, @year, @tracks, @art, @genre, @lookupVersion, @now)
             """;
         cmd.Parameters.AddWithValue("@id", meta.DiscId);
         cmd.Parameters.AddWithValue("@mbid", (object?)meta.ReleaseMbid ?? DBNull.Value);
@@ -1239,6 +1242,7 @@ public static class MediaCache
         cmd.Parameters.AddWithValue("@tracks", (object?)meta.TracksJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@art", (object?)meta.CoverArt ?? DBNull.Value);
         cmd.Parameters.AddWithValue("@genre", (object?)meta.Genre ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@lookupVersion", meta.LookupVersion);
         cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
         cmd.ExecuteNonQuery();
     }
@@ -1248,6 +1252,13 @@ public static class MediaCache
 
 public class CachedCdMetadata
 {
+    /// <summary>
+    /// The lookup pipeline that produced current rows. A row saved at this version is the
+    /// settled answer even when art/genre are null (the archive genuinely has none) - only
+    /// rows from an OLDER pipeline re-fetch. Bump when the lookup learns to fetch more.
+    /// </summary>
+    public const int CurrentLookupVersion = 2;
+
     public string DiscId { get; set; } = "";
     public string? ReleaseMbid { get; set; }
     public string? Artist { get; set; }
@@ -1256,4 +1267,5 @@ public class CachedCdMetadata
     public uint? Year { get; set; }
     public string? TracksJson { get; set; }
     public byte[]? CoverArt { get; set; }
+    public int LookupVersion { get; set; }
 }

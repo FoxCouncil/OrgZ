@@ -1520,6 +1520,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         ButtonPlayPausePadding = ICON_PLAY_PADDING;
 
+        // Multi-pressing CDs ask which release this disc actually is; the answer is
+        // cached per DiscID, so it's asked once. Cleared in Dispose - the delegate
+        // captures this VM.
+        CdAudioService.ChooseRelease = candidates =>
+            Dispatcher.UIThread.InvokeAsync(() => PickCdReleaseAsync(candidates));
+
         Podcasts = new PodcastsViewModel(this);
         Audiobooks = new AudiobooksViewModel(this);
         // Load persisted subscriptions up front so the store's left-column "Subscribed" section and
@@ -8075,6 +8081,62 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         return files;
     }
 
+    /// <summary>
+    /// Modal picker for the multi-pressing case: one line per candidate release
+    /// ("Album — Artist (1994, DE, 12 tracks)"), double-click or OK to choose.
+    /// Null (cancel) lets the caller take the first candidate, the old behavior.
+    /// </summary>
+    private async Task<DiscLookupResult?> PickCdReleaseAsync(IReadOnlyList<DiscLookupResult> candidates)
+    {
+        var list = new Avalonia.Controls.ListBox
+        {
+            ItemsSource = candidates.Select(c => c.DisplayLabel).ToList(),
+            SelectedIndex = 0,
+            MaxHeight = 320,
+        };
+
+        var dialog = new Avalonia.Controls.Window
+        {
+            Title = "Which pressing is this disc?",
+            MinWidth = 480,
+            SizeToContent = Avalonia.Controls.SizeToContent.WidthAndHeight,
+            WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterOwner,
+            CanResize = false,
+        };
+
+        DiscLookupResult? chosen = null;
+        var ok = new Avalonia.Controls.Button { Content = "OK", Width = 80 };
+        var cancel = new Avalonia.Controls.Button { Content = "Cancel", Width = 80 };
+        ok.Click += (_, _) => { chosen = list.SelectedIndex >= 0 ? candidates[list.SelectedIndex] : null; dialog.Close(); };
+        cancel.Click += (_, _) => dialog.Close();
+        list.DoubleTapped += (_, _) => { chosen = list.SelectedIndex >= 0 ? candidates[list.SelectedIndex] : null; dialog.Close(); };
+
+        dialog.Content = new Avalonia.Controls.StackPanel
+        {
+            Margin = new Avalonia.Thickness(16),
+            Spacing = 12,
+            Children =
+            {
+                list,
+                new Avalonia.Controls.StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Spacing = 8,
+                    Children = { cancel, ok },
+                },
+            },
+        };
+
+        // Same owner rule as ShowSettings: the main window can be hidden behind the
+        // mini-player, and a non-visible owner throws.
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+                     as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)
+                    ?.Windows.FirstOrDefault(w => w.IsVisible) ?? _window;
+        await dialog.ShowDialog(owner);
+        return chosen;
+    }
+
     /// <summary>Shows an OK-only error dialog for a burn that can't start or didn't finish.</summary>
     private async Task ShowBurnErrorAsync(string message)
     {
@@ -9711,6 +9773,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _vmCts.Cancel();   // stop background loops (job reattach polling) before teardown
+
+        // The release-picker delegate captures this VM - a stale hook would drive a dead window.
+        CdAudioService.ChooseRelease = null;
 
         // Detach from the process-wide singletons first: they outlive this ViewModel, and a
         // handler left attached keeps the whole VM (and its window) alive and reachable.
