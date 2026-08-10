@@ -1,0 +1,36 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+	<!-- The LCD transport slider chrome (seek + volume) shared by MainWindow and the
+	     mini-player. One definition: each window StyleIncludes this file inside its
+	     Window.Styles, keeping the style window-scoped (dialog sliders keep the fluent
+	     look) while the two players can never drift apart again. -->
+	<Style Selector="Slider:horizontal">
+		<Setter Property="MinHeight" Value="14" />
+		<Setter Property="Margin" Value="0,-2,0,0" />
+		<Setter Property="Padding" Value="0" />
+
+		<!-- Filled track (left of thumb) -->
+		<Setter Property="Foreground" Value="{StaticResource OrgZLcdProgressBrush}" />
+
+		<!-- Empty track background -->
+		<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
+
+		<Style Selector="^ Track">
+			<Setter Property="Height" Value="14" />
+			<Setter Property="Margin" Value="0" />
+
+			<!-- Playback head -->
+			<Style Selector="^ Thumb">
+				<Setter Property="Width" Value="14" />
+				<Setter Property="Height" Value="14" />
+				<Setter Property="CornerRadius" Value="0" />
+				<Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
+				<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
+				<Setter Property="BorderThickness" Value="1" />
+				<Setter Property="Margin" Value="0" />
+				<Setter Property="Padding" Value="0" />
+			</Style>
+		</Style>
+	</Style>
+</Styles>

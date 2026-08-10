@@ -71,34 +71,8 @@
 			<Setter Property="Background" Value="{DynamicResource SystemChromeGrayColor}"/>
 		</Style>
 
-		<Style Selector="Slider:horizontal">
-			<Setter Property="MinHeight" Value="14" />
-			<Setter Property="Margin" Value="0,-2,0,0" />
-			<Setter Property="Padding" Value="0" />
-
-			<!-- Filled track (left of thumb) -->
-			<Setter Property="Foreground" Value="{StaticResource OrgZLcdProgressBrush}" />
-
-			<!-- Empty track background -->
-			<Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
-
-			<Style Selector="^ Track">
-				<Setter Property="Height" Value="14" />
-				<Setter Property="Margin" Value="0" />
-
-				<!-- Playback head -->
-				<Style Selector="^ Thumb">
-					<Setter Property="Width" Value="14" />
-					<Setter Property="Height" Value="14" />
-					<Setter Property="CornerRadius" Value="0" />
-					<Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
-					<Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
-					<Setter Property="BorderThickness" Value="1" />
-					<Setter Property="Margin" Value="0" />
-					<Setter Property="Padding" Value="0" />
-				</Style>
-			</Style>
-		</Style>
+		<!-- LCD transport slider chrome - shared with the mini-player. -->
+		<StyleInclude Source="avares://OrgZ/Controls/TransportSliderStyles.axaml" />
 
 		<!-- GridSplitter style -->
 		<Style Selector="GridSplitter">

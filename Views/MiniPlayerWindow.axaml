@@ -33,32 +33,9 @@
             <Setter Property="TextElement.FontFamily" Value="{StaticResource OrgZMonoFont}" />
         </Style>
 
-        <!-- Duplicate of MainWindow's slider style so the mini-player's seek and
-             volume sliders match the full player exactly.  Keep in sync with
-             MainWindow.axaml by hand - NOT merged into a shared resource because
-             the main-window look is the canonical design and shouldn't shift if
-             someone tweaks the mini-player later. -->
-        <Style Selector="Slider:horizontal">
-            <Setter Property="MinHeight" Value="14" />
-            <Setter Property="Margin" Value="0,-2,0,0" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Foreground" Value="{StaticResource OrgZLcdProgressBrush}" />
-            <Setter Property="Background" Value="{StaticResource OrgZLcdRimBrush}" />
-            <Style Selector="^ Track">
-                <Setter Property="Height" Value="14" />
-                <Setter Property="Margin" Value="0" />
-                <Style Selector="^ Thumb">
-                    <Setter Property="Width" Value="14" />
-                    <Setter Property="Height" Value="14" />
-                    <Setter Property="CornerRadius" Value="0" />
-                    <Setter Property="Background" Value="{StaticResource OrgZLcdProgressBrush}" />
-                    <Setter Property="BorderBrush" Value="{StaticResource OrgZLcdTextBrush}" />
-                    <Setter Property="BorderThickness" Value="1" />
-                    <Setter Property="Margin" Value="0" />
-                    <Setter Property="Padding" Value="0" />
-                </Style>
-            </Style>
-        </Style>
+        <!-- LCD transport slider chrome - the same StyleInclude MainWindow uses, so the
+             two players can never drift apart (the old hand-kept duplicate did). -->
+        <StyleInclude Source="avares://OrgZ/Controls/TransportSliderStyles.axaml" />
 
         <!-- Transport buttons: same colors as MainWindow's transport cluster -
              SystemChromeGrayColor background with default Fluent foreground so

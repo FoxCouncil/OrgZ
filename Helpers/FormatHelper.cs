@@ -4,7 +4,12 @@ namespace OrgZ.Helpers;
 
 internal static class FormatHelper
 {
-    public static string FormatFileSize(long bytes)
+    /// <summary>
+    /// The one binary-unit (1024) reduction every byte formatter shares: 1536 → (1.5, "KB", 1).
+    /// Rounding style stays per-surface (stats are precise, device labels compact), but the
+    /// loop and unit table live here - there used to be three divergent copies.
+    /// </summary>
+    public static (double Size, string Unit, int UnitIndex) ReduceBytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];
         double size = bytes;
@@ -16,7 +21,13 @@ internal static class FormatHelper
             unit++;
         }
 
-        return unit == 0 ? $"{size:F0} {units[unit]}" : $"{size:F2} {units[unit]}";
+        return (size, units[unit], unit);
+    }
+
+    public static string FormatFileSize(long bytes)
+    {
+        var (size, unit, unitIndex) = ReduceBytes(bytes);
+        return unitIndex == 0 ? $"{size:F0} {unit}" : $"{size:F2} {unit}";
     }
 
     public static string FormatTimeSpan(TimeSpan ts)
