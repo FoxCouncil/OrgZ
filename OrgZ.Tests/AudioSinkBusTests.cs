@@ -59,6 +59,59 @@ public class AudioSinkBusTests
         return pcm;
     }
 
+    /// <summary>
+    /// With no open sink, nothing paces LibVLC's audio callback and a track decodes as
+    /// fast as the disk can feed it - heard as playback racing at many times speed. The
+    /// bus has to supply that clock itself.
+    /// </summary>
+    [Fact]
+    public void Write_Paces_In_Real_Time_When_No_Sink_Is_Open()
+    {
+        using var bus = new AudioSinkBus();
+        bus.SetFormat(AudioFormat.CdDaStereo16);
+
+        // Half a second of CD audio, handed over as fast as the caller can push it.
+        var halfSecond = AudioFormat.CdDaStereo16.BytesPerSecond / 2;
+        var chunk = PatternedPcm(TargetBytes);
+        var chunks = Math.Max(1, halfSecond / TargetBytes);
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < chunks; i++)
+        {
+            bus.Write(chunk);
+        }
+        started.Stop();
+
+        // Generous floor: the point is that it takes ROUGHLY the audio's own duration
+        // rather than returning instantly, not that the clock is sample-accurate.
+        var expected = (double)(chunks * TargetBytes) / AudioFormat.CdDaStereo16.BytesPerSecond;
+        Assert.True(started.Elapsed.TotalSeconds > expected * 0.7,
+            $"expected ~{expected:0.00}s of pacing, took {started.Elapsed.TotalSeconds:0.00}s");
+    }
+
+    /// <summary>An open sink owns the clock - the bus must not add a second one on top.</summary>
+    [Fact]
+    public void Write_Does_Not_Pace_When_A_Sink_Is_Open()
+    {
+        using var bus = new AudioSinkBus();
+        bus.SetFormat(AudioFormat.CdDaStereo16);
+        bus.Add(new FakeSink("a"));
+
+        var chunk = PatternedPcm(TargetBytes);
+        var chunks = Math.Max(1, AudioFormat.CdDaStereo16.BytesPerSecond / TargetBytes);
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < chunks; i++)
+        {
+            bus.Write(chunk);
+        }
+        started.Stop();
+
+        // A whole second of audio through a non-blocking sink should be near-instant.
+        Assert.True(started.Elapsed.TotalSeconds < 0.25,
+            $"a sink was open, so the bus should not have paced - took {started.Elapsed.TotalSeconds:0.00}s");
+    }
+
     [Fact]
     public void Write_Fans_Out_To_Every_Attached_Sink()
     {

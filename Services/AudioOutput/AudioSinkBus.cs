@@ -323,14 +323,19 @@ public sealed class AudioSinkBus : IDisposable
         // The snapshot is immutable and swapped whole on mutation, so the fan-out
         // neither locks nor allocates - it runs on the audio thread ~20×/second.
         var sinks = _sinkSnapshot;
-        if (sinks.Length == 0)
-        {
-            return;
-        }
 
         // One read of the nullable format for the whole call: a torn read across an
         // engine swap could otherwise pick the wrong scaling branch for one buffer.
         var format = _format;
+
+        // Before the early-out: with no open sink there is no clock, and that has to be
+        // supplied here or playback races (see PaceIfUnclocked).
+        PaceIfUnclocked(pcm.Length, format, sinks);
+
+        if (sinks.Length == 0)
+        {
+            return;
+        }
 
         // Apply master volume × normalization gain if the product isn't unity.  Scaling is done
         // on a per-call scratch array so sinks receive the adjusted data and can still apply their
@@ -376,9 +381,83 @@ public sealed class AudioSinkBus : IDisposable
         }
     }
 
+    // Wall-clock state for PaceIfUnclocked. Only touched from the audio thread.
+    private long _paceStart;
+    private long _pacedBytes;
+
+    /// <summary>
+    /// Supplies a playback clock when no sink is open to provide one.
+    ///
+    /// Normally an output paces the decoder: WaveOut blocks inside Write until its buffer
+    /// drains, and the AirPlay sink back-pressures once it's streaming. LibVLC's audio
+    /// callback has no clock of its own - it decodes exactly as fast as we accept buffers.
+    /// So when every sink is shut (an AirPlay receiver that refused to pair, a device that
+    /// vanished, or simply nothing selected) the track rips past at whatever speed the disk
+    /// can feed it, which is heard as playback running at many times normal speed.
+    ///
+    /// Sleeping here is correct rather than wasteful: this IS the decoder thread, and
+    /// holding it to real time is exactly what an output would have done. The wait is
+    /// capped so a format glitch can't park playback indefinitely, and the accumulator
+    /// resets whenever a real sink takes over so the two clocks never fight.
+    /// </summary>
+    private void PaceIfUnclocked(int byteCount, AudioFormat? format, IAudioSink[] sinks)
+    {
+        foreach (var sink in sinks)
+        {
+            if (sink.IsOpen)
+            {
+                _pacedBytes = 0;   // a real output owns the clock again
+                return;
+            }
+        }
+
+        if (format is not { SampleRate: > 0, Channels: > 0, BitsPerSample: > 0 } clock)
+        {
+            return;
+        }
+
+        var frameBytes = clock.Channels * (clock.BitsPerSample / 8);
+        if (frameBytes <= 0)
+        {
+            return;
+        }
+
+        if (_pacedBytes == 0)
+        {
+            _paceStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        }
+
+        _pacedBytes += byteCount;
+
+        var due = (double)(_pacedBytes / frameBytes) / clock.SampleRate;
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_paceStart).TotalSeconds;
+        var wait = due - elapsed;
+
+        if (wait > 0)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(Math.Min(wait, 1.0)));
+        }
+    }
+
+    /// <summary>Drops the fallback clock's accumulator - call on seek/stop so it restarts clean.</summary>
+    internal void ResetPacing() => _pacedBytes = 0;
+
+    // A sink that just refused to open must not be retried on every buffer. The bus calls
+    // TryOpen ~20x/second, which turned one locked-out AirPlay receiver into a flood of
+    // identical warnings - and, worse, kept restarting the receiver's own lockout timer.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _openFailedAt = new(StringComparer.Ordinal);
+    private const int ReopenCooldownMs = 5000;
+
     // Instance, not static: a failed open raises SinkFailed so the UI can say why.
     private void TryOpen(IAudioSink sink, AudioFormat format)
     {
+        if (!sink.IsOpen
+            && _openFailedAt.TryGetValue(sink.Id, out var failedAt)
+            && Environment.TickCount64 - failedAt < ReopenCooldownMs)
+        {
+            return;
+        }
+
         try
         {
             // Native-rate playback: the format changes per source (a 44.1 kHz
@@ -393,13 +472,16 @@ public sealed class AudioSinkBus : IDisposable
                 sink.Close();
             }
             sink.Open(format);
+            _openFailedAt.TryRemove(sink.Id, out _);
         }
         catch (Exception ex)
         {
+            _openFailedAt[sink.Id] = Environment.TickCount64;
             _log.Warning(ex, "AudioSinkBus: failed to open {Id}", sink.Id);
             // A sink that can't open produces silence on that output. The log alone left
             // the user staring at a playing track with no sound and no explanation.
-            SinkFailed?.Invoke(this, new SinkFailure(sink.Id, sink.DisplayName, ex.Message));
+            SinkFailed?.Invoke(this, new SinkFailure(sink.Id, sink.DisplayName, ex.Message,
+                sink is AirPlay.AirPlayRaopSink { NeedsPassword: true }));
         }
     }
 
