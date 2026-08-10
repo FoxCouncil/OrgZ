@@ -26,6 +26,11 @@ internal sealed class AirPlayRaopSink : IAudioSink
 
     private RaopSession? _session;
     private AirPlay2Session? _airplay2;
+
+    // Handshake backoff, so a failing receiver isn't hammered (see Open).
+    private DateTime _retryNotBefore = DateTime.MinValue;
+    private int _failureCount;
+    private string? _lastFailure;
     private Channel<byte[]>? _queue;
     private Task? _pump;
     private CancellationTokenSource? _cts;
@@ -87,6 +92,15 @@ internal sealed class AirPlayRaopSink : IAudioSink
         if (IsOpen)
         {
             return;
+        }
+
+        // The bus reopens a closed sink on every playback tick, so a failed handshake was
+        // being retried ~3x/second. Against a HomeKit receiver that trips its brute-force
+        // lockout within seconds - we were the reason pairing kept getting refused. Back
+        // off instead, and answer from the cached reason without touching the network.
+        if (DateTime.UtcNow < _retryNotBefore)
+        {
+            throw new InvalidOperationException(_lastFailure ?? $"“{DisplayName}” is not available right now.");
         }
 
         // RAOP is fixed at 44.1 kHz 16-bit stereo. The bus hands us whatever the decoder
@@ -277,6 +291,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
                 raop = new RaopSession(_host, _port);
                 await raop.ConnectAsync(ct);
                 _session = raop;
+                _failureCount = 0;   // a good connection clears the backoff ladder
                 _log.Information("AirPlay streaming to {Name} (classic RAOP)", DisplayName);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && NeedsPairing(ex))
@@ -288,6 +303,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
                 airplay2 = new AirPlay2Session(_host, _port);
                 await airplay2.ConnectAsync(ct);
                 _airplay2 = airplay2;
+                _failureCount = 0;
                 _log.Information("AirPlay streaming to {Name} (AirPlay 2)", DisplayName);
             }
 
@@ -307,7 +323,20 @@ internal sealed class AirPlayRaopSink : IAudioSink
             // failure mode this whole path exists to avoid.
             _log.Error(ex, "AirPlay handshake failed for {Name} ({Host}:{Port})", DisplayName, _host, _port);
             IsOpen = false;
-            ConnectFailed?.Invoke(this, Explain(ex));
+
+            // A receiver that's rate-limiting needs real time, not another attempt: HomeKit
+            // lockouts clear on a timer and every retry restarts it. Everything else backs
+            // off gently so a flaky network doesn't turn into a connection storm either.
+            var lockedOut = ex.Message.Contains("too many attempts", StringComparison.OrdinalIgnoreCase);
+            _failureCount++;
+            var backoff = lockedOut
+                ? TimeSpan.FromMinutes(5)
+                : TimeSpan.FromSeconds(Math.Min(60, 5 * Math.Pow(2, _failureCount - 1)));
+            _retryNotBefore = DateTime.UtcNow.Add(backoff);
+            _lastFailure = Explain(ex);
+
+            _log.Information("AirPlay: not retrying {Name} for {Seconds:0}s", DisplayName, backoff.TotalSeconds);
+            ConnectFailed?.Invoke(this, _lastFailure);
             return;
         }
 
@@ -346,9 +375,14 @@ internal sealed class AirPlayRaopSink : IAudioSink
     /// A bare "401 Unauthorized" reads like a bug; the real meaning is that this receiver
     /// wants the AirPlay 2 pairing handshake, which OrgZ doesn't implement.
     /// </summary>
-    private string Explain(Exception ex) => ex.Message.Contains("401", StringComparison.Ordinal)
-        ? $"“{DisplayName}” needs AirPlay 2 pairing, which OrgZ can't do yet — it only supports older AirPlay speakers."
-        : $"Couldn't start AirPlay to “{DisplayName}”: {ex.Message}";
+    private string Explain(Exception ex) => ex.Message switch
+    {
+        var m when m.Contains("too many attempts", StringComparison.OrdinalIgnoreCase) =>
+            $"“{DisplayName}” has locked out pairing attempts — wait a few minutes, or restart the speaker, then try again.",
+        var m when m.Contains("401", StringComparison.Ordinal) =>
+            $"“{DisplayName}” refused the connection ({DisplayName} may be in use by another sender).",
+        _ => $"Couldn't start AirPlay to “{DisplayName}”: {ex.Message}",
+    };
 
     private void PushVolume()
     {

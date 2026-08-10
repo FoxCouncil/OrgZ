@@ -4,6 +4,7 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using OrgZ.Services.AudioOutput;
 using OrgZ.Services.AudioOutput.AirPlay;
 
 namespace OrgZ.Tests;
@@ -248,6 +249,34 @@ public class AirPlayPairingTests
     public void A_401_is_what_routes_a_receiver_to_the_paired_path(string message, bool expected)
     {
         Assert.Equal(expected, AirPlayRaopSink.NeedsPairing(new InvalidOperationException(message)));
+    }
+
+    [Fact]
+    public void A_failed_handshake_backs_off_instead_of_retrying_immediately()
+    {
+        // The bus reopens a closed sink every playback tick. Without a cooldown that
+        // becomes ~3 pair-setup attempts a second, which is what tripped the HomePod's
+        // brute-force lockout in the first place.
+        var device = new AudioDeviceInfo
+        {
+            DeviceId = "test", DisplayName = "TestPod", ProviderId = "airplay", ProviderName = "AirPlay",
+        };
+        var sink = new AirPlayRaopSink(device, "127.0.0.1", 1);   // nothing listening
+
+        sink.Open(AudioFormat.CdDaStereo16);
+
+        // The connect runs off-thread; give it a moment to fail and arm the backoff.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (sink.IsOpen && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(50);
+        }
+
+        Assert.False(sink.IsOpen);
+        // The next Open must refuse immediately from cached state, not dial out again.
+        Assert.Throws<InvalidOperationException>(() => sink.Open(AudioFormat.CdDaStereo16));
+
+        sink.Dispose();
     }
 
     [Fact]
