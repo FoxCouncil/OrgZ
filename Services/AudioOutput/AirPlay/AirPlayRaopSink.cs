@@ -78,11 +78,18 @@ internal sealed class AirPlayRaopSink : IAudioSink
             return;
         }
 
-        // RAOP is 44.1k/16/stereo, full stop - the bus negotiates that format for us, and
-        // anything else would need a resampler we don't have here.
-        if (format.SampleRate != 44100 || format.Channels != 2 || format.BitsPerSample != 16)
+        // RAOP is fixed at 44.1 kHz 16-bit stereo. The bus hands us whatever the decoder
+        // produced - in practice 32-bit float - so the sink converts depth itself (the
+        // IAudioSink contract expects exactly that). Rate and channel count it cannot fix:
+        // there's no resampler here, so those still refuse.
+        if (format.SampleRate != 44100 || format.Channels != 2)
         {
-            throw new NotSupportedException($"AirPlay needs 44100 Hz 16-bit stereo; the stream is {format.SampleRate} Hz {format.BitsPerSample}-bit x{format.Channels}.");
+            throw new NotSupportedException($"AirPlay needs 44100 Hz stereo; the stream is {format.SampleRate} Hz x{format.Channels}.");
+        }
+
+        if (!CanConvert(format))
+        {
+            throw new NotSupportedException($"AirPlay can't convert {format.BitsPerSample}-bit {format.Encoding} to the 16-bit PCM RAOP requires.");
         }
 
         CurrentFormat = format;
@@ -115,7 +122,9 @@ internal sealed class AirPlayRaopSink : IAudioSink
             return;
         }
 
-        _partial.AddRange(pcm);
+        // _partial always holds S16LE - convert on the way in, so the packer and the
+        // 352-frame chunking below only ever deal with one layout.
+        AppendAsS16(pcm);
 
         while (_partial.Count >= RaopAlac.PcmBytesPerPacket)
         {
@@ -123,6 +132,73 @@ internal sealed class AirPlayRaopSink : IAudioSink
             _partial.RemoveRange(0, RaopAlac.PcmBytesPerPacket);
             ApplyGain(packet);
             _queue.Writer.TryWrite(packet);
+        }
+    }
+
+    /// <summary>Depths this sink can reduce to the 16-bit PCM RAOP requires.</summary>
+    internal static bool CanConvert(AudioFormat format) => format switch
+    {
+        { Encoding: AudioSampleEncoding.PcmSigned, BitsPerSample: 16 or 24 or 32 } => true,
+        { Encoding: AudioSampleEncoding.IeeeFloat, BitsPerSample: 32 } => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Converts one buffer to S16LE and appends it to <see cref="_partial"/>.
+    /// Exposed as a static for tests; the instance path just forwards its format.
+    /// </summary>
+    internal static void ConvertToS16(ReadOnlySpan<byte> source, AudioFormat format, List<byte> destination)
+    {
+        switch (format.Encoding, format.BitsPerSample)
+        {
+            case (AudioSampleEncoding.PcmSigned, 16):
+            {
+                destination.AddRange(source);
+            }
+            break;
+
+            case (AudioSampleEncoding.IeeeFloat, 32):
+            {
+                // LibVLC's tap hands us normalized floats; clamp before scaling so an
+                // inter-sample peak above 1.0 wraps to full scale instead of to silence.
+                for (var i = 0; i + 4 <= source.Length; i += 4)
+                {
+                    var value = BitConverter.ToSingle(source[i..(i + 4)]);
+                    var scaled = (int)(Math.Clamp(value, -1f, 1f) * short.MaxValue);
+                    destination.Add((byte)(scaled & 0xFF));
+                    destination.Add((byte)((scaled >> 8) & 0xFF));
+                }
+            }
+            break;
+
+            case (AudioSampleEncoding.PcmSigned, 32):
+            {
+                for (var i = 0; i + 4 <= source.Length; i += 4)
+                {
+                    // Keep the top 16 bits.
+                    destination.Add(source[i + 2]);
+                    destination.Add(source[i + 3]);
+                }
+            }
+            break;
+
+            case (AudioSampleEncoding.PcmSigned, 24):
+            {
+                for (var i = 0; i + 3 <= source.Length; i += 3)
+                {
+                    destination.Add(source[i + 1]);
+                    destination.Add(source[i + 2]);
+                }
+            }
+            break;
+        }
+    }
+
+    private void AppendAsS16(ReadOnlySpan<byte> source)
+    {
+        if (CurrentFormat is { } format)
+        {
+            ConvertToS16(source, format, _partial);
         }
     }
 

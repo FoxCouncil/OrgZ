@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using System.Buffers.Binary;
+using OrgZ.Services.AudioOutput;
 using OrgZ.Services.AudioOutput.AirPlay;
 
 namespace OrgZ.Tests;
@@ -300,6 +301,85 @@ public class RaopProtocolTests
         Assert.Equal(server, ports.Server);
         Assert.Equal(control, ports.Control);
         Assert.Equal(timing, ports.Timing);
+    }
+
+    // ===== Sink format conversion =====
+    // The bus delivers whatever the decoder produced (32-bit float in practice); RAOP is
+    // fixed at 16-bit, so the sink converts. Getting this wrong opens no sink at all.
+
+    [Theory]
+    [InlineData(AudioSampleEncoding.IeeeFloat, 32, true)]
+    [InlineData(AudioSampleEncoding.PcmSigned, 16, true)]
+    [InlineData(AudioSampleEncoding.PcmSigned, 24, true)]
+    [InlineData(AudioSampleEncoding.PcmSigned, 32, true)]
+    [InlineData(AudioSampleEncoding.PcmUnsigned, 8, false)]
+    public void Sink_accepts_the_depths_it_can_reduce(AudioSampleEncoding encoding, int bits, bool expected)
+    {
+        var format = new AudioFormat { SampleRate = 44100, Channels = 2, BitsPerSample = bits, Encoding = encoding };
+
+        Assert.Equal(expected, AirPlayRaopSink.CanConvert(format));
+    }
+
+    [Fact]
+    public void Float32_converts_to_s16_at_full_scale()
+    {
+        var format = new AudioFormat { SampleRate = 44100, Channels = 2, BitsPerSample = 32, Encoding = AudioSampleEncoding.IeeeFloat };
+        var source = new List<byte>();
+        foreach (var f in new[] { 0f, 1f, -1f, 0.5f })
+        {
+            source.AddRange(BitConverter.GetBytes(f));
+        }
+
+        var destination = new List<byte>();
+        AirPlayRaopSink.ConvertToS16(source.ToArray(), format, destination);
+
+        Assert.Equal(8, destination.Count);   // four samples, two bytes each
+        var s = destination.ToArray();
+        Assert.Equal(0, BinaryPrimitives.ReadInt16LittleEndian(s.AsSpan(0)));
+        Assert.Equal(short.MaxValue, BinaryPrimitives.ReadInt16LittleEndian(s.AsSpan(2)));
+        Assert.Equal(-short.MaxValue, BinaryPrimitives.ReadInt16LittleEndian(s.AsSpan(4)));
+        Assert.Equal(16383, BinaryPrimitives.ReadInt16LittleEndian(s.AsSpan(6)));
+    }
+
+    [Fact]
+    public void Float32_clamps_out_of_range_samples_instead_of_wrapping()
+    {
+        // An inter-sample peak above 1.0 must saturate, not wrap to the opposite rail.
+        var format = new AudioFormat { SampleRate = 44100, Channels = 2, BitsPerSample = 32, Encoding = AudioSampleEncoding.IeeeFloat };
+        var source = new List<byte>();
+        source.AddRange(BitConverter.GetBytes(3.5f));
+        source.AddRange(BitConverter.GetBytes(-2.0f));
+
+        var destination = new List<byte>();
+        AirPlayRaopSink.ConvertToS16(source.ToArray(), format, destination);
+
+        var s = destination.ToArray();
+        Assert.Equal(short.MaxValue, BinaryPrimitives.ReadInt16LittleEndian(s.AsSpan(0)));
+        Assert.Equal(-short.MaxValue, BinaryPrimitives.ReadInt16LittleEndian(s.AsSpan(2)));
+    }
+
+    [Fact]
+    public void S16_passes_through_untouched()
+    {
+        var format = AudioFormat.CdDaStereo16;
+        var source = new byte[] { 0x11, 0x22, 0x33, 0x44 };
+        var destination = new List<byte>();
+
+        AirPlayRaopSink.ConvertToS16(source, format, destination);
+
+        Assert.Equal(source, destination);
+    }
+
+    [Fact]
+    public void S32_keeps_the_top_sixteen_bits()
+    {
+        var format = new AudioFormat { SampleRate = 44100, Channels = 2, BitsPerSample = 32, Encoding = AudioSampleEncoding.PcmSigned };
+        var source = new byte[] { 0xAA, 0xBB, 0xCC, 0xDD };   // LE int32 - high half is CC DD
+        var destination = new List<byte>();
+
+        AirPlayRaopSink.ConvertToS16(source, format, destination);
+
+        Assert.Equal(new byte[] { 0xCC, 0xDD }, destination);
     }
 
     // ===== mDNS SRV/A resolution =====
