@@ -248,6 +248,69 @@ public sealed class AudioOutputManager : IDisposable
     }
 
     /// <summary>
+    /// Selected AirPlay receivers that advertise a password requirement but have none
+    /// stored yet - the set worth asking about before a handshake burns a failed attempt.
+    /// Only selected devices count; prompting for a speaker nobody chose is just noise.
+    /// </summary>
+    public IReadOnlyList<AudioDeviceInfo> AirPlayDevicesNeedingPassword()
+    {
+        if (_providers.FirstOrDefault(p => p.ProviderId == AirPlay.AirPlayDeviceProvider.Id) is not AirPlay.AirPlayDeviceProvider provider)
+        {
+            return [];
+        }
+
+        var selected = _bus.Sinks.Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return provider.EnumerateDevices()
+            .Where(d => selected.Contains(d.QualifiedId))
+            .Where(d => provider.RequiresPassword(d.DeviceId) && AirPlay.AirPlayCredentials.Get(d.DeviceId) is null)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Drops one sink and builds it again from its provider, preserving volume and mute.
+    ///
+    /// Needed because a sink's credentials are baked in at construction: after the user
+    /// supplies an AirPlay password there is no way to retry the handshake on the existing
+    /// instance, and ApplySelections deliberately leaves already-present sinks alone.
+    /// </summary>
+    public bool RecreateSink(string qualifiedId)
+    {
+        var existing = _bus.Sinks.FirstOrDefault(s => s.Id == qualifiedId);
+        var volume = existing?.Volume ?? 1f;
+        var muted = existing?.IsMuted ?? false;
+
+        if (existing is not null)
+        {
+            _bus.Remove(qualifiedId);
+        }
+
+        var (providerId, deviceId) = AudioDeviceInfo.SplitQualified(qualifiedId);
+        var provider = _providers.FirstOrDefault(p => p.ProviderId == providerId);
+        var deviceInfo = provider?.EnumerateDevices().FirstOrDefault(d => d.DeviceId == deviceId);
+
+        if (provider is null || deviceInfo is null || !deviceInfo.IsAvailable)
+        {
+            _log.Information("RecreateSink: {Id} is no longer available", qualifiedId);
+            return false;
+        }
+
+        try
+        {
+            var sink = provider.CreateSink(deviceInfo);
+            sink.Volume = volume;
+            sink.IsMuted = muted;
+            _bus.Add(sink);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "RecreateSink: failed to rebuild {Id}", qualifiedId);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Loads persisted selections from settings and applies them.  On first
     /// run (no persisted state), falls back to the platform's default device.
     /// </summary>

@@ -1626,10 +1626,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // An output that can't open (AirPlay refusing a hi-res track, a receiver that wants
         // pairing) is silence on that device. Say so - the failure used to reach the log only,
         // which from the user's chair is indistinguishable from a broken app.
-        _audioOutput.Bus.SinkFailed += (_, failure) => UI(() => UpdateMainStatus(failure.Reason));
+        _audioOutput.Bus.SinkFailed += (_, failure) => UI(() => HandleSinkFailure(failure));
 
         _audioOutput.LoadAndApplyPersistedSelections();
         UpdateMasterVolume();
+
+        // Ask up front for receivers that ADVERTISE a password we don't have yet. Waiting
+        // for the handshake to fail would work, but each wrong-credential attempt counts
+        // against the receiver's brute-force lockout, and a HomePod locks pairing for
+        // minutes once tripped.
+        Helpers.TaskObserver.FireAndForget(PromptForKnownAirPlayPasswordsAsync(), "AirPlay password preflight");
 
         // Bit-perfect FLAC engine shares the tap (VU/visualizers) and sink bus
         // with the VLC path; its events funnel into the same handlers.
@@ -2136,6 +2142,88 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             UpdateMainStatus($"Update failed: {error}");
             await new Views.ConfirmDialog("Update failed", error, "OK", showCancel: false).ShowDialog(_window);
+        }
+    }
+
+    // Receivers we've already prompted for this session, so a failing sink that keeps
+    // retrying can't stack password dialogs on top of each other.
+    private readonly HashSet<string> _airPlayPrompted = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Reports an output that stopped working, and offers a password when that's the fix.
+    /// </summary>
+    private void HandleSinkFailure(Services.AudioOutput.SinkFailure failure)
+    {
+        UpdateMainStatus(failure.Reason);
+
+        if (failure.NeedsPassword && _airPlayPrompted.Add(failure.SinkId))
+        {
+            Helpers.TaskObserver.FireAndForget(
+                PromptForAirPlayPasswordAsync(failure.SinkId, failure.DisplayName, rejected: true),
+                "AirPlay password prompt");
+        }
+    }
+
+    /// <summary>Asks for the password of every selected receiver that advertises needing one.</summary>
+    private async Task PromptForKnownAirPlayPasswordsAsync()
+    {
+        // Discovery is a background mDNS sweep; without a beat to land, the first pass sees
+        // an empty device list and asks for nothing.
+        await Task.Delay(TimeSpan.FromSeconds(3));
+
+        foreach (var device in _audioOutput.AirPlayDevicesNeedingPassword())
+        {
+            if (_airPlayPrompted.Add(device.QualifiedId))
+            {
+                await PromptForAirPlayPasswordAsync(device.QualifiedId, device.DisplayName, rejected: false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Prompts for a receiver's AirPlay password, stores it if asked, and rebuilds the sink
+    /// so the handshake runs again with it.
+    /// </summary>
+    private async Task PromptForAirPlayPasswordAsync(string qualifiedId, string displayName, bool rejected)
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        var (_, deviceId) = Services.AudioOutput.AudioDeviceInfo.SplitQualified(qualifiedId);
+        var dialog = new Views.AirPlayPasswordDialog(displayName, rejected ? null : Services.AudioOutput.AirPlay.AirPlayCredentials.Get(deviceId));
+        var password = await dialog.ShowDialog<string?>(_window);
+
+        if (string.IsNullOrEmpty(password))
+        {
+            UpdateMainStatus($"{displayName} needs an AirPlay password to play.");
+            return;
+        }
+
+        if (dialog.Remember && Services.AudioOutput.AirPlay.AirPlayCredentials.CanRemember)
+        {
+            Services.AudioOutput.AirPlay.AirPlayCredentials.Set(deviceId, password);
+        }
+        else
+        {
+            // Either the user declined to save it, or this platform has no secret store.
+            // Keep it for the session either way - but never claim to have saved it.
+            Services.AudioOutput.AirPlay.AirPlayCredentials.SetForSession(deviceId, password);
+
+            if (dialog.Remember)
+            {
+                UpdateMainStatus($"{displayName}: no secure store on this system, so the password won't be remembered.");
+            }
+        }
+
+        // The password is baked into the sink at construction, so retrying means rebuilding
+        // it. Allow a fresh prompt afterwards in case this password is wrong too.
+        _airPlayPrompted.Remove(qualifiedId);
+
+        if (_audioOutput.RecreateSink(qualifiedId))
+        {
+            UpdateMainStatus($"Reconnecting to {displayName}...");
         }
     }
 

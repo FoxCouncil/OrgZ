@@ -6,37 +6,58 @@ namespace OrgZ.Services.AudioOutput.AirPlay;
 /// Remembers the AirPlay password for each receiver that asks for one, so the prompt is a
 /// one-time cost per speaker rather than a per-track interruption.
 ///
-/// Stored in settings.json in the clear. That is a deliberate, stated choice rather than
-/// an oversight: there is no cross-platform secret store here, and the alternatives
-/// (base64, a fixed XOR key shipped in the binary) only look like protection. Anyone who
-/// can read settings.json can read the library, the share config and the device caches
-/// beside it, so this is the same trust boundary - not a new one.
+/// Storage is the OS secret store (<see cref="SecretStore"/>) - DPAPI, Keychain or
+/// libsecret - never settings.json. Where no store exists the password simply isn't kept,
+/// and <see cref="CanRemember"/> lets the UI say so instead of offering a "remember" that
+/// silently does nothing.
 /// </summary>
 internal static class AirPlayCredentials
 {
-    private const string SettingsKey = "OrgZ.AirPlayPasswords";
-
     /// <summary>Keyed by mDNS instance name, which is stable across reboots and IP changes.</summary>
-    private static Dictionary<string, string> Load()
-        => Settings.Get<Dictionary<string, string>>(SettingsKey, null!) ?? new(StringComparer.OrdinalIgnoreCase);
+    private static string KeyFor(string deviceId) => $"AirPlay/{deviceId}";
+
+    /// <summary>False when this platform has nowhere safe to keep a password.</summary>
+    public static bool CanRemember => SecretStore.IsAvailable;
+
+    // Passwords for this run only: what "don't remember" means, and the fallback when the
+    // platform has no secret store. Consulted before the OS store so a freshly entered
+    // password wins over a stale saved one.
+    private static readonly Dictionary<string, string> _session = new(StringComparer.OrdinalIgnoreCase);
 
     public static string? Get(string deviceId)
-        => Load().TryGetValue(deviceId, out var password) && !string.IsNullOrEmpty(password) ? password : null;
+    {
+        lock (_session)
+        {
+            if (_session.TryGetValue(deviceId, out var cached))
+            {
+                return cached;
+            }
+        }
 
+        var password = SecretStore.Get(KeyFor(deviceId));
+        return string.IsNullOrEmpty(password) ? null : password;
+    }
+
+    /// <summary>Keeps a password for this run without writing it anywhere.</summary>
+    public static void SetForSession(string deviceId, string? password)
+    {
+        lock (_session)
+        {
+            if (string.IsNullOrEmpty(password))
+            {
+                _session.Remove(deviceId);
+            }
+            else
+            {
+                _session[deviceId] = password;
+            }
+        }
+    }
+
+    /// <summary>Persists a password to the OS secret store, and uses it for this run.</summary>
     public static void Set(string deviceId, string? password)
     {
-        var all = new Dictionary<string, string>(Load(), StringComparer.OrdinalIgnoreCase);
-
-        if (string.IsNullOrEmpty(password))
-        {
-            all.Remove(deviceId);
-        }
-        else
-        {
-            all[deviceId] = password;
-        }
-
-        Settings.Set(SettingsKey, all);
-        Settings.Save();
+        SetForSession(deviceId, password);
+        SecretStore.Set(KeyFor(deviceId), password);
     }
 }
