@@ -36,6 +36,9 @@ namespace OrgZ.Services.AudioOutput;
 /// chunking, for every platform sink at once.
 /// </para>
 /// </remarks>
+/// <summary>One output that stopped working, and why - phrased for the status bar.</summary>
+public sealed record SinkFailure(string SinkId, string DisplayName, string Reason);
+
 public sealed class AudioSinkBus : IDisposable
 {
     /// <summary>
@@ -369,7 +372,8 @@ public sealed class AudioSinkBus : IDisposable
         }
     }
 
-    private static void TryOpen(IAudioSink sink, AudioFormat format)
+    // Instance, not static: a failed open raises SinkFailed so the UI can say why.
+    private void TryOpen(IAudioSink sink, AudioFormat format)
     {
         try
         {
@@ -389,8 +393,21 @@ public sealed class AudioSinkBus : IDisposable
         catch (Exception ex)
         {
             _log.Warning(ex, "AudioSinkBus: failed to open {Id}", sink.Id);
+            // A sink that can't open produces silence on that output. The log alone left
+            // the user staring at a playing track with no sound and no explanation.
+            SinkFailed?.Invoke(this, new SinkFailure(sink.Id, sink.DisplayName, ex.Message));
         }
     }
+
+    /// <summary>
+    /// Raised when a sink can't be opened or its transport dies - carries a reason fit to
+    /// show the user, because silence with no message is indistinguishable from a bug.
+    /// </summary>
+    public event EventHandler<SinkFailure>? SinkFailed;
+
+    /// <summary>Lets a sink report an asynchronous failure (e.g. a network handshake that fails after Open).</summary>
+    internal void ReportSinkFailure(string id, string displayName, string reason)
+        => SinkFailed?.Invoke(this, new SinkFailure(id, displayName, reason));
 
     public void Dispose()
     {

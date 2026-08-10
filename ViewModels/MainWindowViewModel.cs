@@ -1622,6 +1622,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // devices) and the FFT analyzer (VU-meter data).
         _audioTap = new OrgZ.Services.AudioVisualization.AudioTap(_audioOutput.Bus);
         _audioTap.Attach(_player);
+
+        // An output that can't open (AirPlay refusing a hi-res track, a receiver that wants
+        // pairing) is silence on that device. Say so - the failure used to reach the log only,
+        // which from the user's chair is indistinguishable from a broken app.
+        _audioOutput.Bus.SinkFailed += (_, failure) => UI(() => UpdateMainStatus(failure.Reason));
+
         _audioOutput.LoadAndApplyPersistedSelections();
         UpdateMasterVolume();
 

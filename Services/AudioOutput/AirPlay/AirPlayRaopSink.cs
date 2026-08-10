@@ -38,12 +38,19 @@ internal sealed class AirPlayRaopSink : IAudioSink
     private bool _paused;
     private bool _disposed;
 
-    public AirPlayRaopSink(AudioDeviceInfo device, string host, int port)
+    public AirPlayRaopSink(AudioDeviceInfo device, string host, int port, AudioSinkBus? bus = null)
     {
         Id = device.QualifiedId;
         DisplayName = device.DisplayName;
         _host = host;
         _port = port;
+
+        // The handshake finishes long after Open returns, so a failure can't be thrown to
+        // a caller - it goes back through the bus, which the UI listens to.
+        if (bus is not null)
+        {
+            ConnectFailed += (_, reason) => bus.ReportSinkFailure(Id, DisplayName, reason);
+        }
     }
 
     public string Id { get; }
@@ -84,13 +91,18 @@ internal sealed class AirPlayRaopSink : IAudioSink
         // there's no resampler here, so those still refuse.
         if (format.SampleRate != 44100 || format.Channels != 2)
         {
-            throw new NotSupportedException($"AirPlay needs 44100 Hz stereo; the stream is {format.SampleRate} Hz x{format.Channels}.");
+            // No resampler here, so a hi-res track simply can't go out over RAOP. Say that
+            // in the user's terms - "96000 Hz x2" explains nothing to someone hearing silence.
+            throw new NotSupportedException(
+                $"“{DisplayName}” only takes 44.1 kHz stereo, but this track is {format.SampleRate / 1000.0:0.#} kHz — AirPlay can't play hi-res audio in OrgZ yet.");
         }
 
         if (!CanConvert(format))
         {
             throw new NotSupportedException($"AirPlay can't convert {format.BitsPerSample}-bit {format.Encoding} to the 16-bit PCM RAOP requires.");
         }
+
+        _log.Debug("AirPlay sink accepting {Rate}Hz {Bits}-bit {Encoding}", format.SampleRate, format.BitsPerSample, format.Encoding);
 
         CurrentFormat = format;
         _partial.Clear();
@@ -247,7 +259,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
             // failure mode this whole path exists to avoid.
             _log.Error(ex, "AirPlay handshake failed for {Name} ({Host}:{Port})", DisplayName, _host, _port);
             IsOpen = false;
-            ConnectFailed?.Invoke(this, $"Couldn't start AirPlay to “{DisplayName}”: {ex.Message}");
+            ConnectFailed?.Invoke(this, Explain(ex));
             return;
         }
 
@@ -270,6 +282,15 @@ internal sealed class AirPlayRaopSink : IAudioSink
 
     /// <summary>Raised when the handshake fails after Open returned - carries a user-facing reason.</summary>
     public event EventHandler<string>? ConnectFailed;
+
+    /// <summary>
+    /// Turns a handshake failure into something that tells the user what to do about it.
+    /// A bare "401 Unauthorized" reads like a bug; the real meaning is that this receiver
+    /// wants the AirPlay 2 pairing handshake, which OrgZ doesn't implement.
+    /// </summary>
+    private string Explain(Exception ex) => ex.Message.Contains("401", StringComparison.Ordinal)
+        ? $"“{DisplayName}” needs AirPlay 2 pairing, which OrgZ can't do yet — it only supports older AirPlay speakers."
+        : $"Couldn't start AirPlay to “{DisplayName}”: {ex.Message}";
 
     private void PushVolume()
     {

@@ -61,8 +61,9 @@ public sealed class AudioOutputManager : IDisposable
             AddProvider(new MacOS.CoreAudioDeviceProvider());
         }
 
-        // AirPlay works on any OS - mDNS discovery is cross-platform.
-        AddProvider(new AirPlay.AirPlayDeviceProvider());
+        // AirPlay works on any OS - mDNS discovery is cross-platform. Its sinks connect
+        // after Open returns, so they report late failures back through the bus.
+        AddProvider(new AirPlay.AirPlayDeviceProvider { FailureReportBus = _bus });
 
         // Snapshot current device IDs so the first poll tick doesn't fire
         // a spurious DevicesChanged event.

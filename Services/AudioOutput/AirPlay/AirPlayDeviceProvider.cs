@@ -185,8 +185,14 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             }
         }
 
-        return new AirPlayRaopSink(device, endpoint.Host, endpoint.Port);
+        return new AirPlayRaopSink(device, endpoint.Host, endpoint.Port, FailureReportBus);
     }
+
+    /// <summary>
+    /// The bus a created sink reports late failures to (set by <see cref="AudioOutputManager"/>).
+    /// Null in tests, where nothing is listening.
+    /// </summary>
+    internal AudioSinkBus? FailureReportBus { get; set; }
 
     /// <summary>
     /// Minimal mDNS PTR query for <paramref name="service"/>.  Sends a DNS
