@@ -187,7 +187,6 @@
                             i:Attached.Icon="fa-solid fa-backward-step" FontSize="14"
                             Command="{Binding ButtonPreviousTrack}" ToolTip.Tip="Previous" />
                     <Button Classes="xportPlay" Width="40" Height="40" CornerRadius="20"
-                            IsEnabled="{Binding IsButtonPlayPauseEnabled}"
                             i:Attached.Icon="{Binding ButtonPlayPauseIcon}" FontSize="18"
                             Padding="{Binding ButtonPlayPausePadding}"
                             Command="{Binding ButtonPlayPause}" ToolTip.Tip="Play / Pause" />

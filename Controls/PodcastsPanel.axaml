@@ -25,19 +25,29 @@
 		        BorderThickness="0,0,0,1"
 		        IsVisible="{Binding ShowBackButton}"
 		        Height="40">
-			<Button Command="{Binding GoBackCommand}"
-			        HorizontalAlignment="Left"
-			        VerticalAlignment="Center"
-			        Margin="10,0"
-			        Padding="12,5"
-			        Cursor="Hand">
-				<StackPanel Orientation="Horizontal" Spacing="6">
-					<i:Icon Value="fa-solid fa-chevron-left" FontSize="12"
-					        VerticalAlignment="Center" />
-					<TextBlock Text="Back" FontSize="12"
-					           VerticalAlignment="Center" />
-				</StackPanel>
-			</Button>
+			<StackPanel Orientation="Horizontal" Spacing="6" Margin="10,0" VerticalAlignment="Center">
+				<Button Command="{Binding GoBackCommand}"
+				        Padding="12,5"
+				        Cursor="Hand">
+					<StackPanel Orientation="Horizontal" Spacing="6">
+						<i:Icon Value="fa-solid fa-chevron-left" FontSize="12"
+						        VerticalAlignment="Center" />
+						<TextBlock Text="Back" FontSize="12"
+						           VerticalAlignment="Center" />
+					</StackPanel>
+				</Button>
+				<!-- Home: straight to the store from any depth (Back walks one level). -->
+				<Button Command="{Binding ShowStoreCommand}"
+				        Padding="12,5"
+				        Cursor="Hand">
+					<StackPanel Orientation="Horizontal" Spacing="6">
+						<i:Icon Value="fa-solid fa-house" FontSize="12"
+						        VerticalAlignment="Center" />
+						<TextBlock Text="Store" FontSize="12"
+						           VerticalAlignment="Center" />
+					</StackPanel>
+				</Button>
+			</StackPanel>
 		</Border>
 
 		<Grid>

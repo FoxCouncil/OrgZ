@@ -16,7 +16,6 @@ public class SidebarItemTests
         Assert.False(item.IsEnabled);
         Assert.False(item.IsFavorites);
         Assert.False(item.IsNewPlaylistAction);
-        Assert.False(item.IsImportPlaylistAction);
         Assert.Null(item.Kind);
         Assert.Null(item.PlaylistId);
         Assert.Null(item.IconBitmap);
@@ -50,17 +49,13 @@ public class SidebarItemTests
     public void Playlist_action_flags_are_independent()
     {
         var newAction = new SidebarItem { IsNewPlaylistAction = true };
-        var importAction = new SidebarItem { IsImportPlaylistAction = true };
         var favorites = new SidebarItem { IsFavorites = true };
 
         Assert.True(newAction.IsNewPlaylistAction);
-        Assert.False(newAction.IsImportPlaylistAction);
         Assert.False(newAction.IsFavorites);
 
-        Assert.True(importAction.IsImportPlaylistAction);
-        Assert.False(importAction.IsNewPlaylistAction);
-
         Assert.True(favorites.IsFavorites);
+        Assert.False(favorites.IsNewPlaylistAction);
     }
 
     [Fact]

@@ -212,7 +212,7 @@ public partial class Sidebar : UserControl
     private void PlaylistListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
     {
         var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (listBoxItem?.DataContext is not SidebarItem sb || sb.IsFavorites || sb.IsNewPlaylistAction || sb.IsImportPlaylistAction || !sb.PlaylistId.HasValue)
+        if (listBoxItem?.DataContext is not SidebarItem sb || sb.IsFavorites || sb.IsNewPlaylistAction || !sb.PlaylistId.HasValue)
         {
             e.Handled = true;
             return;

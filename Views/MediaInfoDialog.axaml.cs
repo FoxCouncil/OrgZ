@@ -51,7 +51,9 @@ public partial class MediaInfoDialog : Window
 
         Title = item.Title ?? item.FileName ?? "Media Info";
 
-        var isMusic = item.Kind == MediaKind.Music;
+        // Audiobooks share the music panels: the tag writer accepts them
+        // (AudioFileAnalyzer.WriteTagsAndReanalyze) and a blank Info tab helped no one.
+        var isMusic = item.Kind is MediaKind.Music or MediaKind.Audiobook;
         var isRadio = item.Kind == MediaKind.Radio;
         var isPodcast = item.Kind == MediaKind.Podcast;
 
@@ -589,7 +591,7 @@ public partial class MediaInfoDialog : Window
 
     private void SaveCurrentItem()
     {
-        if (_item.Kind == MediaKind.Music)
+        if (_item.Kind is MediaKind.Music or MediaKind.Audiobook)
         {
             SaveMusicItem();
         }

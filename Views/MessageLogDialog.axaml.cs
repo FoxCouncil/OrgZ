@@ -1,6 +1,7 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 
 namespace OrgZ.Views;
@@ -39,6 +40,19 @@ public partial class MessageLogDialog : Window
     private void UpdateCount()
     {
         CountText.Text = _messages.Count > 0 ? $"({_messages.Count})" : "";
+    }
+
+    /// <summary>Copies the selected messages - or all of them when nothing is selected.</summary>
+    private async void CopyButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var selected = MessageList.SelectedItems?.OfType<string>().ToList();
+        var lines = selected is { Count: > 0 } ? selected : _messages.ToList();
+        if (lines.Count == 0 || Clipboard is null)
+        {
+            return;
+        }
+
+        await Clipboard.SetTextAsync(string.Join(Environment.NewLine, lines));
     }
 
     private void ClearButton_Click(object? sender, RoutedEventArgs e)

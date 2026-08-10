@@ -66,7 +66,7 @@ public partial class RipOptionsDialog : Window
 
     private void ApplyFormatVisibility(RipFormat format)
     {
-        WavPanel.IsVisible = format == RipFormat.Wav;
+        // WAV has no options panel - it's raw PCM, nothing to configure.
         FlacPanel.IsVisible = format == RipFormat.Flac;
         Mp3Panel.IsVisible = format == RipFormat.Mp3;
     }

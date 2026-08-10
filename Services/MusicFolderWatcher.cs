@@ -92,8 +92,10 @@ public sealed class MusicFolderWatcher : IDisposable
             return;
         }
 
-        // Skip dot-prefixed subdirectories (.podcasts/ etc.) - those belong to
-        // sibling subsystems (Podcasts) and would otherwise show up in Music.
+        // Skip dot-prefixed subdirectories (.podcasts/, .disc-images/) - those belong to
+        // sibling subsystems and would otherwise show up in Music. EXCEPT .audiobooks:
+        // FileScanner walks it (audiobooks are library content), so the watcher must see
+        // it too - a book dropped in used to need a full manual rescan to appear.
         if (IsInDotSubdirectory(path))
         {
             return;
@@ -117,7 +119,7 @@ public sealed class MusicFolderWatcher : IDisposable
         {
             var name = Path.GetFileName(dir);
             if (string.IsNullOrEmpty(name)) break;
-            if (name.StartsWith('.')) return true;
+            if (name.StartsWith('.') && !name.Equals(".audiobooks", StringComparison.OrdinalIgnoreCase)) return true;
             var parent = Path.GetDirectoryName(dir);
             if (parent == dir) break;
             dir = parent;

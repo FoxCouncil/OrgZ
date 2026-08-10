@@ -27,7 +27,8 @@ public partial class PodcastsViewModel : ObservableObject
     internal PodcastsViewModel(MainWindowViewModel main)
     {
         _main = main;
-        PodcastDownloadService.Instance.ProgressChanged += OnDownloadProgress;
+        // No ProgressChanged subscription: per-episode progress rides the main window's
+        // LCD (MainWindowViewModel wires it); this VM only reacts to terminal states.
         PodcastDownloadService.Instance.Completed       += OnDownloadCompleted;
         PodcastDownloadService.Instance.Failed          += OnDownloadFailed;
     }
@@ -50,9 +51,7 @@ public partial class PodcastsViewModel : ObservableObject
 
         for (int i = 0; i < 20; i++)
         {
-            var feed = SampleFeed(100 + i, $"Top Show {i + 1}", $"Network {i + 1}");
-            TopPodcasts.Add(feed);
-            NumberedTopPodcasts.Add(new NumberedFeed(i + 1, feed));
+            NumberedTopPodcasts.Add(new NumberedFeed(i + 1, SampleFeed(100 + i, $"Top Show {i + 1}", $"Network {i + 1}")));
         }
 
         // Category carousel sample data so the stacked carousels render in
@@ -87,29 +86,6 @@ public partial class PodcastsViewModel : ObservableObject
         for (int i = 0; i < 12; i++)
         {
             FeedListItems.Add(SampleFeed(700 + i, $"Tech Show {i + 1}", $"Studio {i + 1}"));
-        }
-
-        foreach (var (name, count) in new[]
-        {
-            ("Society & Culture", 6),
-            ("News",              6),
-            ("Technology",        6),
-            ("Comedy",            6),
-        })
-        {
-            var rail = new PodcastCategoryRail
-            {
-                CategoryId   = 0,
-                CategoryName = name,
-                Feeds        = new ObservableCollection<PodcastFeed>(),
-            };
-
-            for (int i = 0; i < count; i++)
-            {
-                rail.Feeds.Add(SampleFeed(300 + i, $"{name} {i + 1}", "Host Name"));
-            }
-
-            CategoryRails.Add(rail);
         }
 
         // Subscriptions sample data - mirrors the shape PodcastCache returns
@@ -193,14 +169,12 @@ public partial class PodcastsViewModel : ObservableObject
     // -- Store rails -----------------------------------------------------
 
     public ObservableCollection<PodcastFeed> Featured     { get; } = [];
-    public ObservableCollection<PodcastFeed> TopPodcasts  { get; } = [];
     public ObservableCollection<NumberedFeed> NumberedTopPodcasts { get; } = [];
     public ObservableCollection<PodcastFeed> NewAndNotable { get; } = [];
     public ObservableCollection<PodcastFeed> NonProfitFeeds { get; } = [];
     public ObservableCollection<PodcastFeed> NewsFeeds { get; } = [];
     public ObservableCollection<PodcastFeed> MusicFeeds { get; } = [];
     public ObservableCollection<PodcastCategory> Categories { get; } = [];
-    public ObservableCollection<PodcastCategoryRail> CategoryRails { get; } = [];
 
     /// <summary>Six spotlight categories for the store's browse-tile grid (the old placeholder mosaic slot).</summary>
     public ObservableCollection<PodcastCategory> CategoryTiles { get; } = [];
@@ -846,7 +820,6 @@ public partial class PodcastsViewModel : ObservableObject
             int rank = 1;
             foreach (var f in trending.Skip(3).Take(20))
             {
-                TopPodcasts.Add(f);
                 NumberedTopPodcasts.Add(new NumberedFeed(rank++, f));
             }
             // New & Notable: recent feeds
@@ -961,7 +934,6 @@ public partial class PodcastsViewModel : ObservableObject
         OnPropertyChanged(nameof(SubscribedPreview));
     }
 
-    private void OnDownloadProgress(DownloadProgress p) { /* hook UI progress here if needed */ }
 
     private void OnDownloadCompleted(PodcastFeed feed, PodcastEpisode ep)
     {
@@ -1042,13 +1014,6 @@ internal sealed class NavEntry
     public IReadOnlyList<PodcastFeed> FeedListItems { get; init; } = [];
     public PodcastFeed? SelectedFeed { get; init; }
     public IReadOnlyList<PodcastEpisodeRow> Episodes { get; init; } = [];
-}
-
-public sealed class PodcastCategoryRail
-{
-    public required int CategoryId { get; init; }
-    public required string CategoryName { get; init; }
-    public required ObservableCollection<PodcastFeed> Feeds { get; init; }
 }
 
 /// <summary>

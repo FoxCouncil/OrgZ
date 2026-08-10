@@ -399,8 +399,9 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isBackTrackButtonEnabled = false;
 
-    [ObservableProperty]
-    private bool _isButtonPlayPauseEnabled = true;
+    // (No play-button IsEnabled property: the button is always live - with nothing
+    // loaded it starts the selection, and with an empty library it no-ops harmlessly.
+    // The old bound-but-never-driven flag just froze it permanently enabled anyway.)
 
     [ObservableProperty]
     private bool _isNextTrackButtonEnabled = false;
@@ -530,9 +531,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private RepeatMode _repeatMode = Settings.Get("OrgZ.RepeatMode", RepeatMode.Off);
-
-    [ObservableProperty]
-    private string _shuffleIcon = "fa-solid fa-shuffle";
 
     [ObservableProperty]
     private double _shuffleOpacity = 0.4;
@@ -5356,17 +5354,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         PlaylistItems.Remove(item);
         PlaylistsChanged?.Invoke();
-    }
-
-    [RelayCommand]
-    internal void AddToPlaylist(int playlistId)
-    {
-        if (SelectedItem == null)
-        {
-            return;
-        }
-
-        AddTrackToPlaylist(playlistId, SelectedItem);
     }
 
     /// <summary>Adds a whole selection to a playlist in view order, refreshing the config once.</summary>
