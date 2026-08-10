@@ -25,6 +25,9 @@ internal partial class MainWindowViewModel
     // disc isn't hit with a READ TOC every 3 seconds.
     private readonly HashSet<string> _cdProbedNoAudio = new(StringComparer.OrdinalIgnoreCase);
 
+    // Last observed drive/media state, so the poll logs transitions instead of heartbeats.
+    private string? _lastCdScanSignature;
+
     private async Task ScanForCdAsync()
     {
         if (_cdScanning)
@@ -52,8 +55,16 @@ internal partial class MainWindowViewModel
                 var w = CdAudioService.GetCdDrivesWithMedia();
                 return (a, w, string.Join(", ", a.Select(d => $"{d.Name}[ready={d.IsReady}]")));
             });
-            _log.Information("ScanForCdAsync: AllCdDrives={All} WithMedia={WithMedia} (paths: {Paths})",
-                all.Count, drives.Count, readiness);
+            // The 3s media-arrival poll calls this forever, so only a CHANGE is worth a
+            // line - the unchanged steady state used to emit ~1200 identical Information
+            // entries an hour and bury everything else in the log.
+            var signature = $"{all.Count}|{drives.Count}|{readiness}";
+            if (signature != _lastCdScanSignature)
+            {
+                _lastCdScanSignature = signature;
+                _log.Information("ScanForCdAsync: AllCdDrives={All} WithMedia={WithMedia} (paths: {Paths})",
+                    all.Count, drives.Count, readiness);
+            }
 
             // A drive that lost its media forgets its no-audio memo so the next
             // inserted disc gets probed fresh.
