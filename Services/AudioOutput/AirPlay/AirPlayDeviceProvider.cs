@@ -107,12 +107,27 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             _log.Debug(ex, "AirPlay mDNS discovery failed");
         }
 
+        // One physical speaker answers BOTH service types, so it arrives twice under two
+        // instance names. Collapse by resolved host, preferring the _raop entry - that's
+        // the one carrying the audio port we actually stream to.
         var result = new List<AudioDeviceInfo>(receivers.Count);
-        foreach (var kvp in receivers)
+        var byHost = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kvp in receivers.OrderByDescending(r => r.Key.Contains("._raop.", StringComparison.OrdinalIgnoreCase)))
         {
             // Only a receiver whose SRV/A records gave us somewhere to connect is offered as
             // usable; the rest stay listed but disabled rather than failing at play time.
             var reachable = endpoints.TryGetValue(kvp.Key, out var endpoint);
+
+            if (reachable)
+            {
+                if (byHost.ContainsKey(endpoint.Host))
+                {
+                    continue;   // already have this speaker, via the service type we prefer
+                }
+                byHost[endpoint.Host] = result.Count;
+            }
+
             result.Add(new AudioDeviceInfo
             {
                 DeviceId = kvp.Key,
@@ -179,16 +194,61 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// <paramref name="timeout"/> before returning.  Parses enough of the
     /// DNS wire format to extract the instance name (e.g., "LivingRoom"
     /// from "LivingRoom._raop._tcp.local").
+    ///
+    /// The query goes out EVERY up IPv4 interface, and the socket joins the group on
+    /// each - the same all-interfaces model <see cref="Sharing.MdnsAdvertiser"/> already
+    /// uses. A bare join/send picks whichever adapter won the metric race, so on a host
+    /// with Hyper-V switches or VPN adapters discovery worked or didn't by coin toss.
     /// </summary>
     private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout)
     {
         using var udp = new UdpClient();
         udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         udp.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
-        udp.JoinMulticastGroup(MdnsEndpoint.Address);
+
+        var interfaces = Sharing.MdnsAdvertiser.LocalInterfaceAddresses();
+        var joined = 0;
+        foreach (var (address, _) in interfaces)
+        {
+            try
+            {
+                udp.JoinMulticastGroup(MdnsEndpoint.Address, address);
+                joined++;
+            }
+            catch (SocketException ex)
+            {
+                _log.Debug(ex, "AirPlay mDNS join failed on {Address}", address);
+            }
+        }
+
+        if (joined == 0)
+        {
+            // Nothing enumerable (or every join refused): a default-interface join still
+            // beats deafness.
+            udp.JoinMulticastGroup(MdnsEndpoint.Address);
+        }
 
         var query = BuildMdnsQuery(service);
-        udp.Send(query, query.Length, MdnsEndpoint);
+        if (interfaces.Count == 0)
+        {
+            udp.Send(query, query.Length, MdnsEndpoint);
+        }
+        else
+        {
+            foreach (var (address, _) in interfaces)
+            {
+                try
+                {
+                    // Steer each send: an un-steered one only leaves the default adapter.
+                    udp.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, address.GetAddressBytes());
+                    udp.Send(query, query.Length, MdnsEndpoint);
+                }
+                catch (SocketException ex)
+                {
+                    _log.Debug(ex, "AirPlay mDNS query failed on {Address}", address);
+                }
+            }
+        }
 
         // Poll Available instead of blocking on Receive with a timeout -
         // ReceiveTimeout throws SocketException per expiry, which clutters
@@ -420,7 +480,9 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 continue;
             }
             if (sb.Length > 0) sb.Append('.');
-            sb.Append(System.Text.Encoding.ASCII.GetString(data, idx + 1, len));
+            // UTF-8, not ASCII: RFC 6763 names carry real punctuation, and a HomePod named
+            // "a Mac mini" (typographic apostrophe) decoded as "Fox???s" under ASCII.
+            sb.Append(System.Text.Encoding.UTF8.GetString(data, idx + 1, len));
             idx += len + 1;
         }
         return sb.ToString();
