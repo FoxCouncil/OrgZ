@@ -135,9 +135,9 @@ public class AirPlayPairingTests
 
         Assert.Equal([0x01], tlv[Tlv8.State]);      // M1
         Assert.Equal([0x00], tlv[Tlv8.Method]);     // pair-setup
-        // Flags 0x10 little-endian selects TRANSIENT pairing - without it the receiver
-        // expects the full PIN flow and refuses.
-        Assert.Equal([0x10, 0x00, 0x00, 0x00], tlv[Tlv8.Flags]);
+        // Flags 0x10 as a SINGLE byte selects transient pairing - the width working
+        // senders use; padding it to four was one of the divergences from the reference.
+        Assert.Equal([0x10], tlv[Tlv8.Flags]);
     }
 
     [Fact]
@@ -157,10 +157,12 @@ public class AirPlayPairingTests
 
     [Theory]
     [InlineData((byte)0x02, "authentication failed")]
-    [InlineData((byte)0x05, "busy")]
-    [InlineData((byte)0x06, "out of sequence")]
+    [InlineData((byte)0x03, "backing off")]
+    [InlineData((byte)0x05, "locked pairing")]
+    [InlineData((byte)0x06, "busy")]
     public void Pair_setup_errors_read_as_english(byte code, string fragment)
     {
+        // Codes follow the HAP numbering: 0x03 BackOff, 0x05 MaxTries, 0x06 Unavailable.
         Assert.Contains(fragment, AirPlay2Pairing.DescribeError(code), StringComparison.OrdinalIgnoreCase);
     }
 

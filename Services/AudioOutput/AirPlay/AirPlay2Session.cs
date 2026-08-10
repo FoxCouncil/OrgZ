@@ -57,7 +57,7 @@ internal sealed class AirPlay2Session : IDisposable
         _rtsp = new RtspClient();
         await _rtsp.ConnectAsync(_host, _rtspPort, ct);
 
-        _rtsp.DefaultHeaders["User-Agent"] = "AirPlay/665.13.1";
+        _rtsp.DefaultHeaders["User-Agent"] = "AirPlay/320.20";
         _rtsp.DefaultHeaders["Client-Instance"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToUpperInvariant();
         _rtsp.DefaultHeaders["DACP-ID"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToUpperInvariant();
         _rtsp.DefaultHeaders["Active-Remote"] = Random.Shared.Next(1, int.MaxValue).ToString();
