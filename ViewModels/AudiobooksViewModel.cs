@@ -356,13 +356,15 @@ public partial class AudiobooksViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Re-fetches a previously-acquired Libro.fm book from its record. Libro re-download needs a live
-    /// session (the token isn't stored), so this reveals the store and asks for sign-in when absent.
+    /// Re-fetches a previously-acquired Libro.fm book from its record. Libro re-download
+    /// needs a live session, so a signed-out user lands on the store view - where the
+    /// sign-in card lives - instead of nothing visibly happening on the Owned grid.
     /// </summary>
     internal async Task ReDownloadLibroAsync(string isbn, string? title, string? creator)
     {
         if (_libroToken is null)
         {
+            CurrentView = AudiobooksView.Store;
             LibroStatusText = "Sign in to Libro.fm to re-download this book.";
             return;
         }

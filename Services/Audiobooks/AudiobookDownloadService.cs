@@ -313,6 +313,7 @@ public sealed class AudiobookDownloadService
 
                 long totalBytes = manifest.Parts.Sum(p => p.SizeBytes);
                 long received = 0;
+                int chapterIndex = 0;   // continues across parts, so track numbers span the whole book
                 for (int i = 0; i < manifest.Parts.Count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -323,13 +324,16 @@ public sealed class AudiobookDownloadService
                     }
 
                     // Each part is a zip of MP3 chapters: stream it to a temp file, then extract
-                    // audio entries through the .partial → atomic-move discipline.
+                    // audio entries through the .partial → atomic-move discipline. Entries sort by
+                    // name so chapter order never depends on zip internals.
                     var tempZip = Path.Combine(Path.GetTempPath(), "orgz_libro_" + Guid.NewGuid().ToString("N") + ".zip");
                     try
                     {
                         received = await DownloadFileAsync(part.Url, tempZip, listing, received, totalBytes, i + 1, manifest.Parts.Count, ct);
                         using var zip = System.IO.Compression.ZipFile.OpenRead(tempZip);
-                        foreach (var entry in zip.Entries.Where(e => FileScanner.IsSupportedExtension(e.Name)))
+                        foreach (var entry in zip.Entries
+                                     .Where(e => FileScanner.IsSupportedExtension(e.Name))
+                                     .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
                         {
                             var target = Path.Combine(dir, SanitizeFileName(entry.Name));
                             var partial = target + ".partial";
@@ -339,6 +343,9 @@ public sealed class AudiobookDownloadService
                                 await entryStream.CopyToAsync(outStream, ct);
                             }
                             File.Move(partial, target, overwrite: true);
+
+                            chapterIndex++;
+                            StampZipChapterTags(target, chapterIndex, listing);
                         }
                     }
                     finally
@@ -363,6 +370,43 @@ public sealed class AudiobookDownloadService
             RemoveJob(listing.Identifier);
             _log.Warning(ex, "Libro.fm download failed: {Isbn}", book.Isbn);
             Failed?.Invoke(listing.Identifier, ex);
+        }
+    }
+
+    /// <summary>
+    /// The MP3-zip fallback's chapters arrive with whatever tags the publisher left in -
+    /// often none. Stamp play order and book identity so the shelf assembles one book and
+    /// chapters run in sequence; existing publisher tags always win where present.
+    /// </summary>
+    private static void StampZipChapterTags(string path, int chapterNumber, AudiobookListing listing)
+    {
+        try
+        {
+            using var f = TagLib.File.Create(path);
+            bool dirty = false;
+            if (f.Tag.Track == 0)
+            {
+                f.Tag.Track = (uint)chapterNumber;
+                dirty = true;
+            }
+            if (string.IsNullOrWhiteSpace(f.Tag.Album) && !string.IsNullOrWhiteSpace(listing.Title))
+            {
+                f.Tag.Album = listing.Title;
+                dirty = true;
+            }
+            if (f.Tag.Performers is not { Length: > 0 } && !string.IsNullOrWhiteSpace(listing.Creator))
+            {
+                f.Tag.Performers = [listing.Creator!];
+                dirty = true;
+            }
+            if (dirty)
+            {
+                f.Save();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Couldn't stamp chapter tags on {Path}", path);
         }
     }
 
