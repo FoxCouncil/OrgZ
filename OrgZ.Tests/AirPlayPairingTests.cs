@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -122,6 +123,120 @@ public class AirPlayPairingTests
     public void Srp_session_key_is_unavailable_before_the_exchange()
     {
         Assert.Throws<InvalidOperationException>(() => new Srp6aClient().SessionKey);
+    }
+
+    // ===== Pair-setup wire messages =====
+
+    [Fact]
+    public void Pair_setup_m1_requests_transient_pairing()
+    {
+        var tlv = Tlv8.Decode(new AirPlay2Pairing().BuildM1());
+
+        Assert.Equal([0x01], tlv[Tlv8.State]);      // M1
+        Assert.Equal([0x00], tlv[Tlv8.Method]);     // pair-setup
+        // Flags 0x10 little-endian selects TRANSIENT pairing - without it the receiver
+        // expects the full PIN flow and refuses.
+        Assert.Equal([0x10, 0x00, 0x00, 0x00], tlv[Tlv8.Flags]);
+    }
+
+    [Fact]
+    public void Pair_setup_m3_carries_the_client_key_and_proof()
+    {
+        var server = new ReferenceSrpServer();
+        var pairing = new AirPlay2Pairing();
+
+        var tlv = Tlv8.Decode(pairing.BuildM3(server.Salt, server.PublicKey));
+
+        Assert.Equal([0x03], tlv[Tlv8.State]);
+        Assert.Equal(384, tlv[Tlv8.PublicKey].Length);
+        Assert.Equal(64, tlv[Tlv8.Proof].Length);
+        // The receiver must accept the proof we send.
+        Assert.True(server.VerifyClientProof(tlv[Tlv8.PublicKey], tlv[Tlv8.Proof]));
+    }
+
+    [Theory]
+    [InlineData((byte)0x02, "authentication failed")]
+    [InlineData((byte)0x05, "busy")]
+    [InlineData((byte)0x06, "out of sequence")]
+    public void Pair_setup_errors_read_as_english(byte code, string fragment)
+    {
+        Assert.Contains(fragment, AirPlay2Pairing.DescribeError(code), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ===== AirPlay 2 audio framing =====
+
+    [Fact]
+    public void Sealed_audio_frame_has_the_length_prefix_cipher_and_tag()
+    {
+        using var cipher = new AirPlay2Cipher(new byte[32]);
+        var payload = new byte[100];
+
+        var frame = cipher.Seal(payload);
+
+        Assert.Equal(2 + 100 + 16, frame.Length);
+        Assert.Equal(100, BinaryPrimitives.ReadUInt16LittleEndian(frame));
+    }
+
+    [Fact]
+    public void Sealed_audio_frames_round_trip()
+    {
+        using var cipher = new AirPlay2Cipher(new byte[32]);
+        var payload = Enumerable.Range(0, 200).Select(i => (byte)i).ToArray();
+
+        var first = cipher.Seal(payload);
+        var second = cipher.Seal(payload);
+
+        // Each frame decrypts under its own counter...
+        Assert.Equal(payload, cipher.Open(first, 0));
+        Assert.Equal(payload, cipher.Open(second, 1));
+
+        // ...and identical plaintext must NOT produce identical ciphertext, or the nonce
+        // isn't advancing - which would leak the keystream.
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void Nonce_is_four_zero_bytes_then_the_little_endian_counter()
+    {
+        var nonce = AirPlay2Cipher.NonceFor(0x0102030405060708);
+
+        Assert.Equal(12, nonce.Length);
+        Assert.Equal(new byte[] { 0, 0, 0, 0 }, nonce[..4]);
+        Assert.Equal(0x0102030405060708UL, BinaryPrimitives.ReadUInt64LittleEndian(nonce.AsSpan(4)));
+    }
+
+    [Fact]
+    public void A_tampered_frame_fails_authentication()
+    {
+        using var cipher = new AirPlay2Cipher(new byte[32]);
+        var frame = cipher.Seal(new byte[64]);
+        frame[10] ^= 0xFF;   // flip a ciphertext byte
+
+        Assert.ThrowsAny<CryptographicException>(() => cipher.Open(frame, 0));
+    }
+
+    [Fact]
+    public void A_frame_opened_under_the_wrong_counter_fails()
+    {
+        // The counter is the nonce, so it's bound into the tag: a receiver replaying or
+        // reordering frames can't have them silently decode as something else.
+        using var cipher = new AirPlay2Cipher(new byte[32]);
+        var frame = cipher.Seal(new byte[64]);
+
+        Assert.ThrowsAny<CryptographicException>(() => cipher.Open(frame, 7));
+    }
+
+    [Fact]
+    public void The_cipher_demands_a_32_byte_key()
+    {
+        // The audio key is the session key's first 32 bytes, raw - handing over all 64
+        // (the natural mistake, since K is 64) must fail loudly rather than half-work.
+        var sessionKey = Enumerable.Range(0, 64).Select(i => (byte)i).ToArray();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AirPlay2Cipher(sessionKey));
+
+        using var cipher = new AirPlay2Cipher(sessionKey[..32]);
+        Assert.Equal(2 + 16 + 16, cipher.Seal(new byte[16]).Length);
     }
 
     /// <summary>

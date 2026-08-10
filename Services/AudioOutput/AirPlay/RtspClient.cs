@@ -6,12 +6,19 @@ using Serilog;
 
 namespace OrgZ.Services.AudioOutput.AirPlay;
 
-/// <summary>One parsed RTSP response: status line, headers, and the (usually empty) body.</summary>
-internal sealed record RtspResponse(int StatusCode, string StatusText, Dictionary<string, string> Headers, string Body)
+/// <summary>
+/// One parsed RTSP response. The body is kept as BYTES: AirPlay 2's pair-setup replies
+/// are binary TLV8 and its SETUP replies are binary plists, so decoding to text up front
+/// would corrupt them.
+/// </summary>
+internal sealed record RtspResponse(int StatusCode, string StatusText, Dictionary<string, string> Headers, byte[] BodyBytes)
 {
     public bool IsSuccess => StatusCode is >= 200 and < 300;
 
     public string? Header(string name) => Headers.TryGetValue(name, out var v) ? v : null;
+
+    /// <summary>The body as text - only meaningful for the text/parameters style replies.</summary>
+    public string Body => Encoding.UTF8.GetString(BodyBytes);
 }
 
 /// <summary>
@@ -137,6 +144,9 @@ internal sealed class RtspClient : IDisposable
 
     /// <summary>Parses a complete response. Pure, so header/status handling is tested directly.</summary>
     internal static RtspResponse ParseResponse(string head, string body)
+        => ParseResponse(head, Encoding.UTF8.GetBytes(body));
+
+    internal static RtspResponse ParseResponse(string head, byte[] body)
     {
         var lines = head.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         var status = lines.Length > 0 ? lines[0] : "";
@@ -156,6 +166,13 @@ internal sealed class RtspClient : IDisposable
 
         return new RtspResponse(code, text, headers, body);
     }
+
+    /// <summary>
+    /// POSTs to an AirPlay 2 HTTP-style endpoint (<c>/pair-setup</c>, <c>/info</c>) over the
+    /// same connection. These use absolute paths as the request URI, not an rtsp:// target.
+    /// </summary>
+    public Task<RtspResponse> PostAsync(string path, string contentType, byte[] body, IReadOnlyDictionary<string, string>? headers = null, CancellationToken ct = default)
+        => SendAsync("POST", path, headers, contentType, body, ct);
 
     private static async Task<RtspResponse> ReadResponseAsync(NetworkStream stream, CancellationToken ct)
     {
@@ -179,7 +196,7 @@ internal sealed class RtspClient : IDisposable
         }
 
         var headText = Encoding.ASCII.GetString(head.ToArray());
-        var parsed = ParseResponse(headText, "");
+        var parsed = ParseResponse(headText, []);
 
         var length = int.TryParse(parsed.Header("Content-Length"), out var len) ? len : 0;
         if (length <= 0)
@@ -199,7 +216,7 @@ internal sealed class RtspClient : IDisposable
             offset += read;
         }
 
-        return parsed with { Body = Encoding.UTF8.GetString(bodyBytes) };
+        return parsed with { BodyBytes = bodyBytes };
     }
 
     public void Dispose()
