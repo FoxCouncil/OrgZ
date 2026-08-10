@@ -36,8 +36,12 @@ namespace OrgZ.Services.AudioOutput;
 /// chunking, for every platform sink at once.
 /// </para>
 /// </remarks>
-/// <summary>One output that stopped working, and why - phrased for the status bar.</summary>
-public sealed record SinkFailure(string SinkId, string DisplayName, string Reason);
+/// <summary>
+/// One output that stopped working, and why - phrased for the status bar.
+/// <paramref name="NeedsPassword"/> marks the one failure the user can actually fix from
+/// here, so the UI can offer a password prompt instead of just reporting it.
+/// </summary>
+public sealed record SinkFailure(string SinkId, string DisplayName, string Reason, bool NeedsPassword = false);
 
 public sealed class AudioSinkBus : IDisposable
 {
@@ -406,8 +410,8 @@ public sealed class AudioSinkBus : IDisposable
     public event EventHandler<SinkFailure>? SinkFailed;
 
     /// <summary>Lets a sink report an asynchronous failure (e.g. a network handshake that fails after Open).</summary>
-    internal void ReportSinkFailure(string id, string displayName, string reason)
-        => SinkFailed?.Invoke(this, new SinkFailure(id, displayName, reason));
+    internal void ReportSinkFailure(string id, string displayName, string reason, bool needsPassword = false)
+        => SinkFailed?.Invoke(this, new SinkFailure(id, displayName, reason, needsPassword));
 
     public void Dispose()
     {

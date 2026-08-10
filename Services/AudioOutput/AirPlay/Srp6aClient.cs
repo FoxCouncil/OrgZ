@@ -35,6 +35,11 @@ internal sealed class Srp6aClient
         "D87602733EC86A64521F2B18177B200CBBE117577A615D6C770988C0BAD946E2" +
         "08E24FA074E5AB3143DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF";
 
+    /// <summary>
+    /// The password transient pairing uses when the receiver has none of its own. A
+    /// receiver that advertises the 0x80 status bit wants the user's real AirPlay password
+    /// here instead - passing this one gets a flat "authentication failed" at M4.
+    /// </summary>
     public const string TransientPin = "3939";
     public const string Username = "Pair-Setup";
 
@@ -43,17 +48,20 @@ internal sealed class Srp6aClient
     private readonly int _width;         // modulus width in bytes - the padding target
     private readonly BigInteger _a;      // client private
     private readonly BigInteger _bigA;   // client public
+    private readonly string _password;
 
     private byte[]? _sessionKey;
 
-    public Srp6aClient()
-        : this(RandomNumberGenerator.GetBytes(32))
+    public Srp6aClient(string? password = null)
+        : this(RandomNumberGenerator.GetBytes(32), password)
     {
     }
 
     /// <summary>Test seam: a fixed client private so the exchange is reproducible.</summary>
-    internal Srp6aClient(byte[] privateKey)
+    internal Srp6aClient(byte[] privateKey, string? password = null)
     {
+        _password = string.IsNullOrEmpty(password) ? TransientPin : password;
+
         _n = ToPositive(Convert.FromHexString(ModulusHex));
         _width = ModulusHex.Length / 2;
 
@@ -89,7 +97,7 @@ internal sealed class Srp6aClient
         var k = ToPositive(Sha512(Minimal(_n), Pad(_g)));
 
         // x = H(salt | H(username : pin))
-        var identityHash = Sha512(Encoding.UTF8.GetBytes($"{Username}:{TransientPin}"));
+        var identityHash = Sha512(Encoding.UTF8.GetBytes($"{Username}:{_password}"));
         var x = ToPositive(Sha512(salt, identityHash));
 
         // u = H(PAD(A) | PAD(B))

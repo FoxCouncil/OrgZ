@@ -28,7 +28,7 @@ internal sealed class AirPlay2Session : IDisposable
 
     private readonly string _host;
     private readonly int _rtspPort;
-    private readonly AirPlay2Pairing _pairing = new();
+    private readonly AirPlay2Pairing _pairing;
 
     private RtspClient? _rtsp;
     private AirPlay2Cipher? _cipher;
@@ -42,11 +42,15 @@ internal sealed class AirPlay2Session : IDisposable
     private DateTime _streamStart;
     private uint _framesSent;
 
-    public AirPlay2Session(string host, int rtspPort)
+    public AirPlay2Session(string host, int rtspPort, string? password = null)
     {
         _host = host;
         _rtspPort = rtspPort;
+        _pairing = new AirPlay2Pairing(password);
     }
+
+    /// <summary>True when the receiver refused our password - the caller should ask for another.</summary>
+    public bool PasswordRejected => _pairing.PasswordRejected;
 
     public bool IsConnected { get; private set; }
 

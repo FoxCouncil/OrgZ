@@ -114,6 +114,64 @@ public class AirPlayPairingTests
             Convert.ToHexString(proof));
     }
 
+    /// <summary>
+    /// A receiver with "Require Password" set rejects the transient PIN, so the password
+    /// has to reach the SRP identity hash. Same fixed inputs, same external reference -
+    /// only the password differs, and it changes both K and the proof.
+    /// </summary>
+    [Fact]
+    public void Srp_with_a_password_matches_the_external_reference_implementation()
+    {
+        var a = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
+        var salt = Enumerable.Range(0, 16).Select(i => (byte)(0xA0 + i)).ToArray();
+        var serverPublic = Enumerable.Range(0, 384).Select(i => (byte)(((i * 7) + 11) & 0xFF)).ToArray();
+
+        var client = new Srp6aClient(a, "speaker-pw");
+        var proof = client.ComputeProof(salt, serverPublic);
+
+        Assert.Equal(
+            "4B097A69911E0D4EECA33D9A207D1D982B56CB085388289FE3E0EBB2347D853CC5A1FACADF9E19CDBA6EC860E33D15E7" +
+            "0A8C144F0098F7F3FD9BC67CA3E1D778",
+            Convert.ToHexString(client.SessionKey));
+
+        Assert.Equal(
+            "27D6C1FFDAF7C227092E73EBA570BA64B9A3769770441984E29C0308FF27CEDFE1EE6C0FB6ADABD6AC0DF4322CDA4761" +
+            "8D92CDAA4FC186C2960B0D3CFA0D457E",
+            Convert.ToHexString(proof));
+    }
+
+    /// <summary>A null/empty password must mean the transient PIN, not an empty one.</summary>
+    [Fact]
+    public void Srp_falls_back_to_the_transient_pin_when_no_password_is_given()
+    {
+        var a = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
+        var salt = Enumerable.Range(0, 16).Select(i => (byte)(0xA0 + i)).ToArray();
+        var serverPublic = Enumerable.Range(0, 384).Select(i => (byte)(((i * 7) + 11) & 0xFF)).ToArray();
+
+        var explicitPin = new Srp6aClient(a, Srp6aClient.TransientPin).ComputeProof(salt, serverPublic);
+
+        Assert.Equal(explicitPin, new Srp6aClient(a, null).ComputeProof(salt, serverPublic));
+        Assert.Equal(explicitPin, new Srp6aClient(a, "").ComputeProof(salt, serverPublic));
+    }
+
+    [Theory]
+    [InlineData("sf=0x98484", true)]      // HomePod with "Require Password" on
+    [InlineData("sf=0x204", false)]       // a Mac advertising no password bit
+    [InlineData("flags=0x98484", true)]   // _airplay spells the same field "flags"
+    [InlineData("pw=true", true)]
+    [InlineData("pw=false", false)]
+    [InlineData("am=AudioAccessory6,1", false)]
+    public void Txt_records_reveal_which_receivers_want_a_password(string entry, bool expected)
+    {
+        // One TXT record: a single length-prefixed key=value string.
+        var payload = System.Text.Encoding.UTF8.GetBytes(entry);
+        var record = new byte[payload.Length + 1];
+        record[0] = (byte)payload.Length;
+        payload.CopyTo(record, 1);
+
+        Assert.Equal(expected, AirPlayDeviceProvider.TxtDemandsPassword(record, 0, record.Length));
+    }
+
     [Fact]
     public void Srp_client_and_reference_server_agree_on_the_session_key()
     {

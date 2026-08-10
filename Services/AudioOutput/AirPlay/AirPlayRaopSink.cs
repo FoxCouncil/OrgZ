@@ -47,20 +47,26 @@ internal sealed class AirPlayRaopSink : IAudioSink
     private bool _paused;
     private bool _disposed;
 
-    public AirPlayRaopSink(AudioDeviceInfo device, string host, int port, AudioSinkBus? bus = null)
+    private readonly string? _password;
+
+    public AirPlayRaopSink(AudioDeviceInfo device, string host, int port, AudioSinkBus? bus = null, string? password = null)
     {
         Id = device.QualifiedId;
         DisplayName = device.DisplayName;
         _host = host;
         _port = port;
+        _password = password;
 
         // The handshake finishes long after Open returns, so a failure can't be thrown to
         // a caller - it goes back through the bus, which the UI listens to.
         if (bus is not null)
         {
-            ConnectFailed += (_, reason) => bus.ReportSinkFailure(Id, DisplayName, reason);
+            ConnectFailed += (_, reason) => bus.ReportSinkFailure(Id, DisplayName, reason, NeedsPassword);
         }
     }
+
+    /// <summary>Set when the receiver rejected our credentials, so the UI knows to prompt.</summary>
+    public bool NeedsPassword { get; private set; }
 
     public string Id { get; }
     public string DisplayName { get; }
@@ -131,11 +137,12 @@ internal sealed class AirPlayRaopSink : IAudioSink
         CurrentFormat = format;
         _partial.Clear();
 
-        // ~4s of audio in flight; DropOldest so a network stall costs latency, never the
-        // decoder - and so the handshake window discards stale audio instead of playing it late.
+        // ~4s of audio in flight. Wait (not DropOldest) so a full queue is visible to
+        // Enqueue, which decides between pacing and dropping - see Enqueue for why that
+        // distinction is what keeps playback running at 1x.
         _queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(512)
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
         });
 
@@ -167,8 +174,54 @@ internal sealed class AirPlayRaopSink : IAudioSink
             var packet = _partial.GetRange(0, RaopAlac.PcmBytesPerPacket).ToArray();
             _partial.RemoveRange(0, RaopAlac.PcmBytesPerPacket);
             ApplyGain(packet);
-            _queue.Writer.TryWrite(packet);
+            Enqueue(packet);
         }
+    }
+
+    /// <summary>How long a full queue may stall the decoder before we drop instead.</summary>
+    private const int BackPressureMs = 2000;
+
+    // True once a session is up and the pump is draining in real time.
+    private volatile bool _streaming;
+
+    /// <summary>
+    /// Hands one packet to the pump, applying back-pressure once we're actually streaming.
+    ///
+    /// This is what keeps playback at 1x. A local sink paces the decoder by blocking in
+    /// its own write; AirPlay has no such clock, so when it is the ONLY output an
+    /// always-accepting Write let LibVLC decode as fast as it could read the file - the
+    /// track raced to the end in seconds while the speaker played the first few. Making a
+    /// full queue block borrows the receiver's real-time drain as the clock.
+    ///
+    /// Bounded, though: a wedged receiver must never hang the decoder (that would stall
+    /// every other output too), so past the deadline we drop the oldest packet and move
+    /// on. Before the session is up we always drop, so the ~1s handshake window doesn't
+    /// stall playback or deliver a backlog of stale audio when it completes.
+    /// </summary>
+    private void Enqueue(byte[] packet)
+    {
+        var queue = _queue;
+        if (queue is null || queue.Writer.TryWrite(packet))
+        {
+            return;
+        }
+
+        if (_streaming)
+        {
+            var deadline = Environment.TickCount64 + BackPressureMs;
+            while (Environment.TickCount64 < deadline)
+            {
+                if (queue.Writer.TryWrite(packet))
+                {
+                    return;
+                }
+
+                Thread.Sleep(5);
+            }
+        }
+
+        queue.Reader.TryRead(out _);
+        queue.Writer.TryWrite(packet);
     }
 
     /// <summary>Depths this sink can reduce to the 16-bit PCM RAOP requires.</summary>
@@ -300,14 +353,23 @@ internal sealed class AirPlayRaopSink : IAudioSink
                 raop = null;
 
                 _log.Information("{Name} wants AirPlay 2 pairing - retrying with the paired path", DisplayName);
-                airplay2 = new AirPlay2Session(_host, _port);
-                await airplay2.ConnectAsync(ct);
+                airplay2 = new AirPlay2Session(_host, _port, _password);
+                try
+                {
+                    await airplay2.ConnectAsync(ct);
+                }
+                finally
+                {
+                    NeedsPassword = airplay2.PasswordRejected;
+                }
+
                 _airplay2 = airplay2;
                 _failureCount = 0;
                 _log.Information("AirPlay streaming to {Name} (AirPlay 2)", DisplayName);
             }
 
             PushVolume();
+            _streaming = true;
         }
         catch (OperationCanceledException)
         {
@@ -323,15 +385,22 @@ internal sealed class AirPlayRaopSink : IAudioSink
             // failure mode this whole path exists to avoid.
             _log.Error(ex, "AirPlay handshake failed for {Name} ({Host}:{Port})", DisplayName, _host, _port);
             IsOpen = false;
+            _streaming = false;
 
             // A receiver that's rate-limiting needs real time, not another attempt: HomeKit
             // lockouts clear on a timer and every retry restarts it. Everything else backs
             // off gently so a flaky network doesn't turn into a connection storm either.
             var lockedOut = ex.Message.Contains("too many attempts", StringComparison.OrdinalIgnoreCase);
             _failureCount++;
-            var backoff = lockedOut
-                ? TimeSpan.FromMinutes(5)
-                : TimeSpan.FromSeconds(Math.Min(60, 5 * Math.Pow(2, _failureCount - 1)));
+
+            // A rejected password won't fix itself, and retrying it is what trips the
+            // receiver's brute-force lockout. Sit out until the user supplies a new one,
+            // which clears the gate via SetPassword.
+            var backoff = NeedsPassword
+                ? TimeSpan.FromHours(1)
+                : lockedOut
+                    ? TimeSpan.FromMinutes(5)
+                    : TimeSpan.FromSeconds(Math.Min(60, 5 * Math.Pow(2, _failureCount - 1)));
             _retryNotBefore = DateTime.UtcNow.Add(backoff);
             _lastFailure = Explain(ex);
 
@@ -402,6 +471,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
     {
         IsOpen = false;
         _paused = false;
+        _streaming = false;
 
         try
         {

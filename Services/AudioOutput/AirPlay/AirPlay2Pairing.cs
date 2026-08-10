@@ -25,7 +25,23 @@ internal sealed class AirPlay2Pairing
     /// <summary>Transient pairing sets bit 4 (0x10) in the pairing flags.</summary>
     private const byte TransientFlag = 0x10;
 
-    private readonly Srp6aClient _srp = new();
+    private readonly Srp6aClient _srp;
+
+    /// <summary>
+    /// <paramref name="password"/> is the receiver's AirPlay password, or null for the
+    /// passwordless transient PIN. Receivers advertising the 0x80 status bit ("Require
+    /// Password" in the Home app) reject the transient PIN outright.
+    /// </summary>
+    public AirPlay2Pairing(string? password = null)
+    {
+        _srp = new Srp6aClient(password);
+        _hasPassword = !string.IsNullOrEmpty(password);
+    }
+
+    private readonly bool _hasPassword;
+
+    /// <summary>Set when the receiver rejected our credentials, so the caller can ask for a password.</summary>
+    public bool PasswordRejected { get; private set; }
 
     /// <summary>The SRP session key (64 bytes) once pairing succeeds.</summary>
     public byte[]? SessionKey { get; private set; }
@@ -113,11 +129,22 @@ internal sealed class AirPlay2Pairing
     }
 
     /// <summary>HAP reports refusals as a TLV error code rather than an HTTP status.</summary>
-    private static void ThrowIfError(Dictionary<byte, byte[]> tlv, string stage)
+    private void ThrowIfError(Dictionary<byte, byte[]> tlv, string stage)
     {
         if (!tlv.TryGetValue(Tlv8.Error, out var error) || error.Length == 0 || error[0] == 0)
         {
             return;
+        }
+
+        // 0x02 is SRP saying "your proof didn't match mine", which for AirPlay means one
+        // thing in practice: the wrong password. Flag it so the caller can ask for one
+        // rather than reporting an authentication failure the user can't act on.
+        if (error[0] == 0x02)
+        {
+            PasswordRejected = true;
+            throw new InvalidOperationException(_hasPassword
+                ? "That AirPlay password was rejected."
+                : "This receiver requires an AirPlay password.");
         }
 
         throw new InvalidOperationException($"Pair-setup {stage} failed: {DescribeError(error[0])}");

@@ -57,6 +57,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     private readonly object _cacheLock = new();
     private List<AudioDeviceInfo> _cachedDevices = [];
     private Dictionary<string, (string Host, int Port)> _endpoints = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, bool> _passwordRequired = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _cachedAt = DateTime.MinValue;
     private int _sweeping;   // 0/1 - at most one background sweep in flight
 
@@ -97,10 +98,11 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     {
         var receivers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var endpoints = new Dictionary<string, (string Host, int Port)>(StringComparer.OrdinalIgnoreCase);
+        var passwordRequired = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            QueryMdns(RaopService, receivers, endpoints, TimeSpan.FromMilliseconds(1500));
-            QueryMdns(AirplayService, receivers, endpoints, TimeSpan.FromMilliseconds(500));
+            QueryMdns(RaopService, receivers, endpoints, TimeSpan.FromMilliseconds(1500), passwordRequired);
+            QueryMdns(AirplayService, receivers, endpoints, TimeSpan.FromMilliseconds(500), passwordRequired);
         }
         catch (Exception ex)
         {
@@ -141,6 +143,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         lock (_cacheLock)
         {
             _endpoints = endpoints;
+            _passwordRequired = passwordRequired;
         }
 
         bool changed;
@@ -185,7 +188,16 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             }
         }
 
-        return new AirPlayRaopSink(device, endpoint.Host, endpoint.Port, FailureReportBus);
+        return new AirPlayRaopSink(device, endpoint.Host, endpoint.Port, FailureReportBus, AirPlayCredentials.Get(device.DeviceId));
+    }
+
+    /// <summary>True when this receiver advertised that it wants an AirPlay password.</summary>
+    internal bool RequiresPassword(string deviceId)
+    {
+        lock (_cacheLock)
+        {
+            return _passwordRequired.TryGetValue(deviceId, out var required) && required;
+        }
     }
 
     /// <summary>
@@ -206,7 +218,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// uses. A bare join/send picks whichever adapter won the metric race, so on a host
     /// with Hyper-V switches or VPN adapters discovery worked or didn't by coin toss.
     /// </summary>
-    private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout)
+    private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout, Dictionary<string, bool>? passwordRequired = null)
     {
         using var udp = new UdpClient();
         udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
@@ -275,7 +287,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             {
                 var data = udp.Receive(ref remote);
                 ExtractPtrNames(data, service, receivers);
-                ExtractEndpoints(data, receivers, endpoints);
+                ExtractEndpoints(data, receivers, endpoints, passwordRequired);
             }
             catch (SocketException)
             {
@@ -373,7 +385,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// packet, so a single sweep normally resolves everything; a receiver whose A record
     /// didn't arrive simply stays unavailable until the next sweep.
     /// </summary>
-    internal static void ExtractEndpoints(byte[] data, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints)
+    internal static void ExtractEndpoints(byte[] data, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, Dictionary<string, bool>? passwordRequired = null)
     {
         if (data.Length < 12)
         {
@@ -427,6 +439,12 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                     addresses[ReadName(data, nameStart)] = $"{data[rdStart]}.{data[rdStart + 1]}.{data[rdStart + 2]}.{data[rdStart + 3]}";
                 }
                 break;
+
+                case 16 when passwordRequired is not null:   // TXT
+                {
+                    passwordRequired[ReadName(data, nameStart)] = TxtDemandsPassword(data, rdStart, rdLength);
+                }
+                break;
             }
 
             idx = rdStart + rdLength;
@@ -447,6 +465,59 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 endpoints[instance] = (host, entry.Port);
             }
         }
+    }
+
+    /// <summary>
+    /// Reads a TXT record and reports whether the receiver wants an AirPlay password.
+    ///
+    /// Two spellings mean the same thing: an explicit <c>pw=true</c>, or bit 0x80 in the
+    /// status flags (<c>sf</c> on _raop, <c>flags</c> on _airplay) - which is what a
+    /// HomePod with "Require Password" set in the Home app actually advertises. Getting
+    /// this wrong is expensive: pairing with the wrong credential trips the receiver's
+    /// brute-force lockout, so it's worth reading rather than discovering by failure.
+    /// </summary>
+    internal static bool TxtDemandsPassword(byte[] data, int rdStart, int rdLength)
+    {
+        const int PasswordBit = 0x80;
+
+        var end = Math.Min(rdStart + rdLength, data.Length);
+        var idx = rdStart;
+        while (idx < end)
+        {
+            int length = data[idx];
+            idx++;
+            if (length == 0 || idx + length > end)
+            {
+                break;
+            }
+
+            var entry = System.Text.Encoding.UTF8.GetString(data, idx, length);
+            idx += length;
+
+            var split = entry.IndexOf('=');
+            if (split <= 0)
+            {
+                continue;
+            }
+
+            var key = entry[..split];
+            var value = entry[(split + 1)..];
+
+            if (key.Equals("pw", StringComparison.OrdinalIgnoreCase) && value.Equals("true", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if ((key.Equals("sf", StringComparison.OrdinalIgnoreCase) || key.Equals("flags", StringComparison.OrdinalIgnoreCase))
+                && value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                && long.TryParse(value.AsSpan(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var flags)
+                && (flags & PasswordBit) != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static int SkipName(byte[] data, int idx)
