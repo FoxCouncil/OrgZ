@@ -73,6 +73,47 @@ public class AirPlayPairingTests
         Assert.Equal(384, new Srp6aClient().PublicKey.Length);
     }
 
+    /// <summary>
+    /// The oracle test: fixed inputs run through srptools - the library pyatv uses to talk
+    /// to real Apple hardware - and the expected values pasted in verbatim.
+    ///
+    /// This exists because the self-written reference server below shares my reading of the
+    /// spec, so it happily agreed with a client that padded values the spec doesn't pad.
+    /// It proved self-consistency, not correctness. An implementation nobody here wrote is
+    /// the only thing that can catch that class of mistake.
+    /// </summary>
+    [Fact]
+    public void Srp_matches_the_external_reference_implementation()
+    {
+        var a = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
+        var salt = Enumerable.Range(0, 16).Select(i => (byte)(0xA0 + i)).ToArray();
+        var serverPublic = Enumerable.Range(0, 384).Select(i => (byte)(((i * 7) + 11) & 0xFF)).ToArray();
+
+        var client = new Srp6aClient(a);
+        var proof = client.ComputeProof(salt, serverPublic);
+
+        Assert.Equal(
+            "BC0E7CF5DC3BABF67DCEDBB3B140AACC6CAC43F4336B43BBD5DE48D6EA7C8EDA66924E354255225BCCAD9DEBE21182E6" +
+            "BB050F3FF3E6CFBB62C229379968C70CA436AD649A0B051373184215EEF046F6F1F2256838F958581F6C7B2B85FA4AFE3" +
+            "26A0E8A951D4489305331AFF88A136FD8D108BCC95FCEB7E557C889C828BD23FB0702F053E1CA6470FB3C76BCE4843FC0" +
+            "05C7EA675740F8550212656CFC8919D9DB805A434A68229E0D9DFE43FC16DC680A5CE74B77CF374353B05759BC1DA3A9D" +
+            "ABDE30A4209381C87CA83D9483ABDF66B86F9B1CBDA9AD82C62712B87CE6FB7069B8FC8DF344261821A06D0DC5106AF76" +
+            "D4245F3F7737A94DBC484B415555DC401842D3011204553BA9F611B02BC38DE26EBA1A76BF8350205A62C436BA1C3C7C6" +
+            "9D59318BD107FD1C1F5D846B3142E85A5D49E522655E020ED1BFE1E186CF923BF328F0B9B4C6A8AA3266ED9125BB98D63" +
+            "827110713BE7803122EE4603C54EA31863CE4B10AFF31F9073CF63B94733B4F066E72D4EC35687047D5D0DB160",
+            Convert.ToHexString(client.PublicKey));
+
+        Assert.Equal(
+            "629B16B8D5DF0E5C532ECEC282C8A62145C6607CF7FEB2AF8D1377B4F4B3525DA4DFF801E4A23F8D9F03727984EFD1FD" +
+            "F1E7A444CC80D0CC77F8E05621BB5AAD",
+            Convert.ToHexString(client.SessionKey));
+
+        Assert.Equal(
+            "0D7AA155741356A6203D5C3F08C75BFF776ABC126FAB0D080AA65F945D91081DFEE6982E6FADB99177DC65D2498275C7" +
+            "496CCA916AFF9FEDE5A37D73EB0E939B",
+            Convert.ToHexString(proof));
+    }
+
     [Fact]
     public void Srp_client_and_reference_server_agree_on_the_session_key()
     {
