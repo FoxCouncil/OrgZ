@@ -360,15 +360,18 @@ public class AirPlayPairingTests
             var bigA = new BigInteger(clientPublicKey, isUnsigned: true, isBigEndian: true);
             var u = new BigInteger(Hash(Pad(bigA), Pad(_bigB)), isUnsigned: true, isBigEndian: true);
 
-            // S = (A * v^u) ^ b mod N
+            // S = (A * v^u) ^ b mod N; K = H(S) over S's MINIMAL bytes.
             var s = BigInteger.ModPow(bigA * BigInteger.ModPow(_v, u, _n) % _n, _b, _n);
-            return Hash(Pad(s));
+            return Hash(Minimal(s));
         }
 
         public bool VerifyClientProof(byte[] clientPublicKey, byte[] proof)
         {
-            var hn = Hash(Pad(_n));
-            var hg = Hash(Pad(_g));
+            // Every term MINIMAL - notably H(g) over the single byte 0x05, matching the
+            // srptools/pyatv convention that is proven against real Apple hardware.
+            var bigA = new BigInteger(clientPublicKey, isUnsigned: true, isBigEndian: true);
+            var hn = Hash(Minimal(_n));
+            var hg = Hash(Minimal(_g));
             var xored = new byte[hn.Length];
             for (var i = 0; i < hn.Length; i++)
             {
@@ -379,15 +382,20 @@ public class AirPlayPairingTests
                 xored,
                 Hash(Encoding.UTF8.GetBytes(Srp6aClient.Username)),
                 Salt,
-                clientPublicKey,
-                Pad(_bigB),
+                Minimal(bigA),
+                Minimal(_bigB),
                 ComputeSessionKey(clientPublicKey));
 
             return CryptographicOperations.FixedTimeEquals(expected, proof);
         }
 
         public byte[] ComputeServerProof(byte[] clientPublicKey, byte[] clientProof)
-            => Hash(clientPublicKey, clientProof, ComputeSessionKey(clientPublicKey));
+        {
+            var bigA = new BigInteger(clientPublicKey, isUnsigned: true, isBigEndian: true);
+            return Hash(Minimal(bigA), clientProof, ComputeSessionKey(clientPublicKey));
+        }
+
+        private static byte[] Minimal(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
 
         private byte[] Pad(BigInteger value)
         {

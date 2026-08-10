@@ -84,8 +84,9 @@ internal sealed class Srp6aClient
             throw new InvalidOperationException("SRP: the receiver's public key is invalid (B mod N == 0).");
         }
 
-        // k = H(N | PAD(g))
-        var k = ToPositive(Sha512(Pad(_n), Pad(_g)));
+        // k = H(N | PAD(g)) - g IS padded here. (N's minimal form is already full width,
+        // its top byte being 0xFF, so the two spellings coincide for it.)
+        var k = ToPositive(Sha512(Minimal(_n), Pad(_g)));
 
         // x = H(salt | H(username : pin))
         var identityHash = Sha512(Encoding.UTF8.GetBytes($"{Username}:{TransientPin}"));
@@ -103,26 +104,35 @@ internal sealed class Srp6aClient
         }
 
         var s = BigInteger.ModPow(baseValue, _a + (u * x), _n);
-        _sessionKey = Sha512(Pad(s));
 
-        // M1 = H(H(N) XOR H(g) | H(I) | salt | A | B | K)
-        var hn = Sha512(Pad(_n));
-        var hg = Sha512(Pad(_g));
+        // K = H(S) over S's MINIMAL bytes. Padding is applied only where the spec asks for
+        // PAD() - k and u - and nowhere else. Padding here instead produces a key the
+        // receiver never derives, which surfaces as "authentication failed" at M4.
+        _sessionKey = Sha512(Minimal(s));
+
+        // M1 = H(H(N) XOR H(g) | H(I) | salt | A | B | K), all values MINIMAL. In
+        // particular H(g) hashes the single byte 0x05, not g padded to 384 - the two uses
+        // of g in this protocol genuinely differ.
+        var hn = Sha512(Minimal(_n));
+        var hg = Sha512(Minimal(_g));
         var xored = new byte[hn.Length];
         for (var i = 0; i < hn.Length; i++)
         {
             xored[i] = (byte)(hn[i] ^ hg[i]);
         }
 
-        return Sha512(xored, Sha512(Encoding.UTF8.GetBytes(Username)), salt, Pad(_bigA), Pad(bigB), _sessionKey);
+        return Sha512(xored, Sha512(Encoding.UTF8.GetBytes(Username)), salt, Minimal(_bigA), Minimal(bigB), _sessionKey);
     }
 
     /// <summary>Verifies the server's proof M2 = H(A | M1 | K), closing the mutual authentication.</summary>
     public bool VerifyServerProof(byte[] clientProof, byte[] serverProof)
     {
-        var expected = Sha512(Pad(_bigA), clientProof, SessionKey);
+        var expected = Sha512(Minimal(_bigA), clientProof, SessionKey);
         return CryptographicOperations.FixedTimeEquals(expected, serverProof);
     }
+
+    /// <summary>The value's shortest big-endian encoding - the default everywhere PAD() isn't specified.</summary>
+    private static byte[] Minimal(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
 
     /// <summary>Left-pads to the modulus width - required before every hash input.</summary>
     private byte[] Pad(BigInteger value)
