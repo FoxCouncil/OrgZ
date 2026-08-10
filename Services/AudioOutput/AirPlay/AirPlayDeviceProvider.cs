@@ -7,20 +7,21 @@ using Serilog;
 namespace OrgZ.Services.AudioOutput.AirPlay;
 
 /// <summary>
-/// Discovers AirPlay receivers on the LAN via mDNS (<c>_raop._tcp.local</c>).
-/// Discovery is functional today; actual streaming via RTSP + RAOP (RSA key
-/// exchange, ALAC encoding, RTP transport, NTP sync) is a substantial
-/// protocol stack and lands in a follow-up - <see cref="CreateSink"/> returns
-/// a placeholder sink that logs and silently drops samples so the UI can
-/// still show AirPlay devices in the list and we have a place to iterate.
+/// Discovers AirPlay receivers on the LAN via mDNS (<c>_raop._tcp.local</c>) and streams
+/// to them over RAOP (see <see cref="RaopSession"/>: RTSP handshake, RSA-wrapped AES key,
+/// uncompressed-ALAC framing, RTP audio with sync + timing).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Why discover-only for now: RAOP is ~2000 LOC of protocol-critical code
-/// (RSA key negotiation, per-receiver auth flavors, ALAC framing, sync).
-/// Shipping a half-done implementation would silently corrupt audio or
-/// hang the UI when a user picks an AirPlay target; better to have the
-/// device visible with a "not yet supported" error than to pretend.
+/// Only receivers whose SRV/A records resolved to a host and port are marked available -
+/// a device we can't actually reach stays visible but disabled rather than becoming a
+/// placebo that silently eats the stream. The sink likewise THROWS when the handshake
+/// fails instead of dropping samples, so a refusal surfaces as an error.
+/// </para>
+/// <para>
+/// Auth flavors: this handles the classic RSA/AES receivers (AirPort Express, most
+/// third-party speakers). Receivers demanding FairPlay or an AirPlay-2 pairing handshake
+/// refuse ANNOUNCE, and that refusal is reported verbatim rather than retried.
 /// </para>
 /// <para>
 /// The mDNS browser here uses raw UDP multicast against
@@ -55,6 +56,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     private static readonly TimeSpan DiscoveryTtl = TimeSpan.FromMinutes(2);
     private readonly object _cacheLock = new();
     private List<AudioDeviceInfo> _cachedDevices = [];
+    private Dictionary<string, (string Host, int Port)> _endpoints = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _cachedAt = DateTime.MinValue;
     private int _sweeping;   // 0/1 - at most one background sweep in flight
 
@@ -94,10 +96,11 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     private void SweepNow()
     {
         var receivers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var endpoints = new Dictionary<string, (string Host, int Port)>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            QueryMdns(RaopService, receivers, TimeSpan.FromMilliseconds(1500));
-            QueryMdns(AirplayService, receivers, TimeSpan.FromMilliseconds(500));
+            QueryMdns(RaopService, receivers, endpoints, TimeSpan.FromMilliseconds(1500));
+            QueryMdns(AirplayService, receivers, endpoints, TimeSpan.FromMilliseconds(500));
         }
         catch (Exception ex)
         {
@@ -107,19 +110,22 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         var result = new List<AudioDeviceInfo>(receivers.Count);
         foreach (var kvp in receivers)
         {
+            // Only a receiver whose SRV/A records gave us somewhere to connect is offered as
+            // usable; the rest stay listed but disabled rather than failing at play time.
+            var reachable = endpoints.TryGetValue(kvp.Key, out var endpoint);
             result.Add(new AudioDeviceInfo
             {
                 DeviceId = kvp.Key,
                 DisplayName = kvp.Value,
                 ProviderId = Id,
                 ProviderName = ProviderName,
-                // Discovery works; STREAMING doesn't yet (CreateSink returns the placeholder that
-                // drops all samples). Unavailable keeps the picker honest - the device shows,
-                // disabled, instead of being a placebo that silently kills audio - and
-                // AudioOutputManager.ApplySelections refuses to create sinks for it. Flip when
-                // RAOP streaming lands (see roadmap).
-                IsAvailable = false,
+                IsAvailable = reachable,
             });
+        }
+
+        lock (_cacheLock)
+        {
+            _endpoints = endpoints;
         }
 
         bool changed;
@@ -140,7 +146,19 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     public IAudioSink CreateSink(AudioDeviceInfo device)
     {
         ArgumentNullException.ThrowIfNull(device);
-        return new AirPlayPlaceholderSink(device);
+
+        (string Host, int Port) endpoint;
+        lock (_cacheLock)
+        {
+            if (!_endpoints.TryGetValue(device.DeviceId, out endpoint))
+            {
+                // No resolved address: refuse loudly. Handing back a sink that can't reach
+                // anything is how audio disappears with no explanation.
+                throw new InvalidOperationException($"“{device.DisplayName}” hasn't resolved to an address yet - refresh the device list and try again.");
+            }
+        }
+
+        return new AirPlayRaopSink(device, endpoint.Host, endpoint.Port);
     }
 
     /// <summary>
@@ -150,7 +168,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// DNS wire format to extract the instance name (e.g., "LivingRoom"
     /// from "LivingRoom._raop._tcp.local").
     /// </summary>
-    private static void QueryMdns(string service, Dictionary<string, string> receivers, TimeSpan timeout)
+    private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout)
     {
         using var udp = new UdpClient();
         udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
@@ -179,6 +197,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             {
                 var data = udp.Receive(ref remote);
                 ExtractPtrNames(data, service, receivers);
+                ExtractEndpoints(data, receivers, endpoints);
             }
             catch (SocketException)
             {
@@ -270,6 +289,88 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         }
     }
 
+    /// <summary>
+    /// Pulls SRV (port + target host) and A (IPv4) records out of an mDNS response and
+    /// pairs them with the receivers PTR already named. Receivers answer PTR/SRV/A in one
+    /// packet, so a single sweep normally resolves everything; a receiver whose A record
+    /// didn't arrive simply stays unavailable until the next sweep.
+    /// </summary>
+    internal static void ExtractEndpoints(byte[] data, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints)
+    {
+        if (data.Length < 12)
+        {
+            return;
+        }
+
+        var srv = new Dictionary<string, (string Target, int Port)>(StringComparer.OrdinalIgnoreCase);
+        var addresses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        int idx = 12;
+        int qdCount = (data[4] << 8) | data[5];
+        for (int q = 0; q < qdCount && idx < data.Length; q++)
+        {
+            idx = SkipName(data, idx);
+            idx += 4;
+        }
+
+        // Answers, authority and additional all carry usable records - AirPlay receivers
+        // put the SRV/A pair in "additional" more often than not.
+        int records = ((data[6] << 8) | data[7]) + ((data[8] << 8) | data[9]) + ((data[10] << 8) | data[11]);
+        for (int r = 0; r < records && idx < data.Length; r++)
+        {
+            int nameStart = idx;
+            idx = SkipName(data, idx);
+            if (idx + 10 > data.Length)
+            {
+                return;
+            }
+
+            int rType = (data[idx] << 8) | data[idx + 1];
+            idx += 8;
+            int rdLength = (data[idx] << 8) | data[idx + 1];
+            idx += 2;
+            int rdStart = idx;
+            if (rdStart + rdLength > data.Length)
+            {
+                return;
+            }
+
+            switch (rType)
+            {
+                case 33 when rdLength >= 7:   // SRV: priority(2) weight(2) port(2) target
+                {
+                    var port = (data[rdStart + 4] << 8) | data[rdStart + 5];
+                    srv[ReadName(data, nameStart)] = (ReadName(data, rdStart + 6), port);
+                }
+                break;
+
+                case 1 when rdLength == 4:    // A
+                {
+                    addresses[ReadName(data, nameStart)] = $"{data[rdStart]}.{data[rdStart + 1]}.{data[rdStart + 2]}.{data[rdStart + 3]}";
+                }
+                break;
+            }
+
+            idx = rdStart + rdLength;
+        }
+
+        foreach (var instance in receivers.Keys)
+        {
+            if (!srv.TryGetValue(instance, out var entry))
+            {
+                continue;
+            }
+
+            // Prefer the A record we just saw; fall back to the SRV target name, which the
+            // OS resolver can usually handle via mDNS itself.
+            var host = addresses.TryGetValue(entry.Target, out var ip) ? ip : entry.Target;
+            if (!string.IsNullOrWhiteSpace(host) && entry.Port > 0)
+            {
+                endpoints[instance] = (host, entry.Port);
+            }
+        }
+    }
+
     private static int SkipName(byte[] data, int idx)
     {
         while (idx < data.Length)
@@ -314,63 +415,4 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     }
 
     internal void RaiseDevicesChanged() => DevicesChanged?.Invoke(this, EventArgs.Empty);
-
-    /// <summary>
-    /// Placeholder sink used until full RAOP streaming is implemented -
-    /// <see cref="Open"/> succeeds (so the bus keeps the sink active) but
-    /// <see cref="Write"/> silently drops samples and logs a one-time warning.
-    /// </summary>
-    private sealed class AirPlayPlaceholderSink : IAudioSink
-    {
-        private static readonly ILogger _log = Logging.For("AirPlayPlaceholderSink");
-
-        private bool _warned;
-        private bool _disposed;
-
-        public AirPlayPlaceholderSink(AudioDeviceInfo device)
-        {
-            Id = device.QualifiedId;
-            DisplayName = device.DisplayName;
-        }
-
-        public string Id { get; }
-        public string DisplayName { get; }
-        public AudioFormat? CurrentFormat { get; private set; }
-        public float Volume { get; set; } = 1f;
-        public bool IsMuted { get; set; }
-        public bool IsOpen { get; private set; }
-
-        public void Open(AudioFormat format)
-        {
-            CurrentFormat = format;
-            IsOpen = true;
-        }
-
-        public void Write(ReadOnlySpan<byte> pcm)
-        {
-            if (!_warned)
-            {
-                _warned = true;
-                _log.Warning("AirPlay streaming for {Id} is not yet implemented — samples are being dropped.  See AirPlayDeviceProvider remarks for the RAOP TODO.", Id);
-            }
-        }
-
-        public void Close()
-        {
-            IsOpen = false;
-            CurrentFormat = null;
-        }
-
-        public void Pause() { }
-        public void Resume() { }
-        public void Flush() { }
-        public void Drain() { }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _disposed = true;
-            Close();
-        }
-    }
 }
