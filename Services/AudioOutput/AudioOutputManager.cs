@@ -264,8 +264,11 @@ public sealed class AudioOutputManager : IDisposable
             {
                 selections = JsonSerializer.Deserialize<List<SinkSelection>>(json) ?? DefaultSelection();
             }
-            catch
+            catch (Exception ex)
             {
+                // Falling back means audio comes out of a different device than the user
+                // chose - the "why did my speakers change" report needs this line.
+                _log.Warning(ex, "Persisted output selection unreadable - falling back to the system default");
                 selections = DefaultSelection();
             }
         }

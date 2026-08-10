@@ -54,8 +54,11 @@ public static class IPodHostPrefs
             var legacy = LegacyComputerSlots.Select(slot => new HostSlot(slot, ReadSlot(bytes, slot))).ToList();
             return new HostIdentity(ReadSlot(bytes, UserSlot), ReadSlot(bytes, CurrentComputerSlot), legacy);
         }
-        catch
+        catch (Exception ex)
         {
+            // "No identity" and "unreadable prefs" are different facts - sync makes
+            // ownership decisions on this, so the corruption must at least leave a trail.
+            _log.Warning(ex, "iTunesPrefs on {Mount} unreadable - treating as no host identity", mountPath);
             return new HostIdentity(null, null, []);
         }
     }
@@ -90,7 +93,9 @@ public static class IPodHostPrefs
             }
             if (changed)
             {
-                File.WriteAllBytes(path, bytes);
+                // Atomic (no backup - a scrub that archives what it scrubbed isn't one):
+                // a yanked cable mid-write must not leave a torn prefs file behind.
+                Helpers.AtomicFile.WriteAllBytes(path, bytes);
                 _log.Information("Scrubbed host names on {Mount} -> “{Generic}”", mountPath, generic);
             }
             return changed;

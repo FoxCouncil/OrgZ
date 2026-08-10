@@ -330,8 +330,10 @@ internal static unsafe class ButtonPressedHandlerFactory
             }
             return 0;
         }
-        catch
+        catch (Exception ex)
         {
+            // Dead media keys with no trail were undiagnosable; the OS gets its E_FAIL either way.
+            Logging.For("Smtc").Debug(ex, "SMTC button callback failed");
             return unchecked((int)0x80004005); // E_FAIL
         }
         finally
@@ -509,7 +511,10 @@ internal sealed class SmtcService : IDisposable
             _smtc.put_IsPreviousEnabled(prev ? (byte)1 : (byte)0);
             _smtc.put_IsNextEnabled(next ? (byte)1 : (byte)0);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "SMTC prev/next enable update failed");
+        }
     }
 
     internal void UpdateMetadata(string? title, string? artist, string? album, byte[]? artBytes)
@@ -568,7 +573,10 @@ internal sealed class SmtcService : IDisposable
                                 var music2 = (IMusicDisplayProperties2)music;
                                 music2.put_AlbumTitle(hsAlbum);
                             }
-                            catch { }
+                            catch (Exception ex)
+                            {
+                                _log.Debug(ex, "SMTC album title update failed");
+                            }
                         }
                         finally
                         {
@@ -594,7 +602,14 @@ internal sealed class SmtcService : IDisposable
 
                 if (artBytes is { Length: > 0 })
                 {
-                    try { SetThumbnail(updater, artBytes); } catch { }
+                    try
+                    {
+                        SetThumbnail(updater, artBytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Debug(ex, "SMTC thumbnail update failed");
+                    }
                 }
 
                 updater.Update();
@@ -604,7 +619,12 @@ internal sealed class SmtcService : IDisposable
                 Marshal.ReleaseComObject(updater);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            // Lock-screen metadata degrading invisibly is exactly the kind of miss that
+            // needs a greppable line.
+            _log.Debug(ex, "SMTC display update failed");
+        }
     }
 
     private static unsafe void SetThumbnail(ISmtcDisplayUpdater updater, byte[] artBytes)
@@ -718,7 +738,10 @@ internal sealed class SmtcService : IDisposable
                 _smtc.remove_ButtonPressed(_buttonPressedToken);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "SMTC button handler detach failed");
+        }
 
         ButtonPressedHandlerFactory.Destroy();
 

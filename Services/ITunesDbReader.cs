@@ -134,8 +134,11 @@ public static class ITunesDbReader
             }
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            // A truncated/damaged database must read as "unreadable" in the log, not
+            // silently as "nothing there".
+            Logging.For("ITunesDbReader").Warning(ex, "iTunesDB master-playlist walk failed - treating as unnamed");
             return null;
         }
     }

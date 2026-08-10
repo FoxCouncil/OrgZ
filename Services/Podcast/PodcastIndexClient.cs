@@ -174,7 +174,16 @@ public static class PodcastIndexClient
             // upstream response doesn't poison the cache for the next 12h.
             if (parsed is not null && HasContent(parsed))
             {
-                try { await File.WriteAllTextAsync(cachePath, json, ct); } catch { }
+                try
+                {
+                    await File.WriteAllTextAsync(cachePath, json, ct);
+                }
+                catch (Exception ex)
+                {
+                    // Not cleanup: a permanently failing cache write means every launch
+                    // re-hits the network forever.
+                    _log.Debug(ex, "Podcast response cache write failed for {Path}", cachePath);
+                }
             }
             return parsed;
         }

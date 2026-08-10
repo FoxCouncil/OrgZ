@@ -65,8 +65,11 @@ public static class ShareServiceOps
             return JsonSerializer.Deserialize<ShareStartPayload>(payloadJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? new ShareStartPayload(null, null);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            // Defaults are the right recovery, but a torn/garbled config must leave a trail -
+            // "share silently didn't restore" was undiagnosable without it.
+            _log.Warning(ex, "Share start payload unparseable - using defaults");
             return new ShareStartPayload(null, null);
         }
     }
@@ -166,7 +169,8 @@ public static class ShareServiceOps
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-            File.WriteAllText(ConfigPath, JsonSerializer.Serialize(new ShareStartPayload(name, port, libraryDb), _configJson));
+            // Atomic: a torn config made the share silently not restore after a restart.
+            Helpers.AtomicFile.WriteAllBytes(ConfigPath, System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new ShareStartPayload(name, port, libraryDb), _configJson)));
         }
         catch (Exception ex)
         {

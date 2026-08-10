@@ -822,7 +822,8 @@ public sealed class Nano5gLibraryWriter
         var legacyDbPath = Path.Combine(iTunesDir, "iTunesDB");
         if (File.Exists(legacyDbPath))
         {
-            File.WriteAllBytes(legacyDbPath, Array.Empty<byte>());
+            // Atomic like its twin above - every other write in this file goes through AtomicFile.
+            Helpers.AtomicFile.WriteAllBytes(legacyDbPath, []);
         }
     }
 

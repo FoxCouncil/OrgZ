@@ -196,8 +196,14 @@ public sealed class MdnsAdvertiser : IDisposable
             {
                 packet = await _client!.ReceiveAsync(ct);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                if (!ct.IsCancellationRequested)
+                {
+                    // The responder just died: the share keeps serving but stops being
+                    // discoverable, which looked like "the share vanished" with no trail.
+                    _log.Warning(ex, "mDNS receive loop stopped - the share is no longer auto-discoverable");
+                }
                 break;
             }
 

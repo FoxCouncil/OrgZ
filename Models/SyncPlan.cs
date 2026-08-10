@@ -68,8 +68,11 @@ public static class SyncPlanStore
             return Settings.Get<Dictionary<string, SyncPlan>>(SettingsKey, [])
                 ?? new Dictionary<string, SyncPlan>();
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            // Defaults are the recovery, but a user's mirror/exclude choices just vanished -
+            // that must be diagnosable from the log.
+            Services.Logging.For("SyncPlan").Warning(ex, "Persisted sync plans unreadable - starting with defaults");
             return [];
         }
     }
