@@ -33,6 +33,9 @@ internal sealed class AirPlayRaopSink : IAudioSink
     // RAOP wants exactly 352 frames per packet.
     private readonly List<byte> _partial = new(RaopAlac.PcmBytesPerPacket * 2);
 
+    // Non-null when the stream isn't already 44.1 kHz.
+    private AudioResampler? _resampler;
+
     private float _volume = 1f;
     private bool _muted;
     private bool _paused;
@@ -89,12 +92,18 @@ internal sealed class AirPlayRaopSink : IAudioSink
         // produced - in practice 32-bit float - so the sink converts depth itself (the
         // IAudioSink contract expects exactly that). Rate and channel count it cannot fix:
         // there's no resampler here, so those still refuse.
-        if (format.SampleRate != 44100 || format.Channels != 2)
+        // RAOP is 44.1 kHz stereo, full stop. Rate is converted here (a hi-res library is
+        // mostly NOT 44.1); channel count isn't, because a downmix is a mixing decision
+        // rather than a transport one.
+        if (format.Channels != 2)
         {
-            // No resampler here, so a hi-res track simply can't go out over RAOP. Say that
-            // in the user's terms - "96000 Hz x2" explains nothing to someone hearing silence.
-            throw new NotSupportedException(
-                $"“{DisplayName}” only takes 44.1 kHz stereo, but this track is {format.SampleRate / 1000.0:0.#} kHz — AirPlay can't play hi-res audio in OrgZ yet.");
+            throw new NotSupportedException($"“{DisplayName}” needs stereo, but this track is {format.Channels}-channel.");
+        }
+
+        _resampler = format.SampleRate == 44100 ? null : new AudioResampler(format.SampleRate, 44100, 2);
+        if (_resampler is not null)
+        {
+            _log.Information("AirPlay: resampling {Rate} Hz to 44.1 kHz for {Name}", format.SampleRate, DisplayName);
         }
 
         if (!CanConvert(format))
@@ -206,12 +215,27 @@ internal sealed class AirPlayRaopSink : IAudioSink
         }
     }
 
+    // Reused across writes so the depth conversion doesn't allocate per buffer; the
+    // resampler reads from it and appends 44.1 kHz frames into _partial.
+    private readonly List<byte> _converted = new(RaopAlac.PcmBytesPerPacket * 2);
+
     private void AppendAsS16(ReadOnlySpan<byte> source)
     {
-        if (CurrentFormat is { } format)
+        if (CurrentFormat is not { } format)
+        {
+            return;
+        }
+
+        if (_resampler is null)
         {
             ConvertToS16(source, format, _partial);
+            return;
         }
+
+        // Depth first, then rate - the resampler works in 16-bit frames.
+        _converted.Clear();
+        ConvertToS16(source, format, _converted);
+        _resampler.Process(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_converted), _partial);
     }
 
     /// <summary>
@@ -344,6 +368,9 @@ internal sealed class AirPlayRaopSink : IAudioSink
     public void Flush()
     {
         _partial.Clear();
+        // Drop the filter's retained tail too, or a seek bleeds pre-jump audio into the
+        // first packets after it.
+        _resampler?.Reset();
         if (_queue is not null)
         {
             while (_queue.Reader.TryRead(out _))
