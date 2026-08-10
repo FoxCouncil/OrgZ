@@ -239,6 +239,49 @@ public class AirPlayPairingTests
         Assert.Equal(2 + 16 + 16, cipher.Seal(new byte[16]).Length);
     }
 
+    // ===== Protocol selection and SETUP parsing =====
+
+    [Theory]
+    [InlineData("AirPlay receiver refused OPTIONS (401 Unauthorized).", true)]
+    [InlineData("AirPlay receiver refused ANNOUNCE (453 Not Enough Bandwidth).", false)]
+    [InlineData("Connection refused", false)]
+    public void A_401_is_what_routes_a_receiver_to_the_paired_path(string message, bool expected)
+    {
+        Assert.Equal(expected, AirPlayRaopSink.NeedsPairing(new InvalidOperationException(message)));
+    }
+
+    [Fact]
+    public void Setup_reply_data_port_is_read_from_the_streams_array()
+    {
+        var reply = BinaryPlist.Write(new Dictionary<string, object?>
+        {
+            ["eventPort"] = 7011L,
+            ["streams"] = new List<object?>
+            {
+                new Dictionary<string, object?> { ["type"] = 96L, ["dataPort"] = 51234L, ["controlPort"] = 51235L },
+            },
+        });
+
+        Assert.Equal(51234, AirPlay2Session.ExtractDataPort(reply));
+    }
+
+    [Fact]
+    public void Setup_reply_data_port_falls_back_to_the_top_level()
+    {
+        // Some receivers answer with the port at the root rather than inside streams.
+        var reply = BinaryPlist.Write(new Dictionary<string, object?> { ["dataPort"] = 6000L });
+
+        Assert.Equal(6000, AirPlay2Session.ExtractDataPort(reply));
+    }
+
+    [Fact]
+    public void Setup_reply_without_a_port_reads_as_null_rather_than_zero()
+    {
+        // Streaming to port 0 would be a silent black hole - the caller must see "no port".
+        Assert.Null(AirPlay2Session.ExtractDataPort(BinaryPlist.Write(new Dictionary<string, object?> { ["eventPort"] = 7011L })));
+        Assert.Null(AirPlay2Session.ExtractDataPort([1, 2, 3]));
+    }
+
     /// <summary>
     /// A minimal SRP-6a server built straight from the specification, used only to check
     /// the client against something that isn't itself.

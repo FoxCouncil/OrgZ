@@ -25,6 +25,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
     private readonly int _port;
 
     private RaopSession? _session;
+    private AirPlay2Session? _airplay2;
     private Channel<byte[]>? _queue;
     private Task? _pump;
     private CancellationTokenSource? _cts;
@@ -263,22 +264,45 @@ internal sealed class AirPlayRaopSink : IAudioSink
             return;
         }
 
-        var session = new RaopSession(_host, _port);
+        // Two protocol generations answer on the same discovery record, and nothing in the
+        // mDNS advertisement reliably says which. So: try classic RAOP, and when the
+        // receiver answers 401 (an AirPlay 2 device demanding pairing) retry that way.
+        RaopSession? raop = null;
+        AirPlay2Session? airplay2 = null;
+
         try
         {
-            await session.ConnectAsync(ct);
-            _session = session;
+            try
+            {
+                raop = new RaopSession(_host, _port);
+                await raop.ConnectAsync(ct);
+                _session = raop;
+                _log.Information("AirPlay streaming to {Name} (classic RAOP)", DisplayName);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && NeedsPairing(ex))
+            {
+                raop?.Dispose();
+                raop = null;
+
+                _log.Information("{Name} wants AirPlay 2 pairing - retrying with the paired path", DisplayName);
+                airplay2 = new AirPlay2Session(_host, _port);
+                await airplay2.ConnectAsync(ct);
+                _airplay2 = airplay2;
+                _log.Information("AirPlay streaming to {Name} (AirPlay 2)", DisplayName);
+            }
+
             PushVolume();
-            _log.Information("AirPlay streaming to {Name}", DisplayName);
         }
         catch (OperationCanceledException)
         {
-            session.Dispose();
+            raop?.Dispose();
+            airplay2?.Dispose();
             return;
         }
         catch (Exception ex)
         {
-            session.Dispose();
+            raop?.Dispose();
+            airplay2?.Dispose();
             // Loud, not silent: the old placeholder sink swallowed the stream, which is the
             // failure mode this whole path exists to avoid.
             _log.Error(ex, "AirPlay handshake failed for {Name} ({Host}:{Port})", DisplayName, _host, _port);
@@ -291,7 +315,14 @@ internal sealed class AirPlayRaopSink : IAudioSink
         {
             await foreach (var packet in _queue.Reader.ReadAllAsync(ct))
             {
-                await session.SendPacketAsync(packet, ct);
+                if (airplay2 is not null)
+                {
+                    await airplay2.SendPacketAsync(packet, ct);
+                }
+                else if (raop is not null)
+                {
+                    await raop.SendPacketAsync(packet, ct);
+                }
             }
         }
         catch (OperationCanceledException)
@@ -303,6 +334,9 @@ internal sealed class AirPlayRaopSink : IAudioSink
             _log.Warning(ex, "AirPlay send pump stopped for {Id}", Id);
         }
     }
+
+    /// <summary>A 401 from the classic handshake means the receiver is an AirPlay 2 device.</summary>
+    internal static bool NeedsPairing(Exception ex) => ex.Message.Contains("401", StringComparison.Ordinal);
 
     /// <summary>Raised when the handshake fails after Open returned - carries a user-facing reason.</summary>
     public event EventHandler<string>? ConnectFailed;
@@ -318,9 +352,15 @@ internal sealed class AirPlayRaopSink : IAudioSink
 
     private void PushVolume()
     {
-        if (_session is { IsConnected: true } session)
+        var level = _muted ? 0f : _volume;
+
+        if (_airplay2 is { IsConnected: true } modern)
         {
-            Helpers.TaskObserver.FireAndForget(session.SetVolumeAsync(_muted ? 0f : _volume), "AirPlay volume");
+            Helpers.TaskObserver.FireAndForget(modern.SetVolumeAsync(level), "AirPlay volume");
+        }
+        else if (_session is { IsConnected: true } session)
+        {
+            Helpers.TaskObserver.FireAndForget(session.SetVolumeAsync(level), "AirPlay volume");
         }
     }
 
@@ -345,6 +385,8 @@ internal sealed class AirPlayRaopSink : IAudioSink
         // idempotent) and covers a Close that lands mid-handshake.
         _session?.Dispose();
         _session = null;
+        _airplay2?.Dispose();
+        _airplay2 = null;
         _cts?.Dispose();
         _cts = null;
         _queue = null;
