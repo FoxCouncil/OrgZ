@@ -60,16 +60,14 @@ public class ITunesDbHash72Tests
         Assert.Equal(rnd, rnd2);
     }
 
-    [Fact]
+    [SkippableFact]
     public void Cbk_byte_matches_iTunes_on_device_fixture()
     {
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrgZ", "nano5g-fixture");
         var locPath = Path.Combine(dir, "Locations.itdb");
         var cbkPath = Path.Combine(dir, "Locations.itdb.cbk");
-        if (!File.Exists(locPath) || !File.Exists(cbkPath))
-        {
-            return; // device fixture absent - integration check skipped on this machine
-        }
+        Skip.If(!File.Exists(locPath) || !File.Exists(cbkPath),
+            @"device fixture absent - stage a real Locations.itdb + .cbk at %LOCALAPPDATA%\OrgZ\nano5g-fixture");
 
         var locations = File.ReadAllBytes(locPath);
         var realCbk = File.ReadAllBytes(cbkPath);

@@ -48,19 +48,17 @@ public class ITunesDbWriterOracleTests
         Assert.Equal(blessed, bytes);
     }
 
-    [Theory]
+    [SkippableTheory]
     [MemberData(nameof(Scenarios))]
     public void Libgpod_reads_back_every_field(string scenario, string fixture, string golden)
     {
         _ = fixture;
         var oracle = Environment.GetEnvironmentVariable("ORGZ_GPOD_DUMP");
-        if (string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle))
-        {
-            // No libgpod oracle on this host (e.g. Windows CI). The byte-reproduction test still
-            // guarantees the writer emits the libgpod-blessed database; run this in the Docker image
-            // from the README to exercise the live parser.
-            return;
-        }
+        // Skip VISIBLY - the old silent return reported green while testing nothing. The
+        // byte-reproduction test still guarantees the writer emits the libgpod-blessed
+        // database; run this in the Docker image from the README for the live parser.
+        Skip.If(string.IsNullOrWhiteSpace(oracle) || !File.Exists(oracle),
+            "ORGZ_GPOD_DUMP unset/missing - needs a built libgpod gpod_dump (see oracle/README.md)");
 
         EmitScenario(scenario, out var mountPoint);
         try

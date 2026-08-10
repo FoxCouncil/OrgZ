@@ -8,20 +8,19 @@ namespace OrgZ.Tests;
 /// <summary>
 /// MACHINE-GATED smoke tests that actually EXECUTE the external encoders (ffmpeg / flac / lame)
 /// the rest of the suite only argues with - argument-string tests can't tell you the tool rejects
-/// the arguments. Each test no-ops when its tool isn't on PATH (CI runners may not carry them; a
-/// dev box with the bundled toolchain runs everything). This is the documented exception to the
-/// no-silent-gating rule: the gate is an external binary, not product state, and the honest
-/// coverage lives here rather than not existing at all.
+/// the arguments. Each test SKIPS (visibly, via SkippableFact) when its tool isn't on PATH, so a
+/// runner without the toolchain reports Skipped counts instead of fake greens; a dev box with the
+/// bundled toolchain runs everything.
 /// </summary>
 public class LocalToolSmokeTests
 {
     // ── ffmpeg: the FLAC→ALAC transcode path every non-MP3 library import takes ──
 
-    [Fact]
+    [SkippableFact]
     public async Task Ffmpeg_transcodes_a_flac_library_track_to_alac_on_a_binary_ipod()
     {
         var ffmpeg = ToolOnPath("ffmpeg");
-        if (ffmpeg is null) { return; } // tool absent on this machine
+        Skip.If(ffmpeg is null, "ffmpeg not on PATH");
 
         var mount = Path.Combine(Path.GetTempPath(), "orgz-smoke-" + Guid.NewGuid().ToString("N"));
         var srcDir = Path.Combine(Path.GetTempPath(), "orgz-smokesrc-" + Guid.NewGuid().ToString("N"));
@@ -66,11 +65,11 @@ public class LocalToolSmokeTests
 
     // ── ffmpeg: real MP4 audiobooks through the library detection pipeline ──
 
-    [Fact]
+    [SkippableFact]
     public async Task Ffmpeg_fabricated_m4b_lands_as_a_fully_analyzed_audiobook()
     {
         var ffmpeg = ToolOnPath("ffmpeg");
-        if (ffmpeg is null) { return; } // tool absent on this machine
+        Skip.If(ffmpeg is null, "ffmpeg not on PATH");
 
         var dir = Path.Combine(Path.GetTempPath(), "orgz-m4b-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -98,11 +97,11 @@ public class LocalToolSmokeTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Stik_tagged_m4a_promotes_to_audiobook_during_analysis()
     {
         var ffmpeg = ToolOnPath("ffmpeg");
-        if (ffmpeg is null) { return; } // tool absent on this machine
+        Skip.If(ffmpeg is null, "ffmpeg not on PATH");
 
         var dir = Path.Combine(Path.GetTempPath(), "orgz-stik-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
@@ -144,10 +143,10 @@ public class LocalToolSmokeTests
 
     // ── flac / lame: the CD rip encoders, fed real PCM through the product pipeline ──
 
-    [Fact]
+    [SkippableFact]
     public async Task Flac_encoder_produces_a_real_flac_stream()
     {
-        if (ToolOnPath("flac") is null) { return; } // tool absent on this machine
+        Skip.If(ToolOnPath("flac") is null, "flac not on PATH");
         var outPath = await EncodePcm(RipFormat.Flac, ".flac");
         try
         {
@@ -157,10 +156,10 @@ public class LocalToolSmokeTests
         finally { TryDeleteFile(outPath); }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Lame_encoder_produces_a_real_mp3_stream()
     {
-        if (ToolOnPath("lame") is null) { return; } // tool absent on this machine
+        Skip.If(ToolOnPath("lame") is null, "lame not on PATH");
         var outPath = await EncodePcm(RipFormat.Mp3, ".mp3");
         try
         {
