@@ -36,9 +36,11 @@ internal sealed class AirPlay2Pairing
     {
         _srp = new Srp6aClient(password);
         _hasPassword = !string.IsNullOrEmpty(password);
+        _passwordLength = password?.Length ?? 0;
     }
 
     private readonly bool _hasPassword;
+    private readonly int _passwordLength;
 
     /// <summary>Set when the receiver rejected our credentials, so the caller can ask for a password.</summary>
     public bool PasswordRejected { get; private set; }
@@ -129,6 +131,14 @@ internal sealed class AirPlay2Pairing
         // From here the connection is encrypted. This is not optional and there is no
         // negotiation of it - the receiver simply expects every subsequent byte to be
         // sealed, and silently drops the connection if it isn't.
+        // Fingerprint only - never the secret itself. The app reads its password from the
+        // OS secret store and the live test from an environment variable, and that is the
+        // last input that has never been compared between the two.
+        _log.Debug("AirPlay 2 pairing: password={Kind} len={Length} sessionKey={Fingerprint}",
+            _hasPassword ? "stored" : "TRANSIENT-PIN",
+            _passwordLength,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(SessionKey))[..12]);
+
         rtsp.EnableEncryption(SessionKey);
 
         _log.Information("AirPlay 2 transient pairing complete (connection encrypted)");

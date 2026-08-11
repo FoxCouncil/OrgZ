@@ -86,8 +86,21 @@ internal sealed class RtspClient : IDisposable
         }
 
         var request = BuildRequest(++_cSeq, method, uri, DefaultHeaders, headers, contentType, body, SessionId);
-        await _stream.WriteAsync(request, ct);
-        await _stream.FlushAsync(ct);
+
+        // Set ORGZ_RTSP_DUMP to capture exactly what goes on the wire. The app and the live
+        // test run identical code against the same receiver with different outcomes, and
+        // diffing the actual bytes beats reasoning about why.
+        if (Environment.GetEnvironmentVariable("ORGZ_RTSP_DUMP") is { Length: > 0 } dumpPath)
+        {
+            var headLength = request.Length - (body?.Length ?? 0);
+            File.AppendAllText(dumpPath, Encoding.ASCII.GetString(request, 0, headLength) + $"<<<body {body?.Length ?? 0} bytes>>>\n\n");
+        }
+
+        // Synchronous on purpose - see HapCryptoStream.Read. The handshake runs on a
+        // dedicated thread so a saturated thread pool can't stall it for ten seconds and
+        // make a perfectly good reply look like it never arrived.
+        _stream.Write(request, 0, request.Length);
+        _stream.Flush();
 
         // A receiver that dislikes a request sometimes just never answers. Without a
         // deadline that hangs the handshake forever, which reads as silence with nothing
@@ -98,11 +111,12 @@ internal sealed class RtspClient : IDisposable
         RtspResponse response;
         try
         {
+            _tcp.ReceiveTimeout = 10000;
             response = await ReadResponseAsync(_stream, timeout.Token);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (ex is OperationCanceledException or IOException && !ct.IsCancellationRequested)
         {
-            throw new TimeoutException($"RTSP {method} {uri} got no reply within 10s.");
+            throw new TimeoutException($"RTSP {method} {uri} got no reply within 10s.", ex);
         }
 
         _log.Debug("RTSP {Method} {Uri} -> {Status}", method, uri, response.StatusCode);
@@ -215,7 +229,7 @@ internal sealed class RtspClient : IDisposable
         var one = new byte[1];
         while (true)
         {
-            var read = await stream.ReadAsync(one, ct);
+            var read = stream.Read(one, 0, 1);
             if (read == 0)
             {
                 throw new IOException("RTSP connection closed mid-response.");

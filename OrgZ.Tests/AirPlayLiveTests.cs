@@ -1,5 +1,6 @@
 // Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using OrgZ.Services.AudioOutput;
 using OrgZ.Services.AudioOutput.AirPlay;
 
 namespace OrgZ.Tests;
@@ -20,6 +21,48 @@ public class AirPlayLiveTests
 {
     private const int SampleRate = 44100;
 
+    /// <summary>
+    /// The APP's path, not the session's: bus -> AirPlayRaopSink -> AirPlay2Session.
+    ///
+    /// The direct-session test passes while the running app times out on SETUP with
+    /// byte-identical requests, so the difference has to live in the layer between them.
+    /// This drives the sink exactly as AudioSinkBus does.
+    /// </summary>
+    [SkippableFact]
+    public async Task Sink_path_connects_to_a_real_receiver()
+    {
+        var host = Environment.GetEnvironmentVariable("ORGZ_AIRPLAY_HOST");
+        Skip.If(string.IsNullOrEmpty(host), "Set ORGZ_AIRPLAY_HOST to run the live AirPlay test.");
+
+        var password = Environment.GetEnvironmentVariable("ORGZ_AIRPLAY_PASSWORD");
+
+        var device = new AudioDeviceInfo
+        {
+            DeviceId = "live@test",
+            DisplayName = "Live",
+            ProviderId = AirPlayDeviceProvider.Id,
+            ProviderName = "AirPlay",
+            IsAvailable = true,
+        };
+
+        using var sink = new AirPlayRaopSink(device, host!, 7000, null, password);
+
+        string? failure = null;
+        sink.ConnectFailed += (_, reason) => failure = reason;
+
+        // Exactly what the bus does: open at one depth, then feed audio.
+        sink.Open(AudioFormat.CdDaStereo16);
+
+        var silence = new byte[RaopAlac.PcmBytesPerPacket];
+        for (var i = 0; i < 200 && failure is null && !sink.ProvidesClock; i++)
+        {
+            sink.Write(silence);
+            await Task.Delay(50, CancellationToken.None);
+        }
+
+        Assert.True(sink.ProvidesClock, $"sink never started streaming (failure: {failure ?? "none reported"})");
+    }
+
     [SkippableFact]
     public async Task Streams_a_tone_to_a_real_receiver()
     {
@@ -36,7 +79,7 @@ public class AirPlayLiveTests
         // One second of a quiet 440 Hz tone, packet-paced by the session itself. Kept short
         // and low: this is a "clean sine or noise?" check, and it plays out loud in someone's
         // room.
-        var packets = SampleRate / AirPlay2Session.FramesPerPacket;
+        var packets = 4 * SampleRate / AirPlay2Session.FramesPerPacket;
         var phase = 0.0;
 
         for (var i = 0; i < packets; i++)

@@ -26,6 +26,21 @@ internal sealed class HapCryptoStream : Stream
     private const int FrameLength = 1024;
     private const int TagLength = 16;
 
+    private static readonly Serilog.ILogger _log = Logging.For("Hap");
+
+    /// <summary>
+    /// Records what actually crosses the socket, encrypted. This is the packet capture -
+    /// we own both ends, so there is no need for an external sniffer.
+    /// </summary>
+    private static void Trace(string what)
+    {
+        if (Environment.GetEnvironmentVariable("ORGZ_RTSP_DUMP") is { Length: > 0 } path)
+        {
+            File.AppendAllText(path + ".wire", what + "\n");
+        }
+        _log.Debug("HAP wire: {What}", what);
+    }
+
     private readonly Stream _inner;
 
     private ChaCha20Poly1305? _out;
@@ -119,11 +134,13 @@ internal sealed class HapCryptoStream : Stream
             var read = await _inner.ReadAsync(_readBuffer, ct);
             if (read == 0)
             {
+                _log.Debug("HAP read: socket EOF (buffered ciphertext {Buffered}B)", _ciphertext.Count);
                 return 0;
             }
 
             _ciphertext.AddRange(_readBuffer.AsSpan(0, read));
             DrainBlocks();
+            _log.Debug("HAP read: {Read}B in, {Cipher}B ciphertext buffered, {Plain}B plaintext ready", read, _ciphertext.Count, _plaintext.Count);
         }
 
         var take = Math.Min(buffer.Length, _plaintext.Count);
@@ -162,11 +179,69 @@ internal sealed class HapCryptoStream : Stream
         }
     }
 
+    /// <summary>
+    /// A REAL synchronous read - it must not defer to the async path.
+    ///
+    /// The RTSP handshake runs on its own thread precisely so it can't be delayed by a busy
+    /// thread pool (in the app, LibVLC and the UI keep the pool busy; in a test process
+    /// nothing does). Bouncing through ReadAsync here would put the completion straight
+    /// back on the pool and reintroduce exactly the stall this avoids.
+    /// </summary>
     public override int Read(byte[] buffer, int offset, int count)
-        => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+    {
+        if (_in is null)
+        {
+            return _inner.Read(buffer, offset, count);
+        }
+
+        while (_plaintext.Count == 0)
+        {
+            var read = _inner.Read(_readBuffer, 0, _readBuffer.Length);
+            Trace($"IN  {read}B head={Convert.ToHexString(_readBuffer, 0, Math.Min(8, Math.Max(read, 1)))}");
+            if (read == 0)
+            {
+                return 0;
+            }
+
+            _ciphertext.AddRange(_readBuffer.AsSpan(0, read));
+            DrainBlocks();
+            Trace($"IN  decrypted -> {_plaintext.Count}B plaintext, {_ciphertext.Count}B held");
+        }
+
+        var take = Math.Min(count, _plaintext.Count);
+        _plaintext.CopyTo(0, buffer, offset, take);
+        _plaintext.RemoveRange(0, take);
+        return take;
+    }
 
     public override void Write(byte[] buffer, int offset, int count)
-        => WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+    {
+        if (_out is null)
+        {
+            _inner.Write(buffer, offset, count);
+            return;
+        }
+
+        var end = offset + count;
+        while (offset < end)
+        {
+            var take = Math.Min(FrameLength, end - offset);
+            var frame = new byte[2 + take + TagLength];
+            BinaryPrimitives.WriteUInt16LittleEndian(frame, (ushort)take);
+
+            _out.Encrypt(
+                NonceFor(_outCounter),
+                buffer.AsSpan(offset, take),
+                frame.AsSpan(2, take),
+                frame.AsSpan(2 + take, TagLength),
+                frame.AsSpan(0, 2));
+
+            Trace($"OUT nonce={_outCounter} plain={take} frame={frame.Length} head={Convert.ToHexString(frame, 0, Math.Min(8, frame.Length))}");
+            _outCounter++;
+            offset += take;
+            _inner.Write(frame, 0, frame.Length);
+        }
+    }
 
     public override void Flush() => _inner.Flush();
     public override Task FlushAsync(CancellationToken ct) => _inner.FlushAsync(ct);

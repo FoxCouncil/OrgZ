@@ -49,7 +49,12 @@ internal sealed class AirPlay2Session : IDisposable
     private UdpClient? _audio;
     private IPEndPoint? _audioEndpoint;
 
-    private readonly uint _ssrc = BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4));
+    /// <summary>
+    /// The RTP SSRC is the RTSP session id, NOT a random value - the receiver ties the
+    /// audio stream to the session it negotiated by this field, and a random one leaves it
+    /// with packets it can't attribute to any session.
+    /// </summary>
+    private uint _ssrc;
     private ushort _sequence;
     private uint _timestamp;
     private bool _first = true;
@@ -70,7 +75,9 @@ internal sealed class AirPlay2Session : IDisposable
 
     public async Task ConnectAsync(CancellationToken ct = default)
     {
-        var sessionId = Random.Shared.NextInt64(1_000_000_000, 9_999_999_999).ToString();
+        var session = (uint)Random.Shared.Next(1, int.MaxValue);
+        var sessionId = session.ToString();
+        _ssrc = session;
 
         _rtsp = new RtspClient();
         await _rtsp.ConnectAsync(_host, _rtspPort, ct);
@@ -187,8 +194,16 @@ internal sealed class AirPlay2Session : IDisposable
         }
 
         _sequence = (ushort)Random.Shared.Next(ushort.MaxValue);
-        _timestamp = (uint)Random.Shared.Next();
+
+        // Start 1.5s into the timeline, as the reference sender does - a stream that starts
+        // at timestamp 0 has no room for the receiver's own buffering.
+        _timestamp = SampleRate + (SampleRate / 2);
         StartSyncLoop();
+
+        // The receiver wants to know where the timeline starts before RECORD.
+        await _rtsp.SendAsync("SET_PARAMETER", $"rtsp://{_rtsp.LocalAddress}/{sessionId}",
+            contentType: "text/parameters",
+            body: System.Text.Encoding.ASCII.GetBytes($"progress: {_timestamp}/{_timestamp}/{_timestamp + (SampleRate * 60)}\r\n"), ct: ct);
 
         // Volume before RECORD, exactly as a working sender does it - a receiver that
         // starts at its own level can be silent for reasons that have nothing to do with
@@ -204,6 +219,15 @@ internal sealed class AirPlay2Session : IDisposable
         }
 
         StartFeedbackLoop(sessionId);
+
+        // FLUSH after RECORD, carrying the RTP timeline. The reference sender does this to
+        // tell the receiver where the audio it's about to get begins; without it a receiver
+        // can hold a live session and still play nothing.
+        await _rtsp.SendAsync("FLUSH", $"rtsp://{_rtsp.LocalAddress}/{sessionId}", new Dictionary<string, string>
+        {
+            ["Range"] = "npt=0-",
+            ["RTP-Info"] = $"seq={_sequence};rtptime={_timestamp}",
+        }, ct: ct);
 
         _streamStart = DateTime.UtcNow;
         _framesSent = 0;
@@ -444,14 +468,13 @@ internal sealed class AirPlay2Session : IDisposable
         // payload as AAD - the receiver checks them, so they can't be filled in afterwards.
         var header = RaopPackets.BuildAudio(_sequence, _timestamp + LatencyFrames, _ssrc, [], _first);
 
-        // Raw PCM, not ALAC: ct=1 in the stream SETUP. RTP payloads are BIG-endian, and the
-        // bus hands us little-endian S16 - sending it unswapped is audible as harsh noise
-        // rather than silence, because the receiver happily plays the mangled samples.
-        var samples = ToBigEndian(pcm.Span);
-
+        // Raw LITTLE-endian PCM, sent exactly as the bus produced it. The reference sender
+        // hands its source's frames to the socket untouched - there is no byte swap here,
+        // despite RTP payloads usually being big-endian.
+        //
         // The sealed payload carries its own nonce on the end, so the packet is
         // header + ciphertext + tag + nonce.
-        var body = _cipher.SealAudio(samples, header.AsSpan(4, 8));
+        var body = _cipher.SealAudio(pcm.Span, header.AsSpan(4, 8));
 
         var packet = new byte[header.Length + body.Length];
         header.CopyTo(packet, 0);

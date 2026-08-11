@@ -155,7 +155,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
         // flyout calls straight through) - so connect inside the pump instead of blocking
         // here. A failure is reported by ConnectFailed rather than thrown, because by then
         // the caller is long gone.
-        _pump = Task.Run(() => RunAsync(_cts.Token), CancellationToken.None);
+        _pump = Task.Factory.StartNew(() => RunAsync(_cts.Token), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         IsOpen = true;
         _log.Information("AirPlay sink opening: {Name} ({Host}:{Port})", DisplayName, _host, _port);
