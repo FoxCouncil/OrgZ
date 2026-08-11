@@ -23,8 +23,22 @@ internal sealed class AirPlay2Session : IDisposable
     private const int SampleRate = 44100;
     private const uint LatencyFrames = 88200;
 
-    /// <summary>ALAC 44.1 kHz 16-bit stereo, as the stream SETUP advertises it.</summary>
-    private const long AudioFormatAlac441 = 0x40000;
+    /// <summary>Frames per audio packet - 352 is what every AirPlay receiver expects.</summary>
+    internal const int FramesPerPacket = 352;
+
+    /// <summary>Raw PCM 44.1 kHz 16-bit stereo, as the stream SETUP advertises it.</summary>
+    private const long AudioFormatPcm441 = 0x800;
+
+    /// <summary>A sender identity has to look like a MAC address; the receiver only keys off it.</summary>
+    private static readonly string DeviceId = "AA:BB:CC:DD:EE:FF";
+
+    private System.Net.Sockets.UdpClient? _timing;
+    private int _timingPort;
+    private System.Net.Sockets.UdpClient? _control;
+    private int _controlPort;
+    private IPEndPoint? _controlEndpoint;
+    private CancellationTokenSource? _servers;
+    private readonly long _streamConnectionId = Random.Shared.NextInt64(1, long.MaxValue);
 
     private readonly string _host;
     private readonly int _rtspPort;
@@ -77,14 +91,32 @@ internal sealed class AirPlay2Session : IDisposable
             _log.Debug("AirPlay 2 /info returned {Status} - continuing to SETUP", info.StatusCode);
         }
 
+        // The receiver drives the clock exchange, so our timing socket has to exist before
+        // SETUP announces its port.
+        StartTimingServer();
+
         // Session SETUP, then the stream SETUP that carries the audio key.
+        //
+        // This body is deliberately verbose. A HomePod refuses a sparse one - it wants a
+        // sender identity and a timing arrangement it recognises, and answers anything
+        // less by accepting SETUP and then never playing a note.
         var setupBody = BinaryPlist.Write(new Dictionary<string, object?>
         {
-            ["timingProtocol"] = "None",
-            ["isMultiSelectAirPlay"] = false,
-            ["model"] = "OrgZ",
+            ["deviceID"] = DeviceId,
+            ["macAddress"] = DeviceId,
+            ["sessionUUID"] = Guid.NewGuid().ToString().ToUpperInvariant(),
+            ["timingPort"] = (long)_timingPort,
+            ["timingProtocol"] = "NTP",
+            ["isMultiSelectAirPlay"] = true,
+            ["groupContainsGroupLeader"] = false,
+            ["senderSupportsRelay"] = false,
+            ["statsCollectionEnabled"] = false,
+            ["model"] = "iPhone14,3",
             ["name"] = Environment.MachineName,
-            ["sourceVersion"] = "665.13.1",
+            ["osName"] = "iPhone OS",
+            ["osVersion"] = "16.5",
+            ["osBuildVersion"] = "20F66",
+            ["sourceVersion"] = "690.7.1",
         });
 
         var setup = await _rtsp.SendAsync("SETUP", $"rtsp://{_rtsp.LocalAddress}/{sessionId}",
@@ -94,6 +126,8 @@ internal sealed class AirPlay2Session : IDisposable
             throw new InvalidOperationException($"AirPlay 2 SETUP refused ({setup.StatusCode} {setup.StatusText}).");
         }
 
+        StartControlClient();
+
         var streamBody = BinaryPlist.Write(new Dictionary<string, object?>
         {
             ["streams"] = new List<object?>
@@ -101,9 +135,17 @@ internal sealed class AirPlay2Session : IDisposable
                 new Dictionary<string, object?>
                 {
                     ["type"] = 96L,                        // realtime audio
-                    ["audioFormat"] = AudioFormatAlac441,
-                    ["ct"] = 2L,                           // ALAC
-                    ["spf"] = (long)RaopAlac.FramesPerPacket,
+                    ["audioFormat"] = AudioFormatPcm441,
+                    ["audioMode"] = "default",
+                    // ct=1 is RAW PCM. AirPlay 2 does carry ALAC, but the realtime path a
+                    // HomePod actually accepts from a third-party sender is uncompressed -
+                    // announcing ALAC here yields a session that sets up and stays silent.
+                    ["ct"] = 1L,
+                    ["sr"] = (long)SampleRate,
+                    ["spf"] = (long)FramesPerPacket,
+                    ["controlPort"] = (long)_controlPort,
+                    ["streamConnectionID"] = _streamConnectionId,
+                    ["supportsDynamicStreamID"] = false,
                     // The audio key goes over verbatim - the receiver seals/unseals with it.
                     ["shk"] = _pairing.AudioKey,
                     ["isMedia"] = true,
@@ -127,8 +169,16 @@ internal sealed class AirPlay2Session : IDisposable
         _audio = new UdpClient(0, AddressFamily.InterNetwork);
         _audioEndpoint = new IPEndPoint(address, dataPort);
 
+        // The receiver answers with its own control port; sync goes there, not to the one
+        // we asked for.
+        if (ExtractStreamPort(streamSetup.BodyBytes, "controlPort") is { } receiverControlPort)
+        {
+            _controlEndpoint = new IPEndPoint(address, receiverControlPort);
+        }
+
         _sequence = (ushort)Random.Shared.Next(ushort.MaxValue);
         _timestamp = (uint)Random.Shared.Next();
+        StartSyncLoop();
 
         var record = await _rtsp.SendAsync("RECORD", $"rtsp://{_rtsp.LocalAddress}/{sessionId}", new Dictionary<string, string>
         {
@@ -144,6 +194,122 @@ internal sealed class AirPlay2Session : IDisposable
         _framesSent = 0;
         IsConnected = true;
         _log.Information("AirPlay 2 session up: {Host} audio->{Port}", _host, dataPort);
+    }
+
+    /// <summary>
+    /// Answers the receiver's NTP clock queries.
+    ///
+    /// Required, not optional: SETUP advertises timingProtocol=NTP, and a receiver that
+    /// can't establish the offset between the two clocks won't start a realtime stream. It
+    /// asks; we reply with the three-stamp exchange and it works out the skew.
+    /// </summary>
+    private void StartTimingServer()
+    {
+        _timing = new UdpClient(0, AddressFamily.InterNetwork);
+        _timingPort = ((IPEndPoint)_timing.Client.LocalEndPoint!).Port;
+        _servers ??= new CancellationTokenSource();
+
+        var token = _servers.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    var query = await _timing.ReceiveAsync(token);
+                    var received = RaopPackets.NtpNow();
+                    if (RaopPackets.IsTimingRequest(query.Buffer))
+                    {
+                        var reply = RaopPackets.BuildTimingReply(query.Buffer, received, RaopPackets.NtpNow());
+                        await _timing.SendAsync(reply, reply.Length, query.RemoteEndPoint);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _log.Debug(ex, "AirPlay 2 timing exchange failed");
+                    return;
+                }
+            }
+        }, token);
+    }
+
+    /// <summary>
+    /// Opens the control socket and starts the sync heartbeat once the receiver's control
+    /// port is known. Sync packets tie an NTP instant to the RTP timestamp playing at it,
+    /// which is how the receiver keeps from drifting away from our clock.
+    /// </summary>
+    private void StartControlClient()
+    {
+        _control = new UdpClient(0, AddressFamily.InterNetwork);
+        _controlPort = ((IPEndPoint)_control.Client.LocalEndPoint!).Port;
+    }
+
+    private void StartSyncLoop()
+    {
+        if (_control is null || _controlEndpoint is null || _servers is null)
+        {
+            return;
+        }
+
+        var token = _servers.Token;
+        _ = Task.Run(async () =>
+        {
+            var first = true;
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    var now = _timestamp + _framesSent;
+                    var packet = RaopPackets.BuildSync(now, RaopPackets.NtpNow(), now + LatencyFrames, first);
+                    await _control.SendAsync(packet, packet.Length, _controlEndpoint);
+                    first = false;
+                    await Task.Delay(TimeSpan.FromSeconds(1), token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _log.Debug(ex, "AirPlay 2 sync send failed");
+                    return;
+                }
+            }
+        }, token);
+    }
+
+    /// <summary>Digs a named port out of the SETUP reply's streams array.</summary>
+    internal static int? ExtractStreamPort(byte[] plist, string name)
+    {
+        try
+        {
+            if (BinaryPlist.Read(plist) is not Dictionary<string, object?> root)
+            {
+                return null;
+            }
+
+            if (root.TryGetValue("streams", out var streamsValue) && streamsValue is List<object?> streams)
+            {
+                foreach (var entry in streams)
+                {
+                    if (entry is Dictionary<string, object?> stream && stream.TryGetValue(name, out var port) && port is long p and > 0)
+                    {
+                        return (int)p;
+                    }
+                }
+            }
+
+            return root.TryGetValue(name, out var direct) && direct is long d and > 0 ? (int)d : null;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "AirPlay 2 SETUP reply was not a readable plist");
+            return null;
+        }
     }
 
     /// <summary>Digs dataPort out of the SETUP reply's streams array.</summary>
@@ -185,15 +351,22 @@ internal sealed class AirPlay2Session : IDisposable
             return;
         }
 
-        // Same ALAC framing RAOP uses - AirPlay 2 changed the negotiation, not the codec.
-        var alac = RaopAlac.Encode(pcm.Span);
-        var sealed_ = _cipher.Seal(alac);
+        // The header is built first because its timestamp+ssrc words authenticate the
+        // payload as AAD - the receiver checks them, so they can't be filled in afterwards.
+        var header = RaopPackets.BuildAudio(_sequence, _timestamp + LatencyFrames, _ssrc, [], _first);
 
-        var packet = RaopPackets.BuildAudio(_sequence, _timestamp + LatencyFrames, _ssrc, sealed_, _first);
+        // Raw PCM, not ALAC: ct=1 in the stream SETUP. The sealed payload carries its own
+        // nonce on the end, so the packet is header + ciphertext + tag + nonce.
+        var body = _cipher.SealAudio(pcm.Span, header.AsSpan(4, 8));
+
+        var packet = new byte[header.Length + body.Length];
+        header.CopyTo(packet, 0);
+        body.CopyTo(packet, header.Length);
+
         _first = false;
         _sequence++;
-        _timestamp += RaopAlac.FramesPerPacket;
-        _framesSent += RaopAlac.FramesPerPacket;
+        _timestamp += FramesPerPacket;
+        _framesSent += FramesPerPacket;
 
         await _audio.SendAsync(packet, packet.Length, _audioEndpoint);
 
@@ -237,6 +410,15 @@ internal sealed class AirPlay2Session : IDisposable
 
         try
         {
+            _servers?.Cancel();
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "AirPlay 2 server shutdown failed");
+        }
+
+        try
+        {
             if (_rtsp is not null && _rtsp.SessionId is not null)
             {
                 _rtsp.SendAsync("TEARDOWN", $"rtsp://{_rtsp.LocalAddress}/stream").Wait(TimeSpan.FromSeconds(2));
@@ -249,6 +431,9 @@ internal sealed class AirPlay2Session : IDisposable
 
         _cipher?.Dispose();
         _audio?.Dispose();
+        _timing?.Dispose();
+        _control?.Dispose();
+        _servers?.Dispose();
         _rtsp?.Dispose();
     }
 }

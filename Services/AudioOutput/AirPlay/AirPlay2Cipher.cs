@@ -60,6 +60,40 @@ internal sealed class AirPlay2Cipher : IDisposable
         return frame;
     }
 
+    /// <summary>
+    /// Seals one AirPlay 2 audio payload: ciphertext, tag, then the 8-byte nonce the
+    /// receiver needs to decrypt it.
+    ///
+    /// Different framing from <see cref="Seal"/> entirely - there is no length prefix, the
+    /// RTP header's timestamp+ssrc words authenticate as AAD, and the packet carries its own
+    /// counter on the end. That last part is what lets a receiver decrypt a stream over UDP,
+    /// where packets arrive out of order or not at all and an implicit counter would desync.
+    /// </summary>
+    public byte[] SealAudio(ReadOnlySpan<byte> payload, ReadOnlySpan<byte> aad)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var output = new byte[payload.Length + 16 + 8];
+        var nonce = NonceFor(_counter);
+
+        _cipher.Encrypt(
+            nonce,
+            payload,
+            output.AsSpan(0, payload.Length),
+            output.AsSpan(payload.Length, 16),
+            aad);
+
+        // Only the low 8 bytes travel - the leading four are always zero by construction.
+        nonce.AsSpan(4, 8).CopyTo(output.AsSpan(payload.Length + 16));
+
+        checked
+        {
+            _counter++;
+        }
+
+        return output;
+    }
+
     /// <summary>The nonce for a given packet index: four zero bytes then the LE counter.</summary>
     internal static byte[] NonceFor(ulong counter)
     {

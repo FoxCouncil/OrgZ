@@ -172,6 +172,43 @@ public class AirPlayPairingTests
         Assert.Equal(expected, AirPlayDeviceProvider.TxtDemandsPassword(record, 0, record.Length));
     }
 
+    /// <summary>
+    /// The AirPlay 2 audio frame: ciphertext, tag, then the counter the receiver needs to
+    /// build the nonce. The RTP header's timestamp+ssrc words are the AAD, so a receiver
+    /// that reassembles the packet differently fails to authenticate and plays silence -
+    /// which is exactly how this went wrong before, with no error anywhere to show for it.
+    /// </summary>
+    [Fact]
+    public void Airplay2_audio_frames_carry_their_nonce_and_bind_the_rtp_header()
+    {
+        var key = Enumerable.Range(0, 32).Select(i => (byte)(i * 3)).ToArray();
+        using var cipher = new AirPlay2Cipher(key);
+
+        var pcm = Enumerable.Range(0, 1408).Select(i => (byte)(i & 0xFF)).ToArray();
+        var header = RaopPackets.BuildAudio(sequence: 42, timestamp: 123456, ssrc: 0xDEADBEEF, [], first: true);
+        var aad = header.AsSpan(4, 8).ToArray();
+
+        var first = cipher.SealAudio(pcm, aad);
+        Assert.Equal(pcm.Length + 16 + 8, first.Length);
+
+        // First packet uses counter 0, so the trailing nonce is eight zero bytes.
+        Assert.Equal(new byte[8], first[^8..]);
+
+        // Rebuild the nonce the way a receiver would and decrypt.
+        var nonce = new byte[12];
+        first[^8..].CopyTo(nonce, 4);
+
+        using var verifier = new System.Security.Cryptography.ChaCha20Poly1305(key);
+        var plaintext = new byte[pcm.Length];
+        verifier.Decrypt(nonce, first.AsSpan(0, pcm.Length), first.AsSpan(pcm.Length, 16), plaintext, aad);
+        Assert.Equal(pcm, plaintext);
+
+        // The counter must advance, or a repeated nonce would leak the keystream.
+        var second = cipher.SealAudio(pcm, aad);
+        Assert.Equal(1UL, BitConverter.ToUInt64(second[^8..]));
+        Assert.NotEqual(first[..pcm.Length], second[..pcm.Length]);
+    }
+
     [Fact]
     public void Srp_client_and_reference_server_agree_on_the_session_key()
     {
