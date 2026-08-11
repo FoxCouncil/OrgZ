@@ -38,6 +38,7 @@ internal sealed class AirPlay2Session : IDisposable
     private int _controlPort;
     private IPEndPoint? _controlEndpoint;
     private CancellationTokenSource? _servers;
+    private string? _sessionUri;
     private readonly long _streamConnectionId = Random.Shared.NextInt64(1, long.MaxValue);
 
     private readonly string _host;
@@ -81,6 +82,7 @@ internal sealed class AirPlay2Session : IDisposable
         var session = (uint)Random.Shared.Next(1, int.MaxValue);
         var sessionId = session.ToString();
         _ssrc = session;
+        _sessionUri = null;
 
         _rtsp = new RtspClient();
         await _rtsp.ConnectAsync(_host, _rtspPort, ct);
@@ -132,7 +134,8 @@ internal sealed class AirPlay2Session : IDisposable
             ["sourceVersion"] = "690.7.1",
         });
 
-        var setup = await _rtsp.SendAsync("SETUP", $"rtsp://{_rtsp.LocalAddress}/{sessionId}",
+        _sessionUri = $"rtsp://{_rtsp.LocalAddress}/{sessionId}";
+        var setup = await _rtsp.SendAsync("SETUP", _sessionUri,
             contentType: "application/x-apple-binary-plist", body: setupBody, ct: ct);
         if (!setup.IsSuccess)
         {
@@ -315,31 +318,45 @@ internal sealed class AirPlay2Session : IDisposable
         _servers ??= new CancellationTokenSource();
 
         var token = _servers.Token;
-        _ = Task.Run(async () =>
+
+        // A DEDICATED THREAD with blocking receives, not a thread-pool task.
+        //
+        // The receiver queries this clock while it is processing SETUP, and withholds its
+        // SETUP reply until we answer. Running the responder on the pool meant that in the
+        // app - where LibVLC and the UI keep the pool busy - the reply could be delayed past
+        // the receiver's patience, so SETUP simply never came back. The same code answered
+        // instantly from a test process with an idle pool, which is exactly why this only
+        // ever failed inside OrgZ.
+        var thread = new Thread(() =>
         {
+            var any = new IPEndPoint(IPAddress.Any, 0);
             while (!token.IsCancellationRequested)
             {
                 try
                 {
-                    var query = await _timing.ReceiveAsync(token);
+                    var query = _timing.Receive(ref any);
                     var received = RaopPackets.NtpNow();
-                    if (RaopPackets.IsTimingRequest(query.Buffer))
+                    if (RaopPackets.IsTimingRequest(query))
                     {
-                        var reply = RaopPackets.BuildTimingReply(query.Buffer, received, RaopPackets.NtpNow());
-                        await _timing.SendAsync(reply, reply.Length, query.RemoteEndPoint);
+                        var reply = RaopPackets.BuildTimingReply(query, received, RaopPackets.NtpNow());
+                        _timing.Send(reply, reply.Length, any);
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
                 }
                 catch (Exception ex)
                 {
-                    _log.Debug(ex, "AirPlay 2 timing exchange failed");
+                    if (!token.IsCancellationRequested)
+                    {
+                        _log.Debug(ex, "AirPlay 2 timing exchange failed");
+                    }
                     return;
                 }
             }
-        }, token);
+        })
+        {
+            IsBackground = true,
+            Name = "AirPlay timing",
+        };
+        thread.Start();
     }
 
     /// <summary>
@@ -542,9 +559,14 @@ internal sealed class AirPlay2Session : IDisposable
 
         try
         {
-            if (_rtsp is not null && _rtsp.SessionId is not null)
+            // TEARDOWN even when the handshake FAILED and no Session header was ever seen.
+            // A receiver holds the session it began building until told otherwise, so a
+            // string of failed attempts fills it up and it eventually stops answering
+            // anything - including /info on a fresh connection. Leaving without saying
+            // goodbye is what turns one bad attempt into a dead speaker.
+            if (_rtsp is not null && _sessionUri is not null)
             {
-                _rtsp.SendAsync("TEARDOWN", $"rtsp://{_rtsp.LocalAddress}/stream").Wait(TimeSpan.FromSeconds(2));
+                _rtsp.SendAsync("TEARDOWN", _sessionUri).Wait(TimeSpan.FromSeconds(2));
             }
         }
         catch (Exception ex)

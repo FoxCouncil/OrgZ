@@ -1637,6 +1637,14 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // minutes once tripped.
         Helpers.TaskObserver.FireAndForget(PromptForKnownAirPlayPasswordsAsync(), "AirPlay password preflight");
 
+        // Diagnostic: the AirPlay sink connects fine from the test host and times out inside
+        // this process. Running the identical code HERE isolates whether the cause is
+        // process state or the bus's use of the sink. Set ORGZ_AIRPLAY_SELFTEST=<host>.
+        if (Environment.GetEnvironmentVariable("ORGZ_AIRPLAY_SELFTEST") is { Length: > 0 } selfTestHost)
+        {
+            Helpers.TaskObserver.FireAndForget(AirPlaySelfTestAsync(selfTestHost), "AirPlay self-test");
+        }
+
         // Bit-perfect FLAC engine shares the tap (VU/visualizers) and sink bus
         // with the VLC path; its events funnel into the same handlers.
         _flacEngine = new FlacPlaybackEngine(_audioOutput.Bus, _audioTap);
@@ -2224,6 +2232,49 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         if (_audioOutput.RecreateSink(qualifiedId))
         {
             UpdateMainStatus($"Reconnecting to {displayName}...");
+        }
+    }
+
+    /// <summary>
+    /// Drives AirPlayRaopSink directly, in THIS process, bypassing the provider and the bus.
+    /// The same call succeeds from a test host, so this separates "something about OrgZ's
+    /// process" from "something about how the bus drives the sink".
+    /// </summary>
+    private static async Task AirPlaySelfTestAsync(string host)
+    {
+        var log = Services.Logging.For("AirPlaySelfTest");
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            var device = new Services.AudioOutput.AudioDeviceInfo
+            {
+                DeviceId = "selftest@" + host,
+                DisplayName = "SelfTest",
+                ProviderId = Services.AudioOutput.AirPlay.AirPlayDeviceProvider.Id,
+                ProviderName = "AirPlay",
+                IsAvailable = true,
+            };
+
+            var password = Environment.GetEnvironmentVariable("ORGZ_AIRPLAY_PASSWORD");
+            using var sink = new Services.AudioOutput.AirPlay.AirPlayRaopSink(device, host, 7000, null, password);
+
+            string? failure = null;
+            sink.ConnectFailed += (_, reason) => failure = reason;
+            sink.Open(Services.AudioOutput.AudioFormat.CdDaStereo16);
+
+            var silence = new byte[Services.AudioOutput.AirPlay.RaopAlac.PcmBytesPerPacket];
+            for (var i = 0; i < 200 && failure is null && !sink.ProvidesClock; i++)
+            {
+                sink.Write(silence);
+                await Task.Delay(50);
+            }
+
+            log.Information("AirPlay self-test: streaming={Streaming} failure={Failure}", sink.ProvidesClock, failure ?? "none");
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "AirPlay self-test threw");
         }
     }
 

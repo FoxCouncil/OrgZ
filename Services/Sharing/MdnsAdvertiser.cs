@@ -29,6 +29,64 @@ public sealed class MdnsAdvertiser : IDisposable
     private UdpClient? _client;
     private Task? _loop;
 
+    /// <summary>
+    /// The live advertiser, once <see cref="Start"/> has succeeded - the single owner of
+    /// this process's mDNS socket.
+    ///
+    /// Library sharing announces through it; AirPlay discovery browses through it. Two
+    /// sockets bound to 5353 and joined to the same group inside one process is not a
+    /// second opinion, it's a race - so there is exactly one, and both features use it.
+    /// </summary>
+    public static MdnsAdvertiser? Running { get; private set; }
+
+    /// <summary>Every packet this socket receives, for consumers doing their own parsing.</summary>
+    public event Action<byte[], IPEndPoint>? PacketReceived;
+
+    /// <summary>
+    /// Sends a query out of every joined interface. Steering each send matters: an
+    /// un-steered one leaves only the default adapter, which on a host with Hyper-V
+    /// switches is whichever won the metric race.
+    /// </summary>
+    public bool SendQuery(byte[] query)
+    {
+        if (_client is null)
+        {
+            return false;
+        }
+
+        var endpoint = new IPEndPoint(IPAddress.Parse(MdnsWire.MulticastAddress), MdnsWire.Port);
+        var sent = 0;
+
+        foreach (var (address, _) in _interfaces)
+        {
+            try
+            {
+                _client.Client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, address.GetAddressBytes());
+                _client.Send(query, query.Length, endpoint);
+                sent++;
+            }
+            catch (SocketException ex)
+            {
+                _log.Debug(ex, "mDNS query send failed on {Address}", address);
+            }
+        }
+
+        if (sent == 0)
+        {
+            try
+            {
+                _client.Send(query, query.Length, endpoint);
+                sent++;
+            }
+            catch (SocketException ex)
+            {
+                _log.Debug(ex, "mDNS query send failed on the default interface");
+            }
+        }
+
+        return sent > 0;
+    }
+
     public MdnsAdvertiser(string shareName, ushort port, IEnumerable<string>? extraTxt = null)
     {
         var host = $"{SanitizeLabel(Environment.MachineName)}.local";
@@ -159,6 +217,11 @@ public sealed class MdnsAdvertiser : IDisposable
             }
 
             _log.Information("mDNS advertiser up on {Count} interface(s): {Addresses}", joined, string.Join(", ", _interfaces.Select(i => i.Address)));
+
+            // This socket is now THE process's mDNS socket - see Running/Browse. AirPlay
+            // discovery used to open a second one bound to the same group, which is two
+            // responders fighting over one link in one process.
+            Running = this;
             _loop = Task.Run(() => RunAsync(_cts.Token));
         }
         catch (Exception ex)
@@ -205,6 +268,17 @@ public sealed class MdnsAdvertiser : IDisposable
                     _log.Warning(ex, "mDNS receive loop stopped - the share is no longer auto-discoverable");
                 }
                 break;
+            }
+
+            // Hand every packet to other consumers (AirPlay discovery) before we look for
+            // our own questions - they browse through this socket rather than opening one.
+            try
+            {
+                PacketReceived?.Invoke(packet.Buffer, packet.RemoteEndPoint);
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "mDNS packet consumer threw");
             }
 
             foreach (var question in MdnsWire.ReadQuestions(packet.Buffer))

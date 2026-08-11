@@ -220,6 +220,39 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// </summary>
     private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout, Dictionary<string, bool>? passwordRequired = null)
     {
+        // Prefer the process's ONE mDNS socket when it's up. Opening a second socket joined
+        // to the same group inside one process is two responders racing on one link, and
+        // OrgZ already owns a responder for library sharing.
+        if (Sharing.MdnsAdvertiser.Running is { } shared)
+        {
+            var answers = new List<(byte[] Data, IPEndPoint From)>();
+            void Collect(byte[] data, IPEndPoint from) => answers.Add((data, from));
+
+            shared.PacketReceived += Collect;
+            try
+            {
+                shared.SendQuery(BuildMdnsQuery(service));
+
+                var until = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+                while (Environment.TickCount64 < until)
+                {
+                    System.Threading.Thread.Sleep(40);
+                }
+
+                foreach (var (data, _) in answers.ToArray())
+                {
+                    ExtractPtrNames(data, service, receivers);
+                    ExtractEndpoints(data, receivers, endpoints, passwordRequired);
+                }
+            }
+            finally
+            {
+                shared.PacketReceived -= Collect;
+            }
+
+            return;
+        }
+
         using var udp = new UdpClient();
         udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         udp.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
