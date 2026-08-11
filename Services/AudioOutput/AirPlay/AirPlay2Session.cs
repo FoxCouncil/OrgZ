@@ -71,6 +71,9 @@ internal sealed class AirPlay2Session : IDisposable
     /// <summary>True when the receiver refused our password - the caller should ask for another.</summary>
     public bool PasswordRejected => _pairing.PasswordRejected;
 
+    /// <summary>The level the session opens at. Set before <see cref="ConnectAsync"/>.</summary>
+    public float InitialVolume { get; set; } = 0.35f;
+
     public bool IsConnected { get; private set; }
 
     public async Task ConnectAsync(CancellationToken ct = default)
@@ -207,8 +210,9 @@ internal sealed class AirPlay2Session : IDisposable
 
         // Volume before RECORD, exactly as a working sender does it - a receiver that
         // starts at its own level can be silent for reasons that have nothing to do with
-        // the stream.
-        await SetVolumeAsync(1f, ct);
+        // the stream. Use the caller's level, NOT full scale: hardcoding 1.0 here meant
+        // every session opened at 0 dB regardless of where the user had the slider.
+        await SetVolumeAsync(InitialVolume, ct);
 
         // RECORD carries no Range/RTP-Info here: the reference sender sends it bare, and
         // this is a realtime stream rather than a seekable one.

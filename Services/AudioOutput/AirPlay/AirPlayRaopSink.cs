@@ -389,7 +389,7 @@ internal sealed class AirPlayRaopSink : IAudioSink
                 raop = null;
 
                 _log.Information("{Name} wants AirPlay 2 pairing - retrying with the paired path", DisplayName);
-                airplay2 = new AirPlay2Session(_host, _port, _password);
+                airplay2 = new AirPlay2Session(_host, _port, _password) { InitialVolume = _muted ? 0f : _volume };
                 try
                 {
                     await airplay2.ConnectAsync(ct);
