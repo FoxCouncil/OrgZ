@@ -404,7 +404,7 @@ public sealed class AudioSinkBus : IDisposable
     {
         foreach (var sink in sinks)
         {
-            if (sink.IsOpen)
+            if (sink.ProvidesClock)
             {
                 _pacedBytes = 0;   // a real output owns the clock again
                 return;
@@ -469,6 +469,13 @@ public sealed class AudioSinkBus : IDisposable
                 {
                     return;
                 }
+
+                // Give the sink a chance to absorb the change first - see TryAdaptFormat.
+                if (sink.TryAdaptFormat(format))
+                {
+                    return;
+                }
+
                 sink.Close();
             }
             sink.Open(format);

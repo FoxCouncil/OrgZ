@@ -32,7 +32,7 @@ internal sealed class RtspClient : IDisposable
     private static readonly ILogger _log = Logging.For("Rtsp");
 
     private readonly TcpClient _tcp = new();
-    private NetworkStream? _stream;
+    private HapCryptoStream? _stream;
     private int _cSeq;
     private bool _disposed;
 
@@ -44,13 +44,31 @@ internal sealed class RtspClient : IDisposable
     /// <summary>Our address as the receiver sees it - the SDP's origin line needs it.</summary>
     public string LocalAddress { get; private set; } = "0.0.0.0";
 
+    /// <summary>
+    /// Switches the connection to HAP encryption. Everything after transient pair-setup
+    /// must go through it; a plaintext request is simply dropped by the receiver.
+    /// </summary>
+    public void EnableEncryption(byte[] sharedSecret)
+    {
+        var (output, input) = HapCryptoStream.DeriveControlKeys(sharedSecret);
+        _stream?.Enable(output, input);
+        _log.Debug("RTSP connection is now HAP-encrypted");
+    }
+
     public async Task ConnectAsync(string host, int port, CancellationToken ct)
     {
         await _tcp.ConnectAsync(host, port, ct);
-        _stream = _tcp.GetStream();
+
+        // Transparent until pairing turns encryption on - see HapCryptoStream.
+        _stream = new HapCryptoStream(_tcp.GetStream());
         if (_tcp.Client.LocalEndPoint is System.Net.IPEndPoint local)
         {
-            LocalAddress = local.Address.ToString();
+            // TcpClient opens a dual-stack socket, so this comes back as an IPv4-mapped
+            // IPv6 address and the request URI becomes "rtsp://::ffff:192.168.1.20/...".
+            // A receiver can't parse that and simply never replies - a silent hang rather
+            // than a refusal.
+            var address = local.Address.IsIPv4MappedToIPv6 ? local.Address.MapToIPv4() : local.Address;
+            LocalAddress = address.ToString();
         }
     }
 
@@ -71,7 +89,23 @@ internal sealed class RtspClient : IDisposable
         await _stream.WriteAsync(request, ct);
         await _stream.FlushAsync(ct);
 
-        var response = await ReadResponseAsync(_stream, ct);
+        // A receiver that dislikes a request sometimes just never answers. Without a
+        // deadline that hangs the handshake forever, which reads as silence with nothing
+        // in the log - far harder to diagnose than a failure.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        RtspResponse response;
+        try
+        {
+            response = await ReadResponseAsync(_stream, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"RTSP {method} {uri} got no reply within 10s.");
+        }
+
+        _log.Debug("RTSP {Method} {Uri} -> {Status}", method, uri, response.StatusCode);
         if (response.Header("Session") is { } session)
         {
             // "Session: DEADBEEF;timeout=60" - the id is everything before the first ';'.
@@ -174,7 +208,7 @@ internal sealed class RtspClient : IDisposable
     public Task<RtspResponse> PostAsync(string path, string contentType, byte[] body, IReadOnlyDictionary<string, string>? headers = null, CancellationToken ct = default)
         => SendAsync("POST", path, headers, contentType, body, ct);
 
-    private static async Task<RtspResponse> ReadResponseAsync(NetworkStream stream, CancellationToken ct)
+    private static async Task<RtspResponse> ReadResponseAsync(Stream stream, CancellationToken ct)
     {
         // Read to the blank line that ends the headers, then exactly Content-Length more.
         var head = new List<byte>(512);

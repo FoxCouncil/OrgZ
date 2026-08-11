@@ -51,6 +51,28 @@ public interface IAudioSink : IDisposable
     void Open(AudioFormat format);
 
     /// <summary>
+    /// Absorbs a format change in place, returning false if the sink must be reopened.
+    ///
+    /// Reopening is cheap for a local device and expensive for a network one: an AirPlay
+    /// receiver treats it as a whole new session, complete with pairing. Since the first
+    /// buffer of a track can arrive at a different bit depth than the format the sink was
+    /// opened with, a sink that converts internally should say so here rather than have a
+    /// working session torn down mid-handshake.
+    /// </summary>
+    bool TryAdaptFormat(AudioFormat format) => false;
+
+    /// <summary>
+    /// Whether this sink is currently consuming audio in real time, and so acts as the
+    /// playback clock.
+    ///
+    /// Distinct from <see cref="IsOpen"/> on purpose: a network sink can be open while its
+    /// handshake is still running or has quietly failed, accepting buffers and discarding
+    /// them. That paces nothing, and if the bus mistakes it for a clock the decoder free-runs
+    /// and the track races through at many times speed.
+    /// </summary>
+    bool ProvidesClock => IsOpen;
+
+    /// <summary>
     /// Queues PCM samples for playback in the format declared by the most
     /// recent <see cref="Open"/>.  Returns quickly - the underlying OS or
     /// network transport buffers async.

@@ -125,7 +125,13 @@ internal sealed class AirPlay2Pairing
         }
 
         SessionKey = _srp.SessionKey;
-        _log.Information("AirPlay 2 transient pairing complete");
+
+        // From here the connection is encrypted. This is not optional and there is no
+        // negotiation of it - the receiver simply expects every subsequent byte to be
+        // sealed, and silently drops the connection if it isn't.
+        rtsp.EnableEncryption(SessionKey);
+
+        _log.Information("AirPlay 2 transient pairing complete (connection encrypted)");
     }
 
     /// <summary>HAP reports refusals as a TLV error code rather than an HTTP status.</summary>

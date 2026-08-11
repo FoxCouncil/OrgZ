@@ -75,21 +75,24 @@ internal sealed class AirPlay2Session : IDisposable
         _rtsp = new RtspClient();
         await _rtsp.ConnectAsync(_host, _rtspPort, ct);
 
-        _rtsp.DefaultHeaders["User-Agent"] = "AirPlay/320.20";
-        _rtsp.DefaultHeaders["Client-Instance"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToUpperInvariant();
-        _rtsp.DefaultHeaders["DACP-ID"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToUpperInvariant();
+        var instance = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToUpperInvariant();
+        _rtsp.DefaultHeaders["User-Agent"] = "AirPlay/550.10";
+        _rtsp.DefaultHeaders["Client-Instance"] = instance;
+        _rtsp.DefaultHeaders["DACP-ID"] = instance;
         _rtsp.DefaultHeaders["Active-Remote"] = Random.Shared.Next(1, int.MaxValue).ToString();
 
-        // Pairing FIRST: until this completes the receiver answers everything with 401.
-        await _pairing.PairAsync(_rtsp, ct);
-        _cipher = new AirPlay2Cipher(_pairing.AudioKey);
-
-        // /info is the expected precursor to SETUP; a receiver can refuse SETUP without it.
-        var info = await _rtsp.PostAsync("/info", "application/x-apple-binary-plist", BinaryPlist.Write(new Dictionary<string, object?>()), ct: ct);
+        // /info goes FIRST, as a GET, before pairing. Order matters more than it looks:
+        // asking for it AFTER pair-setup makes a HomePod drop the connection outright
+        // ("closed mid-response"), which is what kept this from ever reaching SETUP.
+        var info = await _rtsp.SendAsync("GET", "/info", ct: ct);
         if (!info.IsSuccess)
         {
-            _log.Debug("AirPlay 2 /info returned {Status} - continuing to SETUP", info.StatusCode);
+            _log.Debug("AirPlay 2 /info returned {Status} - continuing to pairing", info.StatusCode);
         }
+
+        // Then pairing: until this completes the receiver answers everything with 401.
+        await _pairing.PairAsync(_rtsp, ct);
+        _cipher = new AirPlay2Cipher(_pairing.AudioKey);
 
         // The receiver drives the clock exchange, so our timing socket has to exist before
         // SETUP announces its port.
@@ -124,6 +127,13 @@ internal sealed class AirPlay2Session : IDisposable
         if (!setup.IsSuccess)
         {
             throw new InvalidOperationException($"AirPlay 2 SETUP refused ({setup.StatusCode} {setup.StatusText}).");
+        }
+
+        // The session SETUP answers with an event port the receiver expects a sender to
+        // connect to. We never read from it - holding the socket open is what matters.
+        if (ExtractStreamPort(setup.BodyBytes, "eventPort") is { } eventPort)
+        {
+            await OpenEventChannelAsync(eventPort, ct);
         }
 
         StartControlClient();
@@ -180,20 +190,87 @@ internal sealed class AirPlay2Session : IDisposable
         _timestamp = (uint)Random.Shared.Next();
         StartSyncLoop();
 
-        var record = await _rtsp.SendAsync("RECORD", $"rtsp://{_rtsp.LocalAddress}/{sessionId}", new Dictionary<string, string>
-        {
-            ["Range"] = "npt=0-",
-            ["RTP-Info"] = $"seq={_sequence};rtptime={_timestamp}",
-        }, ct: ct);
+        // Volume before RECORD, exactly as a working sender does it - a receiver that
+        // starts at its own level can be silent for reasons that have nothing to do with
+        // the stream.
+        await SetVolumeAsync(1f, ct);
+
+        // RECORD carries no Range/RTP-Info here: the reference sender sends it bare, and
+        // this is a realtime stream rather than a seekable one.
+        var record = await _rtsp.SendAsync("RECORD", $"rtsp://{_rtsp.LocalAddress}/{sessionId}", ct: ct);
         if (!record.IsSuccess)
         {
             throw new InvalidOperationException($"AirPlay 2 RECORD refused ({record.StatusCode} {record.StatusText}).");
         }
 
+        StartFeedbackLoop(sessionId);
+
         _streamStart = DateTime.UtcNow;
         _framesSent = 0;
         IsConnected = true;
         _log.Information("AirPlay 2 session up: {Host} audio->{Port}", _host, dataPort);
+    }
+
+    private System.Net.Sockets.TcpClient? _events;
+
+    /// <summary>
+    /// Connects to the event port the receiver hands back from SETUP.
+    ///
+    /// The channel carries receiver-to-sender events we have no use for, and its payloads
+    /// are encrypted with separately derived keys - so nothing is read here. A working
+    /// sender does establish it though, and holding the socket open is cheap insurance
+    /// against a receiver that treats its absence as the sender having gone away.
+    /// </summary>
+    private async Task OpenEventChannelAsync(int eventPort, CancellationToken ct)
+    {
+        try
+        {
+            _events = new System.Net.Sockets.TcpClient();
+            await _events.ConnectAsync(_host, eventPort, ct);
+            _log.Debug("AirPlay 2 event channel open on {Port}", eventPort);
+        }
+        catch (Exception ex)
+        {
+            // Not fatal - streaming may well work without it.
+            _log.Debug(ex, "AirPlay 2 event channel connect failed on {Port}", eventPort);
+            _events?.Dispose();
+            _events = null;
+        }
+    }
+
+    /// <summary>
+    /// Posts /feedback on a heartbeat. A receiver uses it to tell that the sender is still
+    /// alive; letting it lapse is a way to have a stream quietly stop.
+    /// </summary>
+    private void StartFeedbackLoop(string sessionId)
+    {
+        if (_rtsp is null || _servers is null)
+        {
+            return;
+        }
+
+        var token = _servers.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), token);
+                    await _rtsp.SendAsync("POST", "/feedback", ct: token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // Best effort, exactly as the reference sender treats it.
+                    _log.Debug(ex, "AirPlay 2 feedback failed");
+                    return;
+                }
+            }
+        }, token);
     }
 
     /// <summary>
@@ -282,6 +359,18 @@ internal sealed class AirPlay2Session : IDisposable
         }, token);
     }
 
+    /// <summary>Swaps 16-bit sample byte order, LE (what the bus produces) to BE (what RTP carries).</summary>
+    internal static byte[] ToBigEndian(ReadOnlySpan<byte> littleEndian)
+    {
+        var swapped = new byte[littleEndian.Length];
+        for (var i = 0; i + 1 < littleEndian.Length; i += 2)
+        {
+            swapped[i] = littleEndian[i + 1];
+            swapped[i + 1] = littleEndian[i];
+        }
+        return swapped;
+    }
+
     /// <summary>Digs a named port out of the SETUP reply's streams array.</summary>
     internal static int? ExtractStreamPort(byte[] plist, string name)
     {
@@ -355,9 +444,14 @@ internal sealed class AirPlay2Session : IDisposable
         // payload as AAD - the receiver checks them, so they can't be filled in afterwards.
         var header = RaopPackets.BuildAudio(_sequence, _timestamp + LatencyFrames, _ssrc, [], _first);
 
-        // Raw PCM, not ALAC: ct=1 in the stream SETUP. The sealed payload carries its own
-        // nonce on the end, so the packet is header + ciphertext + tag + nonce.
-        var body = _cipher.SealAudio(pcm.Span, header.AsSpan(4, 8));
+        // Raw PCM, not ALAC: ct=1 in the stream SETUP. RTP payloads are BIG-endian, and the
+        // bus hands us little-endian S16 - sending it unswapped is audible as harsh noise
+        // rather than silence, because the receiver happily plays the mangled samples.
+        var samples = ToBigEndian(pcm.Span);
+
+        // The sealed payload carries its own nonce on the end, so the packet is
+        // header + ciphertext + tag + nonce.
+        var body = _cipher.SealAudio(samples, header.AsSpan(4, 8));
 
         var packet = new byte[header.Length + body.Length];
         header.CopyTo(packet, 0);
@@ -380,7 +474,9 @@ internal sealed class AirPlay2Session : IDisposable
 
     public async Task SetVolumeAsync(float linear, CancellationToken ct = default)
     {
-        if (_rtsp is null || !IsConnected)
+        // Deliberately NOT gated on IsConnected: the initial volume is set during setup,
+        // before the session is marked up.
+        if (_rtsp is null)
         {
             return;
         }
@@ -433,6 +529,7 @@ internal sealed class AirPlay2Session : IDisposable
         _audio?.Dispose();
         _timing?.Dispose();
         _control?.Dispose();
+        _events?.Dispose();
         _servers?.Dispose();
         _rtsp?.Dispose();
     }

@@ -68,6 +68,9 @@ internal sealed class AirPlayRaopSink : IAudioSink
     /// <summary>Set when the receiver rejected our credentials, so the UI knows to prompt.</summary>
     public bool NeedsPassword { get; private set; }
 
+    /// <summary>Only a session that's actually streaming paces the decoder - see IAudioSink.</summary>
+    public bool ProvidesClock => _streaming;
+
     public string Id { get; }
     public string DisplayName { get; }
     public AudioFormat? CurrentFormat { get; private set; }
@@ -156,6 +159,31 @@ internal sealed class AirPlayRaopSink : IAudioSink
 
         IsOpen = true;
         _log.Information("AirPlay sink opening: {Name} ({Host}:{Port})", DisplayName, _host, _port);
+    }
+
+    /// <summary>
+    /// Takes a new bit depth or sample rate without dropping the session.
+    ///
+    /// Everything except channel count is handled on the way in - depth by ConvertToS16,
+    /// rate by the resampler - so there is nothing about those the receiver needs to know.
+    /// Tearing down instead meant a track that started 16-bit and continued 32-bit killed a
+    /// freshly paired session mid-SETUP, and the receiver wouldn't accept a replacement
+    /// while the old one was still half-open.
+    /// </summary>
+    public bool TryAdaptFormat(AudioFormat format)
+    {
+        if (!IsOpen || format.Channels != 2 || !CanConvert(format))
+        {
+            return false;
+        }
+
+        _resampler = format.SampleRate == 44100 ? null : new AudioResampler(format.SampleRate, 44100, 2);
+        _partial.Clear();
+        _converted.Clear();
+        CurrentFormat = format;
+
+        _log.Information("AirPlay adapted to {Rate}Hz {Bits}-bit for {Name} without reconnecting", format.SampleRate, format.BitsPerSample, DisplayName);
+        return true;
     }
 
     public void Write(ReadOnlySpan<byte> pcm)
@@ -341,6 +369,14 @@ internal sealed class AirPlayRaopSink : IAudioSink
         {
             try
             {
+                // A receiver we hold a password for is an AirPlay 2 device, so don't probe
+                // classic RAOP first. That probe opens and drops a second RTSP connection,
+                // and a HomePod left the follow-up session hanging with no reply at all.
+                if (!string.IsNullOrEmpty(_password))
+                {
+                    throw new InvalidOperationException("401 - receiver requires AirPlay 2 pairing");
+                }
+
                 raop = new RaopSession(_host, _port);
                 await raop.ConnectAsync(ct);
                 _session = raop;
