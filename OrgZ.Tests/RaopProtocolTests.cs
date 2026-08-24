@@ -432,8 +432,8 @@ public class RaopProtocolTests
     [Fact]
     public void Txt_status_flags_parse_from_both_spellings()
     {
-        // "flags" on _airplay, "sf" on _raop - same bits. Values from a real Speaker:
-        // idle vs an active iPhone realtime session.
+        // "flags" on _airplay, "sf" on _raop - same bits. Values captured off a real
+        // HomePod: idle vs an active iPhone realtime session.
         var airplay = BuildTxtResponse(["Speaker", "_airplay", "_tcp", "local"], "flags=0x5b8c84");
         var raop = BuildTxtResponse(["AABBCCDDEEFF@Speaker", "_raop", "_tcp", "local"], "sf=0x98484");
 

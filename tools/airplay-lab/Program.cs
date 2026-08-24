@@ -37,14 +37,23 @@ internal static class Program
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
         {
             Console.WriteLine("usage: airplaylab <info|pair|tone|meta|hold> [host] [--password <p>] [--no-password] [--seconds <n>] [--freq <hz>] [--volume <0..1>]");
-            Console.WriteLine("       host defaults to Speaker.local");
+            Console.WriteLine("       host may be omitted when ORGZ_LAB_HOST names a receiver");
             return args.Length == 0 ? 1 : 0;
         }
 
         Logging.Initialize();
 
         var command = args[0].ToLowerInvariant();
-        var host = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : "Speaker.local";
+        // No hard-coded default: whose receiver it is belongs in the environment, not the repo.
+        var host = args.Length > 1 && !args[1].StartsWith('-')
+            ? args[1]
+            : Environment.GetEnvironmentVariable("ORGZ_LAB_HOST");
+
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            Console.Error.WriteLine("no receiver given: pass a host, or set ORGZ_LAB_HOST");
+            return 1;
+        }
 
         string? explicitPassword = null;
         var noPassword = false;
@@ -165,7 +174,7 @@ internal static class Program
             return env;
         }
 
-        // The app keys credentials by mDNS instance name ("AABBCCDDEEFF@Speaker._raop..."),
+        // The app keys credentials by mDNS instance name ("<mac>@<name>._raop..."),
         // which we don't know from a bare hostname - match on the receiver's short name.
         var shortName = host.Split('.')[0];
         var blobs = Settings.Get<Dictionary<string, string>>("OrgZ.Secrets", null!) ?? new(StringComparer.OrdinalIgnoreCase);

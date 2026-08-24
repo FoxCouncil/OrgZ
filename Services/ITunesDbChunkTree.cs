@@ -119,7 +119,7 @@ public static class ITunesDbChunkTree
             case "mhbd":
                 // Number of datasets (mhsd) - libgpod's itdb_parse reads this and iterates exactly
                 // this many, so a zero here makes the whole database unreadable ("no mhsd type 1").
-                // Real iTunes writes it for the legacy iTunesDB too (BriPod: 5), not only the CDB.
+                // Real iTunes writes it for the legacy iTunesDB too (observed value 5), not only the CDB.
                 c.WriteHeaderInt32(0x14, c.Children.Count(k => k.Magic == "mhsd"));
                 break;
 

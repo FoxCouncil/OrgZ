@@ -141,7 +141,7 @@ Encoder builds, per platform. Kept because the quirks will bite again.
   `scripts/build-encoders-linux.sh`. An AppImage has no dependency mechanism, so static
   matters.
 - osx-arm64: ffmpeg 7.1 (LGPL-clean, AudioToolbox alac/aac) plus flac and lame, built on
-  build-mac. macOS can't statically link libSystem, so only our own libs are static; verified
+  a Mac. macOS can't statically link libSystem, so only our own libs are static; verified
   with `otool -L`. Both scripts pin `MACOSX_DEPLOYMENT_TARGET=11.0` and assert the resulting
   minos - without it clang stamps the build machine's OS and the binary won't launch on
   anything older.

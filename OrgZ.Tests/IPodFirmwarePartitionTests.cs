@@ -241,7 +241,7 @@ public class IPodFirmwarePartitionTests
 
     // Builds the firmware SysInfo record as it actually sits on a 5.5G: the board-name string
     // "iPod M<nn>", then the null-terminated serial a few bytes later, with the model number
-    // in the same record. Mirrors the real BriPod dump (serial 8L645KA1V9M, model MA446).
+    // in the same record. Mirrors a real Video 5.5G dump (model MA446).
     private static byte[] BuildSysInfoRecord(string board, string serial, string modelNumber)
     {
         var buf = new List<byte>();
@@ -288,7 +288,7 @@ public class IPodFirmwarePartitionTests
     [Fact]
     public void ScanSysCfg_reads_real_5_5G_firmware_bytes()
     {
-        // 160 bytes lifted verbatim from a real iPod Video 5.5G firmware dump (BriPod) - the
+        // 160 bytes lifted verbatim from a real iPod Video 5.5G firmware dump - the
         // SysInfo record: board name "iPod M25", serial "8L645KA1V9M", FireWire GUID, "MA446".
         // Proves the parser against actual hardware bytes, not just synthetic ones.
         var record = Convert.FromHexString("f800000069506f64204d32350000000000000000384c3634354b413156394d0000000000000000000000000000000000000000006653d31500270a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b6f3f9ff11000b00425531313141202000000100020000004d4134343600000000000000");

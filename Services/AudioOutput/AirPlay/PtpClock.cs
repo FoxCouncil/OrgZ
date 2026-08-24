@@ -52,7 +52,7 @@ internal sealed class PtpClock : IDisposable
     private static readonly TimeSpan SyncInterval = TimeSpan.FromMilliseconds(125);
     private static readonly TimeSpan SignalingInterval = TimeSpan.FromSeconds(1);
     // Announce logint -2 (254 on the wire) - the exact value a real macOS sender emits, per
-    // the build-mac->Speaker capture. Was 0.
+    // a macOS sender capture. Was 0.
     private const sbyte LogIntervalAnnounce = -2;
     private const sbyte LogIntervalSync = -3;
     private const sbyte LogIntervalSignaling = -128;
@@ -485,7 +485,7 @@ internal sealed class PtpClock : IDisposable
             // master and start sending Delay-Req. Ignoring it (which we used to do) is why
             // the pod never slaved: no grant, no service, no delay measurement, no join.
             // Apple's grant is a proprietary ORGANIZATION_EXTENSION TLV (OUI 00:0D:93), not
-            // the standard 0x0005 GRANT - decoded from the build-mac->Speaker capture.
+            // the standard 0x0005 GRANT - decoded from a macOS sender capture.
             case MsgSignaling when data.Length >= HeaderSize + 10:
             {
                 // Only a peer a session actually registered is granted service. A grant is a
@@ -653,7 +653,7 @@ internal sealed class PtpClock : IDisposable
         //   [0..9] originTimestamp  [10..11] currentUtcOffset  [12] reserved
         //   [13] priority1  [14..17] clockQuality  [18] priority2
         //   [19..26] grandmasterIdentity  [27..28] stepsRemoved  [29] timeSource
-        // Values are the EXACT ones a real macOS sender announces (build-mac->Speaker capture),
+        // Values are the EXACT ones a real macOS sender announces (captured off the wire),
         // not the textbook-superior clock OrgZ used to claim. A HomePod does not pick its
         // master by clock quality - Apple wins with a deliberately mediocre clock - so
         // looking like Apple matters more than looking good.

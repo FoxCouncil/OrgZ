@@ -354,7 +354,7 @@ internal sealed class AirPlay2Session : IDisposable
         if (_ptp is not null)
         {
             // IP strings only. The first attempt sent the HOSTNAME the session was opened
-            // with ("Speaker.local") and the receiver answered 500 - a peer list names
+            // with (its own .local name) and the receiver answered 500 - a peer list names
             // addresses, not names.
             var peers = BinaryPlist.Write(new List<object?> { _rtsp.RemoteAddress, _rtsp.LocalAddress });
             var setPeers = await _rtsp.SendAsync("SETPEERS", _sessionUri,

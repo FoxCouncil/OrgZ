@@ -51,7 +51,7 @@ public class IPodModelDatabaseTests
     [InlineData("8L645KABS41",  "Mini 2G",      "Silver", 4)]   // S41 → 9800
     [InlineData("8L645KABTDU",  "Photo",        "",      20)]   // TDU → A079
     [InlineData("8L645KABWEC",  "Video 5G",     "White", 30)]   // WEC → A002
-    [InlineData("8L645KABV9M",  "Video 5.5G",   "Black", 30)]   // V9M → A446 (BriPod, real serial)
+    [InlineData("8L645KABV9M",  "Video 5.5G",   "Black", 30)]   // V9M → A446
     [InlineData("8L645KABUNA",  "Nano 1G",      "White",  1)]   // UNA → A350
     [InlineData("8L645KABVQ5",  "Nano 2G",      "Silver", 2)]   // VQ5 → A477
     [InlineData("8L645KABY0P",  "Nano 3G",      "Silver", 4)]   // Y0P → A978

@@ -2,7 +2,7 @@
 
 `bripod-3tracks.itunesdb` is a minimal but **structurally real** iTunesDB: the first three `mhit`
 track records (with their `mhod` string children - title, album, artist, path, etc.) lifted verbatim
-from an iTunes-written database on a real iPod Video 5.5G ("BriPod"), wrapped in a freshly-built
+from an iTunes-written database on a real iPod Video 5.5G, wrapped in a freshly-built
 `mhbd → mhsd(type 1) → mhlt` envelope. The track bytes are untouched iTunes output - the offsets,
 field widths and endianness are exactly what the firmware and libgpod see.
 

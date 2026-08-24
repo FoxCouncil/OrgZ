@@ -93,7 +93,7 @@
         "asset": "ffmpeg-osx-arm64",
         "sha256": "7305b451184baec88dc8a58a0cd904a63e0f1dbd5670ea5fb9c81c4051c4cd3a",
         "license": "LGPL-2.1",
-        "builtFrom": "ffmpeg.org 7.1 source via scripts/build-ffmpeg-mac.sh (built on build-mac, Apple clang 17, deployment target 11.0)"
+        "builtFrom": "ffmpeg.org 7.1 source via scripts/build-ffmpeg-mac.sh (built on macOS arm64, Apple clang 17, deployment target 11.0)"
       },
       {
         "out": "flac",
