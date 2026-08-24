@@ -28,10 +28,14 @@ nav:
   - Features:
     - Music Library: features/music-library.md
     - Ripping CDs: features/ripping-cds.md
+    - Burning Discs: features/burning-cds.md
     - Radio Stations: features/radio-stations.md
     - Podcasts: features/podcasts.md
+    - Audiobooks: features/audiobooks.md
     - Favorites: features/favorites.md
     - Playback: features/playback.md
+    - AirPlay: features/airplay.md
+    - Library Sharing: features/sharing.md
     - Keyboard Shortcuts: features/keyboard-shortcuts.md
   - Devices:
     - iPods & Rockbox: devices/ipod-rockbox.md

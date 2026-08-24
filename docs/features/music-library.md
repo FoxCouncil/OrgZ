@@ -11,6 +11,7 @@ OrgZ scans your selected folder for audio files and extracts metadata using TagL
 | MPEG Audio | `.mp3` |
 | FLAC | `.flac` |
 | AAC | `.m4a`, `.aac` |
+| MPEG-4 audiobook | `.m4b` (filed under [Audiobooks](audiobooks.md), not Music) |
 | Ogg Vorbis | `.ogg` |
 | Opus | `.opus` |
 | WAV | `.wav` |
@@ -19,9 +20,9 @@ OrgZ scans your selected folder for audio files and extracts metadata using TagL
 
 ## Columns
 
-The Music view shows: Title, Artist, Album, Year, Extension, and Album Art status.
+The Music view shows: Title, Artist, Track #, Album, Duration, Year, and Rating, behind the iTunes-style tick column.
 
-Click a column header to sort by it. Drag column headers to reorder them - the order is remembered per view.
+Click a column header to sort by it. Drag column headers to reorder them - the order is remembered per view. Right-click a column header to show the columns that are hidden by default: Plays, Extension, and Has Album Art.
 
 ## Searching
 
@@ -33,7 +34,10 @@ Set a 0-5 star rating on any track from its right-click menu. Ratings show in th
 
 ## Right-click actions
 
-Right-clicking a track offers, depending on the view: **Play**, **Play Next**, **Add to Queue**, **Add to Playlist**, **Toggle Favorite**, **Set Rating**, **Remove from Library**, and **Show in Explorer**.
+Right-clicking a track offers **Play**, **Play Next**, **Add to Queue**, **Get Info**, **Rating**, **Add to Playlist**, **Sync** (to a connected device), **Check** / **Uncheck**, **Show in Explorer**, **Burn to CD...**, and **Remove from Library**. Other views trim the list to what applies - a playlist adds **Remove from Playlist**, a read-only share drops the actions that would write.
+
+!!! warning "Remove from Library deletes the file"
+    **Remove from Library** is not "hide from OrgZ" - it permanently deletes the selected tracks' files from disk. There is no undo and nothing goes to the recycle bin. OrgZ asks for confirmation first, and that dialog is the last chance to stop.
 
 ## File Watching
 
@@ -41,4 +45,4 @@ OrgZ monitors your music folder for changes. Added, modified, or deleted files a
 
 ## Changing Library Folder
 
-Go to **File > Change Library Folder** or open **Settings > General** to change your music folder location.
+Open **Settings > General** and use the **Change ...** button next to *Music Library Folder Location*. **Reset** puts it back to the default.

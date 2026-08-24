@@ -4,8 +4,8 @@ Quality, beauty, and simplicity - in that order when they conflict.
 Tests reflect the finished product: nothing ships behind a capability flag without the
 conformance suite proving it.
 
-Status 0.10.10: suite 1963 (1955 pass, 8 skipped for missing oracles/wrong OS), zero build
-warnings, gated per commit.
+Status 0.12.0: AirPlay 2 sending works on real hardware; the release pipeline packs an MSI,
+a .pkg and an AppImage from a tag. Zero build warnings, gated per commit.
 
 ## Before v1
 
@@ -16,6 +16,12 @@ warnings, gated per commit.
 
 ## Metal-gated
 
+- [ ] AirPlay tile reliability across many runs. The keep-alive re-assert fixed the raced
+      single push; what is unproven is that it paints EVERY time, on a cold receiver.
+- [ ] AirPlay to two receivers at once: DACP now forwards from one session rather than
+      every session, so a button press should move playback once, not N times.
+- [ ] PTP as grandmaster. The responder is written and the session offers it; no receiver
+      has been observed joining our timing group (gid/igl unchanged in the TXT probe).
 - [ ] Rockbox erase on a real box.
 - [ ] Nano 5G ALAC/AAC audio-format codes (MP3 proven).
 - [ ] Nano 5G CDB user-playlist form. Playlists stay SQLite-only until iTunes accepts a
@@ -81,7 +87,6 @@ Library read/write:
 
 - [ ] Multi-disc burning: split an overflowing playlist across discs, per-disc titles,
       swap prompt.
-- [ ] AirPlay: real RAOP streaming. Devices are discovered and listed disabled.
 - [ ] Slim ffmpeg build. The vendored win-x64 ffmpeg is 108.9 MB, ~98% of the payload.
       A `--disable-everything` build lands ~10-20 MB.
 - [ ] Device playlists master view. Needs a playlist row type; the shared grid it waited on
@@ -103,6 +108,11 @@ Library read/write:
 
 ## Done
 
+- AirPlay 2 sending: pairing (SRP-6a transient, including password-protected receivers),
+  encrypted RTSP, PCM streaming with NTP timing, now-playing tile with artwork, the
+  receiver's own transport buttons over DACP and the event channel, and connect-time volume
+  adoption. Verified on a HomePod 2026-08-13; the fake receiver in OrgZ.Tests/AirPlay pins
+  the wire so it can be developed without one.
 - CD ripping and burning, audio + data, CD-TEXT read off a real disc. All six burn tests
   passed on real media 2026-07-25.
 - iPod read/write across the tiers. hash58 (Nano 3G) and Shuffle iTunesSD (Shuffle 2G)

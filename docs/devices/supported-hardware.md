@@ -14,29 +14,35 @@ isn't natively playable on that model - `alac` is Apple Lossless (lossless),
 copied through untouched, and transcoded files keep their full tags - title,
 artist, album, track and disc numbers, genre, and embedded cover art.
 
-| Model | Released | Sync tier | Transcode |
-|---|---|---|---|
-| iPod 1G | 2001 | Direct iTunesDB | `mp4a` |
-| iPod 2G | 2002 | Direct iTunesDB | `mp4a` |
-| iPod 3G | 2003 | Direct iTunesDB | `alac` |
-| iPod 4G | 2004 | Direct iTunesDB | `alac` |
-| iPod Photo | 2004 | Direct iTunesDB | `alac` |
-| iPod Video 5G | 2005 | Direct iTunesDB | `alac` |
-| iPod Video 5.5G | 2006 | Direct iTunesDB | `alac` |
-| iPod Shuffle 1G | 2005 | iTunesSD | `mp4a` |
-| iPod Shuffle 2G | 2006 | iTunesSD | `mp4a` |
-| iPod Shuffle 3G | 2009 | iTunesSD (bdhs) | `alac` |
-| iPod Shuffle 4G | 2010 | iTunesSD (bdhs) | `alac` |
-| iPod Mini 1G | 2004 | Direct iTunesDB | `alac` |
-| iPod Mini 2G | 2005 | Direct iTunesDB | `alac` |
-| iPod Classic 6G | 2007 | hash58 | `alac` |
-| iPod Classic 6.5G | 2008 | hash58 | `alac` |
-| iPod Classic 7G | 2009 | hash58 | `alac` |
-| iPod Nano 1G | 2005 | Direct iTunesDB | `alac` |
-| iPod Nano 2G | 2006 | Direct iTunesDB | `alac` |
-| iPod Nano 3G | 2007 | hash58 | `alac` |
-| iPod Nano 4G | 2008 | hash58 | `alac` |
-| iPod Nano 5G | 2009 | hash72 + SQLite | `alac` |
+!!! note "What the tick means"
+    A tick marks a generation OrgZ has written to on a physical device of that
+    model. Every other row is implemented and covered by the conformance suite,
+    but has not yet met its hardware - back up the device before syncing to one.
+    The project's running record is in `HARDWARE.md`.
+
+| Model | Released | Sync tier | Transcode | Validated on hardware |
+|---|---|---|---|---|
+| iPod 1G | 2001 | Direct iTunesDB | `mp4a` |  |
+| iPod 2G | 2002 | Direct iTunesDB | `mp4a` |  |
+| iPod 3G | 2003 | Direct iTunesDB | `alac` |  |
+| iPod 4G | 2004 | Direct iTunesDB | `alac` |  |
+| iPod Photo | 2004 | Direct iTunesDB | `alac` |  |
+| iPod Video 5G | 2005 | Direct iTunesDB | `alac` |  |
+| iPod Video 5.5G | 2006 | Direct iTunesDB | `alac` | ✅ |
+| iPod Shuffle 1G | 2005 | iTunesSD | `mp4a` |  |
+| iPod Shuffle 2G | 2006 | iTunesSD | `mp4a` | ✅ |
+| iPod Shuffle 3G | 2009 | iTunesSD (bdhs) | `alac` |  |
+| iPod Shuffle 4G | 2010 | iTunesSD (bdhs) | `alac` |  |
+| iPod Mini 1G | 2004 | Direct iTunesDB | `alac` |  |
+| iPod Mini 2G | 2005 | Direct iTunesDB | `alac` |  |
+| iPod Classic 6G | 2007 | hash58 | `alac` |  |
+| iPod Classic 6.5G | 2008 | hash58 | `alac` |  |
+| iPod Classic 7G | 2009 | hash58 | `alac` |  |
+| iPod Nano 1G | 2005 | Direct iTunesDB | `alac` |  |
+| iPod Nano 2G | 2006 | Direct iTunesDB | `alac` |  |
+| iPod Nano 3G | 2007 | hash58 | `alac` | ✅ |
+| iPod Nano 4G | 2008 | hash58 | `alac` |  |
+| iPod Nano 5G | 2009 | hash72 + SQLite | `alac` | ✅ |
 
 !!! note "Why some models get AAC instead of lossless"
     Four models can't decode Apple Lossless - their firmware silently skips

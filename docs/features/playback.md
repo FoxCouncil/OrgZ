@@ -49,3 +49,8 @@ OrgZ mirrors playback to the operating system so hardware and on-screen media co
 
 - **Windows**: media keys (play/pause, next, previous), taskbar thumbnail-toolbar buttons, and System Media Transport Controls.
 - **macOS**: the Now Playing panel and media keys.
+- **Linux**: MPRIS over the session bus - media keys and the desktop's now-playing panel (GNOME, KDE, XFCE, `playerctl`).
+
+## Where the sound goes
+
+The speaker icon beside the volume slider picks the output device, and more than one can be ticked at a time - including AirPlay receivers on your network. See [AirPlay](airplay.md).

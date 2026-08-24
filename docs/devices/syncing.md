@@ -16,26 +16,32 @@ Each device also has a **Playlists** entry beneath it in the sidebar:
 - **Rockbox / other**: playlists are read from `*.m3u` files in the device's
   `/Playlists/` folder.
 
-## Sending a playlist to a device
+## Syncing a playlist to a device
 
-Right-click one of your library playlists and choose **Send to device**.
+Right-click one of your library playlists and choose **Sync**, then the device.
+The submenu lists every connected device whose sync tier can take tracks - stock
+(Apple-firmware) iPods included; see
+[Supported Hardware](supported-hardware.md). With nothing suitable connected it
+reads *No compatible devices*.
 
-!!! warning "What this does - and doesn't do"
-    Sending a playlist writes an **M3U file** to the device's `/Playlists/` folder
-    that references tracks **already on the device**. It does **not** copy the
-    audio files themselves. OrgZ matches your playlist's tracks to the device's
-    library by **artist + title**; any track that isn't already on the device is
-    reported as "not found" and skipped (the rest still go through).
+Syncing copies the **tracks themselves**, transcoding on the way in when the
+model can't play the source format (a FLAC becomes ALAC or AAC for a stock iPod;
+Rockbox players take the file as-is). It then writes the playlist into whatever
+database that generation uses - the Nano 5G's SQLite, the binary iTunesDB, or an
+`.m3u8` in the device's `/Playlists/` folder for Rockbox.
 
-The written playlist uses Rockbox-style device-absolute paths (e.g.
-`/Music/Rush/Signals/01.mp3`) so the device resolves them no matter where it's
-mounted on your computer. The new playlist appears under the device immediately -
-no reconnect needed.
+Tracks already on the device are matched by **artist + title** and reused rather
+than copied twice. A track whose file is missing locally is skipped and counted
+as a failure; the rest still go through.
 
-![Sending a playlist to a connected device](../assets/screenshots/device-sync.png)
+![Syncing a playlist to a connected device](../assets/screenshots/device-sync.png)
 
-This is only available for **writable** devices. Stock (Apple-firmware) iPods are
-read-only, so the option is disabled for them.
+The new playlist appears under the device immediately - no reconnect needed.
+
+!!! tip "Keep syncing after you close OrgZ"
+    With **Settings → Services → Keep Running After OrgZ Closes → iPod sync**
+    ticked, the file copy is handed to the background service, so quitting OrgZ
+    mid-sync doesn't abandon it.
 
 ## Ejecting
 
@@ -49,6 +55,6 @@ is fully flushed.
 | Symptom | Likely cause |
 |---------|--------------|
 | Device doesn't appear | Not mounted yet, or (Linux) your user lacks access - see [Installation](../getting-started/installation.md). |
-| "Send to device" is greyed out | The device is a read-only stock iPod. Install Rockbox for read/write. |
-| Most tracks "not found on device" when sending | The playlist references tracks that aren't on the device; only matching artist+title pairs are written. |
+| **Sync** says "No compatible devices" | Nothing is connected whose sync tier can write tracks - a Nano 6G/7G or an iPod Touch, for instance. |
+| Sync stops with "ffmpeg wasn't found" | A stock iPod needs ffmpeg to transcode. It ships with the release packages; a build run from source needs it on `PATH`. |
 | Wrong model / missing identity | Re-run **Refresh device info**, or boot the iPod into Apple firmware once so OrgZ can read its serial and GUID. |

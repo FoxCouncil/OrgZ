@@ -14,7 +14,11 @@ OrgZ is a cross-platform music and radio player built with .NET 10 and Avalonia.
 
 - **Music library**: scans local audio files and reads tags, album art, and duration.
 - **CD ripping**: rips audio CDs to FLAC or MP3 and fills in titles, artist, album, year, and cover art from MusicBrainz.
-- **Internet radio**: browses and streams stations from Radio Browser and SHOUTcast.
+- **Internet radio**: a curated station catalogue ships with the app, and you can add, edit and favourite your own streams.
+- **AirPlay**: streams to AirPlay 2 receivers - HomePods, Apple TVs and Macs - alongside or instead of the local sound device.
+- **Library sharing**: share your library with another copy of OrgZ over the network, encrypted and certificate-pinned.
+- **CD burning**: burns audio and data discs, with CD-TEXT and disc erase.
+- **Audiobooks**: a dedicated shelf that resumes at the furthest chapter.
 - **Podcasts**: subscribes to feeds, downloads episodes on configurable rules, and resumes playback where it left off.
 - **Favorites and playlists**: stars tracks and stations, and builds playlists.
 - **iPod and Rockbox**: detects connected iPods (stock firmware and Rockbox) and copies tracks, playlists, and album art to supported models.

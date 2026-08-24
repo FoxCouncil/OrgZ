@@ -1,31 +1,93 @@
-Third-party binaries bundled with OrgZ
+Third-party software bundled with OrgZ
 ======================================
 
-OrgZ ships these command-line tools next to the app and invokes them as separate
-processes - it never links against them - so this is "mere aggregation" and OrgZ's
-own license is unaffected. Each is redistributed under its own license.
+OrgZ (MIT, see LICENSE) redistributes the components below. The command-line tools
+are invoked as separate processes and are never linked into OrgZ, so shipping them
+alongside it is mere aggregation and OrgZ's own license is unaffected. libvlc is
+loaded dynamically at runtime and can be replaced by the user.
 
-The exact vendored versions and their SHA-256 hashes are pinned in
-scripts/encoders.json. Where an upstream build ships its own LICENSE file, that file
-is included alongside the binary.
+The exact vendored tool versions and their SHA-256 hashes are pinned in
+scripts/encoders.json. The full license texts referenced below travel in this same
+licenses/ folder:
+
+  LGPL-2.1.txt            GNU Lesser General Public License, version 2.1
+  LGPL-2.0.txt            GNU Library General Public License, version 2
+  GPL-2.0.txt             GNU General Public License, version 2
+  BSD-3-Clause-FLAC.txt   Xiph.Org's BSD-like license (COPYING.Xiph)
+
+Upstream archives are not unpacked wholesale - one binary is extracted from each -
+so an upstream LICENSE file does not travel next to its binary; the texts above
+stand in its place.
+
+
+libvlc / libvlccore  (+ the filtered VLC plugin set)
+  License : LGPL v2.1 or later  ->  LGPL-2.1.txt
+  Version : 3.0.21 (Windows, macOS); 3.0.23-0+deb12u1 (Linux)
+  Source  : https://www.videolan.org/vlc/  (code: https://code.videolan.org/videolan/vlc,
+            release tarballs: https://get.videolan.org/vlc/3.0.21/; the Linux build and
+            its complete corresponding source come from Debian bookworm,
+            https://deb.debian.org/debian/pool/main/v/vlc/)
+  Bundled : Windows (VideoLAN.LibVLC.Windows NuGet), macOS (staged from the
+            official VLC.app by scripts/fetch-vlc-mac.sh) and Linux (staged from
+            Debian's libvlc5 / libvlccore9 / vlc-plugin-base packages by
+            scripts/fetch-vlc-linux.sh).
+  Used by : all audio playback and stream handling.
+  Linkage : dynamic. OrgZ resolves libvlc at runtime, so a user may substitute
+            their own compatible build - on macOS by replacing the dylibs in
+            OrgZ.app/Contents/MacOS/vlc/lib/, on Windows those under libvlc\win-x64\,
+            and on Linux those in vlc/lib/ inside the AppImage (extract it with
+            ./OrgZ.AppImage --appimage-extract, replace, and run the extracted
+            AppRun; or point the app at a different build by installing it
+            system-wide and removing the bundled vlc/ directory).
+  Plugins : both bundles drop the plugin categories a music player never loads
+            (video output/filters, subtitles, muxers, visualizations). The macOS
+            staging additionally blocklists plugins whose upstream license is GPL
+            (x264, x265, libdvdread/nav/css), which the official build does not
+            normally carry anyway.
 
 ffmpeg
   License : LGPL v2.1 (the LGPL build - no GPL codecs enabled; OrgZ needs only
             ebur128 + the native aac/alac/pcm encoders, all of which are LGPL)
+            ->  LGPL-2.1.txt
   Source  : https://ffmpeg.org/
             Windows/Linux: prebuilt LGPL builds from https://github.com/BtbN/FFmpeg-Builds
             macOS: built from ffmpeg.org source (LGPL) via scripts/build-ffmpeg-mac.sh
+  Bundled : Windows, Linux and macOS.
   Used by : iPod transcode + artwork extraction, CD-burn transcode,
             Sound Check (ReplayGain) loudness measurement
   Corresponding source is available from ffmpeg.org (and, for the prebuilt platforms,
   the build repository above).
 
-FLAC (flac, libFLAC, libFLAC++)
-  License : BSD 3-Clause (Xiph.Org Foundation)
-  Source  : https://xiph.org/flac/
-  Used by : CD rip to FLAC (Windows bundle; other platforms use a PATH install)
+FLAC - libFLAC, libFLAC++
+  License : BSD 3-Clause, Xiph.Org Foundation  ->  BSD-3-Clause-FLAC.txt
+  Version : 1.4.3
+  Source  : https://xiph.org/flac/   (code: https://github.com/xiph/flac)
+  Bundled : Windows only (libFLAC.dll, libFLAC++.dll - the DLLs the Windows flac.exe
+            needs). The Linux and macOS builds link libFLAC statically into the
+            flac binary, so no separate library ships there.
+
+FLAC - the `flac` command-line encoder
+  License : GPL v2 or later  ->  GPL-2.0.txt
+            (upstream splits FLAC by component: the libraries are BSD-licensed, the
+            programs are GPL - see the project README)
+  Version : 1.4.3
+  Source  : https://xiph.org/flac/   (code: https://github.com/xiph/flac)
+            Windows: the official flac-1.4.3-win build from downloads.xiph.org
+            Linux/macOS: built from that same unmodified source by
+            scripts/build-encoders-linux.sh / scripts/build-encoders-mac.sh
+  Bundled : Windows, Linux and macOS.
+  Used by : CD rip to FLAC (run as a separate process; nothing links against it)
+  The corresponding source for the version shipped is the unmodified upstream
+  flac-1.4.3 release at the URLs above; this is the written offer required by GPL §3.
 
 LAME (lame)
-  License : LGPL v2.0
-  Source  : https://lame.sourceforge.io/   (Windows build: https://www.rarewares.org/)
-  Used by : CD rip to MP3 (Windows bundle; other platforms use a PATH install)
+  License : LGPL v2 or later  ->  LGPL-2.0.txt
+  Version : 3.100
+  Source  : https://lame.sourceforge.io/
+            https://sourceforge.net/projects/lame/files/lame/3.100/
+            Windows: the rarewares build (https://www.rarewares.org/) of that release
+  Bundled : Windows, Linux and macOS.
+  Used by : CD rip to MP3, data-disc transcode (run as a separate process)
+  The corresponding source is the unmodified upstream lame-3.100 release at the URLs
+  above; this is the written offer required by LGPL §6. No upstream sources were
+  modified for any of the builds shipped here.

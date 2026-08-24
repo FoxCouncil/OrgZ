@@ -1,32 +1,44 @@
 # Radio Stations
 
-OrgZ integrates with two radio station directories to give you access to thousands of internet radio streams.
+OrgZ ships with a curated catalogue of internet radio stations - around 700
+streams across 43 countries - plus whatever you add yourself.
 
 ![Browsing radio stations](../assets/screenshots/radio-browser.png)
 
-## Sources
+## Where the stations come from
 
-- **Radio Browser**: Community-maintained directory of internet radio stations
-- **SHOUTcast**: One of the oldest and largest streaming directories
+The catalogue is a file inside the app, hand-curated from the
+[radio-browser.info](https://www.radio-browser.info/) directory. There is no
+live directory sync and nothing to download on first run: the list is there the
+moment you open **Radio**. It is refreshed when a new version of OrgZ ships.
 
-## Getting Started with Radio
+Stations you add yourself are kept in your own library database, so they survive
+updates.
+
+## Getting started with radio
 
 1. Click **Radio** in the sidebar
-2. On first visit, OrgZ fetches the top 250 popular stations from each source
-3. Use the **Country** and **Genre** dropdowns at the bottom to filter stations
-4. Double-click a station to start streaming
+2. Use the **Country** and **Genre** dropdowns in the filter bar above the list
+   to narrow it down
+3. Double-click a station to start streaming
 
-## Genre Grouping
+## Genre grouping
 
 Stations are grouped by genre under collapsible headers. Click a header to collapse or expand that genre; the state is remembered per view, so switching away and back to Radio restores it. The **collapse-all** button in the filter bar collapses every genre at once.
 
-## Full Sync
+## Adding your own stations
 
-Click the sync button in the filter panel to download the complete station database (~95,000 stations). This takes a few minutes but only needs to be done occasionally.
+Use the **+** button in the filter bar. The **Add Radio Station** dialog takes
+three things:
 
-## Adding Custom Stations
+| Field | Notes |
+|-------|-------|
+| Station Name | Free text; what shows in the list. |
+| Stream URL | Must be an `http` or `https` stream URL, or the dialog refuses it. |
+| Genre | Picked from the same genre list the catalogue uses. |
 
-Use the **+** button in the filter panel to add your own stream URL. Format: `Station Name|http://stream.url` or just the URL.
+Your stations sit alongside the bundled ones and can be removed again from the
+station's right-click menu (**Remove Station**).
 
 ## Live Metadata
 

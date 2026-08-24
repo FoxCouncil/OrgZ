@@ -14,17 +14,22 @@ tab for your platform.
 
     | Download | Use it when |
     |----------|-------------|
-    | `OrgZ-win-Setup.exe` | Normal install. Adds Start Menu / desktop entries and auto-updates on launch. |
+    | `OrgZ-win.msi` | Normal install. Installs for all users into Program Files, adds Start Menu / desktop entries, and registers the background device helper. |
     | `OrgZ-win-Portable.zip` | No-install copy you can run from a folder or USB stick. |
 
-    1. Download `OrgZ-win-Setup.exe` and run it.
-    2. Launch OrgZ. It checks for updates on startup and applies them in the background.
+    1. Download `OrgZ-win.msi` and run it. Windows asks for consent once, during
+       the install.
+    2. Launch OrgZ. It checks for updates quietly at startup and tells you through
+       the **Help** menu when one is waiting.
 
-    !!! note "Ripping CDs needs elevation"
-        Reading raw CD audio uses `IOCTL_SCSI_PASS_THROUGH`, which requires
-        administrator rights. OrgZ relaunches an elevated helper **per rip**, so
-        you'll see a UAC prompt when you start ripping. Everyday playback and
-        library management do not need elevation. See [Ripping CDs](../features/ripping-cds.md).
+    !!! note "Disc and iPod access, without a prompt every time"
+        Reading raw CD audio and iPod firmware uses `IOCTL_SCSI_PASS_THROUGH`, which
+        requires administrator rights. The MSI registers a small background service at
+        install time, so those operations run silently afterwards - the one consent
+        prompt during installation replaces a UAC prompt per rip and per device.
+
+        A **portable** copy has no installer and therefore no service, so it falls
+        back to prompting each time. See [Ripping CDs](../features/ripping-cds.md).
 
 === "macOS"
 
@@ -39,32 +44,38 @@ tab for your platform.
     | `OrgZ-osx-Setup.pkg` | Normal install into `/Applications`. |
     | `OrgZ-osx-Portable.zip` | No-install `OrgZ.app` you can run from anywhere. |
 
-    1. Download `OrgZ-osx-Setup.pkg` and run it.
-    2. The build is **not notarized**, so Gatekeeper will complain the first time.
-       Clear the quarantine flag, then launch:
+    1. Download `OrgZ-osx-Setup.pkg`.
+    2. The build is **not signed or notarized yet**, so Gatekeeper blocks the
+       installer the first time you open it. On **macOS 15 (Sequoia) and later**,
+       double-click the `.pkg`, let macOS refuse it, then open **System Settings →
+       Privacy & Security**, scroll to the message naming the blocked package, and
+       click **Open Anyway**. Confirm, and Installer runs.
+
+        Apple removed the Control-click → **Open** override in Sequoia; on older
+        macOS releases that shortcut still works.
+
+        From a terminal, clearing the quarantine flag on the download does the same
+        thing:
 
         ```bash
-        xattr -dr com.apple.quarantine /Applications/OrgZ.app
-        open /Applications/OrgZ.app
+        xattr -dr com.apple.quarantine ~/Downloads/OrgZ-osx-Setup.pkg
         ```
 
-        Or: right-click the app → **Open** → **Open** in the dialog, which adds a
-        permanent exception.
+    3. Launch OrgZ from `/Applications`.
 
-    !!! tip "For CD ripping"
-        Install the encoders if you want FLAC/MP3 output:
-
-        ```bash
-        brew install flac lame
-        ```
+    !!! note "Encoders are already in the bundle"
+        `ffmpeg`, `flac`, and `lame` ship inside the `.app` - there is nothing to
+        install with Homebrew for ripping, burning, or iPod transcoding. See
+        [Ripping CDs](../features/ripping-cds.md).
 
 === "Linux"
 
     **Architecture:** x64 · **Format:** AppImage
 
-    OrgZ is distributed as a single self-contained `OrgZ.AppImage`. Static
-    `flac` and `lame` binaries are bundled for CD ripping, and audio plays
-    through PulseAudio / PipeWire.
+    OrgZ is distributed as a single self-contained `OrgZ.AppImage`. `libvlc` for
+    playback and static `ffmpeg`, `flac`, and `lame` binaries for ripping and
+    transcoding all travel inside it, so there is nothing to install first. Audio
+    plays through PulseAudio / PipeWire.
 
     1. Download `OrgZ.AppImage`, make it executable, and run it:
 
@@ -78,6 +89,14 @@ tab for your platform.
 
         ```bash
         sudo apt install libfuse2      # Debian / Ubuntu
+        ```
+
+    3. If it exits without opening a window, VLC is missing (see above). OrgZ
+       says so on stderr and - where `zenity` or `kdialog` is installed - in a
+       dialog. Either way the reason is in the log:
+
+        ```bash
+        tail ~/.local/state/OrgZ/logs/orgz-*.log
         ```
 
     !!! note "CD device access"
@@ -96,10 +115,19 @@ tab for your platform.
 
 OrgZ keeps your library index, settings, device caches, and logs in a
 per-user data directory. Your **music files are never moved**: OrgZ only
-reads from the library folder you point it at (and writes ripped tracks there;
-see [Ripping CDs](../features/ripping-cds.md)).
+reads from the library folder you point it at, writes ripped tracks and
+downloaded audiobooks there (see [Ripping CDs](../features/ripping-cds.md)),
+and deletes from it only when you choose **Remove from Library**, which asks
+first - see [Music Library](../features/music-library.md).
 
 ## Updating
 
-On Windows, OrgZ updates itself on launch. On macOS and Linux, re-download the
-latest release artifact and reinstall over the top when a new version ships.
+OrgZ checks for a new version quietly at startup and never acts on its own. When
+one is waiting, the **Help** menu changes to *There are updates...* - choosing it
+downloads the update, asks for consent where the platform requires it, and restarts
+into the new version. Nothing is downloaded or installed until you ask for it.
+
+The check runs on Windows, macOS, and Linux alike. It is skipped for a copy with
+nothing to update - a portable `.zip` / `.app`, or a build run from source - and
+the Help menu then simply never announces one; re-download the latest artifact
+for those.

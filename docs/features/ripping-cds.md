@@ -10,10 +10,12 @@ page walks through a full rip and explains every option.
   OrgZ uses a system copy on your `PATH` first and falls back to the binaries
   bundled with the app, so a normal install can rip FLAC/MP3 without extra setup. If
   neither is found you'll get a message telling you how to install them.
-- **Windows elevation.** Reading raw CD audio requires administrator rights, so
-  OrgZ launches an elevated helper and you'll see a **UAC prompt** each time you
-  start a rip. macOS and Linux rip in-process - no prompt, but on Linux your user
-  needs access to the optical device (see [Installation](../getting-started/installation.md)).
+- **Windows elevation.** Reading raw CD audio requires administrator rights. An
+  installed copy registers a background service that holds them, so rips run with
+  no prompt at all; a **portable** copy has no service and shows a **UAC prompt**
+  each time you start a rip. macOS and Linux rip in-process - no prompt, but on
+  Linux your user needs access to the optical device (see
+  [Installation](../getting-started/installation.md)).
 
 ## 1. Insert the disc
 
