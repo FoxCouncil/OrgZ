@@ -3,7 +3,15 @@ root = true
 # All files
 [*]
 charset = utf-8
-end_of_line = crlf
+
+# LF, on every platform, because that is what the repository actually contains: every one of
+# the 392 tracked .cs files is LF, as is every .axaml, .csproj, .md, .yml and .json.
+#
+# This said crlf, which no committed file matched. Any editor that honours .editorconfig - and
+# they all do - rewrote a file's every line the moment it touched one, so a six-line change
+# arrived as a 4,700-line diff and code review became archaeology. .gitattributes now enforces
+# the same thing at the git layer, so a tool that ignores this file still can't reintroduce it.
+end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
 indent_style = space

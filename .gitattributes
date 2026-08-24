@@ -1,3 +1,37 @@
+# Everything text is LF, in the working tree as well as in the repository.
+#
+# This is not a preference, it is what the repository already contains - every tracked source
+# file is LF - and stating it here is what keeps it that way. Without it the rule lived only in
+# .editorconfig, where it was set to crlf by mistake: editors then rewrote whole files on the
+# first keystroke and buried real changes under thousands of line-ending-only diffs. Git now
+# normalises on commit regardless of which editor, OS, or tool did the writing.
+*.cs      text eol=lf
+*.axaml   text eol=lf
+*.xaml    text eol=lf
+*.csproj  text eol=lf
+*.sln     text eol=lf
+*.props   text eol=lf
+*.targets text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.xml     text eol=lf
+*.txt     text eol=lf
+*.editorconfig text eol=lf
+
+# Binary fixtures and assets git must never touch. The iPod database fixtures and the CDB
+# skeleton are byte-exact oracles - a single translated byte invalidates a conformance test
+# and the failure reads as a parser bug.
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.ithmb   binary
+*.cdb     binary
+*.iTunesDB binary
+*.nupkg   binary
+*.zip     binary
+
 # Shell scripts MUST keep LF endings in the working tree, on every OS.
 #
 # Without this, git's autocrlf hands a Windows checkout CRLF-terminated .sh files, and
