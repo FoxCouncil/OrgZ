@@ -34,4 +34,39 @@ public static class AtomicFile
 
         File.Move(tmp, path, overwrite: true);
     }
+
+    /// <summary>
+    /// Applies an in-place mutation - a tag write - to a sibling COPY of <paramref name="path"/>
+    /// and swaps it over the original only once it has completed. TagLib saves in place and shifts
+    /// the entire audio payload whenever a new frame doesn't fit the existing padding, so a crash
+    /// or a pulled drive during that shift truncates the user's only copy of the track.
+    /// <para>
+    /// The copy keeps the <c>.orgztmp</c> extension rather than the audio one, so the music-folder
+    /// watcher never sees a track appear and vanish. That means <paramref name="mutate"/> must open
+    /// the path it is handed by MIME type, not by extension.
+    /// </para>
+    /// </summary>
+    public static void MutateCopy(string path, Action<string> mutate)
+    {
+        var tmp = path + TempSuffix;
+
+        try
+        {
+            File.Copy(path, tmp, overwrite: true);
+            mutate(tmp);
+
+            using (var fs = new FileStream(tmp, FileMode.Open, FileAccess.Write, FileShare.None))
+            {
+                fs.Flush(flushToDisk: true);   // durable before the rename, exactly as above
+            }
+
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            // The original is untouched either way; a temp left behind is the only debris.
+            try { File.Delete(tmp); } catch { /* best effort */ }
+            throw;
+        }
+    }
 }

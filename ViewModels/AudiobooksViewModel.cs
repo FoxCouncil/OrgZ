@@ -144,13 +144,44 @@ public partial class AudiobooksViewModel : ObservableObject
     [RelayCommand]
     private void PlayOwnedBook(OwnedBook? book) => _main?.PlayBook(book);
 
+    /// <summary>
+    /// Shelf "Remove": deletes the book's files from disk and forgets its acquisition record, so it
+    /// confirms first with the same dialog the Music view uses before a destructive delete. A book
+    /// that isn't downloaded has no files to lose - it only leaves the shelf - so it says so.
+    /// </summary>
     [RelayCommand]
     private async Task RemoveOwnedBook(OwnedBook? book)
     {
-        if (_main is not null && book is not null)
+        if (_main is null || book is null)
         {
-            await _main.DeleteOwnedBook(book);
+            return;
         }
+
+        // The main window can be hidden behind the mini-player; parent onto whatever top-level is
+        // actually visible. With no visible window there is nowhere to confirm - so nothing is deleted.
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+                     as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)
+                    ?.Windows.FirstOrDefault(w => w.IsVisible);
+        if (owner is null)
+        {
+            return;
+        }
+
+        var title = string.IsNullOrWhiteSpace(book.Title) ? "this audiobook" : $"“{book.Title}”";
+
+        // Says what actually happens: the delete removes the book's whole folder, not just the
+        // chapters counted here, and prunes the author folder when it empties.
+        var message = book.Chapters.Count > 0
+            ? $"Remove {title} from your library?\n\nThis permanently deletes the book's folder - {book.Chapters.Count} audio file(s), plus anything else kept in it - from disk. It cannot be undone."
+            : $"Remove {title} from your library?\n\nIt will no longer appear in Your Books.";
+
+        var dialog = new Views.ConfirmDialog("Remove from Library", message, "Delete");
+        if (!await dialog.ShowDialog<bool>(owner))
+        {
+            return;
+        }
+
+        await _main.DeleteOwnedBook(book);
     }
 
     /// <summary>Re-fetches an acquired book whose download is gone, via the source its record remembers.</summary>

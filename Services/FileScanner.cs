@@ -6,8 +6,9 @@ namespace OrgZ.Services;
 
 /// <summary>
 /// The outcome of a library folder walk. Only a scan with <see cref="Complete"/> set may be used
-/// to decide a file is gone. A missing folder (an unplugged external drive), a cancelled scan, or
-/// an enumeration that died mid-walk all return what was found so far with <c>Complete = false</c>;
+/// to decide a file is gone. A missing folder (an unplugged external drive), a cancelled scan, a
+/// subfolder the walk couldn't read, or an enumeration that died mid-walk all return what was
+/// found so far with <c>Complete = false</c>;
 /// treating those as "the library is empty now" mass-deletes ratings, play counts and playlist
 /// memberships.
 /// </summary>
@@ -16,6 +17,16 @@ public sealed record FileScanResult(List<MediaItem> Items, bool Complete);
 public class FileScanner
 {
     private static readonly ILogger _log = Logging.For("FileScanner");
+
+    /// <summary>
+    /// Folders a normal process can never read, which therefore say nothing about whether a
+    /// scan saw the whole library. Only reachable when someone points the library at a drive
+    /// root, which people with a dedicated music disk do.
+    /// </summary>
+    private static readonly HashSet<string> AlwaysDenied = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "System Volume Information", "$RECYCLE.BIN", "$Recycle.Bin", ".Trash", ".Trashes", "lost+found",
+    };
 
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -46,47 +57,97 @@ public class FileScanner
 
             var options = new EnumerationOptions
             {
-                // One locked folder skips itself instead of aborting the walk. The eager
-                // GetFiles this replaced threw on the first inaccessible directory and returned
-                // nothing, which the reconciler read as "every track was deleted".
-                IgnoreInaccessible = true,
-                RecurseSubdirectories = recursive,
+                // Faults surface here rather than being swallowed: the walk descends one directory
+                // at a time so a folder it can't read skips itself (like IgnoreInaccessible did)
+                // AND lowers Complete, which is what withdraws the authority to delete rows.
+                IgnoreInaccessible = false,
+                RecurseSubdirectories = false,
                 // GetFiles never skipped hidden/system entries; keep that (the default here
                 // would silently drop hidden files that have always been scanned).
                 AttributesToSkip = 0,
             };
 
-            try
+            var stack = new Stack<string>();
+            stack.Push(directoryPath);
+
+            while (stack.Count > 0)
             {
-                foreach (var filePath in Directory.EnumerateFiles(directoryPath, "*", options))
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        complete = false;
-                        break;
-                    }
+                    complete = false;
+                    break;
+                }
 
-                    // Skip only OrgZ's own .podcasts/ downloads (the Podcasts view owns them).
-                    // Not a blanket "any dotted folder" rule - dot-named albums get scanned.
-                    if (IsInHiddenSubdirectory(filePath, directoryPath))
-                    {
-                        continue;
-                    }
+                var directory = stack.Pop();
 
-                    var item = CreateMediaItemFromPath(filePath);
-
-                    if (item != null)
+                try
+                {
+                    foreach (var filePath in Directory.EnumerateFiles(directory, "*", options))
                     {
-                        audioFiles.Add(item);
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            complete = false;
+                            break;
+                        }
+
+                        // Skip only OrgZ's own .podcasts/ downloads (the Podcasts view owns them).
+                        // Not a blanket "any dotted folder" rule - dot-named albums get scanned.
+                        if (IsInHiddenSubdirectory(filePath, directoryPath))
+                        {
+                            continue;
+                        }
+
+                        var item = CreateMediaItemFromPath(filePath);
+
+                        if (item != null)
+                        {
+                            audioFiles.Add(item);
+                        }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                // The enumerator died mid-walk (drive yanked, IO error). The list is partial:
-                // fine for display, but it must not drive deletions.
-                complete = false;
-                _log.Warning(ex, "Library scan of {Directory} aborted mid-walk; results are partial", directoryPath);
+                catch (Exception ex)
+                {
+                    // A folder we couldn't read (deny-read ACE, dropped share, IO error) contributes
+                    // nothing. The list stays useful for display, but the tracks that live under it
+                    // must not be read as deletions.
+                    complete = false;
+                    _log.Warning(ex, "Library scan skipped {Directory}; results are partial", directory);
+                }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    complete = false;
+                    break;
+                }
+
+                if (!recursive)
+                {
+                    break;
+                }
+
+                try
+                {
+                    foreach (var subDirectory in Directory.EnumerateDirectories(directory, "*", options))
+                    {
+                        // Never descend into the folders the OS denies to every non-elevated
+                        // process. They can hold no library content, but they DO throw - and
+                        // because an unreadable folder now withdraws the authority to prune,
+                        // a library that lives on a drive root would otherwise be marked
+                        // partial on every single scan and never reconcile a deleted file.
+                        if (AlwaysDenied.Contains(Path.GetFileName(subDirectory)))
+                        {
+                            continue;
+                        }
+
+                        stack.Push(subDirectory);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Couldn't list this folder's children: whatever is under them is unaccounted for.
+                    complete = false;
+                    _log.Warning(ex, "Library scan couldn't list the subfolders of {Directory}; results are partial", directory);
+                }
             }
 
             return new FileScanResult(audioFiles, complete);

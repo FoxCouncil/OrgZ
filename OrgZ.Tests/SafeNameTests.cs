@@ -9,6 +9,14 @@ namespace OrgZ.Tests;
 /// disk in real libraries and on real iPods, so the consolidation had to be behaviour-preserving,
 /// not behaviour-improving: each test below reimplements the original expression the style
 /// replaced and asserts the shared helper still agrees with it, character for character.
+///
+/// The oracles pin the invalid-character set as a literal instead of calling
+/// Path.GetInvalidFileNameChars(). That call is the one the implementation itself makes, so
+/// an oracle built from it is self-referential - and on Linux and macOS .NET returns only
+/// { '\0', '/' }, so both sides would degrade in lockstep while ':' '?' '*' '"' '|' and
+/// '\' sailed straight through into a FAT32 iPod path, or into a library folder that later
+/// has to open on Windows. The set below is the Windows/FAT rule, which is the rule every
+/// consumer of these names needs whichever host happened to run the rip or the sync.
 /// </summary>
 public class SafeNameTests
 {
@@ -38,29 +46,46 @@ public class SafeNameTests
         "Ünïcödé Stäys",
     ];
 
+    /// <summary>
+    /// The characters a path segment must never contain, on every host: the C0 controls plus
+    /// the nine reserved punctuation characters. Byte-for-byte what
+    /// Path.GetInvalidFileNameChars() answers on Windows - pinned by
+    /// <see cref="The_pinned_set_is_exactly_the_windows_rule"/> - so names already on disk and
+    /// on devices keep resolving.
+    /// </summary>
+    private static readonly char[] Invalid = [.. Enumerable.Range(0, 32).Select(c => (char)c), '"', '<', '>', '|', ':', '*', '?', '\\', '/'];
+
+    [SkippableFact]
+    public void The_pinned_set_is_exactly_the_windows_rule()
+    {
+        // Windows is the only host whose framework answer is the one we want, so it is the
+        // only host that can check the literal above. Everywhere else the literal IS the rule.
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows is the reference for the invalid-character set");
+
+        Assert.Equal(Path.GetInvalidFileNameChars().Order(), Invalid.Order());
+    }
+
     // ── The original implementations, verbatim, as the oracle ──
 
     private static string OldSanitizeFileName(string name)
     {
-        var invalid = Path.GetInvalidFileNameChars();
         var sb = new System.Text.StringBuilder(name.Length);
         foreach (var c in name)
         {
-            sb.Append(invalid.Contains(c) ? '_' : c);
+            sb.Append(Invalid.Contains(c) ? '_' : c);
         }
         return sb.ToString().Trim();
     }
 
     private static string OldSanitizeFolderName(string s)
-        => string.Join("_", s.Split(Path.GetInvalidFileNameChars())).TrimEnd('.', ' ');
+        => string.Join("_", s.Split(Invalid)).TrimEnd('.', ' ');
 
     private static string OldIPodSanitize(string s)
-        => string.Join("_", s.Split(Path.GetInvalidFileNameChars()));
+        => string.Join("_", s.Split(Invalid));
 
     private static string OldSanitizeSegment(string s)
     {
-        var invalid = Path.GetInvalidFileNameChars();
-        var cleaned = new string(s.Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
+        var cleaned = new string(s.Select(c => Invalid.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
         return cleaned.Length > 0 ? cleaned : "Unknown";
     }
 
@@ -71,12 +96,11 @@ public class SafeNameTests
             return string.Empty;
         }
 
-        var invalid = Path.GetInvalidFileNameChars();
         var result = new char[value.Length];
         int len = 0;
         foreach (var ch in value)
         {
-            if (ch < 0x20 || Array.IndexOf(invalid, ch) >= 0)
+            if (ch < 0x20 || Array.IndexOf(Invalid, ch) >= 0)
             {
                 continue;
             }
@@ -154,6 +178,25 @@ public class SafeNameTests
         Assert.Equal("...", SafeName.For("...", SafeName.Style.Replace));
         Assert.Equal(string.Empty, SafeName.For("///", SafeName.Style.Drop));
         Assert.Equal("___", SafeName.For("///", SafeName.Style.Replace));
+    }
+
+    [Fact]
+    public void Every_style_handles_the_reserved_characters_the_same_way_on_every_platform()
+    {
+        // Literal expectations, not a framework round-trip: these names land on FAT32 iPods
+        // and in libraries that get synced from Windows, so the rule cannot vary with the
+        // host that produced them.
+        const string reserved = "a<b>c:d\"e/f\\g|h?i*j";
+
+        Assert.Equal("a_b_c_d_e_f_g_h_i_j", SafeName.ReplaceOnly(reserved));
+        Assert.Equal("a_b_c_d_e_f_g_h_i_j", SafeName.For(reserved, SafeName.Style.Replace));
+        Assert.Equal("a_b_c_d_e_f_g_h_i_j", SafeName.For(reserved, SafeName.Style.ReplaceTrimTrailing));
+        Assert.Equal("a_b_c_d_e_f_g_h_i_j", SafeName.For(reserved, SafeName.Style.ReplaceOrUnknown));
+        Assert.Equal("abcdefghij", SafeName.For(reserved, SafeName.Style.Drop));
+
+        // Control characters are replaced by every style but Drop, which removes them.
+        Assert.Equal("Tab_Separated", SafeName.ReplaceOnly("Tab\tSeparated"));
+        Assert.Equal("TabSeparated", SafeName.For("Tab\tSeparated", SafeName.Style.Drop));
     }
 
     [Fact]

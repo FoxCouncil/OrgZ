@@ -33,7 +33,21 @@ public static class SafeName
         Drop,
     }
 
-    private static readonly char[] Invalid = Path.GetInvalidFileNameChars();
+    /// <summary>
+    /// The Windows/FAT invalid set, fixed here rather than taken from
+    /// <see cref="Path.GetInvalidFileNameChars"/>, because that method is PLATFORM-dependent:
+    /// on Unix it returns just NUL and '/'. The names this class produces do not stay on the
+    /// host that made them - they are written to FAT32 iPod volumes and to libraries shared
+    /// with Windows machines - so a Mac or Linux user syncing a track called "Who? Me:" would
+    /// otherwise create a file that the iPod firmware and every Windows box refuse to open.
+    /// Using the superset means Windows behaviour, and every name already on disk or on a
+    /// device, is unchanged.
+    /// </summary>
+    private static readonly char[] Invalid =
+    [
+        .. Enumerable.Range(0, 32).Select(c => (char)c),
+        '"', '<', '>', '|', ':', '*', '?', '\\', '/',
+    ];
 
     /// <summary>Shorthand for <see cref="Style.ReplaceOnly"/> - the on-device iPod path form.</summary>
     public static string ReplaceOnly(string value) => For(value, Style.ReplaceOnly);

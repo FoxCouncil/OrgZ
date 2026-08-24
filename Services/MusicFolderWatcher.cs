@@ -8,13 +8,14 @@ public sealed class MusicFolderWatcher : IDisposable
 {
     private static readonly HashSet<string> TempSuffixes = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".tmp", ".part", ".crdownload", ".partial", ".partial-rip"
+        ".tmp", ".part", ".crdownload", ".partial", ".partial-rip", ".orgztmp"
     };
 
     private FileSystemWatcher? _watcher;
     private Channel<FsEvent>? _channel;
     private Task? _consumerTask;
     private CancellationTokenSource? _cts;
+    private long _lastOverflowTicks;
 
     public event Action<WatcherChangeSet>? ChangesDetected;
     public event Action? FullRescanNeeded;
@@ -29,11 +30,14 @@ public sealed class MusicFolderWatcher : IDisposable
         }
 
         _cts = new CancellationTokenSource();
+        // TryWrite never reports a drop in a drop-mode channel, so the queue overflow is caught
+        // through the itemDropped callback instead: a dropped event is a change the library would
+        // never hear about, which only a full rescan can reconcile.
         _channel = Channel.CreateBounded<FsEvent>(new BoundedChannelOptions(4096)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
             SingleReader = true
-        });
+        }, _ => SignalQueueOverflow());
 
         _watcher = new FileSystemWatcher(folderPath)
         {
@@ -48,7 +52,19 @@ public sealed class MusicFolderWatcher : IDisposable
         _watcher.Renamed += (_, e) =>
         {
             Enqueue(FsChangeKind.Deleted, e.OldFullPath);
-            Enqueue(FsChangeKind.Created, e.FullPath);
+
+            // A renamed/moved DIRECTORY is reported once, for the folder itself - the files inside
+            // it get no events at all. The Deleted above sweeps every tracked track under the old
+            // folder out of the library, and a folder path can't survive Enqueue's audio-extension
+            // filter, so the tracks have to be re-added by walking the new location.
+            if (Directory.Exists(e.FullPath))
+            {
+                EnqueueDirectoryContents(e.FullPath);
+            }
+            else
+            {
+                Enqueue(FsChangeKind.Created, e.FullPath);
+            }
         };
         _watcher.Error += (_, e) =>
         {
@@ -110,6 +126,57 @@ public sealed class MusicFolderWatcher : IDisposable
         }
 
         _channel?.Writer.TryWrite(new FsEvent(kind, path));
+    }
+
+    /// <summary>
+    /// Enqueues Created for every supported audio file under <paramref name="directory"/>, so a
+    /// folder that arrived under a new name is re-added without waiting for a manual rescan. If the
+    /// folder can't be read (it moved again, or vanished) the library is out of step with the disk,
+    /// which is exactly what a full rescan is for.
+    /// </summary>
+    private void EnqueueDirectoryContents(string directory)
+    {
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = 0,
+        };
+
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(directory, "*", options))
+            {
+                Enqueue(FsChangeKind.Created, path);
+            }
+        }
+        catch (Exception)
+        {
+            FullRescanNeeded?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// The queue overflowed and events were discarded, so the library's picture of the folder is no
+    /// longer trustworthy - take the same recovery a native buffer overflow does. Throttled, because
+    /// a long burst drops many events and each one lands here.
+    /// </summary>
+    private void SignalQueueOverflow()
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref _lastOverflowTicks);
+
+        if (now - last < TimeSpan.TicksPerMinute)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _lastOverflowTicks, now, last) != last)
+        {
+            return;
+        }
+
+        FullRescanNeeded?.Invoke();
     }
 
     private static bool IsInDotSubdirectory(string path)
