@@ -33,8 +33,22 @@ public static class ShareDiscovery
 {
     private static readonly ILogger _log = Logging.For("ShareDiscovery");
 
-    /// <summary>Catalogue/art/playlist fetches: small payloads, so a short timeout is right.</summary>
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    /// <summary>
+    /// Catalogue/art/playlist fetches: small payloads, so a short timeout is right. The buffer
+    /// cap is the other half of that - a share is an unauthenticated host on the LAN whose
+    /// catalogue we fetch automatically every browse, and without a cap an endless response
+    /// buffers into a multi-hundred-MB string.
+    ///
+    /// Sized for the biggest HONEST catalogue rather than the smallest safe number: this
+    /// applies to the whole JSON body, and a genuinely large library is the case most likely
+    /// to be cut off. A share that trips it fails the same way a hostile one does - the fetch
+    /// throws, the catalogue reads as empty, and the user sees a share with no music and no
+    /// explanation - so the cap has to sit well clear of anything real.
+    /// </summary>
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10), MaxResponseContentBufferSize = 128 * 1024 * 1024 };
+
+    /// <summary>A cover is a few hundred KB at worst; a share sending more than this isn't sending art.</summary>
+    private const int MaxArtBytes = 8 * 1024 * 1024;
 
     /// <summary>
     /// Track downloads: no overall timeout, because a multi-hundred-MB FLAC legitimately
@@ -356,19 +370,66 @@ public static class ShareDiscovery
             : $"http://{shareKey}/art/{remoteId}";
     }
 
-    /// <summary>Fetches cover bytes from a share. Null for a 404, a timeout, or anything unreadable.</summary>
+    /// <summary>
+    /// Fetches cover bytes from a share. Null for a 404, a timeout, anything unreadable, or a
+    /// body that runs past <see cref="MaxArtBytes"/> - art is fetched automatically when a share
+    /// track starts playing, so the read stops at the cap rather than buffering whatever arrives.
+    /// </summary>
     public static async Task<byte[]?> FetchArtAsync(string url, CancellationToken ct = default)
     {
         try
         {
-            using var response = await _http.GetAsync(url, ct);
-            return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync(ct) : null;
+            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > MaxArtBytes)
+            {
+                return null;
+            }
+
+            await using var body = await response.Content.ReadAsStreamAsync(ct);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[64 * 1024];
+            int read;
+            while ((read = await body.ReadAsync(chunk, ct)) > 0)
+            {
+                if (buffer.Length + read > MaxArtBytes)
+                {
+                    _log.Debug("share art exceeded {Cap} bytes for {Url}", MaxArtBytes, url);
+                    return null;
+                }
+                buffer.Write(chunk, 0, read);
+            }
+
+            return buffer.ToArray();
         }
         catch (Exception ex)
         {
             _log.Debug(ex, "share art fetch failed for {Url}", url);
             return null;
         }
+    }
+
+    /// <summary>
+    /// A share's declared file extension, or null when it isn't one we'd accept locally. The
+    /// catalogue is written by whoever answers the browse, and the extension is the only part
+    /// of an imported track's path that isn't a tag - so it must be a bare ".xyz" audio suffix
+    /// from the scanner's own list, never something carrying a separator or a "..".
+    /// </summary>
+    internal static string? SafeExtension(string? ext)
+    {
+        if (ext is null || ext.Length < 2 || ext.Length > 6 || ext[0] != '.')
+        {
+            return null;
+        }
+
+        for (var i = 1; i < ext.Length; i++)
+        {
+            if (!char.IsAsciiLetterOrDigit(ext[i]))
+            {
+                return null;
+            }
+        }
+
+        return FileScanner.IsSupportedExtension(ext) ? ext : null;
     }
 
     /// <summary>Pure catalogue → MediaItem mapping. Malformed payloads yield an empty list.</summary>
@@ -404,7 +465,9 @@ public static class ShareDiscovery
                 // the extension rides the stream URL - but only when the id doesn't ALREADY
                 // end with it. This share's ids are file paths, so appending blindly gave
                 // "...flac.flac", which only worked because the server strips one suffix.
-                var ext = Text("ext") ?? string.Empty;
+                // Validated here, at the edge: this string is remote input that ends up in a
+                // local file name when the track is imported into the library.
+                var ext = SafeExtension(Text("ext")) ?? string.Empty;
                 var urlSuffix = ext.Length > 0 && id.EndsWith(ext, StringComparison.OrdinalIgnoreCase) ? string.Empty : ext;
 
                 items.Add(new MediaItem

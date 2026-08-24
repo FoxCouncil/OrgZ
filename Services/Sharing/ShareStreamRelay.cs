@@ -134,6 +134,10 @@ public static class ShareStreamRelay
     /// <summary>/s/{token}/{remote path...} → https://{share}/{remote path...} with the pin enforced.</summary>
     private static async Task ForwardAsync(HttpListenerContext context)
     {
+        // Once a byte of body is out the door the status line is spent and a reset is the
+        // only truth left to tell. Before that, a failure can still be answered as HTTP.
+        var bodyStarted = false;
+
         try
         {
             // The relay is as read-only as the share: forwarding a POST as anything
@@ -209,6 +213,7 @@ public static class ShareStreamRelay
                     {
                         break;
                     }
+                    bodyStarted = true;
                     await context.Response.OutputStream.WriteAsync(buffer.AsMemory(0, read));
                 }
             }
@@ -218,6 +223,28 @@ public static class ShareStreamRelay
         catch (Exception ex)
         {
             _log.Debug(ex, "relay forward failed");
+
+            // Aborting is only a failure signal on Windows: HTTP.SYS resets the connection and
+            // the client raises, while the managed listener on macOS/Linux lets the request
+            // complete as a normal empty answer - so a refused pin, an unreachable host and a
+            // stalled transfer all read to the caller as "the share is empty". Answer 502 while
+            // the body hasn't started so the failure looks the same on every platform.
+            if (!bodyStarted)
+            {
+                try
+                {
+                    context.Response.StatusCode = 502;
+                    context.Response.StatusDescription = "Bad Gateway";
+                    context.Response.ContentLength64 = 0;
+                    context.Response.Close();
+                    return;
+                }
+                catch (Exception)
+                {
+                    // Headers already on the wire (or the client left) - fall through to the reset.
+                }
+            }
+
             try { context.Response.Abort(); } catch { /* client gone */ }
         }
     }

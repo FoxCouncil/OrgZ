@@ -171,10 +171,74 @@ public static class DeviceHelperInstaller
     /// The firewall rules ride in front on '&': their failures never gate the sc chain,
     /// and cmd's exit code stays the last sc command's.
     /// </summary>
+    /// <summary>
+    /// The account this helper is being installed for, as a SID string, or null when it cannot
+    /// be established.
+    ///
+    /// This is the Windows counterpart of the unix installer's owner UID, and it is what the
+    /// daemon's pipe ACL and caller check are enforced against. Returns null for the machine
+    /// accounts: if the install hook happens to run as LocalSystem there is no human behind it
+    /// to record, and stamping SYSTEM would lock out the very user who just installed OrgZ.
+    /// Null means "no owner recorded", which both the ACL and the caller check treat as the
+    /// legacy fail-open case rather than a lockout.
+    /// </summary>
+    internal static string? WindowsOwnerSid()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var sid = identity.User;
+            if (sid is null)
+            {
+                return null;
+            }
+
+            // LocalSystem, LocalService, NetworkService - nobody to own the helper.
+            if (sid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalSystemSid)
+                || sid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalServiceSid)
+                || sid.IsWellKnown(System.Security.Principal.WellKnownSidType.NetworkServiceSid))
+            {
+                _log.Information("Install is running as a machine account; the device helper will accept any authenticated caller");
+                return null;
+            }
+
+            return sid.Value;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Could not determine the installing user's SID");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Records the owner SID in the service's own environment. A Windows service has no
+    /// equivalent of launchd's EnvironmentVariables or systemd's Environment=, but the SCM
+    /// reads a REG_MULTI_SZ <c>Environment</c> value under the service key and applies it,
+    /// which is how this reaches <c>ORGZ_HELPER_OWNER_SID</c> in the daemon process.
+    /// Empty when there is no owner to record, so the chain stays valid either way.
+    /// </summary>
+    private static string WindowsOwnerEnvironmentCommand()
+    {
+        var sid = WindowsOwnerSid();
+        if (sid is null)
+        {
+            return string.Empty;
+        }
+
+        return $" && reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Services\\{WindowsService}\" /v Environment /t REG_MULTI_SZ /d \"ORGZ_HELPER_OWNER_SID={sid}\" /f";
+    }
+
     internal static string WindowsCreateArguments(string exePath) =>
         $"/c {WindowsFirewallCommands(exePath)} & " +
         $"sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
-        $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\"";
+        $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\"" +
+        WindowsOwnerEnvironmentCommand();
 
     /// <summary>
     /// <c>sc create</c> needs the space after each '='; binPath is quoted so the
@@ -184,8 +248,9 @@ public static class DeviceHelperInstaller
     internal static string WindowsInstallArguments(string exePath) =>
         $"/c {WindowsFirewallCommands(exePath)} & " +
         $"sc create {WindowsService} binPath= \"\\\"{exePath}\\\" --device-helper\" start= auto DisplayName= \"OrgZ Device Helper\" " +
-        $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\" " +
-        $"&& sc start {WindowsService}";
+        $"&& sc description {WindowsService} \"Privileged iPod identity reads for OrgZ.\"" +
+        WindowsOwnerEnvironmentCommand() +
+        $" && sc start {WindowsService}";
 
     // '&' not '&&': delete must run even when the service was already stopped. Firewall
     // deletes first, so the chain's exit code is still sc delete's.
@@ -300,11 +365,27 @@ public static class DeviceHelperInstaller
     // ── Already-elevated paths (the PerMachine MSI's install hooks) ───────
 
     /// <summary>
-    /// How long an install hook may take before we give up. Velopack terminates the
-    /// after-install callback at 30 s and the before-uninstall callback at 30 s, and a
-    /// half-run <c>sc</c> chain is worse than none - so stop well inside that.
+    /// How long a SINGLE <c>sc</c> chain may take before we give up. Velopack terminates the
+    /// after-install and before-uninstall callbacks at 30 s and the update callbacks at 15 s,
+    /// and a half-run <c>sc</c> chain is worse than none - so stop well inside that.
+    ///
+    /// This is per command, not per hook: the start path retries, so a generous per-command
+    /// timeout multiplies. <see cref="HookBudget"/> caps the whole hook.
     /// </summary>
-    internal static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(20);
+    internal static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The wall-clock ceiling for everything one hook does. Velopack kills the callback at
+    /// 30 s (15 s for update hooks) and a killed hook leaves the service in whatever state
+    /// the chain reached; giving up at 25 s means we always get to log what happened.
+    /// </summary>
+    internal static readonly TimeSpan HookBudget = TimeSpan.FromSeconds(25);
+
+    /// <summary>
+    /// Update hooks get half the budget of install hooks, because Velopack allows them half
+    /// the time. Stopping the service is the only thing that has to happen inside one.
+    /// </summary>
+    internal static readonly TimeSpan UpdateHookBudget = TimeSpan.FromSeconds(12);
 
     /// <summary>
     /// Registers the service from a process that ALREADY holds administrator rights -
@@ -315,6 +396,8 @@ public static class DeviceHelperInstaller
     /// </summary>
     public static async Task<InstallResult> InstallElevatedAsync()
     {
+        var deadline = DateTime.UtcNow + HookBudget;
+
         var created = await RunShellAsync(WindowsCreateArguments(ExePath));
         if (!created.Ok)
         {
@@ -324,7 +407,7 @@ public static class DeviceHelperInstaller
         // Start separately and CONFIRM it stayed up. `sc start` returns the moment the
         // service reports RUNNING, so a service that dies a second later still looks like
         // a successful start - which is exactly how a broken install passes its own test.
-        return await StartAndVerifyAsync();
+        return await StartAndVerifyAsync(deadline);
     }
 
     /// <summary>
@@ -332,13 +415,25 @@ public static class DeviceHelperInstaller
     /// times. The MSI is still committing files when the install hook runs, so an early
     /// start can come up against a half-written directory and exit 1067; a retry a couple
     /// of seconds later finds a settled install.
+    ///
+    /// Every attempt is checked against the hook's overall deadline first. Three unbounded
+    /// attempts can outlast Velopack's 30 s kill, and a hook killed mid-retry reports
+    /// nothing at all - the one outcome that leaves no trace of why the service is missing.
     /// </summary>
-    private static async Task<InstallResult> StartAndVerifyAsync()
+    private static async Task<InstallResult> StartAndVerifyAsync(DateTime deadline)
     {
         InstallResult last = new(false, "not attempted");
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
+            // One attempt costs a start plus two 2 s settles; don't begin one we can't finish.
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining < HookTimeout + TimeSpan.FromSeconds(4))
+            {
+                _log.Warning("Out of hook time after {Attempt} attempt(s); leaving the start to the next boot", attempt - 1);
+                break;
+            }
+
             last = await RunShellAsync(WindowsStartArguments());
 
             // Give it long enough to fall over if it is going to.
@@ -359,6 +454,48 @@ public static class DeviceHelperInstaller
         // the installation over it.
         return new(false, $"service was registered but would not stay running ({last.Detail})");
     }
+
+    /// <summary>
+    /// Stops the service from an already-elevated updater, and waits until it is really
+    /// stopped rather than merely asked to stop.
+    ///
+    /// This is what makes an in-place update possible at all on Windows. The service runs
+    /// the SAME OrgZ.exe the update is about to replace, out of Program Files, so while it
+    /// is running that file is held open and Velopack's apply either fails or leaves a
+    /// half-swapped install. <c>sc stop</c> returns on STOP_PENDING, so returning there
+    /// would just move the race a few milliseconds later - hence the poll.
+    /// </summary>
+    public static async Task<InstallResult> StopElevatedAsync()
+    {
+        var deadline = DateTime.UtcNow + UpdateHookBudget;
+
+        var stopped = await RunShellAsync(WindowsStopArguments());
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var state = await QueryStateAsync();
+            if (state is ServiceState.Stopped or ServiceState.NotInstalled)
+            {
+                _log.Information("Device helper service stopped for update");
+                return new(true, "ok");
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(400));
+        }
+
+        // Report it, but never fail an update over it: Velopack's own retry and the
+        // post-update start below both still have a chance to sort it out.
+        _log.Warning("Device helper service did not stop within {Seconds:0}s ({Detail})", UpdateHookBudget.TotalSeconds, stopped.Detail);
+        return new(false, $"still running after {UpdateHookBudget.TotalSeconds:0}s ({stopped.Detail})");
+    }
+
+    /// <summary>
+    /// Starts the service again after an update replaced its executable. Best effort by
+    /// design: the service is start=auto, so the worst case is that it comes back at the
+    /// next boot rather than immediately.
+    /// </summary>
+    public static Task<InstallResult> StartElevatedAsync()
+        => RunShellAsync(WindowsStartArguments());
 
     /// <summary>
     /// Creates Velopack's <c>packages</c> staging directory, which it otherwise creates

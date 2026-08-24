@@ -28,7 +28,6 @@ public sealed class LibraryShareServer : IDisposable
     private readonly Func<List<MediaItem>> _loadLibrary;
     private readonly Func<List<ServedPlaylist>> _loadPlaylists;
     private readonly string _certificateDirectory;
-    private MdnsAdvertiser? _advertiser;
 
     public string ShareName { get; }
     public int Port { get; }
@@ -88,8 +87,16 @@ public sealed class LibraryShareServer : IDisposable
 
         if (advertise)
         {
-            _advertiser = new MdnsAdvertiser(ShareName, (ushort)Port, ["tls=1", $"pin={CertificatePin}"]);
-            _advertiser.Start();
+            // ONE mDNS responder for the whole process; the library share is one service on
+            // it, the AirPlay DACP control endpoint is another. Registering the share here
+            // rather than standing up a second advertiser is what keeps the two from fighting
+            // over the single 5353 socket - the fight that left DACP undiscoverable and
+            // controls unavailable.
+            MdnsAdvertiser.EnsureResponder().Publish(
+                MdnsWire.ServiceType,
+                ShareName,
+                (ushort)Port,
+                [$"name={ShareName}", "version=1", "readonly=1", "tls=1", $"pin={CertificatePin}"]);
         }
 
         _log.Information("Library share \"{Name}\" listening on {Port} (TLS, pin {Pin})", ShareName, Port, CertificatePin);
@@ -186,7 +193,7 @@ public sealed class LibraryShareServer : IDisposable
     private async Task ServeArtAsync(TlsHttpServer.Request request, TlsHttpServer.Response response, string id)
     {
         var track = ResolveTrack(Snapshot().ById, id);
-        if (track?.FilePath is null || AlbumArtWriter.ReadArtwork(track.FilePath) is not { } art)
+        if (track?.FilePath is null || !IsShareable(track.FilePath) || AlbumArtWriter.ReadArtwork(track.FilePath) is not { } art)
         {
             // No art is a perfectly ordinary answer - the client shows the placeholder.
             response.StatusCode = 404;
@@ -209,7 +216,7 @@ public sealed class LibraryShareServer : IDisposable
     private async Task ServeStreamAsync(TlsHttpServer.Request request, TlsHttpServer.Response response, string id)
     {
         var track = ResolveTrack(Snapshot().ById, id);
-        if (track?.FilePath is null || !File.Exists(track.FilePath))
+        if (track?.FilePath is null || !IsShareable(track.FilePath) || !File.Exists(track.FilePath))
         {
             response.StatusCode = 404;
             response.ContentLength64 = 0;
@@ -300,6 +307,34 @@ public sealed class LibraryShareServer : IDisposable
             byId.TryAdd(track.Id, track);
         }
         return ResolveTrack(byId, segment);
+    }
+
+    /// <summary>
+    /// Whether a row's FilePath may actually leave this machine.
+    ///
+    /// The id index already prevents path traversal from the REQUEST side - a caller can only
+    /// name an id, never a path. This guards the other side: the rows themselves. The database
+    /// the server reads is named by whoever started the share, so a row saying
+    /// <c>C:\Users\someone\Documents\taxes.pdf</c> would otherwise be served to the LAN
+    /// verbatim. Only files under a configured music root are shareable, whatever the row says.
+    /// </summary>
+    internal static bool IsShareable(string filePath)
+    {
+        // Ownership, not a configured root: when the SERVICE hosts the share it runs as
+        // LocalSystem and cannot read the user's library-folder setting at all, so a root
+        // comparison would silently pass everything in exactly the case that matters. The
+        // helper's recorded owner is available there, and "the person who started the share
+        // could have read this file themselves" is the honest bar for putting it on the LAN.
+        //
+        // In the GUI-hosted case no owner is recorded and this allows everything, which is
+        // right: that process is already the user, so there is no boundary to enforce.
+        if (DeviceHelper.PrivilegedPaths.MayUse(filePath, out var reason))
+        {
+            return true;
+        }
+
+        _log.Warning("Refusing to serve {Path}: {Reason}", filePath, reason);
+        return false;
     }
 
     /// <inheritdoc cref="ResolveTrack(IReadOnlyList{MediaItem}, string)"/>
@@ -460,7 +495,12 @@ public sealed class LibraryShareServer : IDisposable
 
     public void Dispose()
     {
-        _advertiser?.Dispose();
+        // Withdraw only OUR service from the shared responder - the responder itself lives on
+        // for AirPlay DACP (and any other service). Turning sharing off must not tear down the
+        // process's one mDNS socket. Withdraw rather than Running?.Unpublish, because the
+        // record may be sitting in a responder whose 5353 bind failed - Running is null
+        // there, and a record left behind gets announced the moment a later start binds.
+        MdnsAdvertiser.Withdraw(MdnsWire.ServiceType);
         _server?.Dispose();
         _log.Information("Library share \"{Name}\" stopped", ShareName);
     }

@@ -83,6 +83,18 @@ public static class CdServiceOps
             return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, "a disc operation is already running");
         }
 
+        // Both paths come off the wire and both are touched as LocalSystem - the progress file
+        // is CREATED and truncated, which is an arbitrary-file overwrite unless the caller
+        // could have written there themselves. Checked after the busy latch so a refusal
+        // reports the path problem rather than masking it as "already running", and the latch
+        // is released on the way out.
+        if (PrivilegedPaths.Refuse("cd-run spec", payload.SpecPath, out var specRefusal)
+            || PrivilegedPaths.Refuse("cd-run progress", payload.ProgressPath, out specRefusal))
+        {
+            Volatile.Write(ref _busy, 0);
+            return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, specRefusal);
+        }
+
         Volatile.Write(ref _current, payload);
 
         _ = Task.Run(() =>

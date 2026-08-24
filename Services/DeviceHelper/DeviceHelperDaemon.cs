@@ -128,6 +128,86 @@ public static class DeviceHelperDaemon
     private static uint? ReadOwnerUid()
         => uint.TryParse(Environment.GetEnvironmentVariable("ORGZ_HELPER_OWNER_UID"), out var uid) ? uid : null;
 
+    /// <summary>The owner SID the installer stamped into the service definition, if any. Windows' ORGZ_HELPER_OWNER_UID.</summary>
+    private static string? ReadOwnerSid()
+    {
+        var sid = Environment.GetEnvironmentVariable("ORGZ_HELPER_OWNER_SID");
+        return string.IsNullOrWhiteSpace(sid) ? null : sid.Trim();
+    }
+
+    /// <summary>
+    /// Who may drive the LocalSystem service on Windows. The exact counterpart of
+    /// <see cref="IsPeerAllowed"/>, and split out for the same reason: this is the policy that
+    /// decides who gets to run privileged operations, so it is testable without a pipe.
+    ///
+    /// Fails CLOSED when an owner is recorded but the caller cannot be identified. Fails OPEN
+    /// only when no owner was recorded at all, so an install from before the SID was stamped
+    /// keeps working instead of bricking - the same upgrade concession the unix side makes.
+    /// </summary>
+    internal static bool IsCallerAllowed(string? ownerSid, string? callerSid, bool callerIsAdministrator)
+    {
+        if (ownerSid is null)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(callerSid))
+        {
+            return false;
+        }
+
+        // Administrators and LocalSystem can already do everything this service does, so
+        // refusing them buys no security and costs diagnosability.
+        return string.Equals(callerSid, ownerSid, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(callerSid, "S-1-5-18", StringComparison.OrdinalIgnoreCase)
+            || callerIsAdministrator;
+    }
+
+    /// <summary>
+    /// Resolves the connected client's SID by impersonating it, and applies
+    /// <see cref="IsCallerAllowed"/>.
+    ///
+    /// This is the check the Windows leg never had. The pipe is reachable by every logged-on
+    /// user, and the ops behind it stopped being read-only identity queries at protocol v2 -
+    /// they now write files and adopt databases as LocalSystem. Without a caller check that is
+    /// a local privilege escalation on any machine with the MSI installed.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool IsAuthorizedCaller(NamedPipeServerStream server, string? ownerSid)
+    {
+        if (ownerSid is null)
+        {
+            return true;
+        }
+
+        string? callerSid = null;
+        var isAdmin = false;
+
+        try
+        {
+            server.RunAsClient(() =>
+            {
+                using var identity = WindowsIdentity.GetCurrent();
+                callerSid = identity.User?.Value;
+                isAdmin = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+            });
+        }
+        catch (Exception ex)
+        {
+            // An unanswerable "who are you" must not become "anyone".
+            _log.Warning(ex, "Refusing pipe connection: caller identity could not be read");
+            return false;
+        }
+
+        if (!IsCallerAllowed(ownerSid, callerSid, isAdmin))
+        {
+            _log.Warning("Refusing pipe connection from {Caller}: not owner {Owner}", callerSid ?? "<unknown>", ownerSid);
+            return false;
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Reads the kernel-verified peer UID off the connection and applies
     /// <see cref="IsPeerAllowed"/>. Split so the policy - the part that decides who may
@@ -225,14 +305,23 @@ public static class DeviceHelperDaemon
 
     private static async Task RunNamedPipeAsync(CancellationToken ct)
     {
+        var ownerSid = ReadOwnerSid();
+
         while (!ct.IsCancellationRequested)
         {
-            var server = CreateNamedPipe();
+            var server = CreateNamedPipe(ownerSid);
             await server.WaitForConnectionAsync(ct);
             _ = Task.Run(async () =>
             {
                 try
                 {
+                    // Identity is checked before a single byte is read: the ACL keeps honest
+                    // callers out, this keeps out anyone who got a handle anyway.
+                    if (!IsAuthorizedCaller(server, ownerSid))
+                    {
+                        return;
+                    }
+
                     await ServeAsync(server, ct);
                 }
                 catch (Exception ex)
@@ -248,16 +337,27 @@ public static class DeviceHelperDaemon
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static NamedPipeServerStream CreateNamedPipe()
+    private static NamedPipeServerStream CreateNamedPipe(string? ownerSid)
     {
-        // Grant authenticated users read/write so a non-elevated OrgZ can connect to the
-        // LocalSystem-owned pipe; the daemon only exposes read-only identity queries. Clients
-        // deliberately do NOT get CreateNewInstance - that would let any user stand up a rogue
-        // pipe of the same name and MITM the channel.
+        // Read/write for the ONE user this helper was installed for - not every authenticated
+        // user, which is what this granted until the ops behind it grew teeth. At protocol v2
+        // the daemon stopped being read-only identity queries: cd-run and sync-run write a
+        // caller-named path and share-start adopts a caller-named database, all as LocalSystem.
+        // A pipe any logged-on account can drive therefore hands any local user SYSTEM-level
+        // file write and read on a machine that merely has the MSI installed.
+        //
+        // Clients deliberately do NOT get CreateNewInstance - that would let a user stand up a
+        // rogue pipe of the same name and MITM the channel.
         var security = new PipeSecurity();
-        security.AddAccessRule(new PipeAccessRule(
-            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
-            PipeAccessRights.ReadWrite, AccessControlType.Allow));
+
+        // No recorded owner means an install from before the SID was stamped. Keep the old
+        // grant so an upgrade does not brick it; the daemon's caller check has the same
+        // fail-open rule for exactly this case, and every current install path records one.
+        var client = ownerSid is null
+            ? new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null)
+            : new SecurityIdentifier(ownerSid);
+
+        security.AddAccessRule(new PipeAccessRule(client, PipeAccessRights.ReadWrite, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             PipeAccessRights.FullControl, AccessControlType.Allow));

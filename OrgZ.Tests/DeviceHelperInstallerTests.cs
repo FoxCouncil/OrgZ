@@ -262,6 +262,16 @@ public class DeviceHelperInstallerTests
         // with room to log rather than be killed mid-command.
         Assert.True(DeviceHelperInstaller.HookTimeout < TimeSpan.FromSeconds(30), $"{DeviceHelperInstaller.HookTimeout} leaves no margin");
         Assert.True(DeviceHelperInstaller.HookTimeout >= TimeSpan.FromSeconds(10), "too tight for sc create + start on a slow machine");
+
+        // The per-command timeout is not the whole story: the install hook runs a create and
+        // then up to three start attempts, so a generous per-command ceiling multiplies. What
+        // has to fit inside Velopack's kill timer is the BUDGET, which bounds the whole hook.
+        Assert.True(DeviceHelperInstaller.HookBudget < TimeSpan.FromSeconds(30), $"{DeviceHelperInstaller.HookBudget} would be killed mid-hook");
+        Assert.True(DeviceHelperInstaller.HookBudget > DeviceHelperInstaller.HookTimeout, "the budget must leave room for at least one full command");
+
+        // Update hooks get half the time install hooks do, and all one has to do is stop the
+        // service - so its budget is tighter still.
+        Assert.True(DeviceHelperInstaller.UpdateHookBudget < TimeSpan.FromSeconds(15), $"{DeviceHelperInstaller.UpdateHookBudget} would be killed mid-update-hook");
     }
 
     [Fact]
@@ -276,12 +286,17 @@ public class DeviceHelperInstallerTests
 
     // ── The two things a real install taught us ───────────────
 
-    [Fact]
+    [SkippableFact]
     public void The_packages_directory_sits_beside_current_not_inside_it()
     {
         // Velopack's layout is {root}\current\OrgZ.exe and {root}\packages. Getting this
         // path wrong means we create a directory nobody looks in and the first-launch
         // crash comes straight back.
+        //
+        // Drive letters and backslashes are only separators on Windows - elsewhere this
+        // whole string is one filename, so the literals below can only be asserted there.
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows path literals");
+
         Assert.Equal(
             @"C:\Program Files\OrgZ\packages",
             DeviceHelperInstaller.PackagesDirFor(@"C:\Program Files\OrgZ\current\OrgZ.exe"));
@@ -289,6 +304,17 @@ public class DeviceHelperInstallerTests
         Assert.Equal(
             @"D:\Apps\OrgZ\packages",
             DeviceHelperInstaller.PackagesDirFor(@"D:\Apps\OrgZ\current\OrgZ.exe"));
+    }
+
+    [Fact]
+    public void The_packages_directory_is_a_sibling_of_current_on_every_platform()
+    {
+        // The same rule expressed with the host's own separator, so the .pkg and AppImage
+        // legs pin the arithmetic too rather than leaving it to the Windows-only case.
+        var root = Path.GetFullPath("orgz-install-root");
+        var exe = Path.Combine(root, "current", OperatingSystem.IsWindows() ? "OrgZ.exe" : "OrgZ");
+
+        Assert.Equal(Path.Combine(root, "packages"), DeviceHelperInstaller.PackagesDirFor(exe));
     }
 
     [Fact]

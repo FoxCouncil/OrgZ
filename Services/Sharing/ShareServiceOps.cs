@@ -91,6 +91,14 @@ public static class ShareServiceOps
         // the client tells us where the real database lives. Found the hard way: a
         // service-hosted share answered every request with a connection reset, because
         // LoadAll threw on the systemprofile's tableless db and the handler aborted.
+        // The database is named by the client and then READ as LocalSystem, and every FilePath
+        // in it is subsequently served over an unauthenticated LAN socket - so an adopted
+        // database is an arbitrary-file-read primitive unless the caller owns it.
+        if (payload.LibraryDb is not null && DeviceHelper.PrivilegedPaths.Refuse("share-start libraryDb", payload.LibraryDb, out var dbRefusal))
+        {
+            return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, dbRefusal);
+        }
+
         var adopted = MediaCache.AdoptClientDatabase(payload.LibraryDb);
         if (adopted)
         {

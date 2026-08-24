@@ -79,6 +79,16 @@ public static class SyncServiceOps
             return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, "a device sync is already running");
         }
 
+        // Created and written as LocalSystem, from a path the client chose - the same
+        // arbitrary-overwrite primitive cd-run has, and clamped the same way. After the busy
+        // latch, so a refusal says what is actually wrong; the latch is released on refusal.
+        if (PrivilegedPaths.Refuse("sync-run progress", payload.ProgressPath, out var refusal)
+            || payload.LibraryDb is not null && PrivilegedPaths.Refuse("sync-run libraryDb", payload.LibraryDb, out refusal))
+        {
+            Volatile.Write(ref _busy, 0);
+            return new(DeviceHelperProtocol.Version, Ok: false, null, null, null, refusal);
+        }
+
         Volatile.Write(ref _current, payload);
 
         _ = Task.Run(async () =>

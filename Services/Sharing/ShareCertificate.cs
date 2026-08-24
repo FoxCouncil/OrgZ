@@ -47,7 +47,20 @@ public static class ShareCertificate
         try
         {
             Directory.CreateDirectory(directory);
-            File.WriteAllBytes(path, cert.Export(X509ContentType.Pkcs12));
+
+            // The PKCS#12 carries the private key with no password on it, so it must never
+            // exist - not even for the length of a write - at the umask default of 0644. The
+            // helper daemon writes this as root into the user's OWN directory, and anyone who
+            // can read the file can present this identity to every client holding the pin.
+            var pkcs12 = cert.Export(X509ContentType.Pkcs12);
+            using (var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                if (!OperatingSystem.IsWindows())
+                {
+                    File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                file.Write(pkcs12, 0, pkcs12.Length);
+            }
         }
         catch (Exception ex)
         {

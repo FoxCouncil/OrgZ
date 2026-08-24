@@ -79,13 +79,44 @@ public static class ServiceInstallHook
         Run("uninstall", static () => DeviceHelperInstaller.UninstallElevatedAsync());
     }
 
+    /// <summary>
+    /// Velopack's before-update callback: stop the service so the update can replace the
+    /// file it is running.
+    ///
+    /// The service's binPath IS the installed OrgZ.exe. While it runs, Windows holds that
+    /// image open, so an in-place update either fails outright or half-swaps the install
+    /// directory - and the user's only symptom is an update that silently never takes.
+    /// Update.exe is already elevated when it calls this, so the plain <c>sc</c> chain works
+    /// without a second prompt.
+    /// </summary>
+    public static void OnBeforeUpdate()
+    {
+        Run("stop for update", static () => DeviceHelperInstaller.StopElevatedAsync());
+    }
+
+    /// <summary>
+    /// Velopack's after-update callback: start the freshly-updated service back up, so disc
+    /// and iPod access stay silent instead of falling back to a UAC prompt per operation
+    /// until the next reboot.
+    /// </summary>
+    public static void OnAfterUpdate()
+    {
+        Run("start after update", static () => DeviceHelperInstaller.StartElevatedAsync());
+    }
+
     private static void Run(string what, Func<Task<DeviceHelperInstaller.InstallResult>> action)
     {
         try
         {
             if (!ShouldRegister(OperatingSystem.IsWindows(), IsElevated()))
             {
-                _log.Information("Skipping service {What}: installer is not elevated (per-user install)", what);
+                // Not always a per-user install: a PerMachine MSI run by a standard user who
+                // supplied an administrator's credentials executes its deferred custom actions
+                // impersonating the INSTALLING user, so this lands here on a machine-wide
+                // install too. Either way the outcome is the same - no service, and OrgZ falls
+                // back to a UAC prompt per disc/iPod operation until it is installed from
+                // Settings - so say that rather than diagnosing the cause wrongly.
+                _log.Warning("Skipping service {What}: the hook is not running elevated. OrgZ will ask for consent per operation until the device helper is installed from Settings", what);
                 return;
             }
 

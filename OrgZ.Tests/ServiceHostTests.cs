@@ -10,6 +10,10 @@ namespace OrgZ.Tests;
 /// length-prefixed wire protocol. Verification proves the contract; adversarial cases
 /// attack version mismatches, unknown/duplicate ops, handler crashes, and hostile frames.
 /// </summary>
+// Same collection as the other service classes: this dispatches through the shared op
+// registry and the singletons behind it, so running alongside a class that starts a job
+// makes both flaky for reasons unrelated to either.
+[Collection(ServiceOpsCollection.Name)]
 public class ServiceHostTests
 {
     private static DeviceHelperProtocol.Request Req(string op, int? version = null, string? payload = null)

@@ -18,11 +18,67 @@ namespace OrgZ.Tests;
 /// credential read that fails, a client that hangs up mid-frame, and a declared length
 /// that would have us allocate on command.
 /// </summary>
+// Serialized with the other service classes: the socket half of this file opens the REAL
+// named pipe, whose name is fixed, and xUnit runs classes in parallel by default. Two classes
+// binding orgz-devicehelper at once produced exactly the intermittent failure you would
+// expect - a connection answered by the other class's listener - and it moved between tests
+// run to run, which is the signature of contention rather than a defect in the code.
+[Collection(ServiceOpsCollection.Name)]
 public class DeviceHelperAuthorizationTests
 {
     private const uint Owner = 501;
     private const uint Stranger = 502;
     private const uint Root = 0;
+
+    private const string OwnerSid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+    private const string StrangerSid = "S-1-5-21-1111111111-2222222222-3333333333-1002";
+    private const string SystemSid = "S-1-5-18";
+
+    // ── The Windows gate ──────────────────────────────────────
+    //
+    // The unix leg has had a kernel-verified peer-UID gate since it was written. The Windows
+    // leg had NOTHING: the pipe was granted to Authenticated Users and every op ran for
+    // whoever connected. That stopped being survivable at protocol v2, when the ops grew the
+    // ability to write a caller-named file and adopt a caller-named database as LocalSystem.
+
+    [Fact]
+    public void The_windows_owner_the_installer_recorded_is_served()
+    {
+        Assert.True(DeviceHelperDaemon.IsCallerAllowed(OwnerSid, OwnerSid, callerIsAdministrator: false));
+    }
+
+    [Fact]
+    public void Another_logged_on_user_is_refused()
+    {
+        // The whole point: a standard user sharing the machine cannot drive the service.
+        Assert.False(DeviceHelperDaemon.IsCallerAllowed(OwnerSid, StrangerSid, callerIsAdministrator: false));
+    }
+
+    [Fact]
+    public void Local_system_and_administrators_are_served()
+    {
+        // Refusing them buys nothing - they can already do everything the service does - and
+        // costs the ability to diagnose it.
+        Assert.True(DeviceHelperDaemon.IsCallerAllowed(OwnerSid, SystemSid, callerIsAdministrator: false));
+        Assert.True(DeviceHelperDaemon.IsCallerAllowed(OwnerSid, StrangerSid, callerIsAdministrator: true));
+    }
+
+    [Fact]
+    public void An_unreadable_caller_identity_is_refused_when_an_owner_is_recorded()
+    {
+        // Fail CLOSED: an unanswerable "who are you" must never become "anyone".
+        Assert.False(DeviceHelperDaemon.IsCallerAllowed(OwnerSid, null, callerIsAdministrator: false));
+        Assert.False(DeviceHelperDaemon.IsCallerAllowed(OwnerSid, string.Empty, callerIsAdministrator: false));
+    }
+
+    [Fact]
+    public void An_install_that_recorded_no_owner_still_serves_its_user()
+    {
+        // Fail OPEN only here, so upgrading from a build that predates the SID stamp does not
+        // brick a working helper. Every current install path records one.
+        Assert.True(DeviceHelperDaemon.IsCallerAllowed(null, StrangerSid, callerIsAdministrator: false));
+        Assert.True(DeviceHelperDaemon.IsCallerAllowed(null, null, callerIsAdministrator: false));
+    }
 
     // ── The gate ──────────────────────────────────────────────
 
