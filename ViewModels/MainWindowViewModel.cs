@@ -1628,6 +1628,13 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // which from the user's chair is indistinguishable from a broken app.
         _audioOutput.Bus.SinkFailed += (_, failure) => UI(() => HandleSinkFailure(failure));
 
+        // An AirPlay receiver can drive playback back the other way - the Home app's tile has
+        // real transport buttons. They land on the same handlers as the lock screen's.
+        _audioOutput.Bus.RemoteCommand += (_, command) => UI(() => HandleRemoteCommand(command));
+
+        // The speaker's own volume - the Home app slider, or a touch on the HomePod itself.
+        _audioOutput.Bus.RemoteVolume += (_, change) => UI(() => HandleRemoteVolume(change.SinkId, change.Level));
+
         _audioOutput.LoadAndApplyPersistedSelections();
         UpdateMasterVolume();
 
@@ -1636,14 +1643,6 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         // against the receiver's brute-force lockout, and a HomePod locks pairing for
         // minutes once tripped.
         Helpers.TaskObserver.FireAndForget(PromptForKnownAirPlayPasswordsAsync(), "AirPlay password preflight");
-
-        // Diagnostic: the AirPlay sink connects fine from the test host and times out inside
-        // this process. Running the identical code HERE isolates whether the cause is
-        // process state or the bus's use of the sink. Set ORGZ_AIRPLAY_SELFTEST=<host>.
-        if (Environment.GetEnvironmentVariable("ORGZ_AIRPLAY_SELFTEST") is { Length: > 0 } selfTestHost)
-        {
-            Helpers.TaskObserver.FireAndForget(AirPlaySelfTestAsync(selfTestHost), "AirPlay self-test");
-        }
 
         // Bit-perfect FLAC engine shares the tap (VU/visualizers) and sink bus
         // with the VLC path; its events funnel into the same handlers.
@@ -1874,6 +1873,12 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         np.StopRequested      += () => Dispatcher.UIThread.Post(Stop);
         np.RaiseRequested     += () => Dispatcher.UIThread.Post(() =>
         {
+            // Show() first: minimize-to-tray Hide()s the window, and a hidden window is
+            // unmapped - un-minimizing and activating it does nothing, so a Raise from a
+            // second launch (or the desktop's media controls) would leave the user with a
+            // running app they cannot get back on screen.
+            _window.Show();
+
             if (_window.WindowState == Avalonia.Controls.WindowState.Minimized)
             {
                 _window.WindowState = Avalonia.Controls.WindowState.Normal;
@@ -1886,14 +1891,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     internal void InitializeSmtc(IntPtr hwnd)
     {
         var smtc = new SmtcNowPlaying();
+        // The diagnostics are an acronym plus a raw HRESULT - a log line, not a status bar the
+        // user reads. Only the failure gets a plain-language line, and success says nothing.
         if (!smtc.Initialize(hwnd))
         {
-            UpdateMainStatus(smtc.Diagnostics ?? "SMTC: Init failed (unknown)");
+            _log.Warning("{Diagnostics}", smtc.Diagnostics ?? "SMTC: Init failed (unknown)");
+            UpdateMainStatus("Windows media controls unavailable.");
             smtc.Dispose();
             return;
         }
 
-        UpdateMainStatus(smtc.Diagnostics ?? "SMTC: OK");
+        _log.Information("{Diagnostics}", smtc.Diagnostics ?? "SMTC: OK");
 
         // Connecting SMTC as the now-playing surface is what finally feeds it metadata + status,
         // not just the transport buttons WireNowPlaying hooks up.
@@ -2236,46 +2244,109 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Drives AirPlayRaopSink directly, in THIS process, bypassing the provider and the bus.
-    /// The same call succeeds from a test host, so this separates "something about OrgZ's
-    /// process" from "something about how the bus drives the sink".
+    /// Applies a volume level the OUTPUT DEVICE set - the Home app's slider or the HomePod's
+    /// own touch controls.
+    ///
+    /// This is the DEVICE's own level, which is the per-sink volume - not CurrentVolume, the
+    /// app-wide gain applied to samples before they reach any output. Driving the master
+    /// slider from it would attenuate the audio a second time on top of the attenuation the
+    /// speaker just applied itself, so the sink absorbs it and the app's slider stays put.
+    ///
+    /// Nothing is echoed back either: a reply would land on the device that just set it and
+    /// the two would chase each other for as long as the user kept dragging.
     /// </summary>
-    private static async Task AirPlaySelfTestAsync(string host)
+    private void HandleRemoteVolume(string sinkId, float level)
     {
-        var log = Services.Logging.For("AirPlaySelfTest");
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        _log.Information("Remote volume from {Sink}: {Percent}%", sinkId, (int)Math.Round(Math.Clamp(level, 0f, 1f) * 100));
 
-        try
+        // The sink has already taken the level - it has to, or the next thing the app sends
+        // would fight what the user just did on the speaker. What remains is to REMEMBER it,
+        // so the output picker opens showing where the speaker actually is and the level
+        // survives a restart. Deferred: someone dragging a slider on their phone produces a
+        // stream of these, and settings.json does not need rewriting per pixel.
+        _audioOutput.SavePersistedSelections(deferred: true);
+    }
+
+    /// <summary>
+    /// Applies a transport command that came from an output device rather than from this app -
+    /// currently an AirPlay receiver's Home-app buttons.
+    ///
+    /// Unknown codes are logged, not guessed at. Apple's command vocabulary is larger than the
+    /// part anyone has documented, and acting on a misread command is worse than ignoring it -
+    /// the log is how the set below grows.
+    /// </summary>
+    private void HandleRemoteCommand(string command)
+    {
+        switch (command)
         {
-            var device = new Services.AudioOutput.AudioDeviceInfo
+            case "play":
             {
-                DeviceId = "selftest@" + host,
-                DisplayName = "SelfTest",
-                ProviderId = Services.AudioOutput.AirPlay.AirPlayDeviceProvider.Id,
-                ProviderName = "AirPlay",
-                IsAvailable = true,
-            };
-
-            var password = Environment.GetEnvironmentVariable("ORGZ_AIRPLAY_PASSWORD");
-            using var sink = new Services.AudioOutput.AirPlay.AirPlayRaopSink(device, host, 7000, null, password);
-
-            string? failure = null;
-            sink.ConnectFailed += (_, reason) => failure = reason;
-            sink.Open(Services.AudioOutput.AudioFormat.CdDaStereo16);
-
-            var silence = new byte[Services.AudioOutput.AirPlay.RaopAlac.PcmBytesPerPacket];
-            for (var i = 0; i < 200 && failure is null && !sink.ProvidesClock; i++)
-            {
-                sink.Write(silence);
-                await Task.Delay(50);
+                Play();
             }
+            break;
 
-            log.Information("AirPlay self-test: streaming={Streaming} failure={Failure}", sink.ProvidesClock, failure ?? "none");
+            // "paus" is the event channel's spelling, "pause" is DACP's - the receiver uses
+            // whichever it likes and both mean the same thing.
+            case "paus":
+            case "pause":
+            {
+                Pause();
+            }
+            break;
+
+            // "plps" is the event channel's toggle, "playpause" is DACP's.
+            case "plps":
+            case "playpause":
+            {
+                ButtonPlayPause();
+            }
+            break;
+
+            case "stop":
+            {
+                Stop();
+            }
+            break;
+
+            // Skip has three spellings across the two control channels, and the four-letter
+            // ones are not guessable from the others: a receiver sends "nitm"/"pitm" over the
+            // event channel and "nextitem"/"previtem" over DACP.
+            case "next":
+            case "nitm":
+            case "nextitem":
+            {
+                ButtonNextTrack();
+            }
+            break;
+
+            case "prev":
+            case "pitm":
+            case "previtem":
+            {
+                ButtonPreviousTrack();
+            }
+            break;
+
+            default:
+            {
+                _log.Information("Remote command not handled: {Command}", command);
+            }
+            break;
         }
-        catch (Exception ex)
-        {
-            log.Error(ex, "AirPlay self-test threw");
-        }
+    }
+
+    /// <summary>
+    /// Announces the current track to the OS media surface AND to the audio sinks.
+    ///
+    /// Both need it for the same reason the lock screen does, but a network sink needs one
+    /// thing the OS doesn't: the duration. An AirPlay receiver schedules the end of the
+    /// stream from the track length, so a speaker that is never told stops pulling audio
+    /// partway through every track.
+    /// </summary>
+    private void PushNowPlaying(NowPlayingMetadata metadata)
+    {
+        _nowPlaying?.SetMetadata(metadata);
+        _audioOutput.Bus.SetTrackInfo(metadata.Title, metadata.Artist, metadata.Album, metadata.Duration, metadata.ArtBytes);
     }
 
     [RelayCommand]
@@ -2559,7 +2630,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             : track.Album ?? "";
         CurrentAlbumArt = _cdCoverArt;
 
-        _nowPlaying?.SetMetadata(new NowPlayingMetadata(track.Title, track.Artist, track.Album, Duration: track.Duration, ArtBytes: _cdCoverArtBytes));
+        PushNowPlaying(new NowPlayingMetadata(track.Title, track.Artist, track.Album, Duration: track.Duration, ArtBytes: _cdCoverArtBytes));
 
         var previousRadio = TakeRadioStream();
         var previousMedia = _currentMedia;
@@ -2889,7 +2960,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
         CurrentAlbumArt = artBytes != null ? ArtworkSource.BitmapFromBytes(artBytes) : null;
 
-        _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtUri: string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri, ArtBytes: artBytes));
+        PushNowPlaying(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtUri: string.IsNullOrEmpty(file.FilePath) ? null : new Uri(file.FilePath).AbsoluteUri, ArtBytes: artBytes));
 
         var previousRadio = TakeRadioStream();
         var previousMedia = _currentMedia;
@@ -3051,7 +3122,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             CurrentAlbumArt = ArtworkSource.BitmapFromBytes(bytes);
-            _nowPlaying?.SetMetadata(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtBytes: bytes));
+            PushNowPlaying(new NowPlayingMetadata(file.Title, file.Artist, file.Album, Duration: file.Duration, ArtBytes: bytes));
         });
     }
 
@@ -3067,7 +3138,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _currentRadioArtBytes = null;
         _radioTrackArtActive = false;
 
-        _nowPlaying?.SetMetadata(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl));
+        PushNowPlaying(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl));
 
         if (!string.IsNullOrWhiteSpace(station.FaviconUrl))
         {
@@ -3283,7 +3354,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                     // Carry the art that's currently showing (per-track cover or the
                     // station favicon) - SetMetadata rebuilds the whole SMTC entry, so
                     // omitting it drops the thumbnail on every song change.
-                    _nowPlaying?.SetMetadata(new NowPlayingMetadata(title, artist, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _currentRadioArtBytes ?? _stationArtBytes));
+                    PushNowPlaying(new NowPlayingMetadata(title, artist, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _currentRadioArtBytes ?? _stationArtBytes));
                 });
             };
             thisMedia.MetaChanged += handler;
@@ -3565,7 +3636,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 FilePath  = isLocal ? source : null,
             };
 
-            _nowPlaying?.SetMetadata(new NowPlayingMetadata(episode.Title, feed.Title, "Podcast", ArtUri: episode.Image ?? feed.DisplayImage));
+            PushNowPlaying(new NowPlayingMetadata(episode.Title, feed.Title, "Podcast", ArtUri: episode.Image ?? feed.DisplayImage));
 
             var artUrl = !string.IsNullOrWhiteSpace(episode.Image) ? episode.Image : feed.DisplayImage;
             if (!string.IsNullOrWhiteSpace(artUrl))
@@ -3860,6 +3931,17 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void HandlePlaybackTime(long timeMs, long lengthMs)
     {
+        // Show what the LISTENER hears, not what the decoder has read.
+        //
+        // They are the same thing until the only speaker in use is a distant one: AirPlay
+        // hands a receiver its audio a couple of seconds before it plays, so with no local
+        // output selected the decoder's clock runs ahead of the room. The bus answers null
+        // whenever a local output is in the mix, which is when there is nothing to correct.
+        if (_audioOutput.Bus.ListenerPosition is { } audible)
+        {
+            timeMs = (long)audible.TotalMilliseconds;
+        }
+
         CurrentTrackTime = FormatHelper.FormatDurationCompact(timeMs);
         if (!isSeeking)
         {
@@ -4393,7 +4475,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         CurrentTrackLine1 = station.Title ?? "Unknown Station";
         CurrentTrackLine2 = FormatTags(station.Tags);
         _currentRadioArtBytes = _stationArtBytes;
-        _nowPlaying?.SetMetadata(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl, ArtBytes: _stationArtBytes));
+        PushNowPlaying(new NowPlayingMetadata(station.Title, station.Tags, "Internet Radio", ArtUri: station.FaviconUrl, ArtBytes: _stationArtBytes));
     }
 
     /// <summary>
@@ -4411,7 +4493,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             _radioTrackArtActive = false;
             CurrentAlbumArt = _stationArtBitmap;
             _currentRadioArtBytes = _stationArtBytes;
-            _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _stationArtBytes));
+            PushNowPlaying(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: _stationArtBytes));
             return;
         }
 
@@ -4447,7 +4529,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
                 CurrentAlbumArt = bitmap;
                 var osBytes = ArtworkSource.ToOsArtworkBytes(bitmap, bytes);
                 _currentRadioArtBytes = osBytes;
-                _nowPlaying?.SetMetadata(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: osBytes));
+                PushNowPlaying(new NowPlayingMetadata(CurrentTrackLine1, CurrentTrackLine2, CurrentStation?.Title, ArtUri: CurrentStation?.FaviconUrl, ArtBytes: osBytes));
             });
         }
         catch
@@ -4629,6 +4711,18 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         _audioOutput.SavePersistedSelections();
         _audioTap?.Dispose();
         _audioOutput.Dispose();
+
+        // Say goodbye on the way out, in this order.
+        //
+        // The sessions go first (above), then the services they advertised, then the responder
+        // that carries the announcements - a responder disposed first would have no socket left
+        // to send the goodbyes through. Without this the records simply stop being refreshed,
+        // and every receiver on the network keeps a cached iTunes_Ctrl_ entry pointing at a port
+        // that died with the process. A receiver that resolves a control endpoint it cannot
+        // reach is a receiver that greys out its buttons for the next session.
+        Services.AudioOutput.AirPlay.DacpControlServer.Shutdown();
+        Services.AudioOutput.AirPlay.PtpClock.Shutdown();
+        Services.Sharing.MdnsAdvertiser.Shutdown();
         var pendingCts = Interlocked.Exchange(ref _radioSwitchCts, null);
         pendingCts?.Cancel();
         pendingCts?.Dispose();

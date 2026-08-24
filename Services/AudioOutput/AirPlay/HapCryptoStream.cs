@@ -78,6 +78,23 @@ internal sealed class HapCryptoStream : Stream
             Derive(sharedSecret, "Control-Salt", "Control-Read-Encryption-Key"));
     }
 
+    /// <summary>
+    /// The EVENT-channel key derivation. Same shape as the control channel with a different
+    /// salt - and the two keys swapped.
+    ///
+    /// The swap is not a quirk to paper over: the event channel is a REVERSE connection. The
+    /// receiver is the one making requests on it, so from our end the thing we decrypt is
+    /// what the receiver WROTE, and the thing we encrypt is what it will READ. Deriving these
+    /// the same way round as the control channel yields a socket that connects, accepts
+    /// bytes, and produces garbage on every decrypt.
+    /// </summary>
+    internal static (byte[] Output, byte[] Input) DeriveEventKeys(byte[] sharedSecret)
+    {
+        return (
+            Derive(sharedSecret, "Events-Salt", "Events-Read-Encryption-Key"),
+            Derive(sharedSecret, "Events-Salt", "Events-Write-Encryption-Key"));
+    }
+
     internal static byte[] Derive(byte[] sharedSecret, string salt, string info)
         => HKDF.DeriveKey(
             HashAlgorithmName.SHA512,

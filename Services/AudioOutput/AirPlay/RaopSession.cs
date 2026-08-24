@@ -69,8 +69,14 @@ internal sealed class RaopSession : IDisposable
 
         _rtsp.DefaultHeaders["User-Agent"] = "iTunes/7.6.2 (Windows; N;)";
         _rtsp.DefaultHeaders["Client-Instance"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
-        _rtsp.DefaultHeaders["DACP-ID"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToUpperInvariant();
-        _rtsp.DefaultHeaders["Active-Remote"] = Random.Shared.Next(1, int.MaxValue).ToString();
+        // The PUBLISHED identity, not a fresh random pair. These two headers are the receiver's
+        // only instructions for calling us back: it browses mDNS for iTunes_Ctrl_<DACP-ID> and
+        // posts its button presses there. A random id names a service nothing advertises, so
+        // the receiver looks, finds nothing, and greys its controls out - the classic path had
+        // been promising a control endpoint that did not exist.
+        var dacp = DacpControlServer.Instance;
+        _rtsp.DefaultHeaders["DACP-ID"] = dacp.DacpId;
+        _rtsp.DefaultHeaders["Active-Remote"] = dacp.ActiveRemote;
 
         var local = _rtsp.LocalAddress;
         var uri = $"rtsp://{local}/{sessionId}";

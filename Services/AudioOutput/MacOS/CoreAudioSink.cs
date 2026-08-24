@@ -72,6 +72,37 @@ internal sealed class CoreAudioSink : IAudioSink
     public AudioFormat? CurrentFormat { get; private set; }
     public bool IsOpen => _queue != IntPtr.Zero;
 
+    // The size of the last buffer handed over, so latency is reported in time rather than
+    // in slots.
+    private volatile int _lastWriteBytes;
+
+    /// <summary>
+    /// Write to audible: the pool, which sits full while anything is playing.
+    ///
+    /// Deliberately the POOL SIZE rather than the live in-flight count. Write only blocks
+    /// once every buffer is in flight, so a source that can outrun the hardware - any local
+    /// file - saturates it, and that IS the steady state. Reporting the live count instead
+    /// reports it in whole buffers: a step of a hundred milliseconds every time the
+    /// AudioQueue hands one back. The bus would re-align on each step, and every re-align
+    /// costs the output a delay's worth of silence - so a figure that is right and still
+    /// beats one that is exact and moving. See IAudioSink.OutputLatency.
+    ///
+    /// It is deep, at up to <see cref="PoolSize"/> buffers. That depth is this sink's own and
+    /// predates any of this; reporting it honestly is what lets the other outputs wait for it.
+    /// </summary>
+    public TimeSpan OutputLatency
+    {
+        get
+        {
+            if (!IsOpen || CurrentFormat is not { } format || format.BytesPerSecond <= 0 || _lastWriteBytes <= 0)
+            {
+                return TimeSpan.Zero;
+            }
+
+            return TimeSpan.FromSeconds((double)_lastWriteBytes * PoolSize / format.BytesPerSecond);
+        }
+    }
+
     public float Volume
     {
         get => _volume;
@@ -288,6 +319,7 @@ internal sealed class CoreAudioSink : IAudioSink
 
                 // Patch the mAudioDataByteSize field in place on the native buffer.
                 Marshal.WriteInt32(bufPtr, ByteSizeOffset, chunkLen);
+                _lastWriteBytes = chunkLen;
 
                 var rc = CoreAudioNative.AudioQueueEnqueueBuffer(_queue, bufPtr, 0, IntPtr.Zero);
                 if (rc != 0)
@@ -471,6 +503,16 @@ internal sealed class CoreAudioSink : IAudioSink
                 // gone and bail instead of sitting out its full 5 s deadline.
                 System.Threading.Monitor.PulseAll(_poolLock);
             }
+
+            // Every field below belongs to the queue that just went away. _started in
+            // particular gates the deferred AudioQueueStart in Write - carried into the next
+            // Open it would leave the fresh queue stopped forever, so nothing drains the pool
+            // and the sink is silent. _lastWriteBytes is the format that just closed, and the
+            // bus primes its delay lines off exactly that number right after Open.
+            _started = false;
+            _bufferedSinceStart = 0;
+            _bufferCapacity = 0;
+            _lastWriteBytes = 0;
             CurrentFormat = null;
         }
     }

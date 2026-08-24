@@ -63,6 +63,8 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
 
     public IReadOnlyList<AudioDeviceInfo> EnumerateDevices()
     {
+        EnsurePassiveListener();
+
         List<AudioDeviceInfo> cached;
         bool fresh;
         lock (_cacheLock)
@@ -93,20 +95,181 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         return cached;
     }
 
+    /// <summary>
+    /// Hooks the process's shared mDNS socket so state changes land the moment a receiver
+    /// broadcasts them, not on the next sweep. A pod re-announces its TXT record when it
+    /// starts or stops rendering, which is exactly when a picker icon should repaint -
+    /// polling sweeps would show a speaker as free seconds after someone started using it.
+    /// </summary>
+    private void EnsurePassiveListener()
+    {
+        if (Sharing.MdnsAdvertiser.Running is not { } shared)
+        {
+            return;   // no shared socket yet - sweeps still work, retry on the next call
+        }
+
+        // EnumerateDevices is called from the UI thread and from the output manager's poll
+        // timer at the same time, so the check and the subscribe have to be one step or both
+        // callers hook the same responder. Keeping the instance we hooked also lets a
+        // replaced responder (tests, a future restart) get re-hooked instead of leaving the
+        // handler on a dead socket.
+        lock (_cacheLock)
+        {
+            if (ReferenceEquals(_passiveSource, shared))
+            {
+                return;
+            }
+
+            if (_passiveSource is { } previous)
+            {
+                previous.PacketReceived -= OnMdnsAnnouncement;
+            }
+
+            _passiveSource = shared;
+            shared.PacketReceived += OnMdnsAnnouncement;
+        }
+    }
+
+    private Sharing.MdnsAdvertiser? _passiveSource;
+
+    private void OnMdnsAnnouncement(byte[] data, IPEndPoint from)
+    {
+        try
+        {
+            var updates = ExtractAnnouncedFlags(data);
+            if (updates.Count == 0)
+            {
+                return;
+            }
+
+            var changed = false;
+            lock (_cacheLock)
+            {
+                List<AudioDeviceInfo>? next = null;
+                foreach (var (instance, flags) in updates)
+                {
+                    // The announcement may arrive under either service instance name; the
+                    // cached device kept whichever one the collapse preferred. Match by
+                    // name first, then by resolved host.
+                    var host = _endpoints.TryGetValue(instance, out var endpoint) ? endpoint.Host : null;
+
+                    var source = next ?? _cachedDevices;
+                    for (var i = 0; i < source.Count; i++)
+                    {
+                        var device = source[i];
+                        var sameName = device.DeviceId.Equals(instance, StringComparison.OrdinalIgnoreCase);
+                        var sameHost = host is not null
+                            && _endpoints.TryGetValue(device.DeviceId, out var deviceEndpoint)
+                            && deviceEndpoint.Host.Equals(host, StringComparison.OrdinalIgnoreCase);
+
+                        if ((sameName || sameHost) && device.StateFlags != flags)
+                        {
+                            // Never mutate the published list - EnumerateDevices hands out
+                            // the reference. Replace it wholesale.
+                            next ??= [.. _cachedDevices];
+                            next[i] = device with { StateFlags = flags };
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (next is not null)
+                {
+                    _cachedDevices = next;
+                }
+            }
+
+            if (changed)
+            {
+                DevicesChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "AirPlay announcement parse failed");
+        }
+    }
+
+    /// <summary>TXT status flags for AirPlay/RAOP instances found in one mDNS packet.</summary>
+    internal static List<(string Instance, long Flags)> ExtractAnnouncedFlags(byte[] data)
+    {
+        var result = new List<(string, long)>();
+        if (data.Length < 12)
+        {
+            return result;
+        }
+
+        var idx = 12;
+        int qdCount = (data[4] << 8) | data[5];
+        for (var q = 0; q < qdCount && idx < data.Length; q++)
+        {
+            idx = SkipName(data, idx);
+            idx += 4;
+        }
+
+        int records = ((data[6] << 8) | data[7]) + ((data[8] << 8) | data[9]) + ((data[10] << 8) | data[11]);
+        for (var r = 0; r < records && idx < data.Length; r++)
+        {
+            var nameStart = idx;
+            idx = SkipName(data, idx);
+            if (idx + 10 > data.Length)
+            {
+                return result;
+            }
+
+            int rType = (data[idx] << 8) | data[idx + 1];
+            idx += 8;
+            int rdLength = (data[idx] << 8) | data[idx + 1];
+            idx += 2;
+            var rdStart = idx;
+            if (rdStart + rdLength > data.Length)
+            {
+                return result;
+            }
+
+            if (rType == 16)
+            {
+                var name = ReadName(data, nameStart);
+                if ((name.EndsWith(RaopService, StringComparison.OrdinalIgnoreCase) || name.EndsWith(AirplayService, StringComparison.OrdinalIgnoreCase))
+                    && TxtStatusFlags(data, rdStart, rdLength) is { } flags)
+                {
+                    result.Add((name, flags));
+                }
+            }
+
+            idx = rdStart + rdLength;
+        }
+
+        return result;
+    }
+
     /// <summary>One blocking mDNS sweep; updates the cache and raises <see cref="DevicesChanged"/> when the receiver set changed.</summary>
     private void SweepNow()
     {
         var receivers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var endpoints = new Dictionary<string, (string Host, int Port)>(StringComparer.OrdinalIgnoreCase);
         var passwordRequired = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var stateFlags = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            QueryMdns(RaopService, receivers, endpoints, TimeSpan.FromMilliseconds(1500), passwordRequired);
-            QueryMdns(AirplayService, receivers, endpoints, TimeSpan.FromMilliseconds(500), passwordRequired);
+            QueryMdns(RaopService, receivers, endpoints, TimeSpan.FromMilliseconds(1500), passwordRequired, stateFlags);
+            QueryMdns(AirplayService, receivers, endpoints, TimeSpan.FromMilliseconds(500), passwordRequired, stateFlags);
         }
         catch (Exception ex)
         {
             _log.Debug(ex, "AirPlay mDNS discovery failed");
+        }
+
+        // One speaker, two service records, one truth: the same status bits arrive as
+        // "sf" on _raop and "flags" on _airplay. Merge by resolved host so whichever
+        // instance survives the collapse below still carries the state.
+        var flagsByHost = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (instance, flags) in stateFlags)
+        {
+            if (endpoints.TryGetValue(instance, out var endpoint))
+            {
+                flagsByHost[endpoint.Host] = flagsByHost.TryGetValue(endpoint.Host, out var existing) ? existing | flags : flags;
+            }
         }
 
         // One physical speaker answers BOTH service types, so it arrives twice under two
@@ -137,6 +300,9 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 ProviderId = Id,
                 ProviderName = ProviderName,
                 IsAvailable = reachable,
+                StateFlags = reachable && flagsByHost.TryGetValue(endpoint.Host, out var flags)
+                    ? flags
+                    : stateFlags.GetValueOrDefault(kvp.Key),
             });
         }
 
@@ -149,8 +315,11 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         bool changed;
         lock (_cacheLock)
         {
-            changed = !_cachedDevices.Select(d => d.DeviceId).ToHashSet(StringComparer.OrdinalIgnoreCase)
-                .SetEquals(result.Select(d => d.DeviceId));
+            // A state-flag change IS a device change: the picker shows busy/playing
+            // icons from these bits, and a receiver that just started or stopped
+            // rendering should repaint without waiting to appear or disappear.
+            changed = !_cachedDevices.Select(d => (d.DeviceId, d.StateFlags)).ToHashSet()
+                .SetEquals(result.Select(d => (d.DeviceId, d.StateFlags)));
             _cachedDevices = result;
             _cachedAt = DateTime.UtcNow;
         }
@@ -218,7 +387,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// uses. A bare join/send picks whichever adapter won the metric race, so on a host
     /// with Hyper-V switches or VPN adapters discovery worked or didn't by coin toss.
     /// </summary>
-    private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout, Dictionary<string, bool>? passwordRequired = null)
+    private static void QueryMdns(string service, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, TimeSpan timeout, Dictionary<string, bool>? passwordRequired = null, Dictionary<string, long>? stateFlags = null)
     {
         // Prefer the process's ONE mDNS socket when it's up. Opening a second socket joined
         // to the same group inside one process is two responders racing on one link, and
@@ -226,7 +395,16 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
         if (Sharing.MdnsAdvertiser.Running is { } shared)
         {
             var answers = new List<(byte[] Data, IPEndPoint From)>();
-            void Collect(byte[] data, IPEndPoint from) => answers.Add((data, from));
+            // Collect runs on the responder's receive loop while this sweep waits on its own
+            // thread, so the plain List has to be locked on both ends - an Add landing inside
+            // a snapshot copy either throws or hands back a half-filled array.
+            void Collect(byte[] data, IPEndPoint from)
+            {
+                lock (answers)
+                {
+                    answers.Add((data, from));
+                }
+            }
 
             shared.PacketReceived += Collect;
             try
@@ -239,10 +417,27 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                     System.Threading.Thread.Sleep(40);
                 }
 
-                foreach (var (data, _) in answers.ToArray())
+                shared.PacketReceived -= Collect;
+
+                (byte[] Data, IPEndPoint From)[] snapshot;
+                lock (answers)
                 {
-                    ExtractPtrNames(data, service, receivers);
-                    ExtractEndpoints(data, receivers, endpoints, passwordRequired);
+                    snapshot = [.. answers];
+                }
+
+                foreach (var (data, from) in snapshot)
+                {
+                    // Every multicast datagram on the link lands here, not just answers to our
+                    // query. One malformed packet must cost its own record, not the sweep.
+                    try
+                    {
+                        ExtractPtrNames(data, service, receivers);
+                        ExtractEndpoints(data, receivers, endpoints, passwordRequired, stateFlags);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Debug(ex, "AirPlay mDNS packet parse failed from {From}", from);
+                    }
                 }
             }
             finally
@@ -316,15 +511,25 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 continue;
             }
 
+            byte[] data;
             try
             {
-                var data = udp.Receive(ref remote);
-                ExtractPtrNames(data, service, receivers);
-                ExtractEndpoints(data, receivers, endpoints, passwordRequired);
+                data = udp.Receive(ref remote);
             }
             catch (SocketException)
             {
                 break;
+            }
+
+            // A malformed datagram costs its own record, never the rest of the sweep.
+            try
+            {
+                ExtractPtrNames(data, service, receivers);
+                ExtractEndpoints(data, receivers, endpoints, passwordRequired, stateFlags);
+            }
+            catch (Exception ex)
+            {
+                _log.Debug(ex, "AirPlay mDNS packet parse failed from {From}", remote);
             }
         }
     }
@@ -386,6 +591,10 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             int rdLength = (data[idx] << 8) | data[idx + 1];
             idx += 2;
             int rdStart = idx;
+            if (rdStart + rdLength > data.Length)
+            {
+                return;
+            }
 
             if (rType == 12) // PTR
             {
@@ -418,7 +627,7 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
     /// packet, so a single sweep normally resolves everything; a receiver whose A record
     /// didn't arrive simply stays unavailable until the next sweep.
     /// </summary>
-    internal static void ExtractEndpoints(byte[] data, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, Dictionary<string, bool>? passwordRequired = null)
+    internal static void ExtractEndpoints(byte[] data, Dictionary<string, string> receivers, Dictionary<string, (string Host, int Port)> endpoints, Dictionary<string, bool>? passwordRequired = null, Dictionary<string, long>? stateFlags = null)
     {
         if (data.Length < 12)
         {
@@ -473,9 +682,18 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 }
                 break;
 
-                case 16 when passwordRequired is not null:   // TXT
+                case 16:   // TXT
                 {
-                    passwordRequired[ReadName(data, nameStart)] = TxtDemandsPassword(data, rdStart, rdLength);
+                    var instance = ReadName(data, nameStart);
+                    if (passwordRequired is not null)
+                    {
+                        passwordRequired[instance] = TxtDemandsPassword(data, rdStart, rdLength);
+                    }
+
+                    if (stateFlags is not null && TxtStatusFlags(data, rdStart, rdLength) is { } flags)
+                    {
+                        stateFlags[instance] = flags;
+                    }
                 }
                 break;
             }
@@ -498,6 +716,49 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
                 endpoints[instance] = (host, entry.Port);
             }
         }
+    }
+
+    /// <summary>
+    /// Reads the status-flags value out of a TXT record (<c>flags</c> on _airplay,
+    /// <c>sf</c> on _raop - same bits, two spellings), or null when the record carries
+    /// neither. This is the receiver narrating its own LIVE state to the whole LAN:
+    /// bit 17 = inside an AirPlay session, bit 20 = audio pipeline running. Free to read,
+    /// no connection, and rebroadcast the moment the state changes.
+    /// </summary>
+    internal static long? TxtStatusFlags(byte[] data, int rdStart, int rdLength)
+    {
+        var end = Math.Min(rdStart + rdLength, data.Length);
+        var idx = rdStart;
+        while (idx < end)
+        {
+            int length = data[idx];
+            idx++;
+            if (length == 0 || idx + length > end)
+            {
+                break;
+            }
+
+            var entry = System.Text.Encoding.UTF8.GetString(data, idx, length);
+            idx += length;
+
+            var split = entry.IndexOf('=');
+            if (split <= 0)
+            {
+                continue;
+            }
+
+            var key = entry[..split];
+            var value = entry[(split + 1)..];
+
+            if ((key.Equals("sf", StringComparison.OrdinalIgnoreCase) || key.Equals("flags", StringComparison.OrdinalIgnoreCase))
+                && value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                && long.TryParse(value.AsSpan(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var flags))
+            {
+                return flags;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -584,10 +845,22 @@ internal sealed class AirPlayDeviceProvider : IAudioSinkProvider
             }
             if ((len & 0xC0) == 0xC0)
             {
+                // A pointer needs its second byte; a truncated or crafted packet can put the
+                // 0xC0 on the last byte, and the name is simply whatever we read so far.
+                if (idx + 1 >= data.Length)
+                {
+                    break;
+                }
                 int offset = ((len & 0x3F) << 8) | data[idx + 1];
                 idx = offset;
                 jumps++;
                 continue;
+            }
+            // A label claiming more bytes than the packet holds is a malformed (or hostile)
+            // record - stop rather than reading past the buffer.
+            if (idx + 1 + len > data.Length)
+            {
+                break;
             }
             if (sb.Length > 0) sb.Append('.');
             // UTF-8, not ASCII: RFC 6763 names carry real punctuation, and a HomePod named

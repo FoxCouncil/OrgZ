@@ -5,6 +5,13 @@ using Serilog;
 namespace OrgZ.Services.AudioOutput;
 
 /// <summary>
+/// One output that stopped working, and why - phrased for the status bar.
+/// <paramref name="NeedsPassword"/> marks the one failure the user can actually fix from
+/// here, so the UI can offer a password prompt instead of just reporting it.
+/// </summary>
+public sealed record SinkFailure(string SinkId, string DisplayName, string Reason, bool NeedsPassword = false);
+
+/// <summary>
 /// Composite audio output - holds a collection of active <see cref="IAudioSink"/>s
 /// and fans every <see cref="Write"/> out to all of them simultaneously.
 /// That's what lets the user tick multiple output devices in Settings and
@@ -36,13 +43,6 @@ namespace OrgZ.Services.AudioOutput;
 /// chunking, for every platform sink at once.
 /// </para>
 /// </remarks>
-/// <summary>
-/// One output that stopped working, and why - phrased for the status bar.
-/// <paramref name="NeedsPassword"/> marks the one failure the user can actually fix from
-/// here, so the UI can offer a password prompt instead of just reporting it.
-/// </summary>
-public sealed record SinkFailure(string SinkId, string DisplayName, string Reason, bool NeedsPassword = false);
-
 public sealed class AudioSinkBus : IDisposable
 {
     /// <summary>
@@ -118,6 +118,14 @@ public sealed class AudioSinkBus : IDisposable
 
         lock (_lock)
         {
+            // What the delay lines hold is in the OLD format - a different rate or depth, so
+            // the same bytes are a different length of music. Start them again.
+            if (_format != format)
+            {
+                ResetDelays();
+                Realign();
+            }
+
             _format = format;
             foreach (var sink in _sinks)
             {
@@ -140,13 +148,112 @@ public sealed class AudioSinkBus : IDisposable
 
             _sinks.Add(sink);
             _sinkSnapshot = [.. _sinks];
-            if (_format.HasValue)
+            Realign();
+
+            // A sink that joins live audio opens now. So does one that asks to be opened on
+            // selection - a network receiver, which wants its pairing and its buffer done
+            // before the first note rather than after it.
+            //
+            // The old rule opened neither while stopped, because running the handshake made
+            // a HomePod show itself as playing with nothing playing. That is now handled
+            // where it belongs: the session announces a paused state until audio actually
+            // arrives, so it can hold the speaker without lying about it.
+            if (IsAudioFlowing || sink.HoldsSessionWhenIdle)
             {
-                TryOpen(sink, _format.Value);
+                // A receiver that wants an early open may be selected before anything has
+                // ever played, so there is no format to inherit. AirPlay is 44.1kHz stereo
+                // whatever the source, which makes CD the honest default rather than a guess.
+                TryOpen(sink, _format ?? AudioFormat.CdDaStereo16);
             }
         }
 
+        HookRemoteControl(sink);
+
+        // A sink usually joins mid-track - the user picks a speaker while something is
+        // already playing - and SetTrackInfo has long since been and gone. Replay it, or the
+        // receiver shows nothing until the next track and never learns this one's length.
+        if (_nowPlaying is { } track)
+        {
+            TrySetTrackInfo(sink, track);
+        }
+
         _log.Information("AudioSinkBus: added sink {Id} ({Name})", sink.Id, sink.DisplayName);
+    }
+
+    /// <summary>
+    /// A device asked us to change playback - the play/pause and skip buttons on an AirPlay
+    /// receiver's Home-app tile. Carries the four-character command code.
+    /// </summary>
+    public event EventHandler<string>? RemoteCommand;
+
+    /// <summary>
+    /// A device changed its own volume - carries which output it was and a linear 0-1 level.
+    ///
+    /// The id matters: a speaker's volume is ITS volume. Without knowing which one moved,
+    /// the only thing a listener can do is guess, and with two receivers selected the guess
+    /// is wrong half the time.
+    /// </summary>
+    public event EventHandler<(string SinkId, float Level)>? RemoteVolume;
+
+    private void HookRemoteControl(IAudioSink sink)
+    {
+        if (sink is IRemoteControllableSink remote)
+        {
+            remote.RemoteCommand += OnSinkRemoteCommand;
+            remote.RemoteVolume += OnSinkRemoteVolume;
+        }
+    }
+
+    private void UnhookRemoteControl(IAudioSink sink)
+    {
+        if (sink is IRemoteControllableSink remote)
+        {
+            remote.RemoteCommand -= OnSinkRemoteCommand;
+            remote.RemoteVolume -= OnSinkRemoteVolume;
+        }
+    }
+
+    private void OnSinkRemoteCommand(object? sender, string command) => RemoteCommand?.Invoke(this, command);
+
+    private void OnSinkRemoteVolume(object? sender, float level)
+    {
+        if (sender is IAudioSink sink)
+        {
+            RemoteVolume?.Invoke(this, (sink.Id, level));
+        }
+    }
+
+    /// <summary>What is playing now, kept so a sink added mid-track can be told.</summary>
+    private (string? Title, string? Artist, string? Album, TimeSpan? Duration, byte[]? Artwork)? _nowPlaying;
+
+    /// <summary>
+    /// Passes the current track to every open sink. Local outputs ignore it; a network
+    /// receiver uses it for its display and, more importantly, for the stream's length.
+    /// </summary>
+    public void SetTrackInfo(string? title, string? artist, string? album, TimeSpan? duration, byte[]? artwork)
+    {
+        var track = (title, artist, album, duration, artwork);
+        _nowPlaying = track;
+
+        _log.Information("AudioSinkBus: track info {Title} -> {Count} sink(s)", title ?? "(none)", _sinkSnapshot.Length);
+
+        foreach (var sink in _sinkSnapshot)
+        {
+            TrySetTrackInfo(sink, track);
+        }
+    }
+
+    private void TrySetTrackInfo(IAudioSink sink, (string? Title, string? Artist, string? Album, TimeSpan? Duration, byte[]? Artwork) track)
+    {
+        try
+        {
+            sink.SetTrackInfo(track.Title, track.Artist, track.Album, track.Duration, track.Artwork);
+        }
+        catch (Exception ex)
+        {
+            // Decoration must never take down playback.
+            _log.Warning(ex, "AudioSinkBus: sink {Id} rejected track info", sink.Id);
+        }
     }
 
     public void Remove(string sinkId)
@@ -161,6 +268,7 @@ public sealed class AudioSinkBus : IDisposable
                     removed = _sinks[i];
                     _sinks.RemoveAt(i);
                     _sinkSnapshot = [.. _sinks];
+                    Realign();
                     break;
                 }
             }
@@ -168,6 +276,9 @@ public sealed class AudioSinkBus : IDisposable
 
         if (removed != null)
         {
+            _delays.TryRemove(removed.Id, out _);
+            _unmeasured.TryRemove(removed.Id, out _);
+            UnhookRemoteControl(removed);
             _log.Information("AudioSinkBus: removed sink {Id}", removed.Id);
             removed.Dispose();
         }
@@ -178,7 +289,13 @@ public sealed class AudioSinkBus : IDisposable
     /// pause callback so the user's click is audible immediately rather than
     /// after the per-sink buffer queue drains.
     /// </summary>
-    public void PauseAll() => ForEachSink(s => s.Pause());
+    public void PauseAll()
+    {
+        // A paused network receiver drops the seconds it was holding, so an aligned local
+        // output has to drop the same seconds or resume ahead of it.
+        ResetDelays();
+        ForEachSink(s => s.Pause());
+    }
 
     public void ResumeAll() => ForEachSink(s => s.Resume());
 
@@ -193,6 +310,8 @@ public sealed class AudioSinkBus : IDisposable
         {
             _accumFill = 0;
         }
+
+        ResetDelays();
         ForEachSink(s => s.Flush());
     }
 
@@ -261,6 +380,8 @@ public sealed class AudioSinkBus : IDisposable
             drained = [.. _sinks];
             _sinks.Clear();
             _sinkSnapshot = [];
+            _delays.Clear();
+            _unmeasured.Clear();
         }
 
         foreach (var sink in drained)
@@ -328,6 +449,19 @@ public sealed class AudioSinkBus : IDisposable
         // engine swap could otherwise pick the wrong scaling branch for one buffer.
         var format = _format;
 
+        Interlocked.Exchange(ref _lastWriteTicks, Environment.TickCount64);
+
+        // Audio is arriving, so any sink still shut is one that was picked while nothing was
+        // playing. THIS is where it opens.
+        //
+        // Add deliberately refuses to open a sink while the app is stopped - opening an
+        // AirPlay session runs the handshake through RECORD, and RECORD tells a receiver a
+        // stream is starting, so merely ticking a HomePod in the picker made it show itself
+        // as playing. But refusing there and nowhere else meant the speaker then stayed silent
+        // for the whole session: nothing ever came back to open it. A write is the one moment
+        // that is unambiguously "audio is flowing now".
+        OpenIdleSinks(sinks, format);
+
         // Before the early-out: with no open sink there is no clock, and that has to be
         // supplied here or playback races (see PaceIfUnclocked).
         PaceIfUnclocked(pcm.Length, format, sinks);
@@ -358,13 +492,24 @@ public sealed class AudioSinkBus : IDisposable
             buffer = scratch.AsSpan(0, pcm.Length);
         }
 
+        // The slowest open output sets the beat everything else marches to.
+        var slowest = SlowestLatency(sinks);
+        byte[]? delayScratch = null;
+        var measured = false;
+
         try
         {
             foreach (var sink in sinks)
             {
                 try
                 {
-                    sink.Write(buffer);
+                    var delayed = Align(sink, buffer, format, slowest, ref delayScratch);
+                    sink.Write(delayed);
+
+                    if (!_unmeasured.IsEmpty && _unmeasured.TryRemove(sink.Id, out _))
+                    {
+                        measured = true;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -378,12 +523,226 @@ public sealed class AudioSinkBus : IDisposable
             {
                 System.Buffers.ArrayPool<byte>.Shared.Return(scratch);
             }
+            if (delayScratch != null)
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(delayScratch);
+            }
+        }
+
+        // Something now knows how deep it really is, so line the outputs up again against the
+        // measurement instead of the opening guess - see _unmeasured. Done after the loop so
+        // the sinks in this one buffer are all aligned the same way.
+        if (measured)
+        {
+            Realign();
+        }
+    }
+
+    /// <summary>
+    /// Outputs that have been opened but never written to, and so cannot yet say how far
+    /// behind they run.
+    ///
+    /// A local sink sizes its queue in BUFFERS, and the size of a buffer is whatever the
+    /// decoder hands over - 50ms of hi-res slivers aggregated, 93ms of a 44.1kHz FLAC block.
+    /// Until the first write it can only quote the bus's aggregation target, which for FLAC is
+    /// out by nearly half. A second sound card ticked mid-track was therefore lined up against
+    /// that guess and, since alignment is worked out once, stayed a sixth of a second away from
+    /// the first one for the rest of the session. The first write is where the real figure
+    /// appears, so it counts as an alignment event.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _unmeasured = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// One output's delay line, kept for as long as the sink is on the bus. Keyed by id
+    /// because the sink itself is replaced on a format change and the alignment isn't.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SinkDelayLine> _delays = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Bumped whenever the set of outputs or the stream format changes - the only things
+    /// that can genuinely move the alignment. Delay lines re-prime when it moves and at no
+    /// other time.
+    /// </summary>
+    private int _alignment;
+
+    /// <summary>Marks the alignment stale, so every line re-primes on the next buffer.</summary>
+    private void Realign() => Interlocked.Increment(ref _alignment);
+
+    /// <summary>
+    /// How far into the track the LISTENER is, when that differs from the decoder - or null
+    /// when it doesn't.
+    ///
+    /// It differs when every output is a distant one. A sound card plays what it is given
+    /// almost at once, so with any local output selected the decoder's clock IS what the room
+    /// hears. With only an AirPlay receiver, the room is a couple of seconds behind, and a
+    /// timeline that ignores that is a timeline that disagrees with the music playing in it.
+    ///
+    /// The slowest reporting output wins, since that is the one still to finish.
+    /// </summary>
+    public TimeSpan? ListenerPosition
+    {
+        get
+        {
+            TimeSpan? position = null;
+
+            foreach (var sink in _sinkSnapshot)
+            {
+                if (!sink.IsOpen)
+                {
+                    continue;
+                }
+
+                // A local output anywhere in the mix means the decoder's clock is honest;
+                // there is nothing to correct and nothing to guess at.
+                if (sink.OutputLatency < TimeSpan.FromMilliseconds(500))
+                {
+                    return null;
+                }
+
+                if (sink.PlaybackPosition is { } reported && (position is null || reported > position))
+                {
+                    position = reported;
+                }
+            }
+
+            return position;
+        }
+    }
+
+    /// <summary>The deepest latency among the outputs actually playing.</summary>
+    private static TimeSpan SlowestLatency(IAudioSink[] sinks)
+    {
+        var slowest = TimeSpan.Zero;
+        foreach (var sink in sinks)
+        {
+            if (sink.IsOpen && sink.OutputLatency > slowest)
+            {
+                slowest = sink.OutputLatency;
+            }
+        }
+
+        return slowest;
+    }
+
+    /// <summary>
+    /// Holds one sink back by the difference between its latency and the slowest sink's, so
+    /// the same instant of music leaves every speaker at once.
+    ///
+    /// The common case - one output, or several equally quick ones - allocates nothing and
+    /// touches no buffer: there is nothing to align, so the caller's own span goes straight
+    /// through.
+    /// </summary>
+    private ReadOnlySpan<byte> Align(IAudioSink sink, ReadOnlySpan<byte> pcm, AudioFormat? format, TimeSpan slowest, ref byte[]? scratch)
+    {
+        if (format is not { BytesPerSecond: > 0 } clock || !sink.IsOpen)
+        {
+            return pcm;
+        }
+
+        // A distant output that reports nothing has not told us how far ahead it needs its
+        // audio - only that it has not been asked, or does not know yet. Taking that zero at
+        // face value inverts the whole idea: the far speaker gets held back to match a local
+        // ring, on top of the seconds it already buffers. Leave it alone until it says.
+        if (sink.HoldsSessionWhenIdle && sink.OutputLatency == TimeSpan.Zero)
+        {
+            return pcm;
+        }
+
+        var behind = slowest - sink.OutputLatency;
+        var delayBytes = behind > TimeSpan.Zero ? (int)(behind.TotalSeconds * clock.BytesPerSecond) : 0;
+        delayBytes -= delayBytes % Math.Max(clock.BytesPerFrame, 1);
+
+        if (delayBytes <= 0 && !_delays.ContainsKey(sink.Id))
+        {
+            return pcm;
+        }
+
+        var line = _delays.GetOrAdd(sink.Id, _ => new SinkDelayLine());
+
+        // Aligned ONCE, and then left alone until something really changes.
+        //
+        // Re-priming a line costs that sink a delay's worth of silence, so it must happen on
+        // events - a speaker joining or leaving, a format change - and never on measurement
+        // noise. Comparing the reported latency against the configured one looked equivalent
+        // and was not: a sink reports its depth in whole buffers, so an output holding four
+        // 50ms buffers reports 200ms or 150ms depending on which side of a callback it is
+        // asked. Any threshold fine enough to catch a real change is finer than that step,
+        // so the line was re-primed on almost every write and the output it was meant to
+        // align played nothing but its own priming silence.
+        if (line.Generation != _alignment)
+        {
+            line.Generation = _alignment;
+            _log.Information("AudioSinkBus: {Id} aligned {Ms}ms behind the slowest output", sink.Id, (int)behind.TotalMilliseconds);
+            line.Configure(delayBytes, pcm.Length);
+        }
+
+        if (line.DelayBytes <= 0)
+        {
+            return pcm;
+        }
+
+        scratch ??= System.Buffers.ArrayPool<byte>.Shared.Rent(pcm.Length);
+        if (scratch.Length < pcm.Length)
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(scratch);
+            scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(pcm.Length);
+        }
+
+        var output = scratch.AsSpan(0, pcm.Length);
+        line.Process(pcm, output);
+        return output;
+    }
+
+    /// <summary>
+    /// Drops what the delay lines hold. Called for seek and pause, where the audio in them
+    /// belongs to a moment the listener has just left - and never for a track change, where
+    /// it is simply the end of the song still on its way to the speaker.
+    /// </summary>
+    private void ResetDelays()
+    {
+        foreach (var line in _delays.Values)
+        {
+            line.RequestReset();
+        }
+    }
+
+    /// <summary>
+    /// Opens any sink that isn't. Cheap in the common case - every sink is already open and
+    /// this is a field read each - and rate-limited for the one that isn't by TryOpen's own
+    /// cooldown, so a receiver that refuses to pair is retried every five seconds rather than
+    /// twenty times a second.
+    /// </summary>
+    private void OpenIdleSinks(IAudioSink[] sinks, AudioFormat? format)
+    {
+        if (format is not { } current)
+        {
+            return;
+        }
+
+        foreach (var sink in sinks)
+        {
+            if (!sink.IsOpen)
+            {
+                TryOpen(sink, current);
+            }
         }
     }
 
     // Wall-clock state for PaceIfUnclocked. Only touched from the audio thread.
     private long _paceStart;
     private long _pacedBytes;
+
+    /// <summary>When audio last reached the bus - the difference between stopped and playing.</summary>
+    private long _lastWriteTicks;
+
+    /// <summary>
+    /// True when audio has arrived recently enough that playback is genuinely running.
+    ///
+    /// The window is generous on purpose: a decoder gap between tracks is not "stopped", and
+    /// treating it as such would tear a network session down and pay for the handshake again
+    /// on the next track.
+    /// </summary>
+    private bool IsAudioFlowing => Environment.TickCount64 - Interlocked.Read(ref _lastWriteTicks) < 3000;
 
     /// <summary>
     /// Supplies a playback clock when no sink is open to provide one.
@@ -445,15 +804,15 @@ public sealed class AudioSinkBus : IDisposable
     // A sink that just refused to open must not be retried on every buffer. The bus calls
     // TryOpen ~20x/second, which turned one locked-out AirPlay receiver into a flood of
     // identical warnings - and, worse, kept restarting the receiver's own lockout timer.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _openFailedAt = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long At, string Reason)> _openFailedAt = new(StringComparer.Ordinal);
     private const int ReopenCooldownMs = 5000;
 
     // Instance, not static: a failed open raises SinkFailed so the UI can say why.
     private void TryOpen(IAudioSink sink, AudioFormat format)
     {
-        if (!sink.IsOpen
-            && _openFailedAt.TryGetValue(sink.Id, out var failedAt)
-            && Environment.TickCount64 - failedAt < ReopenCooldownMs)
+        var previous = _openFailedAt.TryGetValue(sink.Id, out var failure) ? failure : default;
+
+        if (!sink.IsOpen && previous.At != 0 && Environment.TickCount64 - previous.At < ReopenCooldownMs)
         {
             return;
         }
@@ -476,19 +835,39 @@ public sealed class AudioSinkBus : IDisposable
                     return;
                 }
 
+                // For a network sink this is a whole new session: pairing, handshake, and a
+                // display that goes blank in between. Worth saying which change caused it.
+                _log.Information("AudioSinkBus: reopening {Id} - {OldRate}Hz/{OldBits}-bit cannot become {NewRate}Hz/{NewBits}-bit",
+                    sink.Id, sink.CurrentFormat?.SampleRate, sink.CurrentFormat?.BitsPerSample, format.SampleRate, format.BitsPerSample);
+
                 sink.Close();
             }
             sink.Open(format);
             _openFailedAt.TryRemove(sink.Id, out _);
+            _unmeasured[sink.Id] = 0;
+
+            // An output that has just opened has a latency it did not have a moment ago -
+            // an AirPlay receiver goes from nothing to two seconds - so everything else has
+            // to be lined up against it again.
+            Realign();
         }
         catch (Exception ex)
         {
-            _openFailedAt[sink.Id] = Environment.TickCount64;
-            _log.Warning(ex, "AudioSinkBus: failed to open {Id}", sink.Id);
-            // A sink that can't open produces silence on that output. The log alone left
-            // the user staring at a playing track with no sound and no explanation.
-            SinkFailed?.Invoke(this, new SinkFailure(sink.Id, sink.DisplayName, ex.Message,
-                sink is AirPlay.AirPlayRaopSink { NeedsPassword: true }));
+            _openFailedAt[sink.Id] = (Environment.TickCount64, ex.Message);
+
+            // ONCE per reason, not once per attempt.
+            //
+            // A sink that can't open produces silence on that output, and the log alone left
+            // the user staring at a playing track with no sound and no explanation. But the
+            // retry runs for as long as the track does, and telling someone the same thing
+            // every five seconds is its own kind of broken - the message is news the first
+            // time and noise afterwards.
+            if (previous.Reason != ex.Message)
+            {
+                _log.Warning(ex, "AudioSinkBus: failed to open {Id}", sink.Id);
+                SinkFailed?.Invoke(this, new SinkFailure(sink.Id, sink.DisplayName, ex.Message,
+                    sink is AirPlay.AirPlayRaopSink { NeedsPassword: true }));
+            }
         }
     }
 
@@ -500,7 +879,16 @@ public sealed class AudioSinkBus : IDisposable
 
     /// <summary>Lets a sink report an asynchronous failure (e.g. a network handshake that fails after Open).</summary>
     internal void ReportSinkFailure(string id, string displayName, string reason, bool needsPassword = false)
-        => SinkFailed?.Invoke(this, new SinkFailure(id, displayName, reason, needsPassword));
+    {
+        // A sink dropping out changes which output is the slowest, and the delay lines were
+        // primed for the old answer. Without this the local speakers keep running two seconds
+        // behind an AirPlay receiver that is no longer in the mix - silence for two seconds,
+        // then permanently late audio, for a fault the user never sees explained.
+        ResetDelays();
+        Realign();
+
+        SinkFailed?.Invoke(this, new SinkFailure(id, displayName, reason, needsPassword));
+    }
 
     public void Dispose()
     {

@@ -25,6 +25,26 @@ public sealed record AudioDeviceInfo
     public bool IsDefault { get; init; }
     public bool IsAvailable { get; init; } = true;
 
+    /// <summary>
+    /// Status flags the receiver broadcasts in its mDNS TXT record - live state, read
+    /// passively off the LAN with no connection. Zero for local devices and for network
+    /// receivers whose record carried none.
+    /// </summary>
+    public long StateFlags { get; init; }
+
+    /// <summary>The receiver is inside an AirPlay session right now (status bit 17).</summary>
+    public bool IsReceivingAirPlay => (StateFlags & 0x20000) != 0;
+
+    /// <summary>The receiver's audio pipeline is running - it is audibly playing (status bit 20).</summary>
+    public bool IsPlayingAudio => (StateFlags & 0x100000) != 0;
+
+    /// <summary>
+    /// Selecting this receiver would take it over from whatever is driving it now.
+    /// AirPlay 2 receivers preempt SILENTLY - a new session simply wins - so anything
+    /// that connects while this is true should say so to the user first.
+    /// </summary>
+    public bool IsBusy => IsReceivingAirPlay || IsPlayingAudio;
+
     public string QualifiedId => $"{ProviderId}:{DeviceId}";
 
     public static (string ProviderId, string DeviceId) SplitQualified(string qualifiedId)

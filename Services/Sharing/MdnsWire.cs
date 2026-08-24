@@ -189,8 +189,11 @@ public static class MdnsWire
 
         var instanceFqdn = $"{instance.InstanceName}.{serviceType}";
 
-        // PTR: service type → this instance
-        WriteRecord(records, serviceType, TypePtr, ttlSeconds, cacheFlush, data =>
+        // PTR: service type → this instance. Never cache-flush, even on an announcement:
+        // RFC 6762 §10.2 - the service-type PTR is a SHARED record, one entry per instance
+        // on the link, so flushing it evicts every OTHER controller's/share's PTR from the
+        // receiver's cache. Only the SRV/TXT/A below are ours alone to overwrite.
+        WriteRecord(records, serviceType, TypePtr, ttlSeconds, false, data =>
         {
             WriteName(data, instanceFqdn);
         });

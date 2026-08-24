@@ -427,6 +427,88 @@ public class RaopProtocolTests
         Assert.Empty(endpoints);
     }
 
+    // ===== Receiver state flags (busy / playing, broadcast in TXT) =====
+
+    [Fact]
+    public void Txt_status_flags_parse_from_both_spellings()
+    {
+        // "flags" on _airplay, "sf" on _raop - same bits. Values from a real Speaker:
+        // idle vs an active iPhone realtime session.
+        var airplay = BuildTxtResponse(["Speaker", "_airplay", "_tcp", "local"], "flags=0x5b8c84");
+        var raop = BuildTxtResponse(["AABBCCDDEEFF@Speaker", "_raop", "_tcp", "local"], "sf=0x98484");
+
+        Assert.Equal((0x5B8C84L, "Speaker._airplay._tcp.local"),
+            (AirPlayDeviceProvider.ExtractAnnouncedFlags(airplay)[0].Flags, AirPlayDeviceProvider.ExtractAnnouncedFlags(airplay)[0].Instance));
+        Assert.Equal(0x98484L, AirPlayDeviceProvider.ExtractAnnouncedFlags(raop)[0].Flags);
+    }
+
+    [Fact]
+    public void Txt_records_for_other_services_carry_no_state_flags()
+    {
+        var other = BuildTxtResponse(["Printer", "_ipp", "_tcp", "local"], "flags=0x5b8c84");
+        Assert.Empty(AirPlayDeviceProvider.ExtractAnnouncedFlags(other));
+    }
+
+    [Fact]
+    public void State_flag_bits_read_as_busy_and_playing()
+    {
+        var device = new AudioDeviceInfo
+        {
+            DeviceId = "d",
+            DisplayName = "d",
+            ProviderId = "p",
+            ProviderName = "p",
+        };
+
+        // 0x5B8C84: a HomePod rendering an iPhone realtime session (receiving + playing).
+        var active = device with { StateFlags = 0x5B8C84 };
+        Assert.True(active.IsReceivingAirPlay);
+        Assert.True(active.IsPlayingAudio);
+        Assert.True(active.IsBusy);
+
+        // 0x98484: the same pod idle.
+        var idle = device with { StateFlags = 0x98484 };
+        Assert.False(idle.IsReceivingAirPlay);
+        Assert.False(idle.IsPlayingAudio);
+        Assert.False(idle.IsBusy);
+
+        // A local sound card has no flags at all.
+        Assert.False(device.IsBusy);
+    }
+
+    /// <summary>Hand-built mDNS response holding a single TXT record.</summary>
+    private static byte[] BuildTxtResponse(string[] nameLabels, params string[] entries)
+    {
+        var bytes = new List<byte>
+        {
+            0x00, 0x00,             // id
+            0x84, 0x00,             // flags: response, authoritative
+            0x00, 0x00,             // QDCOUNT 0
+            0x00, 0x01,             // ANCOUNT 1
+            0x00, 0x00, 0x00, 0x00, // NSCOUNT, ARCOUNT
+        };
+
+        foreach (var label in nameLabels)
+        {
+            bytes.Add((byte)label.Length);
+            bytes.AddRange(System.Text.Encoding.ASCII.GetBytes(label));
+        }
+        bytes.Add(0);
+
+        bytes.AddRange([0x00, 0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x78]);   // type TXT, class IN, ttl
+
+        var txtData = new List<byte>();
+        foreach (var entry in entries)
+        {
+            txtData.Add((byte)entry.Length);
+            txtData.AddRange(System.Text.Encoding.ASCII.GetBytes(entry));
+        }
+        bytes.AddRange([(byte)(txtData.Count >> 8), (byte)(txtData.Count & 0xFF)]);
+        bytes.AddRange(txtData);
+
+        return [.. bytes];
+    }
+
     /// <summary>Hand-built mDNS response: SRV for the Kitchen instance + an A record for its target.</summary>
     private static byte[] BuildMdnsResponse()
     {

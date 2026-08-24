@@ -58,6 +58,41 @@ internal sealed class WaveOutSink : IAudioSink
     public AudioFormat? CurrentFormat { get; private set; }
     public bool IsOpen => _handle != IntPtr.Zero;
 
+    // The size of the last buffer handed over, so latency can be reported in time rather
+    // than in slots - the same four slots are 200ms of 50ms writes and 372ms of 93ms ones.
+    private volatile int _lastWriteBytes;
+
+    /// <summary>
+    /// Write to audible: the ring, which sits full while anything is playing because Write
+    /// blocks for a slot rather than growing.
+    ///
+    /// Small, but not nothing - and it is subtracted from the delay the bus applies to hold
+    /// this output back for a slower one. Reporting zero here would leave the local speaker
+    /// running a fifth of a second behind an AirPlay receiver we had otherwise lined up
+    /// exactly.
+    ///
+    /// Before the first buffer arrives the size of a write can only be guessed at (the bus's
+    /// aggregation target, which a 44.1kHz FLAC block overshoots by nearly half), so the bus
+    /// treats a sink's first write as an alignment event and lines everything up again once
+    /// this figure is measured rather than assumed.
+    /// </summary>
+    public TimeSpan OutputLatency
+    {
+        get
+        {
+            if (!IsOpen || CurrentFormat is not { } format || format.BytesPerSecond <= 0)
+            {
+                return TimeSpan.Zero;
+            }
+
+            var bytes = _lastWriteBytes > 0
+                ? _lastWriteBytes
+                : format.BytesPerSecond * AudioSinkBus.AggregateTargetMs / 1000;
+
+            return TimeSpan.FromSeconds((double)bytes * RingSize / format.BytesPerSecond);
+        }
+    }
+
     public float Volume
     {
         get => _volume;
@@ -196,6 +231,7 @@ internal sealed class WaveOutSink : IAudioSink
         }
 
         pcm.CopyTo(_buffers[slot]);
+        _lastWriteBytes = pcm.Length;
 
         // The slot's header block is reused; only its two live fields are rewritten.
         var headerPtr = _headerPtrs[slot];
@@ -383,6 +419,11 @@ internal sealed class WaveOutSink : IAudioSink
                 _buffers[i] = null!;
             }
             _next = 0;
+
+            // The measured write size belongs to the format that just closed. Carrying it into
+            // the next Open makes OutputLatency report a 44.1 kHz buffer's worth of time for a
+            // 192 kHz one, and the bus primes its delay lines off exactly that number.
+            _lastWriteBytes = 0;
             WaveNative.waveOutClose(_handle);
             _handle = IntPtr.Zero;
             CurrentFormat = null;

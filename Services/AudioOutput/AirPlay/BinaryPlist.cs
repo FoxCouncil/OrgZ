@@ -20,6 +20,9 @@ internal static class BinaryPlist
 
     // ── Writing ──────────────────────────────────────────────
 
+    /// <summary>Apple's reference date - CFDate counts seconds from here, not from 1970.</summary>
+    internal static readonly DateTime AppleEpoch = new(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     public static byte[] Write(object? root)
     {
         // Flatten first: the format addresses objects by index, so every node needs an id
@@ -134,6 +137,21 @@ internal static class BinaryPlist
                 var bytes = new byte[8];
                 BinaryPrimitives.WriteDoubleBigEndian(bytes, real);
                 output.Write(bytes);
+            }
+            break;
+
+            case DateTime date:
+            {
+                // CFDate: marker 0x33, then a big-endian double of SECONDS SINCE
+                // 2001-01-01 UTC - Apple's epoch, not Unix's. MediaRemote's now-playing
+                // Timestamp is one of these, and the receiver extrapolates the playback
+                // position from it, so an epoch 31 years out is not a cosmetic error.
+                output.WriteByte(0x33);
+
+                var seconds = (date.ToUniversalTime() - AppleEpoch).TotalSeconds;
+                var stamp = new byte[8];
+                BinaryPrimitives.WriteDoubleBigEndian(stamp, seconds);
+                output.Write(stamp);
             }
             break;
 
@@ -273,11 +291,24 @@ internal static class BinaryPlist
             offsets[i] = (int)ReadSized(data[(tableStart + (i * offsetSize))..], offsetSize);
         }
 
-        return ReadObject(data, offsets, refSize, rootIndex);
+        return ReadObject(data, offsets, refSize, rootIndex, 0);
     }
 
-    private static object? ReadObject(ReadOnlySpan<byte> data, int[] offsets, int refSize, int index)
+    /// <summary>
+    /// Containers address their children by object id, so nothing in the format stops a
+    /// receiver from sending a dict whose value points back at itself. That recurses until
+    /// the stack dies, and a StackOverflowException can't be caught - the depth cap is the
+    /// only thing between a hostile (or merely broken) peer and the process.
+    /// </summary>
+    private const int MaxDepth = 64;
+
+    private static object? ReadObject(ReadOnlySpan<byte> data, int[] offsets, int refSize, int index, int depth)
     {
+        if (depth > MaxDepth)
+        {
+            throw new InvalidDataException("bplist nesting too deep.");
+        }
+
         if (index < 0 || index >= offsets.Length)
         {
             return null;
@@ -303,7 +334,30 @@ internal static class BinaryPlist
 
             case 0x20:
             {
-                return BinaryPrimitives.ReadDoubleBigEndian(data[(pos + 1)..]);
+                // The nibble is the width exponent: 0x22 is a 4-byte float, 0x23 an 8-byte
+                // double. Reading eight bytes either way decodes a float32 as garbage that
+                // spills into the next object.
+                if (length == 2)
+                {
+                    return (double)BinaryPrimitives.ReadSingleBigEndian(data[(pos + 1)..]);
+                }
+
+                if (length == 3)
+                {
+                    return BinaryPrimitives.ReadDoubleBigEndian(data[(pos + 1)..]);
+                }
+
+                throw new InvalidDataException($"Unsupported bplist real width {1 << length}.");
+            }
+
+            case 0x30:
+            {
+                // CFDate - the same big-endian double as a real, counted from Apple's epoch
+                // rather than Unix's. The writer has emitted these since the now-playing push
+                // needed one; a reader that couldn't take them back made the format
+                // asymmetric, which is only ever discovered by something that reads its own
+                // output.
+                return AppleEpoch.AddSeconds(BinaryPrimitives.ReadDoubleBigEndian(data[(pos + 1)..]));
             }
 
             case 0x40:
@@ -330,7 +384,7 @@ internal static class BinaryPlist
                 var array = new List<object?>(len);
                 for (var i = 0; i < len; i++)
                 {
-                    array.Add(ReadObject(data, offsets, refSize, (int)ReadSized(data[(start + (i * refSize))..], refSize)));
+                    array.Add(ReadObject(data, offsets, refSize, (int)ReadSized(data[(start + (i * refSize))..], refSize), depth + 1));
                 }
                 return array;
             }
@@ -343,9 +397,9 @@ internal static class BinaryPlist
                 {
                     var keyIndex = (int)ReadSized(data[(start + (i * refSize))..], refSize);
                     var valueIndex = (int)ReadSized(data[(start + ((len + i) * refSize))..], refSize);
-                    if (ReadObject(data, offsets, refSize, keyIndex) is string key)
+                    if (ReadObject(data, offsets, refSize, keyIndex, depth + 1) is string key)
                     {
-                        dict[key] = ReadObject(data, offsets, refSize, valueIndex);
+                        dict[key] = ReadObject(data, offsets, refSize, valueIndex, depth + 1);
                     }
                 }
                 return dict;

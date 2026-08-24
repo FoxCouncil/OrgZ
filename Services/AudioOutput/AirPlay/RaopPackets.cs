@@ -67,6 +67,26 @@ internal static class RaopPackets
     }
 
     /// <summary>
+    /// The PTP-session flavor of the sync packet: PT 0xD7 "time announce", 28 bytes. The
+    /// timeline is expressed against the sender's PTP clock (nanoseconds) instead of NTP
+    /// wall time, and NAMES that clock, so the receiver knows whose time it is hearing.
+    /// rtptime here is the earliest PLAYABLE packet (now - 11025) rather than the next
+    /// packet - a different meaning than the NTP sync carries, per the reference sender.
+    /// </summary>
+    public static byte[] BuildSyncPtp(uint nowTimestamp, ulong ptpNanoseconds, ulong clockId, bool first)
+    {
+        var packet = new byte[28];
+        packet[0] = (byte)(0x80 | (first ? 0x10 : 0));
+        packet[1] = 0xD7;
+        BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(2), 6);
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(4), nowTimestamp);
+        BinaryPrimitives.WriteUInt64BigEndian(packet.AsSpan(8), ptpNanoseconds);
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(16), nowTimestamp - 11025);
+        BinaryPrimitives.WriteUInt64BigEndian(packet.AsSpan(20), clockId);
+        return packet;
+    }
+
+    /// <summary>
     /// Answers a receiver's timing query (type 82). The reply echoes the query's transmit
     /// stamp as "origin", then our receive and transmit stamps - a three-stamp exchange the
     /// receiver uses to work out the offset between the two clocks.

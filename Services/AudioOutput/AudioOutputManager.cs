@@ -182,7 +182,19 @@ public sealed class AudioOutputManager : IDisposable
     /// <paramref name="selections"/>.  Sinks no longer selected are disposed;
     /// new sinks are opened against the current format.
     /// </summary>
-    public void ApplySelections(IEnumerable<SinkSelection> selections)
+    public void ApplySelections(IEnumerable<SinkSelection> selections) => ApplySelections(selections, unattended: false);
+
+    /// <summary>
+    /// As above, but <paramref name="unattended"/> marks the case where nobody asked for this
+    /// right now - restoring what was selected at the last shutdown.
+    ///
+    /// That distinction matters for AirPlay. Selecting a receiver opens a session immediately,
+    /// and an AirPlay 2 receiver hands itself over silently, mid-song, to whoever asks last. The
+    /// picker asks the user before doing that to a speaker somebody else is using; a restore at
+    /// launch has no user to ask, so it declines instead - starting OrgZ must never cut off the
+    /// music playing in another room.
+    /// </summary>
+    public void ApplySelections(IEnumerable<SinkSelection> selections, bool unattended)
     {
         var desired = selections.ToList();
         var desiredIds = desired.Select(s => s.QualifiedId).ToHashSet();
@@ -230,6 +242,12 @@ public sealed class AudioOutputManager : IDisposable
             if (!deviceInfo.IsAvailable)
             {
                 _log.Information("ApplySelections: {Id} is not available for playback (discovery-only) — skipping", sel.QualifiedId);
+                continue;
+            }
+
+            if (unattended && deviceInfo.IsBusy)
+            {
+                _log.Information("ApplySelections: {Id} is in use by another sender — not reconnecting unattended", sel.QualifiedId);
                 continue;
             }
 
@@ -337,7 +355,7 @@ public sealed class AudioOutputManager : IDisposable
             }
         }
 
-        ApplySelections(selections);
+        ApplySelections(selections, unattended: true);
     }
 
     private List<SinkSelection> DefaultSelection()

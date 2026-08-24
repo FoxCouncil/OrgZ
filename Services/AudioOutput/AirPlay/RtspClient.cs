@@ -36,6 +36,14 @@ internal sealed class RtspClient : IDisposable
     private int _cSeq;
     private bool _disposed;
 
+    /// <summary>
+    /// One request in flight at a time. RTSP replies carry no way to match them to a
+    /// request beyond arriving in order, and the session now writes from several places at
+    /// once - the feedback heartbeat, progress updates, metadata, and volume changes. Two
+    /// overlapping sends would interleave on the wire and each would read the other's reply.
+    /// </summary>
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
     /// <summary>Headers sent on every request - identity the receiver logs and keys sessions on.</summary>
     public Dictionary<string, string> DefaultHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -43,6 +51,9 @@ internal sealed class RtspClient : IDisposable
 
     /// <summary>Our address as the receiver sees it - the SDP's origin line needs it.</summary>
     public string LocalAddress { get; private set; } = "0.0.0.0";
+
+    /// <summary>The receiver's resolved IP - what a peer list must carry, never its hostname.</summary>
+    public string RemoteAddress { get; private set; } = "0.0.0.0";
 
     /// <summary>
     /// Switches the connection to HAP encryption. Everything after transient pair-setup
@@ -70,6 +81,12 @@ internal sealed class RtspClient : IDisposable
             var address = local.Address.IsIPv4MappedToIPv6 ? local.Address.MapToIPv4() : local.Address;
             LocalAddress = address.ToString();
         }
+
+        if (_tcp.Client.RemoteEndPoint is System.Net.IPEndPoint remote)
+        {
+            var address = remote.Address.IsIPv4MappedToIPv6 ? remote.Address.MapToIPv4() : remote.Address;
+            RemoteAddress = address.ToString();
+        }
     }
 
     public async Task<RtspResponse> SendAsync(
@@ -85,7 +102,29 @@ internal sealed class RtspClient : IDisposable
             throw new InvalidOperationException("RTSP client is not connected.");
         }
 
-        var request = BuildRequest(++_cSeq, method, uri, DefaultHeaders, headers, contentType, body, SessionId);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            return await SendLockedAsync(method, uri, headers, contentType, body, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<RtspResponse> SendLockedAsync(
+        string method,
+        string uri,
+        IReadOnlyDictionary<string, string>? headers,
+        string? contentType,
+        byte[]? body,
+        CancellationToken ct)
+    {
+        var stream = _stream ?? throw new InvalidOperationException("RTSP client is not connected.");
+
+        var cSeq = ++_cSeq;
+        var request = BuildRequest(cSeq, method, uri, DefaultHeaders, headers, contentType, body, SessionId);
 
         // Set ORGZ_RTSP_DUMP to capture exactly what goes on the wire. The app and the live
         // test run identical code against the same receiver with different outcomes, and
@@ -93,30 +132,68 @@ internal sealed class RtspClient : IDisposable
         if (Environment.GetEnvironmentVariable("ORGZ_RTSP_DUMP") is { Length: > 0 } dumpPath)
         {
             var headLength = request.Length - (body?.Length ?? 0);
-            File.AppendAllText(dumpPath, Encoding.ASCII.GetString(request, 0, headLength) + $"<<<body {body?.Length ?? 0} bytes>>>\n\n");
+            // Include the body HEX for small bodies (DMAP metadata, MediaRemote /command,
+            // progress) so an app-vs-lab diff shows the actual bytes, not just a size. Audio
+            // and artwork are large and skipped - they'd bury the interesting frames.
+            var bodyHex = body is { Length: > 0 and <= 2048 } ? Convert.ToHexString(body) : $"<{body?.Length ?? 0} bytes>";
+            File.AppendAllText(dumpPath, Encoding.ASCII.GetString(request, 0, headLength) + $"<<<body {body?.Length ?? 0} bytes: {bodyHex}>>>\n\n");
         }
 
         // Synchronous on purpose - see HapCryptoStream.Read. The handshake runs on a
         // dedicated thread so a saturated thread pool can't stall it for ten seconds and
         // make a perfectly good reply look like it never arrived.
-        _stream.Write(request, 0, request.Length);
-        _stream.Flush();
+        stream.Write(request, 0, request.Length);
+        stream.Flush();
 
         // A receiver that dislikes a request sometimes just never answers. Without a
         // deadline that hangs the handshake forever, which reads as silence with nothing
         // in the log - far harder to diagnose than a failure.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
 
         RtspResponse response;
         try
         {
             _tcp.ReceiveTimeout = 10000;
-            response = await ReadResponseAsync(_stream, timeout.Token);
+
+            // The head is read with blocking reads (see ReadResponseAsync), so the deadline
+            // above can't interrupt a peer that drips one byte every few seconds. Pulling the
+            // socket out from under the read is what makes the deadline real.
+            //
+            // Registered on the DEADLINE only, never on the caller's token. This connection is
+            // shared by every request on the session - the keep-alive loops, the feedback poll,
+            // the teardown - so destroying the socket because one caller cancelled would take
+            // the whole session down with it. A cancelled caller abandons its own read; only a
+            // peer that has genuinely stopped answering loses the socket.
+            using var abort = deadline.Token.Register(static state => ((TcpClient)state!).Client.Dispose(), _tcp);
+
+            while (true)
+            {
+                response = await ReadResponseAsync(stream, timeout.Token);
+
+                // A reply to a request we already gave up on is still sitting in the stream.
+                // Consuming it as THIS request's answer desynchronises every pair after it,
+                // so drain the stale ones instead.
+                if (!int.TryParse(response.Header("CSeq"), out var seq) || seq >= cSeq)
+                {
+                    break;
+                }
+
+                _log.Debug("RTSP discarding stale reply CSeq {Seq} while waiting for {Expected}", seq, cSeq);
+            }
         }
         catch (Exception ex) when (ex is OperationCanceledException or IOException && !ct.IsCancellationRequested)
         {
+            // A stream we stopped waiting on can hold a reply we'll never read. Close it so
+            // the next request opens a fresh connection rather than reading someone else's answer.
+            _tcp.Client.Dispose();
             throw new TimeoutException($"RTSP {method} {uri} got no reply within 10s.", ex);
+        }
+
+        if (int.TryParse(response.Header("CSeq"), out var replySeq) && replySeq != cSeq)
+        {
+            _tcp.Client.Dispose();
+            throw new IOException($"RTSP {method} {uri} reply CSeq {replySeq} does not match request {cSeq}.");
         }
 
         _log.Debug("RTSP {Method} {Uri} -> {Status}", method, uri, response.StatusCode);
@@ -222,6 +299,10 @@ internal sealed class RtspClient : IDisposable
     public Task<RtspResponse> PostAsync(string path, string contentType, byte[] body, IReadOnlyDictionary<string, string>? headers = null, CancellationToken ct = default)
         => SendAsync("POST", path, headers, contentType, body, ct);
 
+    /// <summary>Ceilings on what a peer can make us buffer - every byte here is its choice, not ours.</summary>
+    private const int MaxHeadBytes = 16 * 1024;
+    private const int MaxBodyBytes = 1 << 20;
+
     private static async Task<RtspResponse> ReadResponseAsync(Stream stream, CancellationToken ct)
     {
         // Read to the blank line that ends the headers, then exactly Content-Length more.
@@ -241,6 +322,11 @@ internal sealed class RtspClient : IDisposable
             {
                 break;
             }
+
+            if (n > MaxHeadBytes)
+            {
+                throw new IOException($"RTSP header exceeds {MaxHeadBytes} bytes.");
+            }
         }
 
         var headText = Encoding.ASCII.GetString(head.ToArray());
@@ -250,6 +336,11 @@ internal sealed class RtspClient : IDisposable
         if (length <= 0)
         {
             return parsed;
+        }
+
+        if (length > MaxBodyBytes)
+        {
+            throw new IOException($"RTSP body of {length} bytes exceeds the {MaxBodyBytes} byte limit.");
         }
 
         var bodyBytes = new byte[length];
@@ -276,5 +367,6 @@ internal sealed class RtspClient : IDisposable
         _disposed = true;
         _stream?.Dispose();
         _tcp.Dispose();
+        _gate.Dispose();
     }
 }
