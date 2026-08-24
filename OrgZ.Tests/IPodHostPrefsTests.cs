@@ -75,8 +75,8 @@ public class IPodHostPrefsTests
 
             var scrubbed = IPodHostPrefs.ReadHosts(mount);
             Assert.Equal("Fox", scrubbed.UserName);
-            Assert.Equal("A Computer", scrubbed.Computer);
-            Assert.All(scrubbed.LegacySlots, s => Assert.Equal("A Computer", s.Value));
+            Assert.Equal("Fox's Computer", scrubbed.Computer);
+            Assert.All(scrubbed.LegacySlots, s => Assert.Equal("Fox's Computer", s.Value));
             Assert.Empty(Directory.GetFiles(Path.Combine(mount, "iPod_Control", "iTunes"), "*.orgzbak"));
 
             Assert.False(IPodHostPrefs.ScrubHosts(mount));   // second pass - nothing left to scrub
