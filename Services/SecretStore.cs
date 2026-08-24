@@ -103,6 +103,13 @@ internal static class SecretStore
                     }
                     else
                     {
+                        // Unlike the Linux branch below, the secret rides argv, where any process
+                        // running as this user can read it (KERN_PROCARGS2) for the lifetime of
+                        // the child. security(1) offers no stdin channel that survives both
+                        // launch contexts: `-w` with no value prompts through getpass(), which
+                        // reads /dev/tty whenever the process has one - so a terminal-launched
+                        // OrgZ would hang on the prompt instead of taking the pipe. Closing this
+                        // properly means P/Invoking SecItemAdd/SecItemUpdate.
                         Run("security", ["add-generic-password", "-U", "-a", key, "-s", ServiceName, "-w", secret], out _);
                     }
                 }

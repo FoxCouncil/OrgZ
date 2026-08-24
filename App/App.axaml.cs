@@ -19,6 +19,12 @@ public partial class App : Application
 
     internal static string FolderPath = Settings.Get<string>(SettingKey_FolderPath) ?? string.Empty;
 
+    /// <summary>
+    /// Something that happened before there was a window to say it in - currently only a
+    /// library database that had to be set aside. The main window shows it once, then clears it.
+    /// </summary>
+    internal static string? StartupNotice;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -98,6 +104,15 @@ public partial class App : Application
         Settings.Set(SettingKey_FolderPath, FolderPath);
         Settings.Save();
         UpdateTitle(window);
+
+        // The window's Loaded handler already ran LoadAsync while this picker was up, and it
+        // read an empty FolderPath - so nothing has scanned the folder the user just chose.
+        // Without this the first-run library stays empty until the app is restarted or the
+        // folder is re-picked in Settings.
+        if (window.DataContext is MainWindowViewModel vm)
+        {
+            await vm.ScanAndAnalyzeLibraryAsync();
+        }
     }
 
     // Update checking now lives in UpdateService, reached from the Help menu. This used to

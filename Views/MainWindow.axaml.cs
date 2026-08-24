@@ -214,6 +214,11 @@ public partial class MainWindow : Window
             ApplyViewConfig(initialConfig);
         }
 
+        // A second launch - the Start-menu shortcut, clicked because minimize-to-tray left no
+        // taskbar button - rings the singleton's doorbell instead of starting another copy.
+        // Answering it is what makes that guard usable rather than just silent.
+        SingleInstanceGuard.RestoreRequested += OnSingleInstanceRestoreRequested;
+
         Loaded += async (s, e) =>
         {
             // Screenshot harness seeds state directly; don't scan the real library
@@ -231,6 +236,15 @@ public partial class MainWindow : Window
                 _viewModel.InitializeThumbBar(handle.Handle);
             }
 #endif
+
+            // Anything that went wrong before a window existed to report it - a library
+            // database that had to be set aside. Shown before the load so the empty grid
+            // that follows is explained rather than mysterious.
+            if (App.StartupNotice is { Length: > 0 } notice)
+            {
+                App.StartupNotice = null;
+                await new ConfirmDialog("OrgZ", notice, "OK", showCancel: false).ShowDialog(this);
+            }
 
             await _viewModel.LoadAsync();
 
@@ -1795,7 +1809,21 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             ShowTrayIcon();
-            Hide();
+
+            // Avalonia's Linux tray icon is a D-Bus StatusNotifierItem: with nothing hosting
+            // one (vanilla GNOME and friends) IsVisible = true succeeds silently and no icon
+            // ever appears. Hiding the window there would leave it unreachable - it is unmapped,
+            // so it is not in the shell's window list either. Minimize instead, which always
+            // leaves a way back.
+            if (SingleInstanceGuard.TrayHostAvailable())
+            {
+                Hide();
+            }
+            else
+            {
+                WindowState = WindowState.Minimized;
+            }
+
             return;
         }
 
@@ -1839,6 +1867,12 @@ public partial class MainWindow : Window
         _trayIcon.IsVisible = true;
     }
 
+    // Raised on the guard's listener thread.
+    private void OnSingleInstanceRestoreRequested()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(RestoreFromTray);
+    }
+
     private void RestoreFromTray()
     {
         if (_trayIcon != null)
@@ -1853,6 +1887,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        SingleInstanceGuard.RestoreRequested -= OnSingleInstanceRestoreRequested;
         _trayIcon?.Dispose();
         _trayIcon = null;
         SaveViewState();

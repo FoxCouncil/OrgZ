@@ -414,12 +414,14 @@ public class ConnectedDeviceTests
     // These run the same resolution against the real files in Assets/Devices (walked up from the
     // test bin), pinning both the catalogue contents and the rules working together.
 
+    private const string FixtureMissing = "Assets/Devices not reachable from the test output";
+
     private static IReadOnlySet<string>? ShippedArt()
     {
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Assets", "Devices"));
         if (!Directory.Exists(dir))
         {
-            return null;   // running outside the repo layout - skip, same pattern as the fixture-gated tests
+            return null;   // running outside the repo layout - the callers turn this into a visible skip
         }
         return Directory.EnumerateFiles(dir, "*.png")
             .Select(Path.GetFileNameWithoutExtension)
@@ -428,7 +430,7 @@ public class ConnectedDeviceTests
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("Nano 5G",    "Red",    "ipod_nano_5g_red")]      // exact generation+colour
     [InlineData("Mini 1G",    "Gold",   "ipod_mini_1g_gold")]
     [InlineData("Shuffle 2G", "Mint",   "ipod_shuffle_2g_mint")]
@@ -440,9 +442,9 @@ public class ConnectedDeviceTests
     public void Shipped_art_resolves_known_generations(string generation, string? color, string expectedSlug)
     {
         var shipped = ShippedArt();
-        if (shipped is null) { return; }
+        Skip.If(shipped is null, FixtureMissing);
 
-        ConnectedDevice.ArtCatalogOverride = () => shipped;
+        ConnectedDevice.ArtCatalogOverride = () => shipped!;
         try
         {
             Assert.Equal(expectedSlug, Dev(generation, color).ResolveImageSlug());
@@ -454,16 +456,16 @@ public class ConnectedDeviceTests
         }
     }
 
-    [Theory]
+    [SkippableTheory]
     [InlineData("Bogus 99G")]
     [InlineData("Touch 1G")]   // no on-disk database → no art shipped
     [InlineData("Nano 7G")]    // art not shipped yet - flip to a resolving case when it lands
     public void Shipped_art_has_nothing_for_unsupported_generations(string generation)
     {
         var shipped = ShippedArt();
-        if (shipped is null) { return; }
+        Skip.If(shipped is null, FixtureMissing);
 
-        ConnectedDevice.ArtCatalogOverride = () => shipped;
+        ConnectedDevice.ArtCatalogOverride = () => shipped!;
         try
         {
             Assert.False(Dev(generation).HasGenerationImage);
@@ -474,11 +476,11 @@ public class ConnectedDeviceTests
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public void Shipped_art_every_1x_has_a_2x_partner_and_matches_the_manifest()
     {
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Assets", "Devices"));
-        if (!Directory.Exists(dir)) { return; }
+        Skip.IfNot(Directory.Exists(dir), FixtureMissing);
 
         var all = Directory.EnumerateFiles(dir, "*.png").Select(f => Path.GetFileNameWithoutExtension(f)!).ToHashSet(StringComparer.Ordinal);
         var oneX = all.Where(n => !n.Contains("@2x", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);

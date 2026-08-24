@@ -22,8 +22,16 @@ public sealed class DeviceDetectionService : IDisposable
     /// <summary>Fires (after <see cref="DeviceDisconnected"/>) when the vanished volume's iPod is
     /// still on the USB bus in eject-limbo - iTunes/AMDS ejected it, the firmware took its storage
     /// offline, and only a physical replug revives it. The user deserves to be TOLD that, not a
-    /// silently emptied sidebar. Carries the departed device's display name.</summary>
+    /// silently emptied sidebar. Carries the departed device's display name.
+    ///
+    /// WINDOWS-ONLY in practice: the limbo state is detected through the Windows USB node, so the
+    /// only raise site is inside an #if WINDOWS block. The event itself is NOT compiled out,
+    /// because the subscriber in the view model is shared across platforms - the pragma silences
+    /// the "never used" warning the macOS and Linux legs would otherwise fail the zero-warning
+    /// bar with, without splitting one handler into three.</summary>
+#pragma warning disable CS0067
     public event Action<string>? DeviceEjectedByHost;
+#pragma warning restore CS0067
 
     /// <summary>
     /// Fires when a CD-ROM drive sees media arrival or removal. The subscriber is expected
@@ -38,6 +46,12 @@ public sealed class DeviceDetectionService : IDisposable
 #endif
 
     private readonly List<FileSystemWatcher> _linuxMountWatchers = [];
+
+    /// <summary>
+    /// Per-user roots that could not be watched at all yet because neither they nor their
+    /// parent existed. Re-checked on the poll tick.
+    /// </summary>
+    private readonly List<string> _linuxPendingRoots = [];
 
     // CD media-arrival fallback poll. Win32_VolumeChangeEvent doesn't fire
     // reliably for audio-CD insertion on every USB CD drive - the optical
@@ -71,7 +85,11 @@ public sealed class DeviceDetectionService : IDisposable
         {
             Interval = TimeSpan.FromSeconds(3),
         };
-        _cdPollTimer.Tick += (_, _) => CdDriveEvent?.Invoke();
+        _cdPollTimer.Tick += (_, _) =>
+        {
+            CdDriveEvent?.Invoke();
+            RetryPendingLinuxMountWatchers();
+        };
         _cdPollTimer.Start();
 
 #if WINDOWS
@@ -168,6 +186,13 @@ public sealed class DeviceDetectionService : IDisposable
     // udisks2 auto-mounts removable media under /media/$user on Debian/Ubuntu and
     // /run/media/$user on Fedora/Arch. Watching those directories for subdirectory
     // creation/deletion gives us hot-plug without polling /proc/self/mountinfo.
+    //
+    // Those per-user directories are created lazily, at the first mount - and /run is a tmpfs
+    // recreated empty every boot - so on a machine that has not mounted removable media since
+    // power-on neither exists when OrgZ starts. Watching only them meant hot-plug was dead for
+    // the whole session in exactly the common case: boot, launch OrgZ, then plug the iPod in.
+    // So fall back to the parent (which is where the per-user directory itself appears), and
+    // when even that is missing, keep re-checking on the poll tick.
     private void StartLinuxMountWatchers()
     {
         var user = Environment.UserName;
@@ -179,38 +204,125 @@ public sealed class DeviceDetectionService : IDisposable
 
         foreach (var root in roots)
         {
-            if (!Directory.Exists(root))
-            {
-                continue;
-            }
-
-            try
-            {
-                var watcher = new FileSystemWatcher(root)
-                {
-                    NotifyFilter = NotifyFilters.DirectoryName,
-                    IncludeSubdirectories = false,
-                    EnableRaisingEvents = true,
-                };
-                watcher.Created += OnLinuxMountCreated;
-                watcher.Deleted += OnLinuxMountDeleted;
-                _linuxMountWatchers.Add(watcher);
-                _log.Debug("Linux mount watcher installed at {Root}", root);
-            }
-            catch (Exception ex)
-            {
-                _log.Warning(ex, "Failed to install Linux mount watcher at {Root}", root);
-            }
+            InstallLinuxMountWatcher(root);
         }
 
-        if (_linuxMountWatchers.Count == 0)
+        if (_linuxMountWatchers.Count == 0 && _linuxPendingRoots.Count == 0)
         {
             _log.Information("No udisks2 mount root present — Linux hot-plug detection disabled for this session");
         }
     }
 
+    /// <summary>
+    /// Watches <paramref name="root"/> when it exists, otherwise its parent (recursively, so the
+    /// per-user directory appearing and the mount inside it are both seen). Returns true when a
+    /// watcher was installed; a root with no parent either is queued for a later retry.
+    /// </summary>
+    private bool InstallLinuxMountWatcher(string root)
+    {
+        var parent = Path.GetDirectoryName(root);
+        var watched = Directory.Exists(root) ? root : Directory.Exists(parent) ? parent : null;
+
+        if (watched is null)
+        {
+            if (!_linuxPendingRoots.Contains(root))
+            {
+                _linuxPendingRoots.Add(root);
+            }
+            return false;
+        }
+
+        // A parent watcher has to be recursive - the per-user directory it is waiting for does
+        // not exist yet, so the mount inside it is two levels down. That recursion is also what
+        // marks it as a parent watcher for the depth filter in IsLinuxMountPoint.
+        var isParent = watched != root;
+
+        try
+        {
+            // KNOWN COST, deliberately left as is for now: inotify has no recursive mode, so
+            // .NET emulates IncludeSubdirectories by adding a watch per subdirectory. On a
+            // parent watcher over /media that means every mounted volume's whole tree, which
+            // on a device with many folders can run into the per-user watch limit and then
+            // silently stop delivering events. Making it non-recursive requires the parent
+            // watcher to install a real per-user watcher when {parent}/{user} appears, and
+            // that path cannot be exercised anywhere in this project's test setup - so it
+            // wants a Linux box with a removable drive, not a guess.
+            var watcher = new FileSystemWatcher(watched)
+            {
+                NotifyFilter = NotifyFilters.DirectoryName,
+                IncludeSubdirectories = isParent,
+                EnableRaisingEvents = true,
+            };
+            watcher.Created += OnLinuxMountCreated;
+            watcher.Deleted += OnLinuxMountDeleted;
+            _linuxMountWatchers.Add(watcher);
+            _log.Debug("Linux mount watcher installed at {Root}", watched);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Failed to install Linux mount watcher at {Root}", watched);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Re-tries the roots that had nothing to watch at startup. Runs on the existing poll tick,
+    /// and only does anything on a machine where udisks2 has not created its directories yet.
+    /// </summary>
+    private void RetryPendingLinuxMountWatchers()
+    {
+        if (_linuxPendingRoots.Count == 0)
+        {
+            return;
+        }
+
+        var installed = false;
+
+        for (var i = _linuxPendingRoots.Count - 1; i >= 0; i--)
+        {
+            var root = _linuxPendingRoots[i];
+            if (!Directory.Exists(root) && !Directory.Exists(Path.GetDirectoryName(root)))
+            {
+                continue;
+            }
+
+            _linuxPendingRoots.RemoveAt(i);
+            installed |= InstallLinuxMountWatcher(root);
+        }
+
+        if (installed)
+        {
+            // The mount that created the directory is precisely the one the new watcher was too
+            // late to see - sweep for it now. Registration de-duplicates by mount path.
+            EnumerateExistingDrives();
+        }
+    }
+
+    /// <summary>
+    /// Whether a create/delete event is a mounted volume rather than the per-user directory
+    /// itself (or something deeper inside a volume). Only applies to parent watchers - the
+    /// recursive ones: udisks2 mounts at {parent}/{user}/{label}, so a volume is exactly two
+    /// levels below the watched parent. Per-user watchers see only mounts and need no filter.
+    /// </summary>
+    private static bool IsLinuxMountPoint(object sender, string fullPath)
+    {
+        if (sender is not FileSystemWatcher watcher || !watcher.IncludeSubdirectories)
+        {
+            return true;
+        }
+
+        var userDirectory = Path.GetDirectoryName(fullPath);
+        return userDirectory is not null && string.Equals(Path.GetDirectoryName(userDirectory), watcher.Path, StringComparison.Ordinal);
+    }
+
     private async void OnLinuxMountCreated(object sender, FileSystemEventArgs e)
     {
+        if (!IsLinuxMountPoint(sender, e.FullPath))
+        {
+            return;
+        }
+
         // Debounce: if the same mount path fires multiple Created events within the
         // delay window (flaky USB port, udisks2 retry logic, Finder probe), only the
         // latest one wins. Each event bumps the generation counter; the timer checks
@@ -257,6 +369,11 @@ public sealed class DeviceDetectionService : IDisposable
 
     private void OnLinuxMountDeleted(object sender, FileSystemEventArgs e)
     {
+        if (!IsLinuxMountPoint(sender, e.FullPath))
+        {
+            return;
+        }
+
         // Any pending debounce for this path is now moot - the mount is gone
         lock (_linuxMountDebounceLock)
         {

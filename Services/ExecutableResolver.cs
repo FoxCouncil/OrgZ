@@ -8,19 +8,37 @@ namespace OrgZ.Services;
 /// reach the user without waiting for an OrgZ release - then a copy bundled in <c>tools/</c>
 /// next to the app (the AppImage / .app / portable-Windows layout). Every caller used to carry
 /// its own copy of this search; this is the single source of truth.
+///
+/// That order INVERTS inside the privileged device-helper daemon - see <see cref="_preferBundled"/>.
 /// </summary>
 internal static class ExecutableResolver
 {
+    /// <summary>
+    /// True when this process is the device-helper daemon (App/Program.cs dispatches on the same
+    /// argument, and its in-process ops - sync, cd-run - resolve encoders through here). It runs
+    /// as root/LocalSystem, so PATH-first would let any directory a non-admin can write to decide
+    /// what SYSTEM executes, and a machine-wide PATH entry like that is a state third-party
+    /// Windows installers leave behind. Privileged, the bundled copy the release was tested with
+    /// wins; the GUI keeps PATH-first so a packager's build still does.
+    /// </summary>
+    private static readonly bool _preferBundled = Array.IndexOf(Environment.GetCommandLineArgs(), "--device-helper") >= 0;
+
     /// <summary>Full path to <paramref name="name"/> on PATH, else a bundled copy, else null.</summary>
     public static string? Find(string name)
     {
         var fileName = WithPlatformExtension(name);
+        var bundled = Path.Combine(AppContext.BaseDirectory, "tools", fileName);
+
+        if (_preferBundled && File.Exists(bundled))
+        {
+            return bundled;
+        }
+
         if (TryFindOnPath(fileName, out var onPath))
         {
             return onPath;
         }
 
-        var bundled = Path.Combine(AppContext.BaseDirectory, "tools", fileName);
         return File.Exists(bundled) ? bundled : null;
     }
 

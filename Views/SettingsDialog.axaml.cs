@@ -94,13 +94,16 @@ public partial class SettingsDialog : Window
         ServiceKeepSyncCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false);
         ServiceKeepSharingCheck.IsChecked = Settings.Get("OrgZ.Services.KeepAlive.Sharing", false);
 
-        // Hidden in Release - and don't probe the service either, since nothing would
-        // read the answer. The probe is #if'd rather than guarded on the const so the
-        // Release compile doesn't warn about code it can prove unreachable.
+        // Development shows the whole card up front. Release starts hidden and the probe
+        // decides: with nothing installed the card comes back as an Install-only affordance,
+        // because sharing (and every silent privileged operation) needs the helper and this
+        // is the only place in the app that can obtain it.
         ServiceLifecycleCard.IsVisible = ShowServiceLifecycle;
-#if DEBUG
-        _ = RefreshServiceStatusAsync();
-#endif
+
+        // Observed, not discarded: this now runs for real users, not just DEBUG, and it spawns
+        // sc/launchctl/systemctl. A throw on that path would otherwise surface as an
+        // unobserved TaskException on the finalizer thread rather than in the log.
+        Helpers.TaskObserver.FireAndForget(RefreshServiceStatusAsync(), "service status probe");
 
         BurnDataFormatCombo.SelectedIndex = Settings.Get("OrgZ.Burn.DataFormat", "original") switch
         {
@@ -622,7 +625,9 @@ public partial class SettingsDialog : Window
     {
         if (!serviceAvailable)
         {
-            return "Needs the background service — install it above";
+            // No "install it above": in Release the lifecycle card only appears when nothing
+            // is installed, so pointing at it would sometimes name a control that isn't there.
+            return "Needs the background service";
         }
 
         if (state is not { Sharing: true })
@@ -707,6 +712,9 @@ public partial class SettingsDialog : Window
         _ => answering ? "Running, not installed" : "Not installed",
     };
 
+    /// <summary>Set once the Release card has been shown, so an install's outcome stays on screen.</summary>
+    private bool _serviceCardRevealed;
+
     private async Task RefreshServiceStatusAsync()
     {
         ServiceStatusText.Text = "Checking…";
@@ -716,7 +724,21 @@ public partial class SettingsDialog : Window
         var answering = await Services.DeviceHelper.DeviceHelperClient.IsAvailableAsync();
 
         ServiceStatusText.Text = DescribeServiceState(state, answering);
-        SetServiceButtons(ButtonsFor(state));
+
+        var buttons = ButtonsFor(state);
+
+        if (!ShowServiceLifecycle)
+        {
+            // Install only: the shipping user's one choice is standalone or installed, and
+            // Start/Stop/Uninstall past that point can only leave them somewhere broken.
+            // Once revealed the card stays up, so "Installed and running" is visible after
+            // the install rather than the whole card vanishing.
+            buttons = buttons with { Start = false, Stop = false, Uninstall = false };
+            _serviceCardRevealed |= buttons.Install;
+            ServiceLifecycleCard.IsVisible = _serviceCardRevealed;
+        }
+
+        SetServiceButtons(buttons);
     }
 
     private void SetServiceButtons(ServiceButtons buttons)

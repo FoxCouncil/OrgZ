@@ -510,12 +510,18 @@ internal partial class MainWindowViewModel
         }
 
         var ipod = IPodDevice.For(device);
-        using var batch = ipod.BeginBatchWrite();
         var (ct, owns) = BeginSyncScope();
         BeginLcdBusy($"Syncing to {device.Name}");
         try
         {
-            var deviceItem = await AddTrackToDeviceCoreAsync(ipod, item, ffmpeg ?? "ffmpeg", ct);
+            // Block-scoped using (not `using var`): opening the batch and the commit its Dispose
+            // performs both belong to this try, so a mount that dies mid-copy is reported here
+            // instead of unwinding out of the async void drop handler and killing the process.
+            using (var batch = ipod.BeginBatchWrite())
+            {
+                var deviceItem = await AddTrackToDeviceCoreAsync(ipod, item, ffmpeg ?? "ffmpeg", ct);
+            }
+
             IPodArtworkReader.Invalidate(device.MountPath);
             device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
             _log.Information("Synced “{Title}” to {Device}", item.Title, device.MountPath);
@@ -831,10 +837,12 @@ internal partial class MainWindowViewModel
 
         foreach (var track in shareTracks.Where(Services.Sharing.ShareDiscovery.IsShareItem))
         {
-            var destPath = LibraryDestinationFor(track);
-
             try
             {
+                // Inside the try: a hostile catalogue whose path is rejected fails this one
+                // track (logged and counted) instead of ending the whole import.
+                var destPath = LibraryDestinationFor(track);
+
                 Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                 if (!File.Exists(destPath) && !await Services.Sharing.ShareDiscovery.DownloadTrackAsync(track, destPath))
                 {
@@ -881,23 +889,70 @@ internal partial class MainWindowViewModel
     /// The library path a share track copies to - the same layout a CD rip and an iPod
     /// sync-to-library use: {Music}/{Artist}/{Album}/{NN - Title}.ext, deduped with a
     /// " (2)" suffix. A flat name at the library root (the old behaviour) sorted nowhere.
+    ///
+    /// Every part of the name arrives over the wire from the share, so every part is
+    /// sanitised - the extension included, which is the one component that isn't a tag -
+    /// and the finished path is asserted to still be inside the library folder. A share
+    /// must not be able to steer a download anywhere else the user can write.
     /// </summary>
     internal static string LibraryDestinationFor(MediaItem track)
     {
-        var artist = SanitizeFolderName(string.IsNullOrWhiteSpace(track.Artist) ? "Unknown Artist" : track.Artist!);
-        var album = SanitizeFolderName(string.IsNullOrWhiteSpace(track.Album) ? "Unknown Album" : track.Album!);
+        var artist = LibrarySegment(track.Artist, "Unknown Artist");
+        var album = LibrarySegment(track.Album, "Unknown Album");
         var destDir = Path.Combine(App.FolderPath, artist, album);
 
         var title = string.IsNullOrWhiteSpace(track.Title) ? track.Id : track.Title!;
-        var baseName = SanitizeFolderName(track.Track is { } trackNo && trackNo > 0 ? $"{trackNo:00} - {title}" : title);
-        var ext = track.Extension ?? ".mp3";
+        var baseName = LibrarySegment(track.Track is { } trackNo && trackNo > 0 ? $"{trackNo:00} - {title}" : title, "Unknown");
+        var ext = Services.Sharing.ShareDiscovery.SafeExtension(track.Extension) ?? ".mp3";
 
         var dest = Path.Combine(destDir, baseName + ext);
         for (var n = 2; File.Exists(dest); n++)
         {
             dest = Path.Combine(destDir, $"{baseName} ({n}){ext}");
         }
+
+        if (!IsInsideLibraryFolder(dest))
+        {
+            throw new InvalidOperationException($"Destination “{dest}” is outside the library folder.");
+        }
+
         return dest;
+    }
+
+    /// <summary>
+    /// One sanitised segment of the library layout, never empty and never a relative step.
+    /// A remote catalogue supplies these, and a segment that can climb ("..") or vanish
+    /// would move the write out of the artist/album folder it is supposed to land in.
+    /// </summary>
+    private static string LibrarySegment(string? value, string fallback)
+    {
+        var safe = SanitizeFolderName(string.IsNullOrWhiteSpace(value) ? fallback : value!);
+        return safe.Length == 0 || safe is "." or ".." ? fallback : safe;
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> resolves to somewhere under the library folder.
+    /// Case folding follows the platform: Linux paths are case-sensitive, Windows and macOS
+    /// are not, and folding on Linux would let "/home/fox/music" pass for "/home/fox/Music".
+    /// </summary>
+    private static bool IsInsideLibraryFolder(string path)
+    {
+        try
+        {
+            var root = Path.GetFullPath(App.FolderPath);
+            if (!root.EndsWith(Path.DirectorySeparatorChar))
+            {
+                root += Path.DirectorySeparatorChar;
+            }
+
+            var comparison = OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            return Path.GetFullPath(path).StartsWith(root, comparison);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Couldn't resolve {Path} against the library folder", path);
+            return false;
+        }
     }
 
     /// <summary>

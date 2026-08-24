@@ -44,6 +44,12 @@ public static class LibroFmSession
         else if (OperatingSystem.IsMacOS())
         {
             // -U updates in place on re-login instead of erroring on the duplicate.
+            //
+            // The bearer token rides argv here, readable by any process running as this user
+            // while the child lives - the same exposure SecretStore.Set carries, and for the
+            // same reason: security(1)'s only alternative is `-w` with no value, which prompts
+            // through getpass() and so reads /dev/tty rather than our pipe whenever OrgZ was
+            // launched from a terminal. SecItemAdd/SecItemUpdate is the way out of it.
             if (!RunTool("security", ["add-generic-password", "-U", "-a", KeychainAccount, "-s", KeychainService, "-w", token], stdin: null, out _))
             {
                 _log.Warning("Keychain store failed — the Libro.fm token will not persist across launches");

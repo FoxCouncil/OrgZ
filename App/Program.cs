@@ -1,5 +1,6 @@
 ﻿// Copyright (c) 2026 FoxCouncil (https://github.com/FoxCouncil/OrgZ)
 
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Avalonia;
@@ -104,10 +105,17 @@ internal class Program
 
         try
         {
-            // Single-instance via D-Bus name ownership on Linux: if we can't claim the
-            // singleton bus name, another OrgZ is already running - it's been asked to
-            // raise its window and we exit this process.
-            if (!SingleInstanceGuard.TryAcquirePrimary())
+            // Single-instance: D-Bus name ownership on Linux, a named mutex on Windows. If we
+            // can't claim it, another OrgZ is already running - it's been asked to raise its
+            // window and we exit this process.
+            //
+            // Except for Velopack's install/update hooks, which relaunch this very executable
+            // with --veloapp-* (or the legacy --squirrel-*) and expect it to run the callback
+            // and exit. Turning one of those away at the guard would silently skip the hook -
+            // and ours are what stop and restart the background service around an update.
+            var velopackHook = args.Any(a => a.StartsWith("--veloapp-", StringComparison.OrdinalIgnoreCase) || a.StartsWith("--squirrel-", StringComparison.OrdinalIgnoreCase));
+
+            if (!velopackHook && !SingleInstanceGuard.TryAcquirePrimary())
             {
                 return 0;
             }
@@ -128,7 +136,13 @@ internal class Program
             {
                 velopack = velopack
                     .OnAfterInstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnInstall())
-                    .OnBeforeUninstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnUninstall());
+                    .OnBeforeUninstallFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnUninstall())
+                    // The service runs the very executable an update replaces, so it has to be
+                    // stopped before the swap and started after it. Without this pair the update
+                    // fails on a locked file, which reads to the user as an update that does
+                    // nothing. These two get 15 s each, half what the install hooks get.
+                    .OnBeforeUpdateFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnBeforeUpdate())
+                    .OnAfterUpdateFastCallback(_ => Services.DeviceHelper.ServiceInstallHook.OnAfterUpdate());
             }
 #endif
             velopack.Run();
@@ -139,15 +153,24 @@ internal class Program
             ShortcutInstaller.EnsureShortcut();
             StartupTrace.Mark("shortcut + app id");
 #else
+            // Both exits happen before Avalonia starts, so there is no window and no dialog to
+            // carry the message - and the Console sink is DEBUG-only, so a shipped build would
+            // otherwise leave stdout, stderr and the screen completely silent. stderr is the one
+            // channel a terminal launch will show; the log file is all a double-click leaves.
             if (OperatingSystem.IsLinux() && !RegisterLinuxVlcResolver())
             {
-                Log.Fatal("libvlc (VLC runtime) not found. Install VLC and relaunch. Debian/Ubuntu: sudo apt install vlc | Fedora: sudo dnf install vlc | Arch: sudo pacman -S vlc");
+                const string message = "libvlc (VLC runtime) not found. Install VLC and relaunch. Debian/Ubuntu: sudo apt install vlc | Fedora: sudo dnf install vlc | Arch: sudo pacman -S vlc";
+                Log.Fatal(message);
+                Console.Error.WriteLine(message);
+                ShowLinuxFatalDialog(message);
                 Environment.Exit(1);
             }
 
             if (OperatingSystem.IsMacOS() && !InitializeMacVlc())
             {
-                Log.Fatal("libvlc (VLC runtime) not found. Install VLC.app (brew install --cask vlc, or download from videolan.org) and relaunch.");
+                const string message = "libvlc (VLC runtime) not found. Install VLC.app (brew install --cask vlc, or download from videolan.org) and relaunch.";
+                Log.Fatal(message);
+                Console.Error.WriteLine(message);
                 Environment.Exit(1);
             }
 #endif
@@ -155,12 +178,21 @@ internal class Program
             // App-data stores must exist before the UI constructs - the MainWindow
             // ctor reads them, and on a first launch on a clean machine nothing has
             // created the directory or schema yet.
-            MediaCache.EnsureCreated();
-            StartupTrace.Mark("library db");
-            Services.Podcast.PodcastCache.EnsureCreated();
-            StartupTrace.Mark("podcast db");
-            Services.Media.AcquisitionStore.EnsureCreated();
-            StartupTrace.Mark("acquisition db");
+            try
+            {
+                App.StartupNotice = EnsureAppDataStores();
+            }
+            catch (Exception dbex)
+            {
+                // A fresh database failed too, so there is no app to start and still no UI to
+                // say why. Name the file and the log directory on stderr and leave with a
+                // non-zero code instead of dying invisibly.
+                Log.Fatal(dbex, "Library database at {Path} is unusable", LibraryDb.FilePath);
+                Console.Error.WriteLine($"OrgZ cannot open its library database: {LibraryDb.FilePath}");
+                Console.Error.WriteLine(dbex.Message);
+                Console.Error.WriteLine($"Move that file aside and relaunch. Logs: {Logging.LogDirectory}");
+                return 1;
+            }
 
             _ = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
@@ -176,6 +208,145 @@ internal class Program
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Last-resort visible error for a launch that dies before Avalonia exists. An AppImage
+    /// started from a file manager has no terminal attached, so stderr reaches nobody and the
+    /// user sees an icon that simply never appears. zenity/kdialog is what desktop helpers use
+    /// for exactly this. Best effort: with neither installed nothing happens, and a dialog
+    /// nobody is there to dismiss is killed rather than left holding the process.
+    /// </summary>
+    private static void ShowLinuxFatalDialog(string message)
+    {
+        string[][] candidates =
+        [
+            ["zenity", "--error", "--title=OrgZ", "--text=" + message],
+            ["kdialog", "--title", "OrgZ", "--error", message],
+        ];
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(candidate[0]) { UseShellExecute = false };
+                foreach (var arg in candidate[1..])
+                {
+                    psi.ArgumentList.Add(arg);
+                }
+
+                using var dialog = Process.Start(psi);
+                if (dialog is null)
+                {
+                    continue;
+                }
+
+                if (!dialog.WaitForExit(60_000))
+                {
+                    dialog.Kill(entireProcessTree: true);
+                }
+
+                return;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "Could not show the fatal-error dialog with {Tool}", candidate[0]);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Opens (and migrates) the three app-data stores, which all live in the one library.db.
+    /// A file SQLite cannot read - a half-written scan after a power cut, a roaming profile
+    /// copied mid-flight - throws here, before Avalonia exists, and every later launch throws
+    /// in the same place: the app becomes permanently unlaunchable with nothing on screen.
+    /// So set the unreadable file aside and open a fresh one. The library rebuilds from a
+    /// folder scan and the old file is still on disk under its new name.
+    /// Returns the line the UI should show when a file was set aside, null on a clean open.
+    /// Throws only when the fresh database fails too - there is no app without one.
+    /// </summary>
+    // SQLite's own result codes for "this file is not a usable database", from sqlite3.h.
+    // Microsoft.Data.Sqlite surfaces them on SqliteException.SqliteErrorCode.
+    private const int RawSqliteCorrupt = 11;       // SQLITE_CORRUPT
+    private const int RawSqliteFormat = 24;        // SQLITE_FORMAT
+    private const int RawSqliteNotADatabase = 26;  // SQLITE_NOTADB
+
+    private static string? EnsureAppDataStores()
+    {
+        try
+        {
+            OpenAppDataStores();
+            return null;
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode is RawSqliteCorrupt or RawSqliteNotADatabase or RawSqliteFormat)
+        {
+            // ONLY genuine corruption. Catching everything here would be the more destructive
+            // bug of the two this method exists to prevent: a locked file, a full disk, a
+            // network profile that has not finished mounting, or an antivirus holding the
+            // handle for a moment are all transient, and every one of them would have renamed
+            // a perfectly good library aside and started the user from nothing. A corrupt
+            // file, by contrast, fails identically on every launch forever.
+            var database = LibraryDb.FilePath;
+            Log.Error(ex, "Library database {Path} is corrupt ({Code}) - setting it aside and starting fresh", database, ex.SqliteErrorCode);
+
+            var aside = SetDatabaseAside(database);
+
+            OpenAppDataStores();
+
+            return aside is null
+                ? "The library database could not be opened, so OrgZ started with an empty one. Your music files were not touched."
+                : $"The library database could not be opened. It was set aside as {Path.GetFileName(aside)} and OrgZ started with an empty one. Your music files were not touched.";
+        }
+    }
+
+    private static void OpenAppDataStores()
+    {
+        MediaCache.EnsureCreated();
+        StartupTrace.Mark("library db");
+        Services.Podcast.PodcastCache.EnsureCreated();
+        StartupTrace.Mark("podcast db");
+        Services.Media.AcquisitionStore.EnsureCreated();
+        StartupTrace.Mark("acquisition db");
+    }
+
+    /// <summary>
+    /// Renames an unreadable database out of the way, journal siblings included - a -wal left
+    /// beside a brand-new file would be replayed into it and break that one too. Returns the
+    /// new path, or null when nothing could be moved (the caller's retry then fails and says so).
+    /// </summary>
+    private static string? SetDatabaseAside(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            // The failed open left a pooled connection holding the file, and Windows will not
+            // rename a file that is still open.
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+            var aside = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            File.Move(path, aside);
+
+            string[] siblings = ["-wal", "-shm", "-journal"];
+            foreach (var suffix in siblings)
+            {
+                if (File.Exists(path + suffix))
+                {
+                    File.Move(path + suffix, aside + suffix);
+                }
+            }
+
+            Log.Warning("Library database set aside as {Path}", aside);
+            return aside;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Could not set the unreadable library database aside");
+            return null;
+        }
     }
 
     // No LibVLC NuGet ships native binaries for macOS arm64, and the x64 package's search paths
@@ -220,11 +391,44 @@ internal class Program
     // LibVLCSharp's P/Invoke asks for "libvlc" / "libvlccore" with no version suffix, but most
     // Linux distros only ship libvlc.so.5 / libvlccore.so.9. Redirect those loads instead of
     // requiring the user to install libvlc-dev just to get the unversioned symlink.
+    //
+    // The AppImage carries its own copy under vlc/ (staged by scripts/fetch-vlc-linux.sh),
+    // which is tried FIRST: a self-contained bundle that silently preferred whatever the host
+    // happened to have would be neither self-contained nor predictable. A system install is
+    // still the fallback, so a dev run out of bin/ works with no bundle present.
     private static bool RegisterLinuxVlcResolver()
     {
         var asm = typeof(LibVLCSharp.Shared.LibVLC).Assembly;
         NativeLibrary.SetDllImportResolver(asm, ResolveLinuxVlc);
-        return TryProbe("libvlc") && TryProbe("libvlccore");
+
+        // ORDER MATTERS, and only in the bundled case. libvlc.so.5 carries a DT_NEEDED on
+        // libvlccore.so.9 but NO RUNPATH, so when it is loaded by absolute path out of our own
+        // directory the loader has no idea where its sibling lives and the load fails. Loading
+        // libvlccore first puts it in the process under its SONAME, which is what libvlc's
+        // dependency then resolves against. Probing libvlc first - as this did - reports "no
+        // VLC" on a machine that is carrying a perfectly good one.
+        //
+        // The core handle is deliberately NOT freed: releasing it would undo exactly the thing
+        // that makes the next load work.
+        if (!TryLoad("libvlccore", out _))
+        {
+            return false;
+        }
+
+        if (!TryLoad("libvlc", out _))
+        {
+            return false;
+        }
+
+        var plugins = Path.Combine(AppContext.BaseDirectory, "vlc", "plugins");
+        if (Directory.Exists(plugins))
+        {
+            // libvlc looks for its plugins relative to the binary that loaded it, which for a
+            // bundled copy is OrgZ, not VLC - so it has to be told.
+            Environment.SetEnvironmentVariable("VLC_PLUGIN_PATH", plugins);
+        }
+
+        return true;
 
         static IntPtr ResolveLinuxVlc(string name, Assembly _, DllImportSearchPath? __)
         {
@@ -233,28 +437,20 @@ internal class Program
                 return IntPtr.Zero;
             }
 
-            foreach (var candidate in Candidates(name))
-            {
-                if (NativeLibrary.TryLoad(candidate, out var handle))
-                {
-                    return handle;
-                }
-            }
-
-            return IntPtr.Zero;
+            return TryLoad(name, out var handle) ? handle : IntPtr.Zero;
         }
 
-        static bool TryProbe(string name)
+        static bool TryLoad(string name, out IntPtr handle)
         {
             foreach (var candidate in Candidates(name))
             {
-                if (NativeLibrary.TryLoad(candidate, out var handle))
+                if (NativeLibrary.TryLoad(candidate, out handle))
                 {
-                    NativeLibrary.Free(handle);
                     return true;
                 }
             }
 
+            handle = IntPtr.Zero;
             return false;
         }
 
@@ -263,11 +459,15 @@ internal class Program
             var versions = name == "libvlc"
                 ? new[] { "libvlc.so", "libvlc.so.5" }
                 : new[] { "libvlccore.so", "libvlccore.so.9" };
-            var dirs = new[] { "", "/usr/lib/x86_64-linux-gnu/", "/usr/lib64/", "/usr/local/lib/", "/lib/x86_64-linux-gnu/" };
+            var bundled = Path.Combine(AppContext.BaseDirectory, "vlc", "lib") + Path.DirectorySeparatorChar;
+            var dirs = new[] { bundled, "", "/usr/lib/x86_64-linux-gnu/", "/usr/lib64/", "/usr/local/lib/", "/lib/x86_64-linux-gnu/" };
 
-            foreach (var v in versions)
+            // Directory outer, version inner: each location is exhausted before moving on, so
+            // the bundled copy wins outright. The other way round, a host that happens to have
+            // the unversioned libvlc.so symlink would be preferred over the copy we shipped.
+            foreach (var d in dirs)
             {
-                foreach (var d in dirs)
+                foreach (var v in versions)
                 {
                     yield return d + v;
                 }

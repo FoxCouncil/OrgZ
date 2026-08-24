@@ -43,9 +43,17 @@ public static class ReplayGainService
             var gainDb = GainFromLoudness(lufs);
             try
             {
-                using var file = TagLib.File.Create(filePath);
-                file.Tag.ReplayGainTrackGain = gainDb;
-                file.Save();
+                // Through a copy, never in place: TagLib rewrites the whole audio payload when the
+                // new frame outgrows the existing padding, and a 90 MB FLAC on a USB drive that
+                // loses power mid-shift is unrecoverable. The temp is named .orgztmp so the folder
+                // watcher ignores it, which is why the parser comes from the MIME type here.
+                var mimeType = "taglib/" + Path.GetExtension(filePath).TrimStart('.').ToLowerInvariant();
+                AtomicFile.MutateCopy(filePath, temp =>
+                {
+                    using var file = TagLib.File.Create(temp, mimeType, TagLib.ReadStyle.Average);
+                    file.Tag.ReplayGainTrackGain = gainDb;
+                    file.Save();
+                });
                 _log.Information("ReplayGain {Gain:0.00} dB (from {Lufs:0.0} LUFS) -> {Path}", gainDb, lufs, filePath);
             }
             catch (Exception ex)

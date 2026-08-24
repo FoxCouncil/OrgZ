@@ -50,8 +50,23 @@ public static class RemoteImage
     private const int MaxCachedBitmaps = 300;
     private static readonly ConcurrentQueue<string> _cacheOrder = new();
 
+    // A FETCH failure is remembered here rather than as a null in _cache, because a cached
+    // null is a permanent hit: one bad minute (hotel wifi, the VPN still coming up) used to
+    // blank those tiles for the rest of the process, and only a restart brought them back.
+    // The cooldown still stops a scroll from re-requesting a dead URL on every row recycle.
+    private static readonly ConcurrentDictionary<string, long> _failedAtTicks = new(StringComparer.Ordinal);
+    private const long FailureCooldownMs = 60_000;
+
+    private static bool RecentlyFailed(string url)
+        => _failedAtTicks.TryGetValue(url, out var ticks) && Environment.TickCount64 - ticks < FailureCooldownMs;
+
     private static void CacheBitmap(string key, Bitmap? bmp)
     {
+        if (bmp is not null)
+        {
+            _failedAtTicks.TryRemove(key, out _);
+        }
+
         if (_cache.TryAdd(key, bmp))
         {
             _cacheOrder.Enqueue(key);
@@ -120,6 +135,12 @@ public static class RemoteImage
             }
 
             image.Source = null;
+
+            if (RecentlyFailed(url))
+            {
+                return;
+            }
+
             _ = LoadAndAssignAsync(image, url);
         });
     }
@@ -199,7 +220,11 @@ public static class RemoteImage
             }
             catch
             {
-                CacheBitmap(key, null);
+                // Transient by assumption - the host, the DNS or the link failed, not the
+                // image. Record the time instead of poisoning the cache so the tile refetches
+                // once the cooldown lapses. (A DECODE failure above is a property of the bytes
+                // themselves and stays cached.)
+                _failedAtTicks[key] = Environment.TickCount64;
                 return null;
             }
             finally
