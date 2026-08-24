@@ -2,7 +2,7 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>0.11.0</Version>
+		<Version>0.12.0</Version>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<Nullable>enable</Nullable>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
@@ -81,7 +81,11 @@
 		<PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0" />
 		<PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
 		<PackageReference Include="TagLibSharp" Version="2.3.0" />
-		<PackageReference Include="Velopack" Version="0.0.1298" />
+		<!-- Kept in lockstep with the `vpk` pin in .github/workflows/release.yml. The CLI writes
+		     Update.exe and the release feed; this library reads them from inside the app, and a
+		     0.0.x client against a 1.2.x feed is a mismatched pair nobody tests. 1.2.110 also has
+		     a real net10.0 target, where 0.0.1298 topped out at net8.0. -->
+		<PackageReference Include="Velopack" Version="1.2.110-ge826545" />
 		<PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.21" Condition="'$(IsWindowsBuild)' == 'true'" />
 		<PackageReference Include="System.Management" Version="9.0.1" Condition="'$(IsWindowsBuild)' == 'true'" />
 		<!-- ServiceBase: lets the device-helper answer the Windows SCM control dispatcher so
@@ -114,6 +118,7 @@
 	<ItemGroup>
 		<InternalsVisibleTo Include="OrgZ.Tests" />
 		<InternalsVisibleTo Include="DocsScreenshots" />
+		<InternalsVisibleTo Include="AirPlayLab" />
 	</ItemGroup>
 
 	<ItemGroup>

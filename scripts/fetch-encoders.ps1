@@ -4,8 +4,10 @@
 #
 #   (default) FETCH  - download OUR vetted copies from the GitHub release named in encoders.json
 #                      and verify each SHA-256. CI runs this per platform before packaging. Tools
-#                      whose sha256 is still "PENDING" (or whose asset isn't published yet) are
-#                      skipped with a warning - the app just falls back to a PATH install for those.
+#                      whose sha256 is still "PENDING" are skipped with a warning - the app just
+#                      falls back to a PATH install for those. A tool that IS vendored but fails
+#                      to download is a hard error under CI: shipping a release with no encoders
+#                      in it is worse than not shipping one.
 #
 #   -Vendor          - MAINTAINER step: download the pinned UPSTREAM builds, extract each tool,
 #                      hash it, stage the renamed asset into scripts/staged/, and write the sha256
@@ -100,16 +102,16 @@ if ($Vendor) {
 $dest = Join-Path $root "tools/$Rid"
 New-Item -ItemType Directory -Force $dest | Out-Null
 $base = "https://github.com/$($manifest.repo)/releases/download/$($manifest.release)"
-$got = 0; $skipped = 0
+$got = 0; $pending = 0; $failed = 0
 foreach ($t in $tools) {
     if ($t.sha256 -eq 'PENDING') {
         Write-Warning "skip $($t.out): not vendored yet (sha256 PENDING) — runtime falls back to a PATH install"
-        $skipped++; continue
+        $pending++; continue
     }
     try { $tmp = Save-Url "$base/$($t.asset)" }
     catch {
         Write-Warning "skip $($t.out): download failed — is release '$($manifest.release)' published with asset '$($t.asset)'? ($($_.Exception.Message))"
-        $skipped++; continue
+        $failed++; continue
     }
     try {
         $actual = Get-Sha $tmp
@@ -123,4 +125,12 @@ foreach ($t in $tools) {
     }
     finally { Remove-Item $tmp -ErrorAction SilentlyContinue }
 }
-Write-Host "Done ($Rid): $got verified, $skipped skipped."
+Write-Host "Done ($Rid): $got verified, $pending pending, $failed failed."
+
+# A transient 5xx or a renamed asset must not produce a signed, published release with no
+# encoders in it: CD ripping and iPod transcoding would be broken on any machine that has
+# never installed ffmpeg/flac/lame by hand, and the only trace would be a warning in the
+# build log. PENDING tools are exempt - those are deliberately not vendored yet.
+if ($failed -gt 0 -and $env:CI) {
+    throw "$failed bundled tool(s) failed to download for $Rid — refusing to build a release without them."
+}

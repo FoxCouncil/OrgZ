@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch the official VLC.app for macOS, verify the publisher checksum, and stage
+# Fetch the official VLC.app for macOS, verify it against a pinned SHA-256, and stage
 # libvlc + its plugins into the publish directory so Velopack ships them inside
 # the OrgZ .app bundle.
 #
@@ -20,13 +20,38 @@
 set -euo pipefail
 
 VLC_VERSION="${VLC_VERSION:-3.0.21}"
+
+# SHA-256 of each official dmg, pinned here in-tree - the same model scripts/encoders.json
+# uses for the bundled encoders.
+#
+# Deliberately NOT fetched as a sidecar alongside the payload: get.videolan.org is a
+# redirector onto volunteer community mirrors, so a .sha256 pulled from the same base URL is
+# served by the same machine as the dmg. A mirror serving a trojaned build simply serves a
+# digest computed over it and the comparison passes. Pinning the expected value in the
+# repository is what makes the check mean anything - the bits we accept are decided here,
+# in a reviewable diff.
+#
+# Values taken from VideoLAN's own origin (download.videolan.org) and cross-checked against
+# two independent mirrors. Bumping VLC_VERSION means re-pinning both.
+VLC_PINNED_VERSION="3.0.21"
+VLC_SHA256_ARM64="15dd65bf6489da9ec6a67f5585c74c40a58993acff41a82958a916dd74178044"
+VLC_SHA256_INTEL64="d431fd051c3dc7af02bd313c6d05d90cf604b70ed3ec5bba6fd4c49ef3e638d9"
+
 PUBLISH_DIR="${1:?publish directory required}"
 ARCH="${2:?arch required (arm64 | intel64)}"
 
 case "$ARCH" in
-    arm64|intel64) ;;
+    arm64)   EXPECTED_SHA="$VLC_SHA256_ARM64" ;;
+    intel64) EXPECTED_SHA="$VLC_SHA256_INTEL64" ;;
     *) echo "Unsupported arch: $ARCH (expected arm64 or intel64)" >&2; exit 1 ;;
 esac
+
+if [[ "$VLC_VERSION" != "$VLC_PINNED_VERSION" ]]; then
+    echo "VLC_VERSION=$VLC_VERSION but the digests in this script are pinned to $VLC_PINNED_VERSION." >&2
+    echo "Re-pin VLC_SHA256_ARM64 / VLC_SHA256_INTEL64 from" >&2
+    echo "https://download.videolan.org/pub/videolan/vlc/$VLC_VERSION/macosx/ before bumping the version." >&2
+    exit 1
+fi
 
 DMG_NAME="vlc-${VLC_VERSION}-${ARCH}.dmg"
 BASE_URL="https://get.videolan.org/vlc/${VLC_VERSION}/macosx"
@@ -38,15 +63,9 @@ curl --fail --silent --show-error --location \
     --output "$WORK_DIR/$DMG_NAME" \
     "$BASE_URL/$DMG_NAME"
 
-# VideoLAN publishes a SHA-256 sidecar for every release artifact. Fetching and
-# verifying it pins us to the exact bits the project signed off on, so a
-# compromised mirror cannot silently swap libvlc.
+# Compared against the digest pinned at the top of this script, never against one
+# downloaded next to the dmg.
 echo "==> Verifying checksum"
-curl --fail --silent --show-error --location \
-    --output "$WORK_DIR/$DMG_NAME.sha256" \
-    "$BASE_URL/$DMG_NAME.sha256"
-
-EXPECTED_SHA="$(awk '{print $1}' "$WORK_DIR/$DMG_NAME.sha256")"
 ACTUAL_SHA="$(shasum -a 256 "$WORK_DIR/$DMG_NAME" | awk '{print $1}')"
 if [[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]]; then
     echo "Checksum mismatch for $DMG_NAME" >&2

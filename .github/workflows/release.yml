@@ -33,6 +33,20 @@ jobs:
       contents: read
       id-token: write
 
+    # The presence checks for the signing credentials live HERE and nowhere else.
+    #
+    # `secrets` is not one of the contexts available to a step-level `if` - GitHub's context
+    # availability table grants it to `jobs.<job_id>.env` and to `with:`/`env:`, but not to
+    # `jobs.<job_id>.if` or `jobs.<job_id>.steps.if`. Naming it there doesn't evaluate to
+    # empty, it makes the whole workflow FILE invalid: every run fails at zero seconds with
+    # "workflow file issue" before a single job starts, which is how a tag can look pushed
+    # and produce no release at all. Hoisting the check into job env gives the steps a plain
+    # string flag to gate on, and keeps the "unset credentials degrade to an unsigned build"
+    # behaviour intact.
+    env:
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_APPLE_SIGNING: ${{ secrets.DEVID_CERT_P12 != '' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +58,16 @@ jobs:
       - name: Extract version from tag
         id: version
         shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        # Checked here rather than discovered inside `vpk pack` twenty minutes later: vpk wants
+        # SemVer, so a four-part tag (v1.2.3.4) or a typo fails after three platforms have
+        # already published, leaving a half-finished release.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' is not vMAJOR.MINOR.PATCH[-prerelease]; vpk needs SemVer."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
       # PINNED, deliberately. A bare `dotnet tool install -g vpk` takes whatever is newest,
       # and 1.2.0 shipped a bug where a quiet MSI install ignored --instLocation and landed
@@ -86,13 +109,29 @@ jobs:
         if: matrix.rid == 'osx-arm64'
         run: scripts/fetch-vlc-mac.sh publish arm64
 
+      # Invoked through `bash` rather than directly: this repo is developed on Windows with
+      # core.fileMode=false, so a new script lands in git as 100644 and executing it by path
+      # would fail with "Permission denied" on the runner.
+      - name: Bundle libvlc (Linux)
+        if: matrix.rid == 'linux-x64'
+        run: bash scripts/fetch-vlc-linux.sh publish
+
+      # vpk builds the AppImage by shelling out to mksquashfs, which the GitHub-hosted
+      # Ubuntu image does NOT carry - its own error message is literally "sudo apt install
+      # squashfs-tools". Without this the Linux leg fails at pack time, and because the
+      # release and docs jobs both `needs: build`, one failed leg means the tag produces no
+      # release on ANY platform.
+      - name: Install AppImage build tooling (Linux)
+        if: matrix.rid == 'linux-x64'
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+
       # ── Code signing ──────────────────────────────────────────────────────────
       # Every signing step is CONDITIONAL on its secrets existing, so a release still
       # builds (unsigned) before the accounts are set up, and an expired credential
       # degrades to an unsigned build rather than a failed one. See SIGNING.md.
 
       - name: Azure login for Artifact Signing
-        if: ${{ matrix.rid == 'win-x64' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ matrix.rid == 'win-x64' && env.HAS_AZURE_SIGNING == 'true' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -100,7 +139,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Write Artifact Signing metadata
-        if: ${{ matrix.rid == 'win-x64' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ matrix.rid == 'win-x64' && env.HAS_AZURE_SIGNING == 'true' }}
         shell: bash
         run: |
           # vpk hands this to the bundled signtool.exe, which authenticates with
@@ -112,10 +151,14 @@ jobs:
             "CertificateProfileName": "${{ secrets.AZURE_TS_PROFILE }}"
           }
           JSON
-          echo "SIGN_ARGS=--azureTrustedSignFile $RUNNER_TEMP/signing-metadata.json" >> "$GITHUB_ENV"
+          # RUNNER_TEMP is a Windows path (D:\a\_temp) and the pack step runs SIGN_ARGS through
+          # `eval`, which eats backslashes: D:\a\_temp would reach vpk as D:a_temp and signing
+          # would fail on a file that plainly exists. Hand eval forward slashes, quoted.
+          SIGN_FILE="${RUNNER_TEMP//\\//}/signing-metadata.json"
+          echo "SIGN_ARGS=--azureTrustedSignFile \"$SIGN_FILE\"" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificates
-        if: ${{ matrix.rid == 'osx-arm64' && secrets.DEVID_CERT_P12 != '' }}
+        if: ${{ matrix.rid == 'osx-arm64' && env.HAS_APPLE_SIGNING == 'true' }}
         shell: bash
         env:
           DEVID_CERT_P12: ${{ secrets.DEVID_CERT_P12 }}
@@ -187,8 +230,22 @@ jobs:
             # --runtime is NOT optional here: vpk warns "defaulting to x86" without it, and
             # the WiX template picks [ProgramFiles64Folder] vs [ProgramFilesFolder] off
             # exactly that. Getting it wrong installs a 64-bit app into Program Files (x86).
-            WIN_FLAGS="--icon Assets/app.ico --msi --instLocation PerMachine --runtime ${{ matrix.rid }} --packAuthors FoxCouncil --packTitle OrgZ"
+            WIN_FLAGS="--icon Assets/app.ico --msi --instLocation PerMachine --runtime ${{ matrix.rid }}"
           fi
+
+          # Everyone gets an icon and a real title. Without --icon the AppImage and the .app
+          # carry Velopack's placeholder artwork, which is what the user sees in their dock,
+          # their launcher and their file manager.
+          #
+          # One container per platform, and vpk REFUSES the wrong one rather than converting:
+          # macOS demands .icns ("icon must have a '.icns' extension"), Windows .ico, and the
+          # AppImage takes the PNG. Assets/app.icns is generated from app-icon-1024.png with
+          # sips + iconutil, which only exist on a Mac - hence it lives in the repo.
+          COMMON_FLAGS="--packAuthors FoxCouncil --packTitle OrgZ"
+          case "${{ matrix.rid }}" in
+            osx-*)   COMMON_FLAGS="$COMMON_FLAGS --icon Assets/app.icns" ;;
+            linux-*) COMMON_FLAGS="$COMMON_FLAGS --icon Assets/app-icon-1024.png" ;;
+          esac
           # SIGN_ARGS is set only when the signing secrets exist; empty otherwise, so an
           # unconfigured repo still produces a working (unsigned) release.
           if [[ -n "${SIGN_ARGS:-}" ]]; then
@@ -197,12 +254,29 @@ jobs:
             echo "::warning::No signing credentials - this release will be UNSIGNED (SmartScreen warnings on Windows, Gatekeeper refusal on macOS). See SIGNING.md."
           fi
 
-          eval vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $WIN_FLAGS ${SIGN_ARGS:-}
+          eval vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $COMMON_FLAGS $WIN_FLAGS ${SIGN_ARGS:-}
 
           if [[ "${{ matrix.rid }}" == win-* ]]; then
             rm -f releases/OrgZ-win-Setup.exe
-            # A silently-missing MSI would ship a release whose Windows download 404s.
-            test -f releases/OrgZ-win.msi || { echo "::error::vpk did not produce OrgZ-win.msi"; ls -la releases/; exit 1; }
+          fi
+
+          # Assert the installer this platform's download link points at actually exists, because
+          # the release body below hard-codes these names and a mismatch ships a 404.
+          #
+          # The naming rule is {id}-{channel}{suffix} - EXCEPT on Linux. Velopack's
+          # DefaultName.GetSuggestedPortableName special-cases it: when the channel equals the
+          # default for the OS (and nothing here passes --channel, so it always does) the Linux
+          # AppImage gets NO channel segment. Verified by calling that method directly against
+          # the pinned CLI: win -> OrgZ-win.msi, osx -> OrgZ-osx-Setup.pkg, linux -> OrgZ.AppImage.
+          case "${{ matrix.rid }}" in
+            win-*)   expected=OrgZ-win.msi ;;
+            osx-*)   expected=OrgZ-osx-Setup.pkg ;;
+            linux-*) expected=OrgZ.AppImage ;;
+          esac
+          if [[ ! -f "releases/$expected" ]]; then
+            echo "::error::vpk did not produce $expected - the release body links a file that will not exist."
+            ls -la releases/
+            exit 1
           fi
 
       - name: Upload artifacts
@@ -230,8 +304,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      # PINNED, for the same reason `vpk` is. An unpinned `pip install` here takes whatever
+      # is newest on the day a tag is cut, and the Material for MkDocs team have announced
+      # that MkDocs 2.0 removes the plugin system outright with no migration path - so the
+      # first release after it lands would fail on a docs job nobody had touched. Verified
+      # building this site with --strict.
       - name: Install dependencies
-        run: pip install mkdocs-material mike
+        run: pip install "mkdocs-material==9.7.7" "mike==2.2.0"
 
       - name: Configure git
         run: |
