@@ -20,6 +20,8 @@ jobs:
             rid: linux-x64
           - os: macos-latest
             rid: osx-arm64
+          - os: macos-latest
+            rid: osx-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -106,8 +108,8 @@ jobs:
           fi
 
       - name: Bundle libvlc (macOS)
-        if: matrix.rid == 'osx-arm64'
-        run: scripts/fetch-vlc-mac.sh publish arm64
+        if: startsWith(matrix.rid, 'osx-')
+        run: scripts/fetch-vlc-mac.sh publish ${{ matrix.rid == 'osx-arm64' && 'arm64' || 'intel64' }}
 
       # Invoked through `bash` rather than directly: this repo is developed on Windows with
       # core.fileMode=false, so a new script lands in git as 100644 and executing it by path
@@ -158,7 +160,7 @@ jobs:
           echo "SIGN_ARGS=--azureTrustedSignFile \"$SIGN_FILE\"" >> "$GITHUB_ENV"
 
       - name: Import Developer ID certificates
-        if: ${{ matrix.rid == 'osx-arm64' && env.HAS_APPLE_SIGNING == 'true' }}
+        if: ${{ startsWith(matrix.rid, 'osx-') && env.HAS_APPLE_SIGNING == 'true' }}
         shell: bash
         env:
           DEVID_CERT_P12: ${{ secrets.DEVID_CERT_P12 }}
@@ -246,6 +248,19 @@ jobs:
             osx-*)   COMMON_FLAGS="$COMMON_FLAGS --icon Assets/app.icns" ;;
             linux-*) COMMON_FLAGS="$COMMON_FLAGS --icon Assets/app-icon-1024.png" ;;
           esac
+
+          # Velopack's default channel is the OS, not the RID, so two macOS legs would both
+          # write OrgZ-osx-Setup.pkg and RELEASES-osx and overwrite each other on the release.
+          #
+          # Only the Intel leg is renamed. UpdateManager resolves its channel from the one the
+          # app was INSTALLED from, and every Mac install that already exists came from the
+          # default "osx" channel - moving Apple Silicon to "osx-arm64" would point those
+          # installs at a feed that stopped being published, and they would silently never
+          # update again. Apple Silicon keeps the default; Intel is the new arrival, so it is
+          # the one that gets a name.
+          if [[ "${{ matrix.rid }}" == "osx-x64" ]]; then
+            COMMON_FLAGS="$COMMON_FLAGS --channel osx-x64"
+          fi
           # SIGN_ARGS is set only when the signing secrets exist; empty otherwise, so an
           # unconfigured repo still produces a working (unsigned) release.
           #
@@ -273,9 +288,12 @@ jobs:
           # default for the OS (and nothing here passes --channel, so it always does) the Linux
           # AppImage gets NO channel segment. Verified by calling that method directly against
           # the pinned CLI: win -> OrgZ-win.msi, osx -> OrgZ-osx-Setup.pkg, linux -> OrgZ.AppImage.
+          # The Intel leg passes an explicit --channel (see above), so its name carries it:
+          # OrgZ-osx-x64-Setup.pkg. Apple Silicon stays on the default and keeps its old name.
           case "${{ matrix.rid }}" in
             win-*)   expected=OrgZ-win.msi ;;
-            osx-*)   expected=OrgZ-osx-Setup.pkg ;;
+            osx-arm64) expected=OrgZ-osx-Setup.pkg ;;
+            osx-x64)   expected=OrgZ-osx-x64-Setup.pkg ;;
             linux-*) expected=OrgZ.AppImage ;;
           esac
           if [[ ! -f "releases/$expected" ]]; then
@@ -386,6 +404,7 @@ jobs:
           |----------|-----------|----------|
           | Windows (x64) | [OrgZ-win.msi](${BASE}/OrgZ-win.msi) | [OrgZ-win-Portable.zip](${BASE}/OrgZ-win-Portable.zip) |
           | macOS (Apple Silicon) | [OrgZ-osx-Setup.pkg](${BASE}/OrgZ-osx-Setup.pkg) | [OrgZ-osx-Portable.zip](${BASE}/OrgZ-osx-Portable.zip) |
+          | macOS (Intel) | [OrgZ-osx-x64-Setup.pkg](${BASE}/OrgZ-osx-x64-Setup.pkg) | [OrgZ-osx-x64-Portable.zip](${BASE}/OrgZ-osx-x64-Portable.zip) |
           | Linux (x64) | [OrgZ.AppImage](${BASE}/OrgZ.AppImage) | - |
 
           <details><summary>Other files in this release are used by the auto-updater.</summary>

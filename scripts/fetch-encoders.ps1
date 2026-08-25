@@ -30,7 +30,10 @@ $manifestPath = Join-Path $PSScriptRoot 'encoders.json'
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 
 if (-not $Rid) {
-    $Rid = if ($IsWindows) { 'win-x64' } elseif ($IsLinux) { 'linux-x64' } elseif ($IsMacOS) { 'osx-arm64' } else { throw 'Cannot detect OS — pass -Rid win-x64|linux-x64|osx-arm64' }
+    # macOS ships for both architectures, so detect rather than assume - an Intel Mac
+    # defaulting to osx-arm64 would stage binaries it cannot execute.
+    $macRid = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'osx-arm64' } else { 'osx-x64' }
+    $Rid = if ($IsWindows) { 'win-x64' } elseif ($IsLinux) { 'linux-x64' } elseif ($IsMacOS) { $macRid } else { throw 'Cannot detect OS — pass -Rid win-x64|linux-x64|osx-arm64|osx-x64' }
 }
 
 $tools = $manifest.tools.$Rid

@@ -9,6 +9,13 @@ a .pkg and an AppImage from a tag. Zero build warnings, gated per commit.
 
 ## Before v1
 
+- [ ] Intel macOS build. The matrix, signing, libvlc and the update channel are wired;
+      `scripts/encoders.json` still lists osx-x64 ffmpeg/flac/lame as PENDING, so a release
+      cut now ships an Intel build with no bundled encoders (it falls back to a PATH install).
+      Run `bash scripts/build-ffmpeg-mac.sh x86_64` and `bash scripts/build-encoders-mac.sh
+      x86_64` on a Mac, upload the three assets to `encoders-1`, paste the hashes in. Then
+      verify on an actual Intel Mac - nothing on hand can run it.
+
 - [ ] Burn through the installed service, on real hardware. Expect zero UAC. Hyper-V passes
       through no USB optical drive, so this needs the Pioneer on the desk.
 - [ ] iPod sync through the installed service, on real hardware.
@@ -140,11 +147,13 @@ Encoder builds, per platform. Kept because the quirks will bite again.
   `.tar.xz`). flac and lame built from source and statically linked by
   `scripts/build-encoders-linux.sh`. An AppImage has no dependency mechanism, so static
   matters.
-- osx-arm64: ffmpeg 7.1 (LGPL-clean, AudioToolbox alac/aac) plus flac and lame, built on
-  a Mac. macOS can't statically link libSystem, so only our own libs are static; verified
-  with `otool -L`. Both scripts pin `MACOSX_DEPLOYMENT_TARGET=11.0` and assert the resulting
-  minos - without it clang stamps the build machine's OS and the binary won't launch on
-  anything older.
+- osx-arm64 / osx-x64: ffmpeg 7.1 (LGPL-clean, AudioToolbox alac/aac) plus flac and lame,
+  built on a Mac. macOS can't statically link libSystem, so only our own libs are static;
+  verified with `otool -L`. Both scripts pin `MACOSX_DEPLOYMENT_TARGET=11.0` and assert the
+  resulting minos - without it clang stamps the build machine's OS and the binary won't
+  launch on anything older. Both take an arch argument and cross-compile, so either slice
+  builds from either kind of Mac; the functional test is skipped when the result can't run
+  on the build machine.
 - Comparing a rip round-trip: compare decoded PCM, not files. ffmpeg writes a `LIST` chunk
   into WAV that flac drops, so `cmp` reports a 34-byte difference that isn't data loss.
 

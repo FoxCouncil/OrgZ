@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds flac + lame for macOS arm64, for bundling with OrgZ.
+# Builds flac + lame for macOS, for bundling with OrgZ.
 #
 # Same reasoning as the Linux script: OrgZ ships what OrgZ needs. Ripping shells out to
 # real flac/lame binaries, and telling a Mac user to "brew install flac lame" before they
@@ -13,15 +13,35 @@
 # are Apple's own, which exist on every Mac. That's checked below via otool, and the
 # deployment target is pinned so the binary doesn't demand the build machine's macOS.
 #
-# Run on an Apple-Silicon Mac with the Xcode command-line tools:
-#   bash scripts/build-encoders-mac.sh
+# Run on a Mac with the Xcode command-line tools:
+#   bash scripts/build-encoders-mac.sh [arm64|x86_64]
 #
-# It stages scripts/staged/{flac,lame}-osx-arm64 and prints each SHA-256. Then upload both
+# Either arch can be built from either kind of Mac - clang cross-compiles, and nothing here
+# is executed during the build. The functional test at the end is skipped when the binaries
+# cannot run on this machine (an x86_64 build on Apple Silicon without Rosetta).
+#
+# It stages scripts/staged/{flac,lame}-osx-<rid> and prints each SHA-256. Then upload both
 # to the 'encoders-1' release and paste the hashes into scripts/encoders.json.
 set -euo pipefail
 
 FLAC_VER="1.4.3"
 LAME_VER="3.100"
+
+ARCH="${1:-$(uname -m)}"
+case "$ARCH" in
+    arm64)  RID="osx-arm64" ;;
+    x86_64) RID="osx-x64" ;;
+    *) echo "Unsupported arch: $ARCH (expected arm64 or x86_64)" >&2; exit 1 ;;
+esac
+
+# Cross-compiling needs the target spelled out for the compiler AND for autoconf, which
+# would otherwise configure for the build machine and emit the wrong arch.
+export CFLAGS="-arch $ARCH ${CFLAGS:-}"
+export CXXFLAGS="-arch $ARCH ${CXXFLAGS:-}"
+export LDFLAGS="-arch $ARCH ${LDFLAGS:-}"
+CONFIGURE_HOST="--host=${ARCH}-apple-darwin"
+
+echo "Building for $ARCH ($RID)"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGED="$ROOT/scripts/staged"
@@ -44,11 +64,11 @@ tar -xf flac.tar.xz
 cd "flac-${FLAC_VER}"
 # --disable-ogg: OrgZ rips native .flac, never FLAC-in-Ogg, so this drops the libogg
 # dependency entirely rather than bundling a second library.
-./configure --enable-static --disable-shared --disable-ogg --disable-doxygen-docs \
+./configure $CONFIGURE_HOST --enable-static --disable-shared --disable-ogg --disable-doxygen-docs \
             --disable-examples --disable-dependency-tracking >/dev/null
 make -j"$(sysctl -n hw.ncpu)" >/dev/null
 strip src/flac/flac
-cp src/flac/flac "$STAGED/flac-osx-arm64"
+cp src/flac/flac "$STAGED/flac-${RID}"
 cd "$WORK"
 
 echo "== lame ${LAME_VER} =="
@@ -70,16 +90,16 @@ else
 fi
 tar -xf lame.tar.gz
 cd "lame-${LAME_VER}"
-./configure --enable-static --disable-shared --disable-dependency-tracking >/dev/null
+./configure $CONFIGURE_HOST --enable-static --disable-shared --disable-dependency-tracking >/dev/null
 make -j"$(sysctl -n hw.ncpu)" >/dev/null
 strip frontend/lame
-cp frontend/lame "$STAGED/lame-osx-arm64"
+cp frontend/lame "$STAGED/lame-${RID}"
 cd "$WORK"
 
 echo
 echo "== verifying =="
 for tool in flac lame; do
-  bin="$STAGED/${tool}-osx-arm64"
+  bin="$STAGED/${tool}-${RID}"
   echo "--- $tool ---"
   echo "  $(file -b "$bin")"
 
@@ -100,10 +120,21 @@ for tool in flac lame; do
   esac
 done
 
+if [ "$ARCH" != "$(uname -m)" ] && ! arch -"$ARCH" true 2>/dev/null; then
+  echo
+  echo "== skipping the functional test: $ARCH binaries cannot run on $(uname -m) here =="
+  echo
+  echo "== staged =="
+  for tool in flac lame; do
+    shasum -a 256 "$STAGED/${tool}-${RID}"
+  done
+  exit 0
+fi
+
 echo
 echo "== they do real work =="
-"$STAGED/flac-osx-arm64" --version
-"$STAGED/lame-osx-arm64" --version | head -1
+"$STAGED/flac-${RID}" --version
+"$STAGED/lame-${RID}" --version | head -1
 
 python3 - /tmp/orgz-tone.wav <<'PY'
 import struct, math, sys, wave
@@ -114,15 +145,15 @@ w.writeframes(b''.join(struct.pack('<hh', v, v) for v in
 w.close()
 PY
 
-"$STAGED/flac-osx-arm64" -8 -f -s -o /tmp/orgz-tone.flac /tmp/orgz-tone.wav
-"$STAGED/flac-osx-arm64" -d -f -s -o /tmp/orgz-back.wav /tmp/orgz-tone.flac
+"$STAGED/flac-${RID}" -8 -f -s -o /tmp/orgz-tone.flac /tmp/orgz-tone.wav
+"$STAGED/flac-${RID}" -d -f -s -o /tmp/orgz-back.wav /tmp/orgz-tone.flac
 cmp /tmp/orgz-tone.wav /tmp/orgz-back.wav && echo "  flac  lossless round-trip OK"
-"$STAGED/lame-osx-arm64" -V2 --quiet /tmp/orgz-tone.wav /tmp/orgz-tone.mp3
+"$STAGED/lame-${RID}" -V2 --quiet /tmp/orgz-tone.wav /tmp/orgz-tone.mp3
 echo "  lame  wrote $(stat -f%z /tmp/orgz-tone.mp3) byte mp3"
 rm -f /tmp/orgz-tone.* /tmp/orgz-back.wav
 
 echo
 echo "== staged =="
 for tool in flac lame; do
-  shasum -a 256 "$STAGED/${tool}-osx-arm64"
+  shasum -a 256 "$STAGED/${tool}-${RID}"
 done

@@ -33,34 +33,25 @@ tab for your platform.
 
 === "macOS"
 
-    **Architecture:** Apple Silicon (M1 or newer) · **Requires:** a recent macOS
+    **Architecture:** Apple Silicon and Intel · **Requires:** macOS 11 (Big Sur) or newer
 
-    !!! warning "Apple Silicon only"
-        There is currently no Intel (x86-64) build. OrgZ runs on M1/M2/M3-class
-        Macs. `libvlc` is bundled inside the app, so playback works with no extra setup.
+    Two builds, one per architecture - pick the one matching your Mac. If you are
+    unsure, open the Apple menu → **About This Mac**: an Apple M-series chip means Apple
+    Silicon, anything Intel means the Intel build.
 
     | Download | Use it when |
     |----------|-------------|
-    | `OrgZ-osx-Setup.pkg` | Normal install into `/Applications`. |
-    | `OrgZ-osx-Portable.zip` | No-install `OrgZ.app` you can run from anywhere. |
+    | `OrgZ-osx-Setup.pkg` | Apple Silicon (M1 or newer). Normal install into `/Applications`. |
+    | `OrgZ-osx-Portable.zip` | Apple Silicon, no-install `OrgZ.app` you can run from anywhere. |
+    | `OrgZ-osx-x64-Setup.pkg` | Intel Mac. Normal install into `/Applications`. |
+    | `OrgZ-osx-x64-Portable.zip` | Intel Mac, no-install `OrgZ.app`. |
 
-    1. Download `OrgZ-osx-Setup.pkg`.
-    2. The build is **not signed or notarized yet**, so Gatekeeper blocks the
-       installer the first time you open it. On **macOS 15 (Sequoia) and later**,
-       double-click the `.pkg`, let macOS refuse it, then open **System Settings →
-       Privacy & Security**, scroll to the message naming the blocked package, and
-       click **Open Anyway**. Confirm, and Installer runs.
+    `libvlc` is bundled inside the app, so playback works with no extra setup.
 
-        Apple removed the Control-click → **Open** override in Sequoia; on older
-        macOS releases that shortcut still works.
-
-        From a terminal, clearing the quarantine flag on the download does the same
-        thing:
-
-        ```bash
-        xattr -dr com.apple.quarantine ~/Downloads/OrgZ-osx-Setup.pkg
-        ```
-
+    1. Download the `.pkg` for your architecture.
+    2. Double-click it and follow Installer. The package is signed with a Developer
+       ID certificate and notarized by Apple, so Gatekeeper opens it without a
+       warning and without any quarantine workaround.
     3. Launch OrgZ from `/Applications`.
 
     !!! note "Encoders are already in the bundle"

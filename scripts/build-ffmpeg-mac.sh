@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a portable, LGPL ffmpeg for macOS arm64 from the OFFICIAL ffmpeg.org source, for
+# Builds a portable, LGPL ffmpeg for macOS from the OFFICIAL ffmpeg.org source, for
 # bundling with OrgZ. --disable-gpl keeps it LGPL: OrgZ needs only ebur128 + the native
 # aac / alac / flac / pcm / image codecs (all LGPL) and never x264/x265, so nothing GPL is
 # pulled in. ffmpeg's own libraries are linked statically into the binary; only macOS system
@@ -11,15 +11,29 @@
 #
 #   scripts/build-ffmpeg-mac.sh
 #
-# It drops tools/osx-arm64/ffmpeg and prints the binary's SHA-256. Test it, then:
-#   1. upload it as asset 'ffmpeg-osx-arm64' to the OrgZ 'encoders-1' GitHub release
-#   2. paste the printed sha256 into the osx-arm64 entry in scripts/encoders.json
+# Usage: bash scripts/build-ffmpeg-mac.sh [arm64|x86_64]
+#
+# Either arch builds from either kind of Mac - clang cross-compiles, and configure is told
+# the target explicitly. The version banner only prints when the result can run here.
+#
+# It drops tools/osx-<rid>/ffmpeg and prints the binary's SHA-256. Test it, then:
+#   1. upload it as asset 'ffmpeg-osx-<rid>' to the OrgZ 'encoders-1' GitHub release
+#   2. paste the printed sha256 into the matching entry in scripts/encoders.json
 # From then on every build fetches + verifies OUR copy, exactly like win-x64 / linux-x64.
 set -euo pipefail
 
 VER="7.1"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEST="$ROOT/tools/osx-arm64"
+
+ARCH="${1:-$(uname -m)}"
+case "$ARCH" in
+    arm64)  RID="osx-arm64" ;;
+    x86_64) RID="osx-x64" ;;
+    *) echo "Unsupported arch: $ARCH (expected arm64 or x86_64)" >&2; exit 1 ;;
+esac
+
+DEST="$ROOT/tools/$RID"
+echo "Building for $ARCH ($RID)"
 
 # Without this, clang stamps the BUILD MACHINE's OS as the minimum (a build on macOS 26
 # produced `minos 26.0`), and the binary refuses to launch on anything older - which is
@@ -47,7 +61,13 @@ tar -xf ffmpeg.tar.xz
 cd "ffmpeg-${VER}"
 
 echo "Configuring (LGPL; ffmpeg libs static)…"
+# An explicit target, and --enable-cross-compile when it is not this machine: otherwise
+# configure probes the build host and emits a binary for the wrong architecture that
+# still links and still runs here, so the mistake only surfaces on a user Mac.
 ./configure \
+  --arch="$ARCH" --target-os=darwin \
+  --extra-cflags="-arch $ARCH" --extra-ldflags="-arch $ARCH" \
+  $([ "$ARCH" = "$(uname -m)" ] || echo --enable-cross-compile) \
   --disable-gpl --disable-nonfree \
   --disable-doc --disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages \
   --disable-ffplay --disable-ffprobe \
@@ -62,7 +82,12 @@ cp ffmpeg "$DEST/ffmpeg"
 chmod +x "$DEST/ffmpeg"
 
 echo ""
-"$DEST/ffmpeg" -hide_banner -version | head -1
+if [ "$ARCH" = "$(uname -m)" ] || arch -"$ARCH" true 2>/dev/null; then
+  "$DEST/ffmpeg" -hide_banner -version | head -1
+else
+  echo "(not run: $ARCH binaries cannot execute on $(uname -m) here)"
+fi
+echo "arch:   $(file -b "$DEST/ffmpeg")"
 
 # A binary that only runs on the build machine's macOS is worse than no binary - it fails
 # at launch on the user's Mac with nothing useful to say. Check, don't assume.
@@ -76,4 +101,4 @@ echo "dylibs: $(otool -L "$DEST/ffmpeg" | tail -n +2 | grep -vc '/usr/lib/\|/Sys
 
 echo "Built:  $DEST/ffmpeg"
 echo "sha256: $(shasum -a 256 "$DEST/ffmpeg" | awk '{print $1}')"
-echo "→ upload as 'ffmpeg-osx-arm64' to the encoders-1 release, then set that sha256 in scripts/encoders.json"
+echo "→ upload as 'ffmpeg-${RID}' to the encoders-1 release, then set that sha256 in scripts/encoders.json"
