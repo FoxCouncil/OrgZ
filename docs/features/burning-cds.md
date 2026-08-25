@@ -15,6 +15,8 @@ Two ways in, both landing on the same **Burn Disc** dialog:
 Tracks with no local audio file - radio stations sitting in Favorites, for
 instance - are skipped.
 
+![The Burn Disc dialog](../assets/screenshots/burn-disc.png)
+
 ## The Burn Disc dialog
 
 | Field | What it does |

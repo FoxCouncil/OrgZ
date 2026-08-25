@@ -83,6 +83,15 @@ internal static class Program
             ("playlists", 1280, 800, SeededPlaylists),
             ("podcasts", 1280, 800, SeededPodcasts),
             ("audiobooks", 1280, 800, SeededAudiobooks),
+            ("burn-disc", 480, 0, SeededBurnDialog),
+            ("media-info", 620, 0, SeededMediaInfo),
+            ("sync-settings", 520, 0, SeededSyncSettings),
+            ("device-picker", 420, 0, () => new DevicePickerDialog(
+                ["OrgZ iPod (Classic 6G)", "NIGHTDRIVE (Rockbox)", "Shuffle 2G"],
+                "Send to Device", "Choose where these tracks should go.")),
+            ("playlist-name", 400, 0, () => new PlaylistNameDialog("Night Drive")),
+            ("airplay-password", 420, 0, () => new AirPlayPasswordDialog("Living Room")),
+            ("first-launch", 1280, 800, SeededFirstLaunch),
             ("settings", 620, 0, () => new SettingsDialog()),
             ("mini-player", 0, 0, SeededMiniPlayer),
         };
@@ -113,6 +122,7 @@ internal static class Program
         var window = new MainWindow(screenshotMode: true);
         var vm = window.ViewModel;
         vm.SetItems(SampleLibrary());
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Music");
         vm.RefreshView();
         vm.UpdateData();
         return window;
@@ -246,6 +256,50 @@ internal static class Program
         var vm = window.ViewModel;
         vm.SetItems(SampleRadio());
         vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Radio");
+        return window;
+    }
+
+    /// <summary>The burn confirmation, sized for an audio CD's worth of tracks.</summary>
+    private static Window SeededBurnDialog()
+        => new BurnDiscDialog(
+            ["I:", "F:"],
+            trackCount: 14,
+            totalLength: TimeSpan.FromMinutes(58) + TimeSpan.FromSeconds(12),
+            totalDataBytes: 612_000_000,
+            initialTitle: "Night Drive",
+            probeAsync: null);
+
+    /// <summary>Get Info for one track of the sample library.</summary>
+    private static Window SeededMediaInfo()
+    {
+        var library = SampleLibrary();
+        var track = library.First(i => i.Album == "Driver's High");
+        return new MediaInfoDialog(track, library);
+    }
+
+    /// <summary>Sync settings for a device that supports everything.</summary>
+    private static Window SeededSyncSettings()
+        => new SyncSettingsDialog(
+            "OrgZ iPod",
+            supportsPodcasts: true,
+            supportsAudiobooks: true,
+            supportsPlaylists: true,
+            playlists: [(1, "Night Drive"), (2, "Eurobeat"), (3, "Workout")],
+            current: new SyncPlan());
+
+    /// <summary>The empty library - what a first run looks like before a folder is chosen.</summary>
+    private static MainWindow SeededFirstLaunch()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+        vm.SetItems([]);
+
+        // Explicit: the window restores the last view from settings, and an earlier shot in the
+        // run leaves that pointing at whatever it selected - which also puts the audiobook store
+        // on the network mid-capture.
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Music");
+        vm.RefreshView();
+        vm.UpdateData();
         return window;
     }
 

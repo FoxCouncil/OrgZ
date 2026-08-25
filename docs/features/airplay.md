@@ -36,6 +36,8 @@ A receiver with **Require Password** set for speaker access (the Home app's
 setting) announces that fact, and OrgZ asks for the password before it plays -
 also when the receiver rejects one it was given.
 
+![Entering a receiver password](../assets/screenshots/airplay-password.png)
+
 Tick **Remember** in the prompt to keep it. Passwords go to the operating
 system's secret store (DPAPI on Windows, Keychain on macOS, libsecret on Linux),
 never to `settings.json`. If the system has no secret store, OrgZ keeps the

@@ -8,8 +8,9 @@
     <img src="assets/screenshots/now-playing.png" alt="Now playing" />
     <img src="assets/screenshots/cd-rip-progress.png" alt="Ripping a CD" />
     <img src="assets/screenshots/radio-browser.png" alt="Radio stations" />
+    <img src="assets/screenshots/playlists.png" alt="Playlists" />
   </div>
-  <div class="hero-dots"><span></span><span></span><span></span><span></span></div>
+  <div class="hero-dots"><span></span><span></span><span></span><span></span><span></span></div>
 </div>
 
 OrgZ manages a local music library, rips CDs, streams internet radio, subscribes to podcasts, and syncs music to iPods.
@@ -24,7 +25,8 @@ OrgZ manages a local music library, rips CDs, streams internet radio, subscribes
 - **CD burning**: burns audio and data discs, with CD-TEXT and disc erase.
 - **Audiobooks**: a dedicated shelf that resumes at the furthest chapter.
 - **Podcasts**: subscribes to feeds, downloads episodes on configurable rules, and resumes playback where it left off.
-- **Favorites and playlists**: stars tracks and stations, and builds playlists.
+- **Playlists as files**: every playlist is an `.m3u8` in your music folder, and any `.m3u8` you drop there becomes a playlist - nothing to import, nothing locked in a database.
+- **Favorites**: stars tracks and stations, and writes the list out as `Favorites.m3u8` for other software to read.
 - **iPod and Rockbox**: detects connected iPods (stock firmware and Rockbox) and copies tracks, playlists, and album art to supported models.
 - **Playback**: keeps playing as you move between views; supports shuffle, repeat, and a compact mini-player.
 - **System integration**: media keys, taskbar controls, and System Media Transport Controls on Windows; Now Playing on macOS.
@@ -33,5 +35,6 @@ OrgZ manages a local music library, rips CDs, streams internet radio, subscribes
 
 - [Installation](getting-started/installation.md)
 - [First Launch](getting-started/first-launch.md)
+- [Playlists](features/playlists.md)
 - [Keyboard Shortcuts](features/keyboard-shortcuts.md)
 - [Changelog](changelog.md)

@@ -15,6 +15,8 @@ Every change writes straight through - adding tracks, removing them, dragging to
 renaming the playlist. Rename it in OrgZ and the old file is replaced by one under the new
 name.
 
+![Naming a new playlist](../assets/screenshots/playlist-name.png)
+
 ## Playlists you already have
 
 Drop an `.m3u8` anywhere in your music folder and it becomes a playlist on the next scan.

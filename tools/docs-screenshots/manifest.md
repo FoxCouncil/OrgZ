@@ -35,11 +35,19 @@ same licensed covers.
 | `cd-rip-progress.png` | Ripping CDs | Rip in progress - LCD title/ETA/progress bar |
 | `device-ipod.png` | iPods & Rockbox | Device info bar (Classic 6G identity + capacity) |
 | `device-sync.png` | Playlists & Syncing | Send-to-device result in the activity panel |
+| `sync-settings.png` | Playlists & Syncing | Sync settings for a connected device |
+| `device-picker.png` | Playlists & Syncing | Choosing which device to send to |
+| `burn-disc.png` | Burning Discs | Burn Disc dialog |
+| `media-info.png` | Music Library | Get Info for a track |
+| `playlist-name.png` | Playlists | Naming a new playlist |
+| `airplay-password.png` | AirPlay | Receiver password prompt |
+| `first-launch.png` | First Launch | Empty library on a fresh install |
 
-## Planned (need new seed hooks / pages)
+## Planned (need new seed hooks)
 
 | File | Page | Shows |
 |------|------|-------|
-| `first-launch.png` | First Launch | Empty-state / folder picker on first run |
 | `sharing.png` | Library Sharing | A share visible from a second machine |
-| `airplay.png` | AirPlay | Output picker with receivers listed |
+| `airplay-picker.png` | AirPlay | Output picker with receivers listed |
+
+Both need a seeded network peer, which the harness has no hook for yet.

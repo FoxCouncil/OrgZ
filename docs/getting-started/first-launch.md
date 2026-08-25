@@ -2,6 +2,8 @@
 
 When you launch OrgZ for the first time, you'll be prompted to select your music library folder.
 
+![An empty library on first launch](../assets/screenshots/first-launch.png)
+
 ## Selecting Your Music Folder
 
 1. A folder picker dialog will appear

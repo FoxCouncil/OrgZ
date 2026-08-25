@@ -4,6 +4,8 @@ Once a device is connected (see [iPods & Rockbox players](ipod-rockbox.md)), you
 can browse its library, copy playlists onto writable devices, and eject it
 safely.
 
+![Sync settings for a connected device](../assets/screenshots/sync-settings.png)
+
 ## Browsing the device library
 
 The device's tracks load into the main grid when you select it in the sidebar.
@@ -58,3 +60,10 @@ is fully flushed.
 | **Sync** says "No compatible devices" | Nothing is connected whose sync tier can write tracks - a Nano 6G/7G or an iPod Touch, for instance. |
 | Sync stops with "ffmpeg wasn't found" | A stock iPod needs ffmpeg to transcode. It ships with the release packages; a build run from source needs it on `PATH`. |
 | Wrong model / missing identity | Re-run **Refresh device info**, or boot the iPod into Apple firmware once so OrgZ can read its serial and GUID. |
+
+## Sending tracks to a device
+
+Select tracks, right-click, and choose **Sync**. When more than one device is
+connected OrgZ asks which one.
+
+![Choosing a device](../assets/screenshots/device-picker.png)

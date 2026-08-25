@@ -41,6 +41,8 @@ Right-clicking inside a selection acts on the whole selection. Right-clicking ou
 !!! warning "Remove from Library deletes the file"
     **Remove from Library** is not "hide from OrgZ" - it permanently deletes the selected tracks' files from disk. There is no undo and nothing goes to the recycle bin. OrgZ asks for confirmation first, and that dialog is the last chance to stop.
 
+![Track info](../assets/screenshots/media-info.png)
+
 ## File Watching
 
 OrgZ monitors your music folder for changes. Added, modified, or deleted files are automatically reflected in the library.
