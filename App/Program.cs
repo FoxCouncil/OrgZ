@@ -428,6 +428,14 @@ internal class Program
         //
         // The core handle is deliberately NOT freed: releasing it would undo exactly the thing
         // that makes the next load work.
+        //
+        // libidn.so.12 is the same problem one link further down: libvlccore carries a
+        // DT_NEEDED on it and, again, no RUNPATH. It is GNU libidn 1.x, which the distributions
+        // OrgZ targets no longer install by default, so the bundle ships it. Best-effort on
+        // purpose - a system libvlccore resolves libidn through the loader cache like anything
+        // else, and only our own copy needs the hand-hold.
+        TryLoad("libidn", out _);
+
         if (!TryLoad("libvlccore", out _))
         {
             return false;
@@ -474,9 +482,12 @@ internal class Program
 
         static IEnumerable<string> Candidates(string name)
         {
-            var versions = name == "libvlc"
-                ? new[] { "libvlc.so", "libvlc.so.5" }
-                : new[] { "libvlccore.so", "libvlccore.so.9" };
+            var versions = name switch
+            {
+                "libvlc" => new[] { "libvlc.so", "libvlc.so.5" },
+                "libidn" => new[] { "libidn.so.12" },
+                _ => new[] { "libvlccore.so", "libvlccore.so.9" },
+            };
             var bundled = Path.Combine(AppContext.BaseDirectory, "vlc", "lib") + Path.DirectorySeparatorChar;
             var dirs = new[] { bundled, "", "/usr/lib/x86_64-linux-gnu/", "/usr/lib64/", "/usr/local/lib/", "/lib/x86_64-linux-gnu/" };
 

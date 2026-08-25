@@ -17,7 +17,7 @@
 # cannot hand us different bytes and a matching checksum. To re-pin (new version or suite):
 #
 #   curl -s https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz \
-#     | gzip -d | awk -v RS= '/^Package: (libvlc5|libvlccore9|vlc-plugin-base)$/ \
+#     | gzip -d | awk -v RS= '/^Package: (libvlc5|libvlccore9|vlc-plugin-base|libidn12)$/ \
 #       { for (i=1;i<=NF;i++) if ($i ~ /^(Package|Version|Filename|SHA256):$/) print $i, $(i+1) }'
 #
 # Usage: scripts/fetch-vlc-linux.sh <publish-dir>
@@ -30,11 +30,17 @@ PUBLISH="${1:?usage: fetch-vlc-linux.sh <publish-dir>}"
 VLC_VERSION="3.0.23-0+deb12u1"
 MIRROR="https://deb.debian.org/debian"
 
-# package|relative path in the pool|sha256
+# libvlccore carries a hard DT_NEEDED on libidn.so.12 - GNU libidn 1.x, which bookworm still
+# ships but most current distributions no longer install by default. It is bundled for the
+# same reason libvlc is: without it the loader fails before OrgZ reaches its own logging.
+LIBIDN_VERSION="1.41-1"
+
+# package|version|relative path in the pool|sha256
 PACKAGES=(
-    "libvlc5|pool/main/v/vlc/libvlc5_${VLC_VERSION}_amd64.deb|07ad5c61dc41acf29c485224accf457b7632e68a910eee21badf30213e6ab359"
-    "libvlccore9|pool/main/v/vlc/libvlccore9_${VLC_VERSION}_amd64.deb|a3114b86450777e4cbbd4620419b74d189367e5f5026286cc74c39c9e759bfa7"
-    "vlc-plugin-base|pool/main/v/vlc/vlc-plugin-base_${VLC_VERSION}_amd64.deb|38b953a2a6355c5ba75e3e5d2015100d793fbf5a00211aaa78b2d705a9547cb1"
+    "libvlc5|${VLC_VERSION}|pool/main/v/vlc/libvlc5_${VLC_VERSION}_amd64.deb|07ad5c61dc41acf29c485224accf457b7632e68a910eee21badf30213e6ab359"
+    "libvlccore9|${VLC_VERSION}|pool/main/v/vlc/libvlccore9_${VLC_VERSION}_amd64.deb|a3114b86450777e4cbbd4620419b74d189367e5f5026286cc74c39c9e759bfa7"
+    "vlc-plugin-base|${VLC_VERSION}|pool/main/v/vlc/vlc-plugin-base_${VLC_VERSION}_amd64.deb|38b953a2a6355c5ba75e3e5d2015100d793fbf5a00211aaa78b2d705a9547cb1"
+    "libidn12|${LIBIDN_VERSION}|pool/main/libi/libidn/libidn12_${LIBIDN_VERSION}_amd64.deb|42b89a25fadc6ba31cbb70d6e60fbda0adf1494025f8a434209fe9929e2d7df8"
 )
 
 WORK="$(mktemp -d)"
@@ -47,11 +53,13 @@ mkdir -p "$DEST_LIB" "$DEST_PLUGINS"
 for entry in "${PACKAGES[@]}"; do
     name="${entry%%|*}"
     rest="${entry#*|}"
+    version="${rest%%|*}"
+    rest="${rest#*|}"
     path="${rest%%|*}"
     want="${rest##*|}"
     deb="$WORK/$name.deb"
 
-    echo "==> $name $VLC_VERSION"
+    echo "==> $name $version"
     curl -fsSL "$MIRROR/$path" -o "$deb"
 
     got="$(sha256sum "$deb" | cut -d' ' -f1)"
@@ -69,7 +77,7 @@ done
 
 # The libraries themselves, resolved through their symlinks so the AppImage carries real
 # files rather than dangling links into /usr.
-for so in "$WORK"/extract-*/usr/lib/x86_64-linux-gnu/libvlc*.so.*; do
+for so in "$WORK"/extract-*/usr/lib/x86_64-linux-gnu/libvlc*.so.* "$WORK"/extract-*/usr/lib/x86_64-linux-gnu/libidn.so.*; do
     [ -e "$so" ] || continue
     cp -L "$so" "$DEST_LIB/"
 done
@@ -92,18 +100,35 @@ done
 # Assert the result is actually loadable rather than merely present: a missing transitive
 # dependency here is a silent "no audio" for every Linux user, discovered after release.
 #
-# LD_LIBRARY_PATH is set for the check because libvlc.so.5 carries a DT_NEEDED on
-# libvlccore.so.9 and NO RUNPATH, so it cannot find its sibling on its own. That is not a
-# packaging fault - the app loads libvlccore by absolute path first, which puts it in the
-# process before libvlc asks for it - but it does mean a bare ldd reports a false failure.
-# Anything ELSE reported missing here is real.
-if command -v ldd >/dev/null 2>&1; then
-    missing="$(LD_LIBRARY_PATH="$DEST_LIB" ldd "$DEST_LIB"/libvlc.so.5 2>/dev/null | grep 'not found' || true)"
-    if [ -n "$missing" ]; then
-        echo "bundled libvlc has unresolved dependencies:" >&2
-        echo "$missing" >&2
-        exit 1
-    fi
+# Resolved against the BUNDLE, not the host. `ldd` answers "does this load on the machine that
+# built it", which is the wrong question, and answering it is how libvlccore's dependency on
+# libidn.so.12 reached a tag: every Debian-derived box this script had been run on happened to
+# have libidn12 installed, and the release runner did not. Walking DT_NEEDED gives the same
+# answer everywhere.
+#
+# Only the two core libraries are walked. A plugin with an unmet dependency is not a fault -
+# libvlc skips any plugin it cannot dlopen, which is how one build of vlc-plugin-base serves
+# machines with and without x264, dav1d or a soundcard.
+#
+# The baseline is what a desktop Linux always has: glibc and its loader, the GCC runtimes, and
+# libdbus, which is not bundled because bundling it would drag libsystemd and its own closure
+# in behind it for a library no graphical session is ever without.
+BASELINE_LIBS="ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 libgcc_s.so.1 libstdc++.so.6 libdbus-1.so.3"
+
+unmet=""
+for so in libvlc.so.5 libvlccore.so.9; do
+    for need in $(objdump -p "$DEST_LIB/$so" | awk '/NEEDED/ { print $2 }'); do
+        case " $BASELINE_LIBS " in *" $need "*) continue ;; esac
+        [ -e "$DEST_LIB/$need" ] && continue
+        unmet="$unmet  $so needs $need"$'
+'
+    done
+done
+
+if [ -n "$unmet" ]; then
+    echo "bundled libvlc has dependencies that are neither bundled nor part of a base system:" >&2
+    printf '%s' "$unmet" >&2
+    exit 1
 fi
 
 echo "bundled libvlc $VLC_VERSION:"
