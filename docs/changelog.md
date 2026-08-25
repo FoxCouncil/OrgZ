@@ -1,6 +1,17 @@
 # Changelog
 
-## v0.13.2 (Current)
+## v0.14.0 (Current)
+
+### Playlists
+
+- Playlists are files. Every playlist is a `.m3u8` in your music folder, and any
+  `.m3u8` you put there becomes a playlist - no importing
+- Favorites is written out as `Favorites.m3u8` for other software to read
+- Drag a selection onto Favorites to star all of it at once
+- Right-clicking a multiple selection acts on the whole selection instead of
+  collapsing to one track
+
+## v0.13.2
 
 ### Fixes
 
