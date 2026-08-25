@@ -36,6 +36,8 @@ Set a 0-5 star rating on any track from its right-click menu. Ratings show in th
 
 Right-clicking a track offers **Play**, **Play Next**, **Add to Queue**, **Get Info**, **Rating**, **Add to Playlist**, **Sync** (to a connected device), **Check** / **Uncheck**, **Show in Explorer**, **Burn to CD...**, and **Remove from Library**. Other views trim the list to what applies - a playlist adds **Remove from Playlist**, a read-only share drops the actions that would write.
 
+Right-clicking inside a selection acts on the whole selection. Right-clicking outside one selects that track first, the same way dragging does.
+
 !!! warning "Remove from Library deletes the file"
     **Remove from Library** is not "hide from OrgZ" - it permanently deletes the selected tracks' files from disk. There is no undo and nothing goes to the recycle bin. OrgZ asks for confirmation first, and that dialog is the last chance to stop.
 

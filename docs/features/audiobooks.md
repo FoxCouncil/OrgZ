@@ -4,6 +4,8 @@ Audiobooks are a first-class kind in OrgZ, not music with a funny genre. They
 live in their own **Audiobooks** section, keep their own vocabulary (author,
 book, narrator), and remember where you stopped listening.
 
+![Your audiobook shelf](../assets/screenshots/audiobooks.png)
+
 ## The Audiobooks section
 
 Clicking **Audiobooks** in the sidebar opens the store over your own shelf:

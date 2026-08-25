@@ -2,6 +2,8 @@
 
 OrgZ subscribes to podcasts, downloads episodes automatically on rules you set, and resumes playback where you left off.
 
+![Podcast subscriptions](../assets/screenshots/podcasts.png)
+
 ## Browsing and searching
 
 Click **Podcasts** in the sidebar to open the podcast view. It shows featured shows and categories to browse. Type in the header search box to search for a show by name.

@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using OrgZ;
 using OrgZ.Controls;
 using OrgZ.Models;
+using OrgZ.Services;
 using OrgZ.ViewModels;
 using OrgZ.Views;
 
@@ -39,7 +40,30 @@ internal static class Program
         Settings.OverrideSettingsDirectory(Path.Combine(Path.GetTempPath(), "orgz-docs-screenshots"));
         Settings.Clear();
 
+        // The library database too, or anything that reads it renders the developer's own
+        // library into a published screenshot - playlist names, favourites, device history.
+        var scratch = Path.Combine(Path.GetTempPath(), "orgz-docs-screenshots", "db");
+        if (Directory.Exists(scratch))
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+
+        Directory.CreateDirectory(scratch);
+        LibraryDb.OverrideDirectory(scratch);
+
+        // Same three stores App opens at startup. Without them the empty scratch database has
+        // no schema and anything that queries it throws instead of returning nothing.
+        MediaCache.EnsureCreated();
+        OrgZ.Services.Podcast.PodcastCache.EnsureCreated();
+        OrgZ.Services.Media.AcquisitionStore.EnsureCreated();
+
+        // Also the music folder: RemoteImage keys its disk cache off it, so leaving it empty
+        // would read and write the developer's real image cache.
+        App.FolderPath = scratch;
+
         BuildAvaloniaApp().SetupWithoutStarting();
+
+        SeedRemoteImageCache(scratch);
 
         // Width pins the window so wrapping help text wraps as designed; Height > 0
         // forces a fixed-size window (the full MainWindow), otherwise height is
@@ -56,6 +80,9 @@ internal static class Program
             ("now-playing", 1280, 800, SeededNowPlaying),
             ("radio-browser", 1280, 800, SeededRadio),
             ("favorites", 1280, 800, SeededFavorites),
+            ("playlists", 1280, 800, SeededPlaylists),
+            ("podcasts", 1280, 800, SeededPodcasts),
+            ("audiobooks", 1280, 800, SeededAudiobooks),
             ("settings", 620, 0, () => new SettingsDialog()),
             ("mini-player", 0, 0, SeededMiniPlayer),
         };
@@ -222,6 +249,99 @@ internal static class Program
         return window;
     }
 
+    /// <summary>Podcasts view, showing subscribed shows. Invented feeds - nothing real is named.</summary>
+    private static MainWindow SeededPodcasts()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+
+        vm.Podcasts.Subscriptions.Clear();
+        var shows = new (string Title, string Author, string Description)[]
+        {
+            ("Eurobeat After Dark", "Mandie NRG", "Long-form mixes and the stories behind them, every Friday night."),
+            ("Akina Pass Weekly", "Kaiju Red Alarm", "Two hosts argue about downhill anthems and BPM."),
+            ("The 175 Club", "DJ Nine", "One track, one episode, taken apart bar by bar."),
+            ("Para Para Practice", "Neon Expressway", "Choreography breakdowns for the Tokyo club circuit."),
+            ("Super Euro History", "Velocity 175", "How a genre built in Italy conquered Japanese car culture."),
+        };
+
+        for (var i = 0; i < shows.Length; i++)
+        {
+            vm.Podcasts.Subscriptions.Add(new PodcastSubscription
+            {
+                FeedId = 500 + i,
+                Title = shows[i].Title,
+                Author = shows[i].Author,
+                Description = shows[i].Description,
+                ImageUrl = PodcastArtwork[i].Url,
+                SubscribedAt = new DateTime(2026, 1, 12 + i, 9, 0, 0, DateTimeKind.Utc),
+                LastCheckedAt = new DateTime(2026, 8, 24, 18, 30, 0, DateTimeKind.Utc),
+            });
+        }
+
+        vm.Podcasts.CurrentView = PodcastsView.Subscriptions;
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Podcasts");
+        return window;
+    }
+
+    /// <summary>Audiobooks view, owned shelf. Invented titles in the same theme as the music.</summary>
+    private static MainWindow SeededAudiobooks()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+
+        // Selection first: it runs RefreshOwned, which reads the (empty) store and would
+        // clear anything seeded before it.
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Audiobooks");
+        Dispatcher.UIThread.RunJobs();
+
+        vm.Audiobooks.OwnedBooks.Clear();
+        var books = new (string Title, string Author, int Chapters, int Hours, int Mins)[]
+        {
+            ("Night Of Fire: An Oral History", "Mandie NRG", 14, 9, 12),
+            ("Downhill: Notes From Akina Pass", "DJ Nine", 22, 13, 40),
+            ("The Beat Online", "Kaiju Red Alarm", 9, 5, 55),
+            ("Three Minutes At 175 BPM", "Velocity 175", 18, 11, 6),
+        };
+
+        // Also as library items, so the status bar's count agrees with the shelf.
+        var media = new List<MediaItem>();
+
+        foreach (var b in books)
+        {
+            vm.Audiobooks.OwnedBooks.Add(new OwnedBook
+            {
+                BookFolder = SamplePath(b.Author, "Audiobooks", 1, b.Title),
+                Title = b.Title,
+                Author = b.Author,
+                ChapterCount = b.Chapters,
+                TotalDuration = new TimeSpan(b.Hours, b.Mins, 0),
+                IsDownloaded = true,
+            });
+
+            media.Add(new MediaItem
+            {
+                Id = $"audiobook:{b.Title}",
+                Kind = MediaKind.Audiobook,
+                Title = b.Title,
+                Artist = b.Author,
+                Album = b.Title,
+                Duration = new TimeSpan(b.Hours, b.Mins, 0),
+                Extension = ".m4b",
+                FilePath = SamplePath(b.Author, "Audiobooks", 1, b.Title),
+                FileName = $"{b.Title}.m4b",
+                FileSize = SampleSize(b.Hours * 60 + b.Mins, 0) / 12,
+                IsAnalyzed = true,
+            });
+        }
+
+        vm.SetItems(media);
+        vm.UpdateData();
+
+        vm.Audiobooks.CurrentView = AudiobooksView.Owned;
+        return window;
+    }
+
     /// <summary>Favorites view - the sample library, all starred.</summary>
     private static MainWindow SeededFavorites()
     {
@@ -231,6 +351,34 @@ internal static class Program
         vm.SelectedSidebarItem = vm.PlaylistItems.First(i => i.ViewConfigKey == "Favorites");
         vm.UpdateData();
         return window;
+    }
+
+    /// <summary>A playlist selected in the sidebar, showing its tracks in playlist order.</summary>
+    private static MainWindow SeededPlaylists()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+
+        var tracks = SampleFavorites();
+        vm.SetItems(tracks);
+
+        // Written to the scratch database so the header, the track list and the sidebar all
+        // read through the real code path.
+        MediaCache.UpsertMusicBatch(tracks);
+        SeedPlaylist("Night Drive", tracks.Take(6));
+        SeedPlaylist("Eurobeat", tracks);
+        SeedPlaylist("Workout", tracks.Skip(2).Take(5));
+
+        vm.ReloadPlaylistsForScreenshots();
+        vm.SelectedSidebarItem = vm.PlaylistItems.First(i => i.Name == "Eurobeat");
+        vm.UpdateData();
+        return window;
+
+        static void SeedPlaylist(string name, IEnumerable<MediaItem> items)
+        {
+            var id = MediaCache.CreatePlaylist(name, "M3U8", $@"D:\Music\{name}.m3u8");
+            MediaCache.ReplacePlaylistTracks(id, items.Select(t => t.Id));
+        }
     }
 
     /// <summary>The mini-player window, bound to a now-playing view model.</summary>
@@ -276,18 +424,18 @@ internal static class Program
     {
         var data = new (string Name, string Genre, string Country, string Cc, int Bitrate, int Votes)[]
         {
-            ("Nightdrive FM", "synthwave", "Germany", "DE", 128, 5210),
-            ("KEXP", "alternative rock", "United States", "US", 256, 9120),
-            ("Jazz24", "jazz", "United States", "US", 128, 7640),
-            ("FIP", "eclectic", "France", "FR", 192, 8830),
-            ("SomaFM Groove Salad", "ambient", "United States", "US", 128, 11200),
-            ("BBC Radio 6 Music", "alternative", "United Kingdom", "GB", 128, 9950),
-            ("Radio Paradise", "rock", "United States", "US", 320, 12400),
-            ("Classic FM", "classical", "United Kingdom", "GB", 128, 6310),
-            ("Lofi Girl Radio", "lofi hip hop", "France", "FR", 128, 13800),
-            ("Triple J", "alternative", "Australia", "AU", 128, 4520),
-            ("WWOZ New Orleans", "jazz", "United States", "US", 128, 3990),
-            ("NTS Radio 1", "electronic", "United Kingdom", "GB", 192, 5870),
+            ("Nightdrive FM", "eurobeat", "Germany", "DE", 128, 5210),
+            ("Hyper Techno Tokyo", "hyper techno", "Japan", "JP", 256, 9120),
+            ("Kaiju Red Alert Radio", "eurobeat", "Japan", "JP", 128, 7640),
+            ("Autobahn Beat", "eurobeat", "Germany", "DE", 192, 8830),
+            ("Super Euro Channel", "eurobeat", "Italy", "IT", 128, 11200),
+            ("Akina Pass FM", "eurodance", "Japan", "JP", 128, 9950),
+            ("Velocity 175", "eurobeat", "Italy", "IT", 320, 12400),
+            ("Neon Expressway", "synthwave", "Canada", "CA", 128, 6310),
+            ("Para Para Station", "parapara", "Japan", "JP", 128, 13800),
+            ("Rising Sun Energy", "eurobeat", "Australia", "AU", 128, 4520),
+            ("Midnight Drift", "eurobeat", "United Kingdom", "GB", 128, 3990),
+            ("Bassline Overdrive", "hardcore", "Netherlands", "NL", 192, 5870),
         };
 
         var list = new List<MediaItem>();
@@ -350,6 +498,11 @@ internal static class Program
                     Duration = new TimeSpan(0, t.Mins, t.Secs),
                     Rating = t.Rating > 0 ? t.Rating : null,
                     Extension = ".flac",
+                    // A track with no path is not a library file - it is dropped by the
+                    // playlist/favorites lookups, which read counts and sizes off real files.
+                    FilePath = SamplePath(artist, album, i + 1, t.Title),
+                    FileName = $"{i + 1:00} - {t.Title}.flac",
+                    FileSize = SampleSize(t.Mins, t.Secs),
                     HasAlbumArt = hasArt,
                     IsAnalyzed = true,
                 });
@@ -376,6 +529,9 @@ internal static class Program
                     Duration = new TimeSpan(0, t.Mins, t.Secs),
                     Rating = t.Rating > 0 ? t.Rating : null,
                     Extension = ".flac",
+                    FilePath = SamplePath(t.Artist, album, i + 1, t.Title),
+                    FileName = $"{i + 1:00} - {t.Title}.flac",
+                    FileSize = SampleSize(t.Mins, t.Secs),
                     HasAlbumArt = false,
                     IsAnalyzed = true,
                 });
@@ -425,6 +581,50 @@ internal static class Program
         return items;
     }
 
+    /// <summary>
+    /// Pre-fills RemoteImage's disk cache so podcast and store artwork renders without a
+    /// network fetch. The cache is checked before any request and keyed on a SHA-1 of the URL,
+    /// so writing the licensed covers under those names makes the shots offline-deterministic.
+    /// </summary>
+    private static void SeedRemoteImageCache(string root)
+    {
+        var dir = Path.Combine(root, ".podcasts", "images");
+        Directory.CreateDirectory(dir);
+
+        foreach (var (url, file) in PodcastArtwork)
+        {
+            var hash = Convert.ToHexString(
+                System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(url))).ToLowerInvariant();
+
+            File.Copy(
+                Path.Combine(FindRepoRoot(), "tools", "docs-screenshots", "assets", "eurobeat", file),
+                Path.Combine(dir, hash + ".png"),
+                overwrite: true);
+        }
+    }
+
+    /// <summary>Fake artwork URLs paired with the covers we actually hold the rights to.</summary>
+    private static readonly (string Url, string File)[] PodcastArtwork =
+    [
+        ("https://art.invalid/eurobeat-after-dark.png", "the-beat-online.png"),
+        ("https://art.invalid/akina-pass-weekly.png", "tokyo-clash.png"),
+        ("https://art.invalid/the-175-club.png", "drivers-high.png"),
+        ("https://art.invalid/para-para-practice.png", "boom-boom-love-me.png"),
+        ("https://art.invalid/super-euro-history.png", "the-beat-online.png"),
+    ];
+
+    /// <summary>A plausible library path for a mock track. Nothing reads the file - the path
+    /// is what marks the item as a library file rather than a stream.</summary>
+    private static string SamplePath(string artist, string album, int track, string title)
+    {
+        var root = OperatingSystem.IsWindows() ? @"D:\Music" : "/home/orgz/Music";
+        var safe = new string(title.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '-' : c).ToArray());
+        return Path.Combine(root, artist, album, $"{track:00} - {safe}.flac");
+    }
+
+    /// <summary>Roughly what a FLAC of that length weighs, so size totals read sensibly.</summary>
+    private static long SampleSize(int mins, int secs) => (long)((mins * 60 + secs) * 900_000L / 8);
+
     /// <summary>Wraps a bare control in a transparent host window so it can be rendered.</summary>
     private static Window Host(Control content)
         => new() { Content = content, Background = Brushes.Transparent };
@@ -472,8 +672,18 @@ internal static class Program
 
         window.Show();
 
-        // Pump layout/render: run queued jobs, force a render tick, run again so
-        // the Skia frame is actually composed before we grab it.
+        // Pump layout/render until it settles. A single pass is not enough for anything that
+        // loads on a background thread and posts its result back - the playlist header reads
+        // its counts and cover tiles through Task.Run, and capturing after one RunJobs caught
+        // it before the continuation had even been queued.
+        for (var pass = 0; pass < 12; pass++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(40);
+        }
+
         Dispatcher.UIThread.RunJobs();
         AvaloniaHeadlessPlatform.ForceRenderTimerTick();
         Dispatcher.UIThread.RunJobs();

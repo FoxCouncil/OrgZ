@@ -20,6 +20,13 @@ namespace OrgZ.ViewModels;
 internal partial class MainWindowViewModel
 {
 
+    /// <summary>
+    /// Rebuilds the sidebar's playlists from the database. The docs screenshot harness writes
+    /// playlists to its own scratch database and calls this, so the shots go through the same
+    /// path the app does rather than a parallel fake.
+    /// </summary>
+    internal void ReloadPlaylistsForScreenshots() => LoadPlaylistSidebarItems();
+
     private void LoadPlaylistSidebarItems()
     {
         // Remove existing playlist sidebar items (keep Favorites and New Playlist action)

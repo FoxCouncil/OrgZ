@@ -32,6 +32,7 @@ nav:
     - Radio Stations: features/radio-stations.md
     - Podcasts: features/podcasts.md
     - Audiobooks: features/audiobooks.md
+    - Playlists: features/playlists.md
     - Favorites: features/favorites.md
     - Playback: features/playback.md
     - AirPlay: features/airplay.md
