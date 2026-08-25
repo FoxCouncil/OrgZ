@@ -617,6 +617,19 @@ public partial class SettingsDialog : Window
 
     // ── Services tab: library sharing ────────────────────────
 
+    /// <summary>Selects a tab by header. Used by the docs screenshot harness.</summary>
+    internal void SelectTabForScreenshots(string header)
+    {
+        for (var i = 0; i < SettingsTabs.Items.Count; i++)
+        {
+            if (SettingsTabs.Items[i] is TabItem tab && (tab.Header as string) == header)
+            {
+                SettingsTabs.SelectedIndex = i;
+                return;
+            }
+        }
+    }
+
     /// <summary>
     /// The one line the Services tab shows for sharing. Pure so the wording is
     /// tested rather than eyeballed: a share needs the background service, and

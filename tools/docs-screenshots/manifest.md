@@ -28,7 +28,6 @@ same licensed covers.
 | `radio-browser.png` | Radio Stations | Station browser |
 | `now-playing.png` | Playback | Now-playing LCD |
 | `mini-player.png` | Playback | Mini-player window |
-| `settings.png` | Settings | Settings dialog |
 | `cd-rip-options.png` | Ripping CDs | Rip Options dialog (FLAC) |
 | `cd-detected.png` | Ripping CDs | Inserted CD, generic tracks (pre-metadata) |
 | `cd-metadata.png` | Ripping CDs | CD with MusicBrainz titles/album |
@@ -42,6 +41,17 @@ same licensed covers.
 | `playlist-name.png` | Playlists | Naming a new playlist |
 | `airplay-password.png` | AirPlay | Receiver password prompt |
 | `first-launch.png` | First Launch | Empty library on a fresh install |
+| `queue.png` | Playback | Play queue open beside a playing track |
+| `search-results.png` | Music Library | Library filtered by a search term |
+| `radio-filters.png` | Radio Stations | Station filter panel |
+| `confirm-remove.png` | Music Library | Delete confirmation |
+| `settings.png` | Settings | General tab |
+| `settings-playback.png` | Settings | Playback tab |
+| `settings-burning.png` | Settings | Burning tab |
+| `settings-services.png` | Settings | Services tab (sharing, keep-alive) |
+| `settings-podcasts.png` | Settings | Podcasts tab |
+| `settings-stats.png` | Settings | Stats tab |
+| `settings-advanced.png` | Settings | Advanced tab |
 
 ## Planned (need new seed hooks)
 

@@ -61,6 +61,10 @@ internal static class Program
         // would read and write the developer's real image cache.
         App.FolderPath = scratch;
 
+        // The share name defaults to "<MACHINENAME> Library", which puts the developer's
+        // computer name in a published screenshot.
+        Settings.Set("OrgZ.Services.Sharing.Name", "OrgZ Library");
+
         BuildAvaloniaApp().SetupWithoutStarting();
 
         SeedRemoteImageCache(scratch);
@@ -92,7 +96,21 @@ internal static class Program
             ("playlist-name", 400, 0, () => new PlaylistNameDialog("Night Drive")),
             ("airplay-password", 420, 0, () => new AirPlayPasswordDialog("Living Room")),
             ("first-launch", 1280, 800, SeededFirstLaunch),
-            ("settings", 620, 0, () => new SettingsDialog()),
+            ("settings", 620, 0, () => SettingsTab("General")),
+            ("settings-playback", 620, 0, () => SettingsTab("Playback")),
+            ("settings-burning", 620, 0, () => SettingsTab("Burning")),
+            ("settings-services", 620, 0, () => SettingsTab("Services")),
+            ("settings-podcasts", 620, 0, () => SettingsTab("Podcasts")),
+            ("settings-stats", 620, 0, () => SettingsTab("Stats")),
+            ("settings-advanced", 620, 0, () => SettingsTab("Advanced")),
+            ("queue", 1280, 800, SeededQueue),
+            ("radio-filters", 1280, 800, SeededRadioFilters),
+            ("search-results", 1280, 800, SeededSearch),
+            ("confirm-remove", 460, 0, () => new ConfirmDialog(
+                "Remove From Library",
+                "Delete 3 tracks from disk?" + Environment.NewLine + Environment.NewLine
+                    + "This cannot be undone and nothing goes to the recycle bin.",
+                "Delete")),
             ("mini-player", 0, 0, SeededMiniPlayer),
         };
 
@@ -256,6 +274,58 @@ internal static class Program
         var vm = window.ViewModel;
         vm.SetItems(SampleRadio());
         vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Radio");
+        return window;
+    }
+
+    /// <summary>The Settings dialog opened on a named tab.</summary>
+    private static Window SettingsTab(string header)
+    {
+        var dialog = new SettingsDialog();
+        dialog.SelectTabForScreenshots(header);
+        return dialog;
+    }
+
+    /// <summary>The play queue open beside the library.</summary>
+    private static MainWindow SeededQueue()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+        var library = SampleLibrary();
+
+        vm.SetItems(library);
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Music");
+        vm.RefreshView();
+
+        var queue = library.Where(i => i.Kind == MediaKind.Music).ToList();
+        vm.SeedQueueForScreenshots(queue, queue[0]);
+        ApplyNowPlaying(vm, EurobeatCover("the-beat-online.png"),
+            "The Beat Online (Extended Version)", "Mandie NRG feat. DJ Nine", 128_000, 348_000);
+        vm.IsQueueVisible = true;
+        vm.UpdateData();
+        return window;
+    }
+
+    /// <summary>Radio view with the filter panel open.</summary>
+    private static MainWindow SeededRadioFilters()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+        vm.SetItems(SampleRadio());
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Radio");
+        vm.UpdateData();
+        return window;
+    }
+
+    /// <summary>The library filtered by a search term.</summary>
+    private static MainWindow SeededSearch()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+        vm.SetItems(SampleLibrary());
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Music");
+        vm.SearchText = "driver";
+        vm.RefreshView();
+        vm.UpdateData();
         return window;
     }
 

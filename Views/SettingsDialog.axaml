@@ -21,7 +21,7 @@
 		</StackPanel>
 
 		<!-- Tabbed settings area -->
-		<TabControl>
+		<TabControl x:Name="SettingsTabs">
 			<!-- ===== General Tab ===== -->
 			<TabItem Header="General">
 				<ScrollViewer Padding="0,0,12,0">

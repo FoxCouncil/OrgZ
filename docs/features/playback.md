@@ -25,6 +25,8 @@ When you start playing a track, OrgZ captures a snapshot of the current filtered
 - Switching views doesn't interrupt playback
 - Starting a track from a different view creates a new context
 
+![The play queue](../assets/screenshots/queue.png)
+
 ## Live Streams
 
 Radio streams show a "LIVE" duration and an animated progress indicator instead of a seek bar. Live ICY metadata updates the track info display in real time.

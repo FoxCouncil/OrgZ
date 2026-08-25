@@ -1014,6 +1014,16 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Appends a selection to the queue in order.</summary>
+    /// <summary>
+    /// Builds a playback context without starting playback, so the queue panel has something
+    /// to show. Docs screenshot harness only - a real queue comes from playing something.
+    /// </summary>
+    internal void SeedQueueForScreenshots(List<MediaItem> source, MediaItem start)
+    {
+        _playbackContext = new PlaybackContext(source, start) { RepeatMode = RepeatMode };
+        OnPropertyChanged(nameof(PlaybackContextUpcoming));
+    }
+
     internal void AddToQueue(IReadOnlyList<MediaItem> items)
     {
         foreach (var item in items)

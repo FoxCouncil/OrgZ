@@ -26,6 +26,8 @@ updates.
 
 Stations are grouped by genre under collapsible headers. Click a header to collapse or expand that genre; the state is remembered per view, so switching away and back to Radio restores it. The **collapse-all** button in the filter bar collapses every genre at once.
 
+![Filtering stations](../assets/screenshots/radio-filters.png)
+
 ## Adding your own stations
 
 Use the **+** button in the filter bar. The **Add Radio Station** dialog takes

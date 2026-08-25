@@ -28,6 +28,8 @@ Click a column header to sort by it. Drag column headers to reorder them - the o
 
 Press ++ctrl+f++ (or click the search box) and type to filter the current view; the match runs against title, artist, and album. The footer summary (song count, total time, total size) reflects the filtered set, not the whole library. Press ++enter++ to play the first result.
 
+![Searching the library](../assets/screenshots/search-results.png)
+
 ## Ratings
 
 Set a 0-5 star rating on any track from its right-click menu. Ratings show in the Rating column.
@@ -42,6 +44,8 @@ Right-clicking inside a selection acts on the whole selection. Right-clicking ou
     **Remove from Library** is not "hide from OrgZ" - it permanently deletes the selected tracks' files from disk. There is no undo and nothing goes to the recycle bin. OrgZ asks for confirmation first, and that dialog is the last chance to stop.
 
 ![Track info](../assets/screenshots/media-info.png)
+
+![Confirming a delete](../assets/screenshots/confirm-remove.png)
 
 ## File Watching
 
