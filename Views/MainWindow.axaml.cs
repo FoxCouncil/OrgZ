@@ -1164,9 +1164,17 @@ public partial class MainWindow : Window
             return;
         }
         // A row, not a header (the header right-click owns the column menu). Select the item under
-        // the cursor so the context menu that's about to open acts on this row.
+        // the cursor so the context menu that's about to open acts on this row - UNLESS that row is
+        // already part of a multi-selection, which the menu should act on whole. Same rule the drag
+        // payload uses, and the Explorer/iTunes convention.
         if ((e.Source as Visual)?.FindAncestorOfType<DataGridRow>()?.DataContext is MediaItem item)
         {
+            var grid = GetActiveDataGrid();
+            if (grid.SelectedItems?.OfType<MediaItem>().Contains(item) == true)
+            {
+                return;
+            }
+
             _viewModel.SelectedItem = item;
         }
     }

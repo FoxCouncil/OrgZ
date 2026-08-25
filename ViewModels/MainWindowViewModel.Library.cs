@@ -333,7 +333,109 @@ internal partial class MainWindowViewModel
             Audiobooks.RefreshOwned();
         }
 
+        // After track reconciliation: a playlist can only resolve tracks already in the library.
+        SyncFolderPlaylists(scan.Complete);
+
         UpdateData();
+    }
+
+    /// <summary>
+    /// Reconciles the sidebar's playlists against the .m3u8 files under the music folder.
+    /// The file is authoritative for anything it produced; playlists made in OrgZ are untouched.
+    ///
+    /// <paramref name="scanComplete"/> gates removal only - a partial walk cannot tell a deleted
+    /// file from an unreadable folder.
+    /// </summary>
+    private void SyncFolderPlaylists(bool scanComplete)
+    {
+        if (string.IsNullOrEmpty(App.FolderPath))
+        {
+            return;
+        }
+
+        // Playlists that predate folder sync have no file yet. Write them out first so every
+        // playlist is file-backed and the pass below has a single kind of thing to reconcile.
+        foreach (var unbacked in MediaCache.LoadAllPlaylists().Where(p => string.IsNullOrEmpty(p.SourcePath) && p.Source != "Share"))
+        {
+            ExportPlaylistFile(unbacked.Id);
+        }
+
+        var files = PlaylistFolderSync.Discover(App.FolderPath);
+        var known = MediaCache.LoadAllPlaylists()
+            .Where(p => !string.IsNullOrEmpty(p.SourcePath))
+            .ToDictionary(p => p.SourcePath, StringComparer.OrdinalIgnoreCase);
+
+        var byPath = _allItems
+            .Where(IsLocalLibraryFile)
+            .ToDictionary(i => NormalizePath(i.FilePath!), i => i.Id, StringComparer.OrdinalIgnoreCase);
+
+        var changed = false;
+
+        foreach (var file in files)
+        {
+            // Per file: a malformed or locked playlist must not abort the ones after it.
+            try
+            {
+                var result = PlaylistImporter.Import(file);
+
+                var mediaIds = result.TrackPaths
+                    .Select(NormalizePath)
+                    .Where(byPath.ContainsKey)
+                    .Select(p => byPath[p])
+                    .ToList();
+
+                var name = !string.IsNullOrWhiteSpace(result.Name)
+                    ? result.Name
+                    : Path.GetFileNameWithoutExtension(file);
+
+                if (known.TryGetValue(file, out var existing))
+                {
+                    MediaCache.ReplacePlaylistTracks(existing.Id, mediaIds);
+
+                    if (!string.Equals(existing.Name, name, StringComparison.Ordinal))
+                    {
+                        MediaCache.RenamePlaylist(existing.Id, name);
+                    }
+
+                    known.Remove(file);
+                }
+                else
+                {
+                    var id = MediaCache.CreatePlaylist(name, "M3U8", file);
+                    MediaCache.ReplacePlaylistTracks(id, mediaIds);
+                }
+
+                _log.Information("Playlist {Name}: {Matched}/{Total} track(s) matched from {File}",
+                    name, mediaIds.Count, result.TrackPaths.Count, file);
+
+                changed = true;
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "Could not sync the playlist {File}", file);
+            }
+        }
+
+        // Whatever is left in `known` had a file that is now gone.
+        if (scanComplete)
+        {
+            foreach (var orphan in known.Values)
+            {
+                MediaCache.DeletePlaylist(orphan.Id);
+                changed = true;
+                _log.Information("Removed playlist {Name}; {Path} no longer exists", orphan.Name, orphan.SourcePath);
+            }
+        }
+
+        // Favourites are flags, so nothing else keeps the file current - a track deleted outside
+        // OrgZ would otherwise linger in Favorites.m3u8 until the next star was clicked.
+        ExportFavoritesFile();
+
+        if (changed)
+        {
+            LoadPlaylistSidebarItems();
+            PlaylistsChanged?.Invoke();
+        }
     }
 
     private static string NormalizePath(string path)

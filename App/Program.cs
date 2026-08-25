@@ -429,11 +429,9 @@ internal class Program
         // The core handle is deliberately NOT freed: releasing it would undo exactly the thing
         // that makes the next load work.
         //
-        // libidn.so.12 is the same problem one link further down: libvlccore carries a
-        // DT_NEEDED on it and, again, no RUNPATH. It is GNU libidn 1.x, which the distributions
-        // OrgZ targets no longer install by default, so the bundle ships it. Best-effort on
-        // purpose - a system libvlccore resolves libidn through the loader cache like anything
-        // else, and only our own copy needs the hand-hold.
+        // libidn.so.12 is the same problem one link down: libvlccore has a DT_NEEDED on it and
+        // no RUNPATH, and most distributions no longer install GNU libidn 1.x, so the bundle
+        // ships it. Best-effort - a system libvlccore resolves it through the loader cache.
         TryLoad("libidn", out _);
 
         if (!TryLoad("libvlccore", out _))

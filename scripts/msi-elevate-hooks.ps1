@@ -8,13 +8,10 @@
 # already type 3137 - the same flags PLUS NoImpersonate - which is what a custom action
 # that touches machine state is supposed to be.
 #
-# The failure is invisible AND machine-dependent: an install driven from a process that
-# already holds a full administrator token (PowerShell Direct, an elevated terminal) has
-# nothing to impersonate down to and the hook succeeds, so this passes on a test VM and
-# fails on a real desktop where UAC hands out a filtered token. Observed doing exactly
-# that between v0.12.0 (VM, worked) and v0.13.1 (real machine, no service): the log there
-# reads "Skipping service install: the hook is not running elevated", preceded by an
-# UnauthorizedAccessException creating a directory under Program Files.
+# The failure is machine-dependent: an install started from a process that already holds a
+# full administrator token succeeds, while one behind a UAC prompt gets a filtered token and
+# does not. The symptom is "Skipping service install: the hook is not running elevated" in
+# the app log, after an UnauthorizedAccessException under Program Files.
 #
 # SIGNING: this rewrites the MSI, which invalidates its Authenticode signature. The caller
 # MUST re-sign afterwards. Failing to do so trades a missing service for SmartScreen.
@@ -39,12 +36,9 @@ $NoImpersonate = 2048
 # and leaving THAT unelevated orphans a LocalSystem service pointing at a deleted exe.
 $Actions = @('InstallHookDeferred', 'UninstallHookDeferred')
 
-# Every COM object this script touches, newest first, so it can drop them deterministically.
-#
-# Releasing matters more than it looks: the Installer/Database RCWs hold the .msi open, and
-# waiting for the GC to notice leaves the file locked against the re-sign step that has to
-# follow. [GC]::Collect alone proved unreliable here - the verification re-open failed with
-# "OpenDatabase,DatabasePath,OpenMode" while a stale view was still alive.
+# Every COM object this script touches, newest first, for deterministic release. The
+# Installer/Database RCWs hold the .msi open; leaving that to the GC locks the file against
+# the re-sign step. [GC]::Collect alone is not enough - stale views survive it.
 $script:ComObjects = @()
 
 function New-Com([string] $progId)
@@ -93,9 +87,8 @@ function Get-ActionType($database, [string] $action)
 {
     $view = Invoke-Com $database 'OpenView' @("SELECT Type FROM CustomAction WHERE Action = '$action'")
 
-    # [void] on Execute/Close: InvokeMember returns a value even for those, and an
-    # unswallowed return joins this function's output stream - which turned the [int]
-    # below into an Object[] and made -band fail with "no method op_BitwiseAnd".
+    # [void] on Execute/Close: InvokeMember returns a value for those too, and an unswallowed
+    # return joins this function's output stream, making the [int] below an Object[].
     [void] (Invoke-Com $view 'Execute' $null)
     $record = Invoke-Com $view 'Fetch' $null
     [void] (Invoke-Com $view 'Close' $null)
@@ -152,9 +145,8 @@ finally
     Release-Com
 }
 
-# Re-open from scratch and re-read rather than trusting the write: a Commit that silently
-# did nothing looks identical to one that worked, and the whole point of this file is that
-# a silent no-op is a class of bug nobody notices until a user reports a missing service.
+# Re-read from a fresh handle rather than trusting the write: a Commit that silently did
+# nothing is indistinguishable from one that worked.
 try
 {
     $verifier = New-Com 'WindowsInstaller.Installer'

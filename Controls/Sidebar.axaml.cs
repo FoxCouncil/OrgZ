@@ -284,8 +284,10 @@ public partial class Sidebar : UserControl
             return;
         }
 
+        // Favorites accepts drops too. It has no PlaylistId - it is a per-track flag - so gating
+        // on PlaylistId alone made the star the one playlist row nothing could be dropped on.
         var item = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (item?.DataContext is SidebarItem sb && sb.PlaylistId.HasValue)
+        if (item?.DataContext is SidebarItem sb && (sb.PlaylistId.HasValue || sb.IsFavorites))
         {
             e.DragEffects = DragDropEffects.Copy;
         }
@@ -313,14 +315,21 @@ public partial class Sidebar : UserControl
         }
 
         var item = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (item?.DataContext is not SidebarItem sb || !sb.PlaylistId.HasValue)
+        if (item?.DataContext is not SidebarItem sb || !(sb.PlaylistId.HasValue || sb.IsFavorites))
         {
             return;
         }
 
         if (DataContext is MainWindowViewModel vm)
         {
-            vm.AddTracksToPlaylist(sb.PlaylistId.Value, media);
+            if (sb.IsFavorites)
+            {
+                vm.FavoriteTracks(media);
+            }
+            else
+            {
+                vm.AddTracksToPlaylist(sb.PlaylistId!.Value, media);
+            }
         }
 
         e.Handled = true;

@@ -203,10 +203,9 @@ public static class DeviceHelperInstaller
             // out the human who just installed OrgZ, and recording nothing leaves the helper
             // fail-open to any authenticated caller.
             //
-            // This is the normal case, not an edge one. The MSI's install hook is deliberately
-            // NoImpersonate (see scripts/msi-elevate-hooks.ps1) because `sc create` needs the
-            // elevated token, which means EVERY machine-wide install arrives here. So ask the
-            // session instead of the token: the person at the console is the person installing.
+            // The common case, not an edge one: the MSI's install hook runs NoImpersonate
+            // (scripts/msi-elevate-hooks.ps1), so every machine-wide install lands here. Ask the
+            // session instead of the token.
             if (sid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalSystemSid)
                 || sid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalServiceSid)
                 || sid.IsWellKnown(System.Security.Principal.WellKnownSidType.NetworkServiceSid))
@@ -218,8 +217,7 @@ public static class DeviceHelperInstaller
                     return consoleSid;
                 }
 
-                // Unattended, or nobody logged in - an SCCM push, an image build. There is
-                // genuinely no owner to record, so this stays the legacy fail-open case.
+                // Unattended or nobody logged in - no owner to record, so this stays fail-open.
                 _log.Warning("Install is running as a machine account with no console user; the device helper will accept any authenticated caller");
                 return null;
             }

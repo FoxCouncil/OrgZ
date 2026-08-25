@@ -8,9 +8,8 @@ namespace OrgZ.Services.DeviceHelper;
 /// <summary>
 /// The two Terminal Services calls needed to answer "who is sitting at this machine".
 ///
-/// Only reached when OrgZ is running as LocalSystem during the MSI install hook, where
-/// <see cref="System.Security.Principal.WindowsIdentity.GetCurrent"/> describes the machine
-/// rather than the person - see <see cref="DeviceHelperInstaller.WindowsConsoleUserSid"/>.
+/// Used when running as LocalSystem, where WindowsIdentity.GetCurrent describes the machine
+/// rather than the person. See <see cref="DeviceHelperInstaller.WindowsConsoleUserSid"/>.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static partial class WtsNativeMethods
@@ -22,9 +21,8 @@ internal static partial class WtsNativeMethods
     }
 
     /// <summary>
-    /// The session currently attached to the physical console, or 0xFFFFFFFF when none is.
-    /// Fast User Switching moves this, which is the point: it names the session in front of
-    /// the screen right now, not the first one that logged in.
+    /// The session attached to the physical console, or 0xFFFFFFFF when none is. Follows Fast
+    /// User Switching, so it names the session at the screen now.
     /// </summary>
     [LibraryImport("kernel32.dll")]
     internal static partial uint WTSGetActiveConsoleSessionId();

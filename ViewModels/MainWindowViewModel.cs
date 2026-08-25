@@ -4072,7 +4072,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
     /// have no Media row (the UPDATE would hit zero rows and the flag would evaporate
     /// at restart), so theirs goes to the RadioState overlay.
     /// </summary>
-    private static void PersistFavorite(MediaItem item)
+    private void PersistFavorite(MediaItem item)
     {
         if (item.Kind == MediaKind.Radio && item.Source != "user")
         {
@@ -4081,6 +4081,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         MediaCache.SetFavorite(item.Id, item.IsFavorite);
+        ExportFavoritesFile();
     }
 
     internal void ToggleFavorite(MediaItem? station)

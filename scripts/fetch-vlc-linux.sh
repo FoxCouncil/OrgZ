@@ -30,9 +30,9 @@ PUBLISH="${1:?usage: fetch-vlc-linux.sh <publish-dir>}"
 VLC_VERSION="3.0.23-0+deb12u1"
 MIRROR="https://deb.debian.org/debian"
 
-# libvlccore carries a hard DT_NEEDED on libidn.so.12 - GNU libidn 1.x, which bookworm still
-# ships but most current distributions no longer install by default. It is bundled for the
-# same reason libvlc is: without it the loader fails before OrgZ reaches its own logging.
+# libvlccore has a hard DT_NEEDED on libidn.so.12 (GNU libidn 1.x), which bookworm ships but
+# most current distributions do not install by default. Bundled for the same reason libvlc is:
+# without it the loader fails before OrgZ reaches its own logging.
 LIBIDN_VERSION="1.41-1"
 
 # package|version|relative path in the pool|sha256
@@ -101,10 +101,8 @@ done
 # dependency here is a silent "no audio" for every Linux user, discovered after release.
 #
 # Resolved against the BUNDLE, not the host. `ldd` answers "does this load on the machine that
-# built it", which is the wrong question, and answering it is how libvlccore's dependency on
-# libidn.so.12 reached a tag: every Debian-derived box this script had been run on happened to
-# have libidn12 installed, and the release runner did not. Walking DT_NEEDED gives the same
-# answer everywhere.
+# built it", which is the wrong question - a host that happens to have a dependency installed
+# hides a gap the AppImage still has. Walking DT_NEEDED gives the same answer everywhere.
 #
 # Only the two core libraries are walked. A plugin with an unmet dependency is not a fault -
 # libvlc skips any plugin it cannot dlopen, which is how one build of vlc-plugin-base serves

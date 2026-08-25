@@ -226,6 +226,8 @@ public static class MediaCache
         var columns = new[]
         {
             "Source TEXT NOT NULL DEFAULT 'Library'",
+            // Discovery key: matched on rescan so a file updates its playlist rather than duplicating it.
+            "SourcePath TEXT NOT NULL DEFAULT ''",
         };
 
         AddMissingColumns(connection, "Playlists", columns);
@@ -1021,18 +1023,87 @@ public static class MediaCache
 
     #region Playlists
 
-    public static int CreatePlaylist(string name, string source = "Library")
+    public static int CreatePlaylist(string name, string source = "Library", string sourcePath = "")
     {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
 
         using var cmd = connection.CreateCommand();
         var now = DateTime.UtcNow.ToString("o");
-        cmd.CommandText = "INSERT INTO Playlists (Name, Source, CreatedAt, UpdatedAt) VALUES (@name, @source, @now, @now); SELECT last_insert_rowid();";
+        cmd.CommandText = "INSERT INTO Playlists (Name, Source, SourcePath, CreatedAt, UpdatedAt) VALUES (@name, @source, @path, @now, @now); SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("@name", name);
         cmd.Parameters.AddWithValue("@source", string.IsNullOrWhiteSpace(source) ? "Library" : source);
+        cmd.Parameters.AddWithValue("@path", sourcePath ?? string.Empty);
         cmd.Parameters.AddWithValue("@now", now);
         return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>Replaces a playlist's tracks wholesale; used when the file on disk is authoritative.</summary>
+    public static void ReplacePlaylistTracks(int playlistId, IEnumerable<string> mediaIds)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+        using var tx = connection.BeginTransaction();
+
+        // Every command must carry the transaction: Microsoft.Data.Sqlite throws when a
+        // connection has a pending transaction and the command's is null.
+        using (var clear = connection.CreateCommand())
+        {
+            clear.Transaction = tx;
+            clear.CommandText = "DELETE FROM PlaylistTracks WHERE PlaylistId = @pid";
+            clear.Parameters.AddWithValue("@pid", playlistId);
+            clear.ExecuteNonQuery();
+        }
+
+        using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = tx;
+            // AddedAt is NOT NULL with no default, and OR IGNORE swallows the constraint
+            // violation - omitting it inserts nothing, silently.
+            insert.CommandText = "INSERT OR IGNORE INTO PlaylistTracks (PlaylistId, MediaId, SortOrder, AddedAt) VALUES (@pid, @mid, @order, @now)";
+            var pid = insert.Parameters.Add("@pid", SqliteType.Integer);
+            var mid = insert.Parameters.Add("@mid", SqliteType.Text);
+            var ord = insert.Parameters.Add("@order", SqliteType.Integer);
+            insert.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+            pid.Value = playlistId;
+
+            var order = 0;
+            foreach (var mediaId in mediaIds)
+            {
+                mid.Value = mediaId;
+                ord.Value = order++;
+                insert.ExecuteNonQuery();
+            }
+        }
+
+        using (var touch = connection.CreateCommand())
+        {
+            touch.Transaction = tx;
+            touch.CommandText = "UPDATE Playlists SET UpdatedAt = @now WHERE Id = @pid";
+            touch.Parameters.AddWithValue("@pid", playlistId);
+            touch.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+            touch.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+    }
+
+    /// <summary>
+    /// Records the file a playlist is backed by, and marks it as file-backed. Every local
+    /// playlist ends up here once written, so discovery matches it instead of creating a
+    /// second row for the same file.
+    /// </summary>
+    public static void SetPlaylistSourcePath(int id, string sourcePath)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Playlists SET SourcePath = @path, Source = @source WHERE Id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@path", sourcePath ?? string.Empty);
+        cmd.Parameters.AddWithValue("@source", "M3U8");
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>Returns a playlist's <c>Source</c> ("Library", "M3U8", ...), or "Library" if unknown.</summary>
@@ -1084,7 +1155,7 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT Id, Name, Source, CreatedAt, UpdatedAt FROM Playlists ORDER BY Name";
+        cmd.CommandText = "SELECT Id, Name, Source, CreatedAt, UpdatedAt, SourcePath FROM Playlists ORDER BY Name";
 
         var playlists = new List<Playlist>();
         using var reader = cmd.ExecuteReader();
@@ -1097,6 +1168,7 @@ public static class MediaCache
                 Source = reader.IsDBNull(2) ? "Library" : reader.GetString(2),
                 CreatedAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 UpdatedAt = DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                SourcePath = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
             });
         }
 

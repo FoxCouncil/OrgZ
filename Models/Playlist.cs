@@ -15,6 +15,12 @@ public partial class Playlist : ObservableObject
     /// </summary>
     public string Source { get; set; } = "Library";
 
+    /// <summary>
+    /// The .m3u8 this playlist was discovered from, empty when it was made in OrgZ. When set,
+    /// the file is authoritative: a rescan rewrites the tracks, and deleting it drops the playlist.
+    /// </summary>
+    public string SourcePath { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

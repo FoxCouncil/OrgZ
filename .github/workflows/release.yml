@@ -249,11 +249,8 @@ jobs:
           # SIGN_ARGS is set only when the signing secrets exist; empty otherwise, so an
           # unconfigured repo still produces a working (unsigned) release.
           #
-          # Scoped to the platforms that HAVE a signing path. Linux never sets SIGN_ARGS -
-          # there is no AppImage signing step here - so an unconditional warning fired on
-          # every green release, annotating the run with "this release will be UNSIGNED" and
-          # naming SmartScreen and Gatekeeper, neither of which has anything to do with the
-          # job that emitted it. A warning that is always on is a warning nobody reads.
+          # Scoped to platforms that have a signing path. Linux never sets SIGN_ARGS, so an
+          # unconditional warning fires on every green release and stops meaning anything.
           if [[ -n "${SIGN_ARGS:-}" ]]; then
             echo "Signing enabled."
           elif [[ "${{ matrix.rid }}" == linux-* ]]; then
@@ -288,19 +285,15 @@ jobs:
           fi
 
       # ── MSI post-processing ───────────────────────────────────────────────────
-      # Runs AFTER pack (which is where signing happens) and therefore INVALIDATES the MSI's
-      # Authenticode signature - the re-sign below is not optional, it is part of this pair.
-      #
-      # See scripts/msi-elevate-hooks.ps1 for what it changes and why. Short version: vpk emits
-      # the install hook as a deferred IMPERSONATED custom action, so `sc create` inside it runs
-      # on the user's filtered token and the background service is silently never registered.
+      # Runs after pack, so it INVALIDATES the MSI's Authenticode signature - the re-sign below
+      # is part of this pair, not optional. vpk emits the install hook as a deferred impersonated
+      # custom action, so `sc create` inside it never gets an elevated token. See the script.
       - name: Elevate the MSI install hooks (Windows)
         if: matrix.rid == 'win-x64'
         shell: pwsh
         run: scripts/msi-elevate-hooks.ps1 -MsiPath releases/OrgZ-win.msi
 
-      # Only the MSI is re-signed; every other artifact still carries the signature vpk gave
-      # it. Conditional on the same secret as the rest, so an unsigned build stays a build.
+      # Only the MSI is re-signed; other artifacts keep the signature vpk gave them.
       - name: Re-sign the patched MSI (Windows)
         if: ${{ matrix.rid == 'win-x64' && env.HAS_AZURE_SIGNING == 'true' }}
         uses: azure/artifact-signing-action@v2
@@ -314,8 +307,7 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      # A patched-but-unsigned MSI is worse than either end state: the service works and every
-      # user gets a SmartScreen block. Fail the release here rather than publish that.
+      # A patched-but-unsigned MSI means a SmartScreen block for every user. Fail here instead.
       - name: Verify the MSI signature survived (Windows)
         if: ${{ matrix.rid == 'win-x64' && env.HAS_AZURE_SIGNING == 'true' }}
         shell: pwsh

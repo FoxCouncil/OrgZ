@@ -68,6 +68,7 @@ internal partial class MainWindowViewModel
         }
 
         var id = MediaCache.CreatePlaylist(result.Trim());
+        ExportPlaylistFile(id);
         LoadPlaylistSidebarItems();
         PlaylistsChanged?.Invoke();
 
@@ -95,7 +96,14 @@ internal partial class MainWindowViewModel
             return;
         }
 
+        var previousName = item.Name;
         MediaCache.RenamePlaylist(item.PlaylistId.Value, result.Trim());
+        if (!string.Equals(previousName, result.Trim(), StringComparison.Ordinal))
+        {
+            PlaylistFolderSync.Delete(App.FolderPath, previousName);
+            MediaCache.SetPlaylistSourcePath(item.PlaylistId.Value, string.Empty);
+        }
+        ExportPlaylistFile(item.PlaylistId.Value);
         LoadPlaylistSidebarItems();
         PlaylistsChanged?.Invoke();
     }
@@ -297,6 +305,8 @@ internal partial class MainWindowViewModel
             MediaCache.AddTrackToPlaylist(playlistId, track.Id);
         }
 
+        ExportPlaylistFile(playlistId);
+
         LoadPlaylistSidebarItems();
         PlaylistsChanged?.Invoke();
 
@@ -304,6 +314,92 @@ internal partial class MainWindowViewModel
         if (newPlaylistItem != null)
         {
             SelectedSidebarItem = newPlaylistItem;
+        }
+    }
+
+    /// <summary>
+    /// Writes a playlist out to the music folder. Discovered playlists are rewritten in place;
+    /// the rest land in the root as &lt;name&gt;.m3u8. Never throws - a read-only or missing
+    /// music folder must not break the edit that triggered it.
+    /// </summary>
+    private void ExportPlaylistFile(int playlistId)
+    {
+        if (string.IsNullOrEmpty(App.FolderPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var playlist = MediaCache.LoadAllPlaylists().FirstOrDefault(p => p.Id == playlistId);
+            if (playlist is null)
+            {
+                return;
+            }
+
+            var tracks = GetPlaylistMediaItems(playlistId);
+            var target = string.IsNullOrEmpty(playlist.SourcePath)
+                ? PlaylistFolderSync.PathFor(App.FolderPath, playlist.Name)
+                : playlist.SourcePath;
+
+            PlaylistFolderSync.WriteTo(target, App.FolderPath, playlist.Name, tracks);
+
+            // Claim the file, or the next scan discovers it as a playlist OrgZ has never seen
+            // and adds a second row for it.
+            if (!string.Equals(playlist.SourcePath, target, StringComparison.OrdinalIgnoreCase))
+            {
+                MediaCache.SetPlaylistSourcePath(playlistId, target);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Could not write the playlist file for {PlaylistId}", playlistId);
+        }
+    }
+
+    /// <summary>
+    /// Rewrites Favorites.m3u8 from the favourite flags. Write-only - the file is never read
+    /// back, so the flags stay the single source of truth.
+    /// </summary>
+    internal void ExportFavoritesFile()
+    {
+        if (string.IsNullOrEmpty(App.FolderPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var favorites = _allItems
+                .Where(i => i.IsFavorite && IsLocalLibraryFile(i))
+                .ToList();
+
+            PlaylistFolderSync.Write(App.FolderPath, PlaylistFolderSync.FavoritesName, favorites);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning(ex, "Could not write Favorites.m3u8");
+        }
+    }
+
+    /// <summary>
+    /// Marks a whole selection as favourite - the drop-on-the-star gesture. Already-favourite
+    /// tracks are left alone rather than toggled off, so dropping a mixed selection adds them
+    /// all instead of inverting each one.
+    /// </summary>
+    internal void FavoriteTracks(IReadOnlyList<MediaItem> items)
+    {
+        var added = 0;
+
+        foreach (var item in items.Where(i => !i.IsFavorite))
+        {
+            ToggleFavorite(item);
+            added++;
+        }
+
+        if (added > 0)
+        {
+            UpdateMainStatus(added == 1 ? "Added 1 track to Favorites." : $"Added {added} tracks to Favorites.");
         }
     }
 
@@ -1377,6 +1473,7 @@ internal partial class MainWindowViewModel
 
         var key = item.ViewConfigKey;
         MediaCache.DeletePlaylist(item.PlaylistId.Value);
+        PlaylistFolderSync.Delete(App.FolderPath, item.Name);
         ListViewConfigs.Remove(key);
 
         // Navigate away if we're viewing the deleted playlist
@@ -1410,6 +1507,7 @@ internal partial class MainWindowViewModel
     internal void AddTrackToPlaylist(int playlistId, MediaItem item)
     {
         MediaCache.AddTrackToPlaylist(playlistId, item.Id);
+        ExportPlaylistFile(playlistId);
 
         // Refresh the playlist's config with updated track IDs
         var key = $"Playlist:{playlistId}";
@@ -1704,6 +1802,8 @@ internal partial class MainWindowViewModel
             MediaCache.RemoveTrackFromPlaylist(playlistId, item.Id);
         }
 
+        ExportPlaylistFile(playlistId);
+
         var key = $"Playlist:{playlistId}";
         var trackIds = MediaCache.GetPlaylistTrackIds(playlistId);
         ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, trackIds));
@@ -1760,6 +1860,7 @@ internal partial class MainWindowViewModel
         fullOrder.Insert(Math.Clamp(insertIdx, 0, fullOrder.Count), movedItem.Id);
 
         MediaCache.ReorderPlaylistTracks(playlistId, fullOrder);
+        ExportPlaylistFile(playlistId);
 
         var key = $"Playlist:{playlistId}";
         ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlistId, fullOrder));

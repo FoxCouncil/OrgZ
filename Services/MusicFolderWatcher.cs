@@ -101,6 +101,9 @@ public sealed class MusicFolderWatcher : IDisposable
         Stop();
     }
 
+    private static bool IsPlaylistFile(string path) =>
+        string.Equals(Path.GetExtension(path), PlaylistFolderSync.Extension, StringComparison.OrdinalIgnoreCase);
+
     private void Enqueue(FsChangeKind kind, string path)
     {
         if (IsTempFile(path))
@@ -114,6 +117,18 @@ public sealed class MusicFolderWatcher : IDisposable
         // it too - a book dropped in used to need a full manual rescan to appear.
         if (IsInDotSubdirectory(path))
         {
+            return;
+        }
+
+        // A playlist file is library content too, and carries no audio extension. Skip the ones
+        // OrgZ just wrote, or saving a playlist edit rescans the library that triggered it.
+        if (IsPlaylistFile(path))
+        {
+            if (!PlaylistFolderSync.WasSelfWritten(path) && kind != FsChangeKind.Changed)
+            {
+                FullRescanNeeded?.Invoke();
+            }
+
             return;
         }
 

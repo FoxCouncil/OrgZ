@@ -7,7 +7,11 @@ namespace OrgZ.Services;
 
 public static class PlaylistExporter
 {
-    public static void ExportM3U8(string outputPath, string playlistName, IReadOnlyList<MediaItem> tracks)
+    /// <summary>
+    /// <paramref name="relativeTo"/> writes track paths relative to that folder. Tracks outside
+    /// it stay absolute.
+    /// </summary>
+    public static void ExportM3U8(string outputPath, string playlistName, IReadOnlyList<MediaItem> tracks, string? relativeTo = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#EXTM3U");
@@ -26,10 +30,35 @@ public static class PlaylistExporter
                 : track.Title ?? track.FileName ?? "Unknown";
 
             sb.AppendLine($"#EXTINF:{duration},{display}");
-            sb.AppendLine(track.FilePath);
+            sb.AppendLine(RelativeOrAbsolute(track.FilePath, relativeTo));
         }
 
         File.WriteAllText(outputPath, sb.ToString(), Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Path relative to <paramref name="root"/>, or the original when it falls outside -
+    /// GetRelativePath would otherwise return an unportable ".." chain.
+    /// </summary>
+    private static string RelativeOrAbsolute(string filePath, string? root)
+    {
+        if (string.IsNullOrEmpty(root))
+        {
+            return filePath;
+        }
+
+        try
+        {
+            var relative = Path.GetRelativePath(root, filePath);
+            return relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative)
+                ? filePath
+                : relative;
+        }
+        catch (Exception)
+        {
+            // Different volumes, or a malformed path - absolute is still correct, just longer.
+            return filePath;
+        }
     }
 
     public static void ExportPLS(string outputPath, string playlistName, IReadOnlyList<MediaItem> tracks)
