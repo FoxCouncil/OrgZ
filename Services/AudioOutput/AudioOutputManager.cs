@@ -75,6 +75,17 @@ public sealed class AudioOutputManager : IDisposable
         _pollTimer = new System.Threading.Timer(_ => PollForChanges(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>
+    /// Replaces the real providers with one supplied by the caller. Docs screenshot harness
+    /// only - it makes the output picker render a fixed set of speakers instead of whatever
+    /// hardware and AirPlay receivers happen to be on the machine taking the shot.
+    /// </summary>
+    internal void UseOnlyProvidersForScreenshots(params IAudioSinkProvider[] providers)
+    {
+        _providers.Clear();
+        _providers.AddRange(providers);
+    }
+
     private void AddProvider(IAudioSinkProvider provider)
     {
         if (!provider.IsSupported)

@@ -880,6 +880,16 @@ internal partial class MainWindowViewModel
         }
     }
 
+    /// <summary>
+    /// Mounts a share from supplied data instead of the network. Docs screenshot harness only -
+    /// a real share arrives through mDNS discovery.
+    /// </summary>
+    internal void MountShareForScreenshots(
+        Services.Sharing.DiscoveredShare share,
+        List<MediaItem> tracks,
+        List<Services.Sharing.ShareDiscovery.SharePlaylist> playlists)
+        => MountShare(share, tracks, playlists);
+
     private void MountShare(Services.Sharing.DiscoveredShare share, List<MediaItem> tracks, List<Services.Sharing.ShareDiscovery.SharePlaylist> playlists)
     {
         var viewKey = $"Share:{share.Key}";

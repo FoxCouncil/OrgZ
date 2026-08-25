@@ -30,6 +30,8 @@ using it.
     faster output to match, so the same song doesn't arrive twice from two rooms.
     The delay is carried across track boundaries, so gapless stays gapless.
 
+![The output picker](../assets/screenshots/airplay-picker.png)
+
 ## Passwords
 
 A receiver with **Require Password** set for speaker access (the Home app's

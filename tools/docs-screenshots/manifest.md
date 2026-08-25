@@ -52,12 +52,19 @@ same licensed covers.
 | `settings-podcasts.png` | Settings | Podcasts tab |
 | `settings-stats.png` | Settings | Stats tab |
 | `settings-advanced.png` | Settings | Advanced tab |
+| `sharing.png` | Library Sharing | A mounted remote library and its playlists |
+| `airplay-picker.png` | AirPlay | Output picker, grouped by provider |
+| `device-library.png` | iPods & Rockbox | A connected device in the sidebar |
 
-## Planned (need new seed hooks)
+## Seed hooks
 
-| File | Page | Shows |
-|------|------|-------|
-| `sharing.png` | Library Sharing | A share visible from a second machine |
-| `airplay-picker.png` | AirPlay | Output picker with receivers listed |
+Surfaces that read live state need a hook on the type that owns it, so the shot uses the
+real control rather than a lookalike:
 
-Both need a seeded network peer, which the harness has no hook for yet.
+| Hook | Gives |
+|------|-------|
+| `MainWindowViewModel.SeedQueueForScreenshots` | A `PlaybackContext` without starting playback |
+| `MainWindowViewModel.MountShareForScreenshots` | A network share without mDNS discovery |
+| `MainWindowViewModel.ReloadPlaylistsForScreenshots` | Sidebar playlists from the scratch database |
+| `AudioOutputManager.UseOnlyProvidersForScreenshots` | Fixed speakers instead of real hardware |
+| `SettingsDialog.SelectTabForScreenshots` | A named Settings tab |

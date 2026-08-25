@@ -54,6 +54,8 @@ share is never mounted back into your own sidebar.
 When the other machine goes away, the share unmounts and its tracks disappear
 from the list. New tracks added on the remote show up on the next refresh.
 
+![A mounted share in the sidebar](../assets/screenshots/sharing.png)
+
 ## Copying tracks into your library
 
 - **Tracks**: select them and drag them onto **Music** in the sidebar. Each is

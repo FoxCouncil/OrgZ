@@ -51,6 +51,8 @@ exposes - SysInfo, SCSI `INQUIRY` VPD data, Apple opcode `0xC6`, the Rockbox
 target string, and (on Windows) the WMI disk descriptor. No single source is
 complete, which is why OrgZ keeps a per-device record (below).
 
+![A connected device in the sidebar](../assets/screenshots/device-library.png)
+
 ## The `.orgz/device` record
 
 The first time you select a device, OrgZ writes a small text file to

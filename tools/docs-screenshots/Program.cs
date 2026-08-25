@@ -104,6 +104,9 @@ internal static class Program
             ("settings-stats", 620, 0, () => SettingsTab("Stats")),
             ("settings-advanced", 620, 0, () => SettingsTab("Advanced")),
             ("queue", 1280, 800, SeededQueue),
+            ("sharing", 1280, 800, SeededSharing),
+            ("airplay-picker", 460, 0, SeededOutputPicker),
+            ("device-library", 1280, 800, SeededDeviceLibrary),
             ("radio-filters", 1280, 800, SeededRadioFilters),
             ("search-results", 1280, 800, SeededSearch),
             ("confirm-remove", 460, 0, () => new ConfirmDialog(
@@ -274,6 +277,96 @@ internal static class Program
         var vm = window.ViewModel;
         vm.SetItems(SampleRadio());
         vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Radio");
+        return window;
+    }
+
+    /// <summary>
+    /// The audio output picker, populated from a fixed device list rather than whatever
+    /// hardware and AirPlay receivers are on the machine taking the shot. The flyout's panel
+    /// is hosted directly - a flyout renders nothing until it is opened.
+    /// </summary>
+    private static Window SeededOutputPicker()
+    {
+        var manager = new OrgZ.Services.AudioOutput.AudioOutputManager();
+        manager.UseOnlyProvidersForScreenshots(
+            new SampleOutputProvider("system", "System Audio",
+                ("local-default", "Speakers (Realtek High Definition Audio)", true),
+                ("local-optical", "Digital Output (S/PDIF)", false)),
+            new SampleOutputProvider("airplay", "AirPlay",
+                ("airplay-living", "Living Room", false),
+                ("airplay-kitchen", "Kitchen", false),
+                ("airplay-office", "Office HomePod", false)));
+
+        var panel = new StackPanel { Spacing = 4, Margin = new Thickness(6, 6, 18, 6) };
+        OrgZ.Services.AudioOutput.AudioOutputFlyoutHelper.Populate(manager, panel);
+
+        return Host(panel);
+    }
+
+    /// <summary>Another OrgZ library mounted from the network, with its playlists.</summary>
+    private static MainWindow SeededSharing()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+
+        var share = new Services.Sharing.DiscoveredShare("Studio Library", "studio.local", 7391, "10.0.0.24");
+        var source = $"share:{share.Key}";
+
+        // Share tracks are namespaced by source, which is what the share view filters on.
+        var tracks = SampleLibrary()
+            .Where(i => i.Kind == MediaKind.Music)
+            .Select(t => new MediaItem
+            {
+                Id = $"{source}/{t.Id}",
+                Kind = MediaKind.Music,
+                Title = t.Title,
+                Artist = t.Artist,
+                Album = t.Album,
+                Year = t.Year,
+                Genre = t.Genre,
+                Track = t.Track,
+                TotalTracks = t.TotalTracks,
+                Duration = t.Duration,
+                Extension = t.Extension,
+                Source = source,
+                StreamUrl = $"{share.BaseUrl}/stream",
+                IsAnalyzed = true,
+            })
+            .ToList();
+
+        var playlists = new List<Services.Sharing.ShareDiscovery.SharePlaylist>
+        {
+            new("Favorites", tracks.Take(9).Select(t => t.Id).ToList(), "favorites"),
+            new("Night Drive", tracks.Skip(4).Take(7).Select(t => t.Id).ToList()),
+        };
+
+        vm.SetItems([]);
+        vm.MountShareForScreenshots(share, tracks, playlists);
+        vm.SelectedSidebarItem = vm.ShareItems.First();
+        vm.UpdateData();
+        return window;
+    }
+
+    /// <summary>A connected iPod's library in the grid, with the device info bar above it.</summary>
+    private static MainWindow SeededDeviceLibrary()
+    {
+        var window = new MainWindow(screenshotMode: true);
+        var vm = window.ViewModel;
+
+        vm.SetItems(SampleLibrary());
+        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Music");
+        vm.RefreshView();
+
+        vm.DeviceItems.Add(new SidebarItem
+        {
+            Name = "OrgZ iPod",
+            Icon = "fa-solid fa-music",
+            Category = "DEVICES",
+            IsEnabled = true,
+            ViewConfigKey = "Device:screenshot",
+        });
+
+        vm.UpdateData();
         return window;
     }
 
@@ -828,4 +921,32 @@ internal static class Program
         }
         return dir ?? Directory.GetCurrentDirectory();
     }
+}
+
+/// <summary>Fixed speakers for the output-picker shot - no real hardware, no LAN scan.</summary>
+internal sealed class SampleOutputProvider(
+    string providerId,
+    string providerName,
+    params (string Id, string Name, bool IsDefault)[] devices) : OrgZ.Services.AudioOutput.IAudioSinkProvider
+{
+    public string ProviderId => providerId;
+
+    public string ProviderName => providerName;
+
+    public bool IsSupported => true;
+
+    public event EventHandler? DevicesChanged { add { } remove { } }
+
+    public IReadOnlyList<OrgZ.Services.AudioOutput.AudioDeviceInfo> EnumerateDevices() =>
+        [.. devices.Select(d => new OrgZ.Services.AudioOutput.AudioDeviceInfo
+        {
+            DeviceId = d.Id,
+            DisplayName = d.Name,
+            ProviderId = providerId,
+            ProviderName = providerName,
+            IsDefault = d.IsDefault,
+        })];
+
+    public OrgZ.Services.AudioOutput.IAudioSink CreateSink(OrgZ.Services.AudioOutput.AudioDeviceInfo device)
+        => throw new NotSupportedException("The screenshot harness never plays audio.");
 }
