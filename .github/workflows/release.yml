@@ -248,10 +248,18 @@ jobs:
           esac
           # SIGN_ARGS is set only when the signing secrets exist; empty otherwise, so an
           # unconfigured repo still produces a working (unsigned) release.
+          #
+          # Scoped to the platforms that HAVE a signing path. Linux never sets SIGN_ARGS -
+          # there is no AppImage signing step here - so an unconditional warning fired on
+          # every green release, annotating the run with "this release will be UNSIGNED" and
+          # naming SmartScreen and Gatekeeper, neither of which has anything to do with the
+          # job that emitted it. A warning that is always on is a warning nobody reads.
           if [[ -n "${SIGN_ARGS:-}" ]]; then
             echo "Signing enabled."
+          elif [[ "${{ matrix.rid }}" == linux-* ]]; then
+            echo "No signing step for linux-x64; the AppImage is published as-is."
           else
-            echo "::warning::No signing credentials - this release will be UNSIGNED (SmartScreen warnings on Windows, Gatekeeper refusal on macOS). See SIGNING.md."
+            echo "::warning::No signing credentials for ${{ matrix.rid }} - it will be UNSIGNED (SmartScreen warnings on Windows, Gatekeeper refusal on macOS). See SIGNING.md."
           fi
 
           eval vpk pack -u OrgZ -v ${{ steps.version.outputs.VERSION }} -p publish -o releases $COMMON_FLAGS $WIN_FLAGS ${SIGN_ARGS:-}
