@@ -1,6 +1,15 @@
 # Changelog
 
-## v0.13.1 (Current)
+## v0.13.2 (Current)
+
+### Fixes
+
+- The background service is now registered by the Windows installer as intended,
+  so disc and iPod operations stay silent instead of asking for consent each time
+- The library sharing checkbox follows the service when it is started or stopped,
+  rather than needing OrgZ restarted
+
+## v0.13.1
 
 The first release cut from a tag: every installer is built, signed, and published
 by the pipeline itself.
