@@ -1,0 +1,72 @@
+/* Auto-rotating crossfade hero for the homepage.
+   Pure CSS — four full-window shots fade between each other on a 24s cycle
+   (6s per slide). Indicator dots highlight the active slide in sync. */
+
+.hero {
+  max-width: 940px;
+  margin: 1.5rem auto 2rem;
+}
+
+.hero-slides {
+  position: relative;
+  aspect-ratio: 1280 / 800;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
+}
+
+.hero-slides img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  animation: heroFade 24s infinite;
+}
+
+.hero-slides img:nth-child(1) { animation-delay: 0s; }
+.hero-slides img:nth-child(2) { animation-delay: 6s; }
+.hero-slides img:nth-child(3) { animation-delay: 12s; }
+.hero-slides img:nth-child(4) { animation-delay: 18s; }
+
+@keyframes heroFade {
+  0%   { opacity: 0; }
+  2%   { opacity: 1; }   /* fade in  (~0.5s) */
+  23%  { opacity: 1; }   /* hold     (~5s)   */
+  27%  { opacity: 0; }   /* fade out (~1s)   */
+  100% { opacity: 0; }
+}
+
+.hero-dots {
+  display: flex;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.hero-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--md-default-fg-color--lighter);
+  animation: heroDot 24s infinite;
+}
+
+.hero-dots span:nth-child(1) { animation-delay: 0s; }
+.hero-dots span:nth-child(2) { animation-delay: 6s; }
+.hero-dots span:nth-child(3) { animation-delay: 12s; }
+.hero-dots span:nth-child(4) { animation-delay: 18s; }
+
+@keyframes heroDot {
+  0%, 27%, 100% { background: var(--md-default-fg-color--lighter); }
+  2%, 23%       { background: var(--md-accent-fg-color); }
+}
+
+/* Respect reduced-motion: drop the animation, show the first slide static. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-slides img { animation: none; }
+  .hero-slides img:nth-child(1) { opacity: 1; }
+  .hero-dots span { animation: none; }
+  .hero-dots span:nth-child(1) { background: var(--md-accent-fg-color); }
+}
