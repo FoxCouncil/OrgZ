@@ -8,13 +8,40 @@ namespace OrgZ.Services;
 /// <summary>
 /// Computes a track's ReplayGain (the loudness offset iTunes called "Sound Check") once and writes
 /// it into the file's tags, so playback can apply the precise value forever after. Loudness is
-/// measured with the bundled ffmpeg's EBU R128 meter; gain targets the ReplayGain 2.0 reference of
-/// -18 LUFS. Jobs are serialized (one ffmpeg at a time) so tagging a library in the background can't
-/// storm the CPU.
+/// measured with the bundled ffmpeg's EBU R128 meter. Jobs are serialized (one ffmpeg at a time) so
+/// tagging a library in the background can't storm the CPU.
 /// </summary>
 public static class ReplayGainService
 {
-    private const double ReferenceLufs = -18.0;
+    /// <summary>
+    /// The loudness every track is brought to.
+    ///
+    /// NOT ReplayGain 2.0's -18 LUFS. That reference dates from an era of quieter masters, and
+    /// against a modern library - which mostly sits between -6 and -10 LUFS - it only ever
+    /// attenuates, by 8 to 12 dB. The result is a library that is uniformly QUIET rather than
+    /// level, which is the opposite of what someone turning normalization on wants.
+    ///
+    /// -14 is where Spotify, YouTube and Tidal settled (Apple Music sits at -16), so a library
+    /// normalized here sounds like the rest of what a listener hears. Going louder buys little:
+    /// every dB above this pushes more tracks into a boost the peak ceiling below has to refuse,
+    /// and a track that cannot reach the target is unevenness reintroduced from the other side.
+    ///
+    /// Apple's own Sound Check reference is not public and is not LUFS-based; the value written
+    /// to a device is converted to its units in ITunesDbWriter regardless of what is chosen here.
+    /// </summary>
+    private const double ReferenceLufs = -14.0;
+
+    /// <summary>
+    /// Where a boosted track's true peak is allowed to land. Gain is capped so nothing crosses
+    /// it, because the playback scaler CLAMPS rather than wraps - so an over-boost would not
+    /// overflow, it would hard-clip, and the loudest part of the track is exactly where that is
+    /// most audible. 1 dB of headroom also covers the inter-sample peaks a decoder can produce
+    /// that a sample-peak meter never sees.
+    /// </summary>
+    private const double PeakCeilingDbfs = -1.0;
+
+    /// <summary>Ceiling on boost, so a near-silent recording is lifted, not amplified into its own noise floor.</summary>
+    private const double MaxBoostDb = 6.0;
 
     private static readonly ILogger _log = Logging.For("ReplayGain");
     private static readonly SemaphoreSlim _gate = new(1, 1);
@@ -26,21 +53,42 @@ public static class ReplayGainService
     /// </summary>
     public static async Task<double?> ComputeAndTagAsync(string filePath, string ffmpegPath, CancellationToken ct = default)
     {
+        // Serialized: this fires from playback, where one ffmpeg competing with the decoder is
+        // acceptable and several are not. The bulk rescan wants its own parallelism and so calls
+        // the ungated form directly.
         await _gate.WaitAsync(ct);
         try
+        {
+            return await MeasureAndTagAsync(filePath, ffmpegPath, ct);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// The same work without the one-at-a-time gate, for <see cref="ReplayGainRescan"/>, which
+    /// runs its own bounded parallelism across files.
+    /// </summary>
+    internal static Task<double?> ComputeAndTagUngatedAsync(string filePath, string ffmpegPath, CancellationToken ct = default)
+        => MeasureAndTagAsync(filePath, ffmpegPath, ct);
+
+    private static async Task<double?> MeasureAndTagAsync(string filePath, string ffmpegPath, CancellationToken ct)
+    {
         {
             if (!File.Exists(filePath))
             {
                 return null;
             }
 
-            var loudness = await MeasureIntegratedLoudnessAsync(filePath, ffmpegPath, ct);
-            if (loudness is not { } lufs)
+            var measured = await MeasureLoudnessAsync(filePath, ffmpegPath, ct);
+            if (measured is not { } m)
             {
                 return null;
             }
 
-            var gainDb = GainFromLoudness(lufs);
+            var gainDb = GainFromLoudness(m.Lufs, m.TruePeakDbfs);
             try
             {
                 // Through a copy, never in place: TagLib rewrites the whole audio payload when the
@@ -54,7 +102,7 @@ public static class ReplayGainService
                     file.Tag.ReplayGainTrackGain = gainDb;
                     file.Save();
                 });
-                _log.Information("ReplayGain {Gain:0.00} dB (from {Lufs:0.0} LUFS) -> {Path}", gainDb, lufs, filePath);
+                _log.Information("ReplayGain {Gain:0.00} dB (from {Lufs:0.0} LUFS, peak {Peak}) -> {Path}", gainDb, m.Lufs, m.TruePeakDbfs is { } tp ? $"{tp:0.0} dBFS" : "unknown", filePath);
             }
             catch (Exception ex)
             {
@@ -68,16 +116,52 @@ public static class ReplayGainService
 
             return gainDb;
         }
-        finally
-        {
-            _gate.Release();
-        }
     }
 
     // ── pure pieces (unit-tested) ──────────────────────────────────────────────
 
-    /// <summary>ReplayGain 2.0: the gain that brings a track's integrated loudness to -18 LUFS.</summary>
-    internal static double GainFromLoudness(double integratedLufs) => ReferenceLufs - integratedLufs;
+    /// <summary>
+    /// The gain that brings a track's integrated loudness to <see cref="ReferenceLufs"/>, held
+    /// back so the result neither clips nor over-amplifies.
+    ///
+    /// Attenuation is unbounded - a track 12 dB too loud is turned down 12 dB, that is the whole
+    /// job. Boost is bounded twice: by the track's own true peak, so raising a quiet-but-hot
+    /// master cannot drive it into the clamp in the playback scaler, and by
+    /// <see cref="MaxBoostDb"/> so a near-silent recording is not amplified into its own hiss.
+    /// Pass <paramref name="truePeakDbfs"/> as null when the meter did not report one; the peak
+    /// limit is then simply not applied.
+    /// </summary>
+    internal static double GainFromLoudness(double integratedLufs, double? truePeakDbfs = null)
+    {
+        var gain = ReferenceLufs - integratedLufs;
+
+        if (truePeakDbfs is { } peak)
+        {
+            gain = Math.Min(gain, PeakCeilingDbfs - peak);
+        }
+
+        return Math.Min(gain, MaxBoostDb);
+    }
+
+    /// <summary>
+    /// Pulls the true-peak figure out of ffmpeg's ebur128 summary ("Peak: -0.3 dBFS"), which it
+    /// only prints when the filter is asked for it. Returns null when absent, which is the
+    /// signal to skip peak limiting rather than to assume a peak.
+    /// </summary>
+    internal static double? ParseTruePeak(string ffmpegStderr)
+    {
+        double? last = null;
+        foreach (System.Text.RegularExpressions.Match m in
+            System.Text.RegularExpressions.Regex.Matches(ffmpegStderr, @"\bPeak:\s*(-?\d+(?:\.\d+)?)\s*dBFS"))
+        {
+            if (double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+            {
+                last = v;
+            }
+        }
+
+        return last;
+    }
 
     /// <summary>
     /// Pulls the integrated-loudness value ("I: -14.2 LUFS") out of ffmpeg's ebur128 summary, which
@@ -101,7 +185,7 @@ public static class ReplayGainService
 
     // ── plumbing ──────────────────────────────────────────────────────────────
 
-    private static async Task<double?> MeasureIntegratedLoudnessAsync(string filePath, string ffmpegPath, CancellationToken ct)
+    private static async Task<(double Lufs, double? TruePeakDbfs)?> MeasureLoudnessAsync(string filePath, string ffmpegPath, CancellationToken ct)
     {
         try
         {
@@ -113,8 +197,9 @@ public static class ReplayGainService
                 CreateNoWindow = true,
             };
             psi.ArgumentList.Add("-nostats");
+            psi.ArgumentList.Add("-threads"); psi.ArgumentList.Add("1");
             psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(filePath);
-            psi.ArgumentList.Add("-af"); psi.ArgumentList.Add("ebur128");
+            psi.ArgumentList.Add("-af"); psi.ArgumentList.Add("ebur128=peak=true");
             psi.ArgumentList.Add("-f"); psi.ArgumentList.Add("null");
             psi.ArgumentList.Add("-");
 
@@ -125,7 +210,8 @@ public static class ReplayGainService
             }
             var stderrTask = p.StandardError.ReadToEndAsync(ct);
             await p.WaitForExitAsync(ct);
-            return ParseIntegratedLoudness(await stderrTask);
+            var stderr = await stderrTask;
+            return ParseIntegratedLoudness(stderr) is { } lufs ? (lufs, ParseTruePeak(stderr)) : null;
         }
         catch (OperationCanceledException)
         {

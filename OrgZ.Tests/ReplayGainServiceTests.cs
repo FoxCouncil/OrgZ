@@ -10,15 +10,58 @@ namespace OrgZ.Tests;
 /// </summary>
 public class ReplayGainServiceTests
 {
-    // ===== Gain math: bring a track to the -18 LUFS reference =====
+    // ===== Gain math: bring a track to the -14 LUFS reference =====
 
     [Theory]
-    [InlineData(-14.0, -4.0)]   // a loud master (-14 LUFS) is turned DOWN 4 dB
-    [InlineData(-23.0, 5.0)]    // a quiet track (-23 LUFS) is turned UP 5 dB
-    [InlineData(-18.0, 0.0)]    // already at reference - no change
-    public void Gain_targets_minus_18_lufs(double integratedLufs, double expectedGain)
+    [InlineData(-8.0, -6.0)]    // a loud modern master (-8 LUFS) is turned DOWN 6 dB
+    [InlineData(-18.0, 4.0)]    // a quiet track (-18 LUFS) is turned UP 4 dB
+    [InlineData(-14.0, 0.0)]    // already at reference - no change
+    public void Gain_targets_minus_14_lufs(double integratedLufs, double expectedGain)
     {
         Assert.Equal(expectedGain, ReplayGainService.GainFromLoudness(integratedLufs), 3);
+    }
+
+    [Fact]
+    public void Attenuation_is_unbounded_but_boost_is_capped()
+    {
+        // Turning a track DOWN can never distort it, so a brickwalled master gets the full cut.
+        Assert.Equal(-16.0, ReplayGainService.GainFromLoudness(2.0), 3);
+
+        // Lifting one can, so a near-silent recording is raised, not amplified into its own hiss.
+        Assert.Equal(6.0, ReplayGainService.GainFromLoudness(-40.0), 3);
+    }
+
+    [Fact]
+    public void A_boost_is_held_back_so_the_true_peak_cannot_clip()
+    {
+        // -20 LUFS wants +6 dB, but the track already peaks at -2 dBFS: the playback scaler
+        // CLAMPS rather than wraps, so the untethered boost would hard-clip every peak.
+        // Ceiling is -1 dBFS, so only +1 dB is available.
+        Assert.Equal(1.0, ReplayGainService.GainFromLoudness(-20.0, truePeakDbfs: -2.0), 3);
+
+        // Plenty of headroom - the loudness target wins, not the peak.
+        Assert.Equal(4.0, ReplayGainService.GainFromLoudness(-18.0, truePeakDbfs: -30.0), 3);
+
+        // A track already over the ceiling is pushed DOWN to it even when loudness says otherwise.
+        Assert.Equal(-1.0, ReplayGainService.GainFromLoudness(-14.0, truePeakDbfs: 0.0), 3);
+
+        // No peak reported - the limit simply isn't applied, rather than a peak being assumed.
+        Assert.Equal(4.0, ReplayGainService.GainFromLoudness(-18.0, truePeakDbfs: null), 3);
+    }
+
+    [Fact]
+    public void Parses_the_true_peak_from_the_summary()
+    {
+        var stderr = """
+            [Parsed_ebur128_0 @ 0x55] Summary:
+
+              Integrated loudness:
+                I:         -9.2 LUFS
+              True peak:
+                Peak:      -0.3 dBFS
+            """;
+        Assert.Equal(-0.3, ReplayGainService.ParseTruePeak(stderr));
+        Assert.Null(ReplayGainService.ParseTruePeak("no peak here"));
     }
 
     // ===== Parsing ffmpeg's ebur128 summary (stderr) =====

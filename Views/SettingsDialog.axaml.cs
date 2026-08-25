@@ -672,17 +672,23 @@ public partial class SettingsDialog : Window
     // ── Services tab ─────────────────────────────────────────
 
     /// <summary>
-    /// Whether the background-service card appears at all. Development only: a shipping
-    /// user makes one choice - run OrgZ standalone (each privileged disc operation asks
-    /// for UAC) or with the service installed (asked once, then silent) - and lifecycle
-    /// buttons past that point can only put them somewhere broken, like installed-but-
-    /// stopped with no idea why burning started prompting again.
+    /// Whether the FULL service card - Install, Start, Stop, Uninstall - is shown up front.
+    /// Development only: a shipping user makes one choice, run OrgZ standalone (each privileged
+    /// disc operation asks for UAC) or with the service installed (asked once, then silent), and
+    /// lifecycle buttons past that point can only put them somewhere broken, like
+    /// installed-but-stopped with no idea why burning started prompting again.
     ///
-    /// The installer code itself stays compiled rather than being #if'd out: the
-    /// pre-commit suite runs in Release, and <c>DeviceHelperInstallerTests</c> has to
-    /// build there. It is simply unreachable in a Release UI.
+    /// Release is NOT "no card": it shows an Install-only card while the helper is missing, then
+    /// keeps it up afterwards so "Installed and running" is visible rather than the card
+    /// vanishing at the moment it finally says something good.
+    ///
+    /// Deliberately <c>static readonly</c> rather than <c>const</c>. As a const the compiler
+    /// folds `if (!ShowServiceLifecycle)` to a constant in each configuration and warns CS0162
+    /// on the branch it just proved dead - in Debug, which is the configuration this repo is
+    /// developed in. Both paths stay compiled either way; the installer code has to build in
+    /// Release regardless, because the pre-commit suite runs there.
     /// </summary>
-    internal const bool ShowServiceLifecycle =
+    internal static readonly bool ShowServiceLifecycle =
 #if DEBUG
         true;
 #else

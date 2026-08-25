@@ -29,6 +29,24 @@ internal class Program
             return CdHelperMode.Run(args);
         }
 
+        // Bulk loudness rescan. Headless on purpose: it rewrites a tag in every file in the
+        // library and takes hours on a large one, so it belongs in a console the user can leave
+        // running, not behind a window they have to keep open. Needed whenever the loudness
+        // REFERENCE changes - the per-track pass during playback only measures files that have
+        // no gain yet, so it would never revisit a library that is already tagged.
+        if (Array.IndexOf(args, "--rescan-gain") >= 0)
+        {
+            Logging.Initialize();
+            try
+            {
+                return Services.ReplayGainRescan.RunAsync().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                Logging.Shutdown();
+            }
+        }
+
         // Privileged device-helper daemon mode: the installed OS service (LaunchDaemon /
         // systemd unit / Windows service) launches OrgZ this way. It runs as root/LocalSystem,
         // serves silent iPod identity reads over a socket/pipe, and never touches Avalonia.
