@@ -1,6 +1,17 @@
 # Changelog
 
-## v0.12.0 (Current)
+## v0.13.0 (Current)
+
+The first release cut from a tag: every installer is built, signed, and published
+by the pipeline itself.
+
+### Playback
+
+- Replay Gain normalizes to -14 LUFS without clipping, so quiet and loud albums
+  sit at the same level and neither distorts
+- Rescan the whole library's Replay Gain in one pass from Settings
+
+## v0.12.0
 
 The first release with AirPlay, and the first one packaged as a per-machine
 installer. It covers everything since v0.4.20.
