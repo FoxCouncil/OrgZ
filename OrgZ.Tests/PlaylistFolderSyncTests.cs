@@ -198,6 +198,50 @@ public class PlaylistFolderSyncTests : IDisposable
     }
 
     [Fact]
+    public void Write_UnchangedContentDoesNotTouchTheFile()
+    {
+        var track = Track(Touch("a.flac"), "A", "One");
+        var path = Path.Combine(_root, "Stable.m3u8");
+
+        PlaylistFolderSync.Write(_root, "Stable", [track]);
+        var stamp = File.GetLastWriteTimeUtc(path);
+
+        File.SetLastWriteTimeUtc(path, stamp.AddMinutes(-5));
+        var moved = File.GetLastWriteTimeUtc(path);
+
+        PlaylistFolderSync.Write(_root, "Stable", [track]);
+
+        // Rewriting identical content is what fed the watcher/scanner loop.
+        Assert.Equal(moved, File.GetLastWriteTimeUtc(path));
+        Assert.Empty(Directory.GetFiles(_root, "*.orgztmp", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void Write_ChangedContentDoesRewrite()
+    {
+        var a = Track(Touch("a.flac"), "A", "One");
+        var b = Track(Touch("b.flac"), "B", "Two");
+        var path = Path.Combine(_root, "Moving.m3u8");
+
+        PlaylistFolderSync.Write(_root, "Moving", [a]);
+        PlaylistFolderSync.Write(_root, "Moving", [a, b]);
+
+        Assert.Equal(2, PlaylistImporter.Import(path).TrackPaths.Count);
+    }
+
+    [Fact]
+    public void WasSelfWritten_SurvivesMoreThanOneWatcherEvent()
+    {
+        PlaylistFolderSync.Write(_root, "Echo", [Track(Touch("a.flac"), "A", "One")]);
+        var path = Path.Combine(_root, "Echo.m3u8");
+
+        // One write raises several events; every one of them must be suppressed.
+        Assert.True(PlaylistFolderSync.WasSelfWritten(path));
+        Assert.True(PlaylistFolderSync.WasSelfWritten(path));
+        Assert.True(PlaylistFolderSync.WasSelfWritten(path));
+    }
+
+    [Fact]
     public void WriteTo_RewritesADiscoveredPlaylistWhereItWasFound()
     {
         var nested = Touch(Path.Combine("Soundtracks", "Nested.m3u8"));

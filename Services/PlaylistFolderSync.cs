@@ -27,7 +27,12 @@ public static class PlaylistFolderSync
 
     private static readonly TimeSpan SelfWriteWindow = TimeSpan.FromSeconds(10);
 
-    /// <summary>True if OrgZ wrote this path moments ago. Consumes the record.</summary>
+    /// <summary>
+    /// True if OrgZ wrote this path within the last few seconds. Does NOT consume the record:
+    /// one write raises several watcher events (a move-with-overwrite reports the delete and
+    /// the create), and a single-use record let the second event through - which triggered a
+    /// rescan, which rewrote the file, which raised more events.
+    /// </summary>
     public static bool WasSelfWritten(string path)
     {
         lock (_selfWritten)
@@ -39,7 +44,7 @@ public static class PlaylistFolderSync
                 _selfWritten.Remove(stale);
             }
 
-            return _selfWritten.Remove(path);
+            return _selfWritten.ContainsKey(path);
         }
     }
 
@@ -97,8 +102,18 @@ public static class PlaylistFolderSync
 
         var temp = filePath + TempExtension;
 
-        MarkSelfWritten(filePath);
         PlaylistExporter.ExportM3U8(temp, playlistName, tracks, relativeTo: musicRoot);
+
+        // Identical content is not worth a write. Favorites is regenerated on every library
+        // scan, and rewriting it unchanged was enough to keep the watcher and the scanner
+        // feeding each other.
+        if (File.Exists(filePath) && File.ReadAllBytes(temp).AsSpan().SequenceEqual(File.ReadAllBytes(filePath)))
+        {
+            File.Delete(temp);
+            return;
+        }
+
+        MarkSelfWritten(filePath);
         File.Move(temp, filePath, overwrite: true);
     }
 
