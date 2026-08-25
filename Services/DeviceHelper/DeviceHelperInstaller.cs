@@ -198,12 +198,29 @@ public static class DeviceHelperInstaller
                 return null;
             }
 
-            // LocalSystem, LocalService, NetworkService - nobody to own the helper.
+            // LocalSystem, LocalService, NetworkService - nobody is BEHIND this process, so
+            // its own SID is the wrong answer twice over: stamping SYSTEM as the owner locks
+            // out the human who just installed OrgZ, and recording nothing leaves the helper
+            // fail-open to any authenticated caller.
+            //
+            // This is the normal case, not an edge one. The MSI's install hook is deliberately
+            // NoImpersonate (see scripts/msi-elevate-hooks.ps1) because `sc create` needs the
+            // elevated token, which means EVERY machine-wide install arrives here. So ask the
+            // session instead of the token: the person at the console is the person installing.
             if (sid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalSystemSid)
                 || sid.IsWellKnown(System.Security.Principal.WellKnownSidType.LocalServiceSid)
                 || sid.IsWellKnown(System.Security.Principal.WellKnownSidType.NetworkServiceSid))
             {
-                _log.Information("Install is running as a machine account; the device helper will accept any authenticated caller");
+                var consoleSid = WindowsConsoleUserSid();
+                if (consoleSid is not null)
+                {
+                    _log.Information("Install is running as a machine account; recording the console user {Sid} as the device helper's owner", consoleSid);
+                    return consoleSid;
+                }
+
+                // Unattended, or nobody logged in - an SCCM push, an image build. There is
+                // genuinely no owner to record, so this stays the legacy fail-open case.
+                _log.Warning("Install is running as a machine account with no console user; the device helper will accept any authenticated caller");
                 return null;
             }
 
@@ -213,6 +230,76 @@ public static class DeviceHelperInstaller
         {
             _log.Debug(ex, "Could not determine the installing user's SID");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The SID of the user signed in at the physical console, or null when there isn't one.
+    ///
+    /// Used only when the installer itself is a machine account. WTS is asked for the user
+    /// NAME rather than a token on purpose: <c>WTSQueryUserToken</c> would need SE_TCB_NAME
+    /// and hand back a handle to own and close, while the name translates to a SID through
+    /// plain managed code. LocalSystem can read this without any privilege adjustment.
+    /// </summary>
+    internal static string? WindowsConsoleUserSid()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            var session = WtsNativeMethods.WTSGetActiveConsoleSessionId();
+
+            // 0xFFFFFFFF means no session is attached to the console - the machine is at the
+            // lock screen with nobody logged in, or this is a headless/RDP-only box.
+            if (session == 0xFFFFFFFF)
+            {
+                return null;
+            }
+
+            var user = WtsQuery(session, WtsNativeMethods.WtsInfoClass.WTSUserName);
+            if (string.IsNullOrWhiteSpace(user))
+            {
+                return null;
+            }
+
+            var domain = WtsQuery(session, WtsNativeMethods.WtsInfoClass.WTSDomainName);
+            var account = string.IsNullOrWhiteSpace(domain) ? user : $@"{domain}\{user}";
+
+            var identifier = (System.Security.Principal.SecurityIdentifier)
+                new System.Security.Principal.NTAccount(account).Translate(typeof(System.Security.Principal.SecurityIdentifier));
+
+            return identifier.Value;
+        }
+        catch (Exception ex)
+        {
+            _log.Debug(ex, "Could not determine the console user's SID");
+            return null;
+        }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string? WtsQuery(uint session, WtsNativeMethods.WtsInfoClass info)
+    {
+        var buffer = IntPtr.Zero;
+
+        try
+        {
+            if (!WtsNativeMethods.WTSQuerySessionInformationW(IntPtr.Zero, session, info, out buffer, out _))
+            {
+                return null;
+            }
+
+            return System.Runtime.InteropServices.Marshal.PtrToStringUni(buffer);
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                WtsNativeMethods.WTSFreeMemory(buffer);
+            }
         }
     }
 

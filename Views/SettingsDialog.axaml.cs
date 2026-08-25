@@ -86,8 +86,11 @@ public partial class SettingsDialog : Window
 
         // Services
         ShareNameInput.Text = Settings.Get("OrgZ.Services.Sharing.Name", $"{Environment.MachineName} Library");
+        // Seeded from settings so the box is not blank for the length of a service probe; the
+        // probe below corrects it from what the service is ACTUALLY doing. Not refreshed here
+        // as well - RefreshServiceStatusAsync now ends by re-reading the share, and firing both
+        // would race two probes at the same checkbox on every open.
         ShareEnabledCheck.IsChecked = Settings.Get("OrgZ.Services.Sharing.Enabled", false);
-        _ = RefreshShareStatusAsync();
 
         // No "Disc burning" row: a burn always survives the GUI (the service or the elevated
         // helper process owns the write), and stopping one mid-write would only ruin the disc.
@@ -636,7 +639,7 @@ public partial class SettingsDialog : Window
         }
 
         var name = string.IsNullOrWhiteSpace(state.Name) ? "This library" : state.Name;
-        return $"Sharing “{name}” on port {state.Port}";
+        return $"Sharing “{name}”";
     }
 
     private async Task RefreshShareStatusAsync()
@@ -745,6 +748,14 @@ public partial class SettingsDialog : Window
         }
 
         SetServiceButtons(buttons);
+
+        // The share card reads the SAME service this method just changed the state of, so it
+        // has to be re-read here rather than only when the dialog opens. Without this, starting
+        // or stopping the service left the sharing checkbox showing whatever was true when the
+        // dialog was constructed - disabled after a start that had just made it available,
+        // still ticked after a stop that had already torn the share down - and the only way to
+        // correct it was to close and reopen the app.
+        await RefreshShareStatusAsync();
     }
 
     private void SetServiceButtons(ServiceButtons buttons)

@@ -297,7 +297,7 @@ public class ShareHostingTests : IDisposable
     {
         Assert.Equal("Not sharing", SettingsDialog.DescribeShareState(true, null));
         Assert.Equal("Not sharing", SettingsDialog.DescribeShareState(true, new DeviceHelperClient.ShareState(false, null, 0)));
-        Assert.Equal("Sharing “Fox Library” on port 7391", SettingsDialog.DescribeShareState(true, new DeviceHelperClient.ShareState(true, "Fox Library", 7391)));
+        Assert.Equal("Sharing “Fox Library”", SettingsDialog.DescribeShareState(true, new DeviceHelperClient.ShareState(true, "Fox Library", 7391)));
 
         // A share with no reported name still says something sensible.
         Assert.Contains("This library", SettingsDialog.DescribeShareState(true, new DeviceHelperClient.ShareState(true, "  ", 7391)));

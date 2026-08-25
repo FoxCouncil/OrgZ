@@ -287,6 +287,46 @@ jobs:
             exit 1
           fi
 
+      # ── MSI post-processing ───────────────────────────────────────────────────
+      # Runs AFTER pack (which is where signing happens) and therefore INVALIDATES the MSI's
+      # Authenticode signature - the re-sign below is not optional, it is part of this pair.
+      #
+      # See scripts/msi-elevate-hooks.ps1 for what it changes and why. Short version: vpk emits
+      # the install hook as a deferred IMPERSONATED custom action, so `sc create` inside it runs
+      # on the user's filtered token and the background service is silently never registered.
+      - name: Elevate the MSI install hooks (Windows)
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: scripts/msi-elevate-hooks.ps1 -MsiPath releases/OrgZ-win.msi
+
+      # Only the MSI is re-signed; every other artifact still carries the signature vpk gave
+      # it. Conditional on the same secret as the rest, so an unsigned build stays a build.
+      - name: Re-sign the patched MSI (Windows)
+        if: ${{ matrix.rid == 'win-x64' && env.HAS_AZURE_SIGNING == 'true' }}
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_TS_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TS_PROFILE }}
+          files-folder: ${{ github.workspace }}/releases
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # A patched-but-unsigned MSI is worse than either end state: the service works and every
+      # user gets a SmartScreen block. Fail the release here rather than publish that.
+      - name: Verify the MSI signature survived (Windows)
+        if: ${{ matrix.rid == 'win-x64' && env.HAS_AZURE_SIGNING == 'true' }}
+        shell: pwsh
+        run: |
+          $status = (Get-AuthenticodeSignature 'releases/OrgZ-win.msi').Status
+          Write-Host "MSI signature: $status"
+          if ($status -ne 'Valid') {
+            Write-Error "MSI signature is '$status' after patching - the re-sign did not take."
+            exit 1
+          }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
