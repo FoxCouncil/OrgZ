@@ -1037,43 +1037,15 @@ public partial class MainWindow : Window
                     Header = def.Header,
                     CellTemplate = new FuncDataTemplate<MediaItem>((item, _) =>
                     {
-                        // Five slots: a faint outline star always shows (75% transparent - the
-                        // "no rating here" look), with a solid star layered on top and toggled
-                        // per-slot by the rating, so re-rating updates live via the binding.
-                        var row = new StackPanel
+                        // One drawn control instead of sixteen assembled ones - see RatingStars.
+                        var stars = new Controls.RatingStars
                         {
-                            Orientation = Orientation.Horizontal,
-                            Spacing = 1,
                             HorizontalAlignment = HorizontalAlignment.Center,
                             VerticalAlignment = VerticalAlignment.Center,
                         };
 
-                        for (int position = 1; position <= 5; position++)
-                        {
-                            var outline = new Icon
-                            {
-                                Value = "fa-regular fa-star",
-                                FontSize = 12,
-                                Opacity = 0.25,
-                                VerticalAlignment = VerticalAlignment.Center,
-                                HorizontalAlignment = HorizontalAlignment.Center,
-                            };
-                            var filled = new Icon
-                            {
-                                Value = "fa-solid fa-star",
-                                FontSize = 12,
-                                VerticalAlignment = VerticalAlignment.Center,
-                                HorizontalAlignment = HorizontalAlignment.Center,
-                            };
-                            filled.Bind(IsVisibleProperty, new Binding(nameof(MediaItem.Rating))
-                            {
-                                Converter = Converters.RatingStarConverter.Instance,
-                                ConverterParameter = position,
-                            });
-
-                            row.Children.Add(new Panel { Width = 15, Height = 14, Children = { outline, filled } });
-                        }
-                        return row;
+                        stars.Bind(Controls.RatingStars.RatingProperty, new Binding(nameof(MediaItem.Rating)));
+                        return stars;
                     }),
                 },
                 _ => new DataGridTextColumn
