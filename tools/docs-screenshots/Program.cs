@@ -65,6 +65,10 @@ internal static class Program
         // computer name in a published screenshot.
         Settings.Set("OrgZ.Services.Sharing.Name", "OrgZ Library");
 
+        // The device helper listens on a machine-wide pipe, so an unguarded harness reaches the
+        // developer's own running service and renders their live share into the Services shot.
+        OrgZ.Services.DeviceHelper.DeviceHelperClient.OfflineForScreenshots = true;
+
         BuildAvaloniaApp().SetupWithoutStarting();
 
         SeedRemoteImageCache(scratch);

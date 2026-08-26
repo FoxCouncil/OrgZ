@@ -18,9 +18,22 @@ public static class DeviceHelperClient
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(45);
 
+    /// <summary>
+    /// Set by the docs screenshot harness. The client talks to a machine-wide named pipe, so
+    /// without this the harness reaches the DEVELOPER'S running service and renders their live
+    /// share - name and all - into a published screenshot, while also making the Services tab
+    /// look connected when the shot is meant to show it idle.
+    /// </summary>
+    internal static bool OfflineForScreenshots { get; set; }
+
     /// <summary>Quick liveness check - is the service installed and answering?</summary>
     public static async Task<bool> IsAvailableAsync()
     {
+        if (OfflineForScreenshots)
+        {
+            return false;
+        }
+
         try
         {
             var pong = await ExchangeAsync(new DeviceHelperProtocol.Request(
@@ -186,6 +199,14 @@ public static class DeviceHelperClient
 
     private static async Task<DeviceHelperProtocol.Response?> ExchangeAsync(DeviceHelperProtocol.Request request)
     {
+        // Gated here as well as in IsAvailableAsync: every other call goes through this one,
+        // so a single check keeps the screenshot harness off the machine-wide pipe entirely
+        // rather than relying on each caller to ask whether the service is up first.
+        if (OfflineForScreenshots)
+        {
+            return null;
+        }
+
         using var cts = new CancellationTokenSource(CallTimeout);
         await using var stream = await OpenAsync(cts.Token);
         await DeviceHelperProtocol.WriteMessageAsync(stream, request, cts.Token);

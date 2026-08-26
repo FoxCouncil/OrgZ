@@ -659,8 +659,15 @@ public partial class SettingsDialog : Window
         var state = available ? await Services.DeviceHelper.DeviceHelperClient.ShareStatusAsync() : null;
 
         ShareStatusText.Text = DescribeShareState(available, state);
-        ShareEnabledCheck.IsEnabled = available;
         ShareEnabledCheck.IsChecked = state is { Sharing: true };
+
+        // Everything on this tab needs the background service, not just the share tick. The
+        // keep-alive boxes hand work TO that service, and the share name is the name it would
+        // advertise - with nothing answering, all of it is a control that silently does nothing.
+        ShareEnabledCheck.IsEnabled = available;
+        ShareNameInput.IsEnabled = available;
+        ServiceKeepSyncCheck.IsEnabled = available;
+        ServiceKeepSharingCheck.IsEnabled = available;
     }
 
     private async void ShareEnabled_Click(object? sender, RoutedEventArgs e)
