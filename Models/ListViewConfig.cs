@@ -206,7 +206,7 @@ public static class ListViewConfigs
         return new ListViewConfig
         {
             Key = $"Share:{shareKey}",
-            Columns = ShareColumns(),
+            Columns = [PlaylistPositionColumn(), .. ShareColumns()],
             BaseFilter = item => item.Source == source,
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
@@ -245,7 +245,21 @@ public static class ListViewConfigs
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildShareContextMenu(),
-            Sorter = items => items.OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue),
+            // Stamps each row's position while ordering, so the "#" column has something to
+            // show and something to sort on - clicking it is the way back to list order.
+            Sorter = items =>
+            {
+                var ordered = items
+                    .OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue)
+                    .ToList();
+
+                for (var i = 0; i < ordered.Count; i++)
+                {
+                    ordered[i].PlaylistPosition = orderMap.TryGetValue(ordered[i].Id, out var idx) ? idx + 1 : null;
+                }
+
+                return ordered;
+            },
         };
     }
 
@@ -309,7 +323,9 @@ public static class ListViewConfigs
             Columns =
             [
                 new() { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new() { Header = "#", BindingPath = "Track", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 40, Type = ColumnType.Centered },
+                // Position in the playlist, not the album track number - "#" bound to Track
+                // put a track's place on its album under the header for its place in the list.
+                PlaylistPositionColumn(),
                 new() { Header = "Title", BindingPath = "Title", WidthType = DataGridLengthUnitType.Star, WidthValue = 2 },
                 new() { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
                 new() { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
@@ -321,7 +337,21 @@ public static class ListViewConfigs
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildDeviceContextMenu(),
-            Sorter = items => items.OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue),
+            // Stamps each row's position while ordering, so the "#" column has something to
+            // show and something to sort on - clicking it is the way back to list order.
+            Sorter = items =>
+            {
+                var ordered = items
+                    .OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue)
+                    .ToList();
+
+                for (var i = 0; i < ordered.Count; i++)
+                {
+                    ordered[i].PlaylistPosition = orderMap.TryGetValue(ordered[i].Id, out var idx) ? idx + 1 : null;
+                }
+
+                return ordered;
+            },
         };
     }
 
@@ -588,16 +618,9 @@ public static class ListViewConfigs
         {
             Key = "Favorites",
             ShowCheckedColumn = true,
-            Columns =
-            [
-                CheckedColumn(),
-                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Year", BindingPath = "Year", WidthType = DataGridLengthUnitType.Pixel, WidthValue = 60, Type = ColumnType.Centered },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 100, CanUserSort = false },
-            ],
+            // The library's columns. Favorites is the same songs seen through a flag, so it
+            // read as a thinner grid for no reason - no Track #, no Duration, no Plays.
+            Columns = MusicColumns(withChecked: true),
             BaseFilter = item => item.IsFavorite,
             SearchFilter = (item, search) =>
                 (item.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||

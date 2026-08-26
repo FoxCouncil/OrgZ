@@ -22,9 +22,14 @@ Favorites [host=Grid]
   (blank) | IsPlaying | PlayIndicator | 30px | ---
   Title | Title | FavoriteTitle | 1* | sro
   Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
   Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
   Year | Year | Centered | 60px | sro
-  Rating | RatingDisplay | Rating | 100px | -ro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
+  Rating | RatingDisplay | Rating | 110px | -ro
 BadFormat [host=Grid]
   (blank) | IsPlaying | PlayIndicator | 30px | ---
   Title | Title | FavoriteTitle | 1* | sro
@@ -64,6 +69,7 @@ Device [host=Grid]
   Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
   Rating | RatingDisplay | Rating | 110px | -ro
 Share [host=Grid]
+  # | PlaylistPosition | RightAligned | 44px | sr-
   (blank) | IsPlaying | PlayIndicator | 30px | ---
   Title | Title | Text | 1* | sro
   Artist | Artist | Text | 1* | sro
@@ -104,7 +110,7 @@ DeviceKind:Audiobook [host=Grid]
   Rating | RatingDisplay | Rating | 110px | -ro
 DevicePlaylist [host=Grid]
   (blank) | IsPlaying | PlayIndicator | 30px | ---
-  # | Track | Centered | 40px | sro
+  # | PlaylistPosition | RightAligned | 44px | sr-
   Title | Title | Text | 2* | sro
   Artist | Artist | Text | 1* | sro
   Album | Album | Text | 1* | sro
