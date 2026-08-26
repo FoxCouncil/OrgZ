@@ -1,6 +1,14 @@
 # Changelog
 
-## v0.15.0 (Current)
+## v0.15.1 (Current)
+
+### Performance
+
+- Smoother scrolling in long lists. The rating stars are now drawn directly rather
+  than built from sixteen controls per row, and the grid no longer re-measures every
+  row while you scroll. Most noticeable on slower machines and high-resolution screens
+
+## v0.15.0
 
 ### macOS
 

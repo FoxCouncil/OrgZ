@@ -4,7 +4,7 @@ Quality, beauty, and simplicity - in that order when they conflict.
 Tests reflect the finished product: nothing ships behind a capability flag without the
 conformance suite proving it.
 
-Status 0.15.0: AirPlay 2 sending works on real hardware; the release pipeline packs an MSI,
+Status 0.15.1: AirPlay 2 sending works on real hardware; the release pipeline packs an MSI,
 two .pkgs (Apple Silicon and Intel) and an AppImage from a tag, all signed and notarized.
 Zero build warnings, gated per commit.
 
