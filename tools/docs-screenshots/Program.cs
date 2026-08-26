@@ -918,6 +918,12 @@ internal static class Program
 
         window.Show();
 
+        // Drop focus before rendering. A focused TextBox draws a BLINKING caret, so a dialog
+        // with an input in it produced a different PNG depending on which half of the blink
+        // the capture landed in - the Burn Disc shot churned by one 1x17px column every run.
+        // No ClearFocus in this Avalonia; focusing the window itself moves it off the input.
+        window.FocusManager?.Focus(null);
+
         // Pump layout/render until it settles. A single pass is not enough for anything that
         // loads on a background thread and posts its result back - the playlist header reads
         // its counts and cover tiles through Task.Run, and capturing after one RunJobs caught

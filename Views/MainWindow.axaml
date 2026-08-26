@@ -354,8 +354,14 @@
 							     radio or CD or share. Columns and grouping come from the view's
 							     ListViewConfig; MediaGrid (Controls/MediaGrid.cs) owns the two Avalonia
 							     workarounds that used to require a grid per column set. -->
+							<!-- RowHeight is pinned rather than left to measure. Unset, the DataGrid sizes
+							     every realized row on its own and recomputes the scroll extent from
+							     estimates, which is measure work per row on every scroll tick. 32 is what
+							     the rows already measure to, so nothing moves - it just stops being
+							     rediscovered. Matters most on weak GPUs pushing a HiDPI panel. -->
 							<DataGrid x:Name="MediaDataGrid"
 								Classes="mediaGrid"
+								RowHeight="32"
 								DoubleTapped="DataGrid_DoubleTapped"
 								SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
 								ItemsSource="{Binding FilteredItemsView}"
