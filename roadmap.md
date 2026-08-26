@@ -9,12 +9,11 @@ a .pkg and an AppImage from a tag. Zero build warnings, gated per commit.
 
 ## Before v1
 
-- [ ] Intel macOS build. The matrix, signing, libvlc and the update channel are wired;
-      `scripts/encoders.json` still lists osx-x64 ffmpeg/flac/lame as PENDING, so a release
-      cut now ships an Intel build with no bundled encoders (it falls back to a PATH install).
-      Run `bash scripts/build-ffmpeg-mac.sh x86_64` and `bash scripts/build-encoders-mac.sh
-      x86_64` on a Mac, upload the three assets to `encoders-1`, paste the hashes in. Then
-      verify on an actual Intel Mac - nothing on hand can run it.
+- [ ] Intel macOS build. Matrix, signing, libvlc, update channel and encoder hashes are all
+      wired; ffmpeg/flac/lame were cross-built for x86_64 on the Apple Silicon Mac. Remaining:
+      upload the three `*-osx-x64` assets to the `encoders-1` release (until then the build
+      fetch fails, because a vendored tool that will not download is a hard error under CI),
+      then verify on an actual Intel Mac - nothing on hand can run one.
 
 - [ ] Burn through the installed service, on real hardware. Expect zero UAC. Hyper-V passes
       through no USB optical drive, so this needs the Pioneer on the desk.

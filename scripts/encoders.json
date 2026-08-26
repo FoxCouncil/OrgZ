@@ -114,21 +114,21 @@
       {
         "out": "ffmpeg",
         "asset": "ffmpeg-osx-x64",
-        "sha256": "PENDING",
+        "sha256": "663d2d47d61b71b226d7fa11c0332e02fcd546a9f6e49a52461d8232b537d955",
         "license": "LGPL-2.1",
-        "builtFrom": "ffmpeg.org 7.1 source via scripts/build-ffmpeg-mac.sh (built on macOS x86_64, Apple clang 17, deployment target 11.0)"
+        "builtFrom": "ffmpeg.org 7.1 source via scripts/build-ffmpeg-mac.sh (cross-built for x86_64 on an Apple Silicon Mac, Apple clang 17, deployment target 11.0)"
       },
       {
         "out": "flac",
         "asset": "flac-osx-x64",
-        "sha256": "PENDING",
+        "sha256": "addf0b81d4e2baa597dad8b683e33116d413649dce3b5719a15b2df3b2e37388",
         "license": "BSD",
         "builtFrom": "xiph.org flac-1.4.3 source via scripts/build-encoders-mac.sh (deployment target 11.0, Apple system libs only)"
       },
       {
         "out": "lame",
         "asset": "lame-osx-x64",
-        "sha256": "PENDING",
+        "sha256": "f18566eca69d4f6a1bb1fbdb226984ba2699d8692cde0fc38baf48dc9ae3587d",
         "license": "LGPL-2.0",
         "builtFrom": "upstream lame-3.100 tarball (Debian pool) via scripts/build-encoders-mac.sh (deployment target 11.0, Apple system libs only)"
       }
