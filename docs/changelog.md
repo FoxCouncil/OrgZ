@@ -1,6 +1,28 @@
 # Changelog
 
-## v0.14.0 (Current)
+## v0.15.0 (Current)
+
+### macOS
+
+- An Intel build, alongside the Apple Silicon one. Both are signed with a Developer
+  ID certificate and notarized, and each updates from its own architecture
+
+### Playlists
+
+- Playlists show their own running order in a `#` column, along with track number,
+  duration and year - the same columns the library shows
+- Sorting a playlist by any other column no longer loses that order; click `#` to
+  come back to it
+- Favorites gains the library's columns too
+- On a device or a shared library, `#` is the track's place in the playlist rather
+  than its place on its album
+
+### Settings
+
+- Every control that needs the background service now greys out together when the
+  service is stopped, instead of only the sharing checkbox
+
+## v0.14.0
 
 ### Playlists
 
