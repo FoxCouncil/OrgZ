@@ -44,6 +44,28 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
+# x86_64 ffmpeg needs an x86 assembler; the arm64 build does not, which is why this only
+# shows up when cross-compiling. Rather than require Homebrew on the build machine, nasm is
+# built into this run's temp directory and thrown away with it - nothing lands on the system.
+# Without it configure stops with "nasm/yasm not found or too old"; --disable-x86asm would
+# get past that by producing ffmpeg's own "crippled build", which is not what users get on
+# every other platform.
+if [ "$ARCH" = "x86_64" ] && ! command -v nasm >/dev/null 2>&1; then
+  NASM_VER="2.16.03"
+  echo "Building nasm ${NASM_VER} (build-time only, not installed)"
+  curl -fsSL -o nasm.tar.xz "https://www.nasm.us/pub/nasm/releasebuilds/${NASM_VER}/nasm-${NASM_VER}.tar.xz"
+  tar -xf nasm.tar.xz
+  (
+    cd "nasm-${NASM_VER}"
+    # Native for THIS machine: nasm runs during the build, it is not shipped.
+    ./configure --prefix="$WORK/nasm-install" CFLAGS="" LDFLAGS="" >/dev/null
+    make -j"$(sysctl -n hw.ncpu)" >/dev/null
+    make install >/dev/null
+  )
+  export PATH="$WORK/nasm-install/bin:$PATH"
+  echo "nasm:   $(nasm -v)"
+fi
+
 url="https://ffmpeg.org/releases/ffmpeg-${VER}.tar.xz"
 echo "Downloading $url"
 curl -fsSL -o ffmpeg.tar.xz "$url"

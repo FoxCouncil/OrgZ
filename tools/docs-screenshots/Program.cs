@@ -80,7 +80,7 @@ internal static class Program
             ("cd-detected", 1280, 800, () => SeededCd(metadata: false)),
             ("cd-metadata", 1280, 800, () => SeededCd(metadata: true)),
             ("cd-rip-progress", 1280, 800, SeededRip),
-            ("device-sync", 1280, 800, SeededDeviceSync),
+
             ("now-playing", 1280, 800, SeededNowPlaying),
             ("radio-browser", 1280, 800, SeededRadio),
             ("favorites", 1280, 800, SeededFavorites),
@@ -107,6 +107,7 @@ internal static class Program
             ("sharing", 1280, 800, SeededSharing),
             ("airplay-picker", 460, 0, SeededOutputPicker),
             ("device-library", 1280, 800, SeededDeviceLibrary),
+            ("device-sync", 1280, 800, SeededDeviceSync),
             ("radio-filters", 1280, 800, SeededRadioFilters),
             ("search-results", 1280, 800, SeededSearch),
             ("confirm-remove", 460, 0, () => new ConfirmDialog(
@@ -194,24 +195,19 @@ internal static class Program
         return window;
     }
 
-    /// <summary>A MainWindow showing the result of sending a playlist to a device.</summary>
+    /// <summary>
+    /// A sync in progress. The LCD's busy state is the whole point of this shot - the previous
+    /// version only added a sidebar row, which made it identical to device-library.
+    /// </summary>
     private static MainWindow SeededDeviceSync()
     {
-        var window = new MainWindow(screenshotMode: true);
+        var window = SeededDeviceLibrary();
         var vm = window.ViewModel;
-        vm.SetItems(SampleLibrary());
-        vm.RefreshView();
-        vm.UpdateData();
 
-        vm.DeviceItems.Add(new SidebarItem
-        {
-            Name = "OrgZ iPod",
-            Icon = "fa-solid fa-music",
-            Category = "DEVICES",
-            IsEnabled = true,
-            ViewConfigKey = "Device:screenshot",
-        });
-
+        vm.BusyTitle = "Syncing OrgZ iPod";
+        vm.BusyDetail = "Copying \u201cDriver's High (Extended)\u201d - 7 of 26";
+        vm.BusyPercent = 0.27;
+        vm.IsBusy = true;
         return window;
     }
 
@@ -347,25 +343,54 @@ internal static class Program
         return window;
     }
 
-    /// <summary>A connected iPod's library in the grid, with the device info bar above it.</summary>
+    /// <summary>
+    /// A connected iPod SELECTED, so the grid shows the device's own tracks. Device rows are
+    /// namespaced by source, which is what the device view filters on - without that the grid
+    /// renders the local library and the shot is indistinguishable from library-overview.
+    /// </summary>
     private static MainWindow SeededDeviceLibrary()
     {
         var window = new MainWindow(screenshotMode: true);
         var vm = window.ViewModel;
 
-        vm.SetItems(SampleLibrary());
-        vm.SelectedSidebarItem = vm.LibraryItems.First(i => i.ViewConfigKey == "Music");
-        vm.RefreshView();
+        const string mount = "/Volumes/ORGZ IPOD";
+        var source = $"device:{mount}";
 
-        vm.DeviceItems.Add(new SidebarItem
+        var deviceTracks = SampleLibrary()
+            .Where(i => i.Kind == MediaKind.Music)
+            .Select(t => new MediaItem
+            {
+                Id = $"{source}/{t.Id}",
+                Kind = MediaKind.Music,
+                Title = t.Title,
+                Artist = t.Artist,
+                Album = t.Album,
+                Year = t.Year,
+                Genre = t.Genre,
+                Track = t.Track,
+                TotalTracks = t.TotalTracks,
+                Duration = t.Duration,
+                Extension = t.Extension,
+                Source = source,
+                FilePath = $"{mount}/iPod_Control/Music/F00/{t.Track:00}.mp3",
+                IsAnalyzed = true,
+            })
+            .ToList();
+
+        ListViewConfigs.Register($"Device:{mount}", ListViewConfigs.BuildDeviceConfig(mount));
+        vm.SetItems(deviceTracks);
+
+        var item = new SidebarItem
         {
             Name = "OrgZ iPod",
             Icon = "fa-solid fa-music",
             Category = "DEVICES",
             IsEnabled = true,
-            ViewConfigKey = "Device:screenshot",
-        });
+            ViewConfigKey = $"Device:{mount}",
+        };
 
+        vm.DeviceItems.Add(item);
+        vm.SelectedSidebarItem = item;
         vm.UpdateData();
         return window;
     }
