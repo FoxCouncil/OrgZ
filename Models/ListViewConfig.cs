@@ -377,14 +377,14 @@ public static class ListViewConfigs
             Key = $"Playlist:{playlistId}",
             PlaylistId = playlistId,
             ShowCheckedColumn = true,
+            // The library's columns, plus the position column in front. A playlist showed
+            // Title/Artist/Album/Rating and nothing else, so Track #, Duration and Year were
+            // missing from a view that is otherwise the same list of the same songs.
             Columns =
             [
                 CheckedColumn(),
-                new ColumnDef { Header = "", BindingPath = "IsPlaying", Type = ColumnType.PlayIndicator, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 30, CanUserSort = false, CanUserResize = false, CanUserReorder = false },
-                new ColumnDef { Header = "Title", BindingPath = "Title", Type = ColumnType.FavoriteTitle, WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Artist", BindingPath = "Artist", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Album", BindingPath = "Album", WidthType = DataGridLengthUnitType.Star, WidthValue = 1 },
-                new ColumnDef { Header = "Rating", BindingPath = "RatingDisplay", Type = ColumnType.Rating, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 110, CanUserSort = false },
+                PlaylistPositionColumn(),
+                .. MusicColumns().Where(c => c.BindingPath != "IsChecked"),
             ],
             BaseFilter = item => idSet.Contains(item.Id),
             SearchFilter = (item, search) =>
@@ -392,7 +392,24 @@ public static class ListViewConfigs
                 (item.Artist?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (item.Album?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false),
             ContextMenuItems = BuildPlaylistContextMenu(),
-            Sorter = items => items.OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue),
+
+            // Stamps each row's position as it orders them, so the "#" column has something to
+            // show and something to sort on. Sorting by "#" is what gets playlist order back
+            // after a header sort - without it, clicking Artist replaced the user's order with
+            // no way to return to it.
+            Sorter = items =>
+            {
+                var ordered = items
+                    .OrderBy(item => orderMap.TryGetValue(item.Id, out var idx) ? idx : int.MaxValue)
+                    .ToList();
+
+                for (var i = 0; i < ordered.Count; i++)
+                {
+                    ordered[i].PlaylistPosition = orderMap.TryGetValue(ordered[i].Id, out var idx) ? idx + 1 : null;
+                }
+
+                return ordered;
+            },
         };
     }
 
@@ -405,6 +422,13 @@ public static class ListViewConfigs
     /// The iTunes row tick: included in play-through and sync when checked. Editable,
     /// unsortable, and pinned narrow at the front like iTunes had it.
     /// </summary>
+    /// <summary>
+    /// The playlist's own running order. Sortable on purpose: it is the way back to playlist
+    /// order once a header sort has been applied.
+    /// </summary>
+    internal static ColumnDef PlaylistPositionColumn() =>
+        new() { Header = "#", BindingPath = "PlaylistPosition", Type = ColumnType.RightAligned, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 44, FontSize = 11, CanUserReorder = false };
+
     internal static ColumnDef CheckedColumn() =>
         new() { Header = "", BindingPath = "IsChecked", Type = ColumnType.RowCheck, WidthType = DataGridLengthUnitType.Pixel, WidthValue = 28, CanUserSort = false, CanUserResize = false, CanUserReorder = false };
 

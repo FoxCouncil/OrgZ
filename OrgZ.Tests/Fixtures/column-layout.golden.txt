@@ -115,8 +115,15 @@ DevicePlaylists [host=Grid]
   Duration | Duration | Centered | 100px | sro | fmt=h\:mm\:ss
 Playlist [host=Grid]
   (blank) | IsChecked | RowCheck | 28px | ---
+  # | PlaylistPosition | RightAligned | 44px | sr-
   (blank) | IsPlaying | PlayIndicator | 30px | ---
   Title | Title | FavoriteTitle | 1* | sro
   Artist | Artist | Text | 1* | sro
+  Track # | TrackDisplay | RightAligned | 65px | sro
   Album | Album | Text | 1* | sro
+  Duration | Duration | Centered | 80px | sro | fmt=m\:ss
+  Year | Year | Centered | 60px | sro
+  Plays | PlayCount | RightAligned | 60px | sro | hidden
+  Extension | Extension | Text | auto | sro | hidden
+  Has Album Art | HasAlbumArt | CheckBox | auto | sro | hidden
   Rating | RatingDisplay | Rating | 110px | -ro

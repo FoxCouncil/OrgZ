@@ -46,6 +46,15 @@ public partial class MediaItem : ObservableObject
     private bool _isFavorite;
 
     /// <summary>
+    /// 1-based position in the playlist currently on screen, or null outside a playlist view.
+    /// Transient like <see cref="IsPlaying"/>: a track can sit in several playlists, so this
+    /// belongs to the view being shown rather than to the track, and is stamped when that
+    /// view's order is applied.
+    /// </summary>
+    [ObservableProperty]
+    private int? _playlistPosition;
+
+    /// <summary>
     /// CD-rip status surfaced in the play column. The play indicator takes priority,
     /// so the rip glyphs hide while a row is actively playing.
     /// </summary>

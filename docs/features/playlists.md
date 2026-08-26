@@ -17,6 +17,14 @@ name.
 
 ![Naming a new playlist](../assets/screenshots/playlist-name.png)
 
+## Order
+
+The **#** column is the playlist's own running order, and it is what a playlist plays in
+and what gets written to the file. Drag rows to change it.
+
+Sorting by any other column - Artist, Duration - only changes what you are looking at. The
+saved order is untouched, and clicking **#** puts the view back.
+
 ## Playlists you already have
 
 Drop an `.m3u8` anywhere in your music folder and it becomes a playlist on the next scan.
