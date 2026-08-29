@@ -375,6 +375,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # The Download page is written against releases/latest so it works from a checkout, and
+      # is pinned here to THIS tag so a versioned manual links the installers it documents.
+      - name: Pin the Download page to this release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i             -e "s#/releases/latest/download/#/releases/download/${GITHUB_REF_NAME}/#g"             -e "s#/releases/latest#/releases/tag/${GITHUB_REF_NAME}#g"             -e "s|^# Download OrgZ\$|# Download OrgZ v${VERSION}|"             docs/download.md
+
       - name: Deploy versioned docs
         run: mike deploy --push --update-aliases "${GITHUB_REF_NAME#v}" latest
 
@@ -397,8 +404,11 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           REPO="${{ github.repository }}"
           BASE="https://github.com/${REPO}/releases/download/${GITHUB_REF_NAME}"
+          DOCS="https://foxcouncil.github.io/OrgZ/${VERSION}"
           cat > body.md << EOF
           ## Download OrgZ v${VERSION}
+
+          **Documentation:** [Manual](${DOCS}/) · [Installation](${DOCS}/getting-started/installation/) · [Changelog](${DOCS}/changelog/)
 
           | Platform | Installer | Portable |
           |----------|-----------|----------|

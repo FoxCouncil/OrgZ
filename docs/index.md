@@ -33,6 +33,7 @@ OrgZ manages a local music library, rips CDs, streams internet radio, subscribes
 
 ## Quick Links
 
+- [Download](download.md)
 - [Installation](getting-started/installation.md)
 - [First Launch](getting-started/first-launch.md)
 - [Playlists](features/playlists.md)

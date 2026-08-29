@@ -138,9 +138,12 @@ public class LibrarySharingTests
         // The pair over real UDP, not the codec in memory - this is the test whose absence
         // hid that responses went multicast to :5353, a port the ephemeral-bound browser
         // can never hear. The name is unique per run so a genuine OrgZ share on the same
-        // machine (or a parallel test run) can't satisfy the assertion.
+        // machine (or a parallel test run) can't satisfy the assertion - and the port is
+        // NOT the product default, because the browser dedups on host:port and a real
+        // share on this machine at 7391 would swallow ours (its reply wins the address
+        // sort, and the test-named share is never seen).
         var shareName = $"OrgZ Pair Test {Guid.NewGuid():N}";
-        using var advertiser = new MdnsAdvertiser(shareName, 7391);
+        using var advertiser = new MdnsAdvertiser(shareName, 27391);
         advertiser.Start();
 
         List<DiscoveredShare> found = [];
@@ -156,7 +159,7 @@ public class LibrarySharingTests
         }
 
         var share = Assert.Single(found);
-        Assert.Equal(7391, share.Port);
+        Assert.Equal(27391, share.Port);
         Assert.False(string.IsNullOrEmpty(share.Address));
     }
 

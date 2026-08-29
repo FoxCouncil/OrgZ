@@ -1,8 +1,7 @@
 # Installation
 
-OrgZ ships for Windows, macOS, and Linux. Grab the latest build from
-[GitHub Releases](https://github.com/FoxCouncil/OrgZ/releases) and follow the
-tab for your platform.
+OrgZ ships for Windows, macOS, and Linux. Grab the build for your platform from
+the [Download](../download.md) page and follow the tab below.
 
 === "Windows"
 

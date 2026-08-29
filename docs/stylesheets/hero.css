@@ -72,3 +72,29 @@
   .hero-dots span { animation: none; }
   .hero-dots span:nth-child(1) { background: var(--md-accent-fg-color); }
 }
+
+/* Download page: one card per platform. */
+
+.download-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.download-card {
+  padding: 1.25rem 1.25rem 1rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 10px;
+  background: var(--md-code-bg-color);
+}
+
+.download-card h3 {
+  margin-top: 0;
+}
+
+.download-card .md-button {
+  display: block;
+  text-align: center;
+  margin: 0.4rem 0 0;
+}
