@@ -377,10 +377,12 @@ jobs:
 
       # The Download page is written against releases/latest so it works from a checkout, and
       # is pinned here to THIS tag so a versioned manual links the installers it documents.
+      # Order matters: the download/ URLs are rewritten first, so the bare /releases/latest
+      # pattern only catches the remaining "all releases" link.
       - name: Pin the Download page to this release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          sed -i             -e "s#/releases/latest/download/#/releases/download/${GITHUB_REF_NAME}/#g"             -e "s#/releases/latest#/releases/tag/${GITHUB_REF_NAME}#g"             -e "s|^# Download OrgZ\$|# Download OrgZ v${VERSION}|"             docs/download.md
+          sed -i -e "s#/releases/latest/download/#/releases/download/${GITHUB_REF_NAME}/#g" -e "s#/releases/latest#/releases/tag/${GITHUB_REF_NAME}#g" -e "s|^# Download OrgZ\$|# Download OrgZ v${VERSION}|" docs/download.md
 
       - name: Deploy versioned docs
         run: mike deploy --push --update-aliases "${GITHUB_REF_NAME#v}" latest
