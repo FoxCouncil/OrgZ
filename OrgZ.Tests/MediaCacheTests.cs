@@ -63,6 +63,24 @@ public class MediaCacheTests : IDisposable
     }
 
     [Fact]
+    public void CreatePlaylist_PersistsAndMovesTheVirtualFolder()
+    {
+        var rooted = MediaCache.CreatePlaylist("Rooted");
+        var nested = MediaCache.CreatePlaylist("Nested", folder: "Road Trips/2026");
+
+        var byId = MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id);
+        Assert.Equal(string.Empty, byId[rooted].Folder);
+        Assert.Equal("Road Trips/2026", byId[nested].Folder);
+
+        MediaCache.SetPlaylistFolder(nested, string.Empty);
+        MediaCache.SetPlaylistFolder(rooted, "Chill");
+
+        byId = MediaCache.LoadAllPlaylists().ToDictionary(p => p.Id);
+        Assert.Equal(string.Empty, byId[nested].Folder);
+        Assert.Equal("Chill", byId[rooted].Folder);
+    }
+
+    [Fact]
     public void LoadAllPlaylists_ReturnsAllOrderedByName()
     {
         MediaCache.CreatePlaylist("Zeta");

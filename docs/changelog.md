@@ -1,6 +1,20 @@
 # Changelog
 
-## v0.15.1 (Current)
+## v0.16.0 (Current)
+
+### Playlists
+
+- Folders. Group playlists into folders - nest them as deep as you like - from the
+  sidebar's right-click menu or the File menu, and drag playlists in and out. The
+  `.m3u8` files stay exactly where they were in your music folder; a playlist
+  remembers its folder with an `#ORGZ-FOLDER:` line inside the file, which other
+  players ignore
+- Editing a playlist file outside OrgZ (adding a track in a text editor, say) is
+  now picked up immediately instead of going unnoticed
+- New Playlist and New Folder live in the File menu and the sidebar's right-click
+  menu; the "New Playlist..." sidebar row is gone
+
+## v0.15.1
 
 ### Performance
 

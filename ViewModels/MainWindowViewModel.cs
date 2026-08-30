@@ -388,10 +388,11 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Roots of the playlist tree: Favorites, then virtual folders, then root playlists.
+    /// New playlists/folders come from the File menu and the sidebar's context menu.</summary>
     internal ObservableCollection<SidebarItem> PlaylistItems { get; } =
     [
         new() { Name = "Favorites", Icon = "fa-solid fa-star", Category = "PLAYLISTS", IsEnabled = true, IsFavorites = true, ViewConfigKey = "Favorites" },
-        new() { Name = "New Playlist...", Icon = "fa-solid fa-plus", Category = "PLAYLISTS", IsEnabled = true, IsNewPlaylistAction = true },
     ];
 
     // -- Playback State --
@@ -1101,7 +1102,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var target = ResolveNavigationTarget(_playbackOriginViewKey, item, LibraryItems, PlaylistItems, DeviceItems);
+        var target = ResolveNavigationTarget(_playbackOriginViewKey, item, LibraryItems, FlattenedPlaylistItems().ToList(), DeviceItems);
         if (target == null)
         {
             return;
@@ -1583,7 +1584,7 @@ internal partial class MainWindowViewModel : ObservableObject, IDisposable
         RebuildLibraryItems();
 
         var savedView = Settings.Get("OrgZ.ActiveView", "Music");
-        SelectedSidebarItem = PlaylistItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
+        SelectedSidebarItem = FlattenedPlaylistItems().FirstOrDefault(i => i.ViewConfigKey == savedView && !i.IsPlaylistFolder) ?? LibraryItems.FirstOrDefault(i => i.ViewConfigKey == savedView) ?? LibraryItems[0];
     }
 
     /// <summary>Runs while the window is already up; null until it finishes.</summary>

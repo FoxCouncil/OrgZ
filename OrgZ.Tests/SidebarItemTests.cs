@@ -15,7 +15,7 @@ public class SidebarItemTests
         Assert.Equal(string.Empty, item.ViewConfigKey);
         Assert.False(item.IsEnabled);
         Assert.False(item.IsFavorites);
-        Assert.False(item.IsNewPlaylistAction);
+        Assert.False(item.IsPlaylistFolder);
         Assert.Null(item.Kind);
         Assert.Null(item.PlaylistId);
         Assert.Null(item.IconBitmap);
@@ -46,16 +46,17 @@ public class SidebarItemTests
     }
 
     [Fact]
-    public void Playlist_action_flags_are_independent()
+    public void Playlist_folder_flags_are_independent()
     {
-        var newAction = new SidebarItem { IsNewPlaylistAction = true };
+        var folder = new SidebarItem { IsPlaylistFolder = true, FolderPath = "Road Trips" };
         var favorites = new SidebarItem { IsFavorites = true };
 
-        Assert.True(newAction.IsNewPlaylistAction);
-        Assert.False(newAction.IsFavorites);
+        Assert.True(folder.IsPlaylistFolder);
+        Assert.Equal("Road Trips", folder.FolderPath);
+        Assert.False(folder.IsFavorites);
 
         Assert.True(favorites.IsFavorites);
-        Assert.False(favorites.IsNewPlaylistAction);
+        Assert.False(favorites.IsPlaylistFolder);
     }
 
     [Fact]

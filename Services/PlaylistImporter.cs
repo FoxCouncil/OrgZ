@@ -7,6 +7,10 @@ namespace OrgZ.Services;
 public class PlaylistImportResult
 {
     public string Name { get; init; } = string.Empty;
+
+    /// <summary>Virtual sidebar folder from an <c>#ORGZ-FOLDER:</c> directive; empty = root.</summary>
+    public string Folder { get; init; } = string.Empty;
+
     public List<string> TrackPaths { get; init; } = [];
 }
 
@@ -28,6 +32,7 @@ public static class PlaylistImporter
     {
         var dir = Path.GetDirectoryName(filePath) ?? ".";
         var name = Path.GetFileNameWithoutExtension(filePath);
+        var folder = string.Empty;
         var paths = new List<string>();
 
         foreach (var line in File.ReadLines(filePath))
@@ -45,6 +50,12 @@ public static class PlaylistImporter
                 continue;
             }
 
+            if (trimmed.StartsWith(PlaylistExporter.FolderDirective, StringComparison.OrdinalIgnoreCase))
+            {
+                folder = PlaylistFolderSync.NormalizeFolder(trimmed[PlaylistExporter.FolderDirective.Length..]);
+                continue;
+            }
+
             if (trimmed.StartsWith('#'))
             {
                 continue;
@@ -58,7 +69,7 @@ public static class PlaylistImporter
             paths.Add(resolved);
         }
 
-        return new PlaylistImportResult { Name = name, TrackPaths = paths };
+        return new PlaylistImportResult { Name = name, Folder = folder, TrackPaths = paths };
     }
 
     // Playlists are portable - treat Windows drive-letter and UNC paths as absolute on any

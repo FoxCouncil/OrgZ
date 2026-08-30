@@ -388,6 +388,8 @@ internal partial class MainWindowViewModel
                     ? result.Name
                     : Path.GetFileNameWithoutExtension(file);
 
+                var folder = PlaylistFolderSync.NormalizeFolder(result.Folder);
+
                 if (known.TryGetValue(file, out var existing))
                 {
                     MediaCache.ReplacePlaylistTracks(existing.Id, mediaIds);
@@ -397,11 +399,17 @@ internal partial class MainWindowViewModel
                         MediaCache.RenamePlaylist(existing.Id, name);
                     }
 
+                    // The file's #ORGZ-FOLDER directive is as authoritative as its tracks.
+                    if (!string.Equals(PlaylistFolderSync.NormalizeFolder(existing.Folder), folder, StringComparison.Ordinal))
+                    {
+                        MediaCache.SetPlaylistFolder(existing.Id, folder);
+                    }
+
                     known.Remove(file);
                 }
                 else
                 {
-                    var id = MediaCache.CreatePlaylist(name, "M3U8", file);
+                    var id = MediaCache.CreatePlaylist(name, "M3U8", file, folder);
                     MediaCache.ReplacePlaylistTracks(id, mediaIds);
                 }
 

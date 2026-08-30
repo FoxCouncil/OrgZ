@@ -121,10 +121,12 @@ public sealed class MusicFolderWatcher : IDisposable
         }
 
         // A playlist file is library content too, and carries no audio extension. Skip the ones
-        // OrgZ just wrote, or saving a playlist edit rescans the library that triggered it.
+        // OrgZ just wrote, or saving a playlist edit rescans the library that triggered it. All
+        // OTHER events count, Changed included: an in-place external edit (Notepad, `echo >>`)
+        // raises only Changed, and excluding it meant OrgZ never noticed the update.
         if (IsPlaylistFile(path))
         {
-            if (!PlaylistFolderSync.WasSelfWritten(path) && kind != FsChangeKind.Changed)
+            if (!PlaylistFolderSync.WasSelfWritten(path))
             {
                 FullRescanNeeded?.Invoke();
             }

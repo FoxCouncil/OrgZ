@@ -32,6 +32,9 @@
 		<NativeMenu>
 			<NativeMenuItem Header="File">
 				<NativeMenu>
+					<NativeMenuItem Header="New Playlist..." Command="{Binding CreatePlaylistCommand}" />
+					<NativeMenuItem Header="New Folder..." Command="{Binding CreatePlaylistFolderCommand}" />
+					<NativeMenuItemSeparator />
 					<NativeMenuItem Header="Import Playlist..." Command="{Binding ImportPlaylistCommand}" />
 					<NativeMenuItem Header="Export Library..." Command="{Binding ExportLibraryCommand}" />
 					<NativeMenuItemSeparator />

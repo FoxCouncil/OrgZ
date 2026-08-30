@@ -228,6 +228,8 @@ public static class MediaCache
             "Source TEXT NOT NULL DEFAULT 'Library'",
             // Discovery key: matched on rescan so a file updates its playlist rather than duplicating it.
             "SourcePath TEXT NOT NULL DEFAULT ''",
+            // Virtual sidebar folder ("A" or "A/B"); the .m3u8 itself stays flat in the music root.
+            "Folder TEXT NOT NULL DEFAULT ''",
         };
 
         AddMissingColumns(connection, "Playlists", columns);
@@ -1023,15 +1025,16 @@ public static class MediaCache
 
     #region Playlists
 
-    public static int CreatePlaylist(string name, string source = "Library", string sourcePath = "")
+    public static int CreatePlaylist(string name, string source = "Library", string sourcePath = "", string folder = "")
     {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
 
         using var cmd = connection.CreateCommand();
         var now = DateTime.UtcNow.ToString("o");
-        cmd.CommandText = "INSERT INTO Playlists (Name, Source, SourcePath, CreatedAt, UpdatedAt) VALUES (@name, @source, @path, @now, @now); SELECT last_insert_rowid();";
+        cmd.CommandText = "INSERT INTO Playlists (Name, Source, SourcePath, Folder, CreatedAt, UpdatedAt) VALUES (@name, @source, @path, @folder, @now, @now); SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("@name", name);
+        cmd.Parameters.AddWithValue("@folder", folder ?? string.Empty);
         cmd.Parameters.AddWithValue("@source", string.IsNullOrWhiteSpace(source) ? "Library" : source);
         cmd.Parameters.AddWithValue("@path", sourcePath ?? string.Empty);
         cmd.Parameters.AddWithValue("@now", now);
@@ -1106,6 +1109,20 @@ public static class MediaCache
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Moves a playlist to a virtual folder; empty puts it back at the root.</summary>
+    public static void SetPlaylistFolder(int id, string folder)
+    {
+        using var connection = new SqliteConnection(ConnectionString);
+        connection.Open();
+
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Playlists SET Folder = @folder, UpdatedAt = @now WHERE Id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+        cmd.Parameters.AddWithValue("@folder", folder ?? string.Empty);
+        cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("o"));
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>Returns a playlist's <c>Source</c> ("Library", "M3U8", ...), or "Library" if unknown.</summary>
     public static string GetPlaylistSource(int id)
     {
@@ -1155,7 +1172,7 @@ public static class MediaCache
         connection.Open();
 
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT Id, Name, Source, CreatedAt, UpdatedAt, SourcePath FROM Playlists ORDER BY Name";
+        cmd.CommandText = "SELECT Id, Name, Source, CreatedAt, UpdatedAt, SourcePath, Folder FROM Playlists ORDER BY Name";
 
         var playlists = new List<Playlist>();
         using var reader = cmd.ExecuteReader();
@@ -1169,6 +1186,7 @@ public static class MediaCache
                 CreatedAt = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 UpdatedAt = DateTime.Parse(reader.GetString(4), null, System.Globalization.DateTimeStyles.RoundtripKind),
                 SourcePath = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                Folder = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
             });
         }
 

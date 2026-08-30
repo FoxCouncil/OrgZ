@@ -11,11 +11,21 @@ public static class PlaylistExporter
     /// <paramref name="relativeTo"/> writes track paths relative to that folder. Tracks outside
     /// it stay absolute.
     /// </summary>
-    public static void ExportM3U8(string outputPath, string playlistName, IReadOnlyList<MediaItem> tracks, string? relativeTo = null)
+    /// <summary>The comment directive carrying a playlist's virtual sidebar folder. Valid M3U -
+    /// every other player skips unknown # lines - so folder membership travels inside the file
+    /// with no sidecar index to drift.</summary>
+    public const string FolderDirective = "#ORGZ-FOLDER:";
+
+    public static void ExportM3U8(string outputPath, string playlistName, IReadOnlyList<MediaItem> tracks, string? relativeTo = null, string? folder = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("#EXTM3U");
         sb.AppendLine($"#PLAYLIST:{playlistName}");
+
+        if (!string.IsNullOrEmpty(folder))
+        {
+            sb.AppendLine($"{FolderDirective}{folder}");
+        }
 
         foreach (var track in tracks)
         {

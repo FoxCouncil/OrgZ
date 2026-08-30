@@ -27,16 +27,81 @@ internal partial class MainWindowViewModel
     /// </summary>
     internal void ReloadPlaylistsForScreenshots() => LoadPlaylistSidebarItems();
 
+    /// <summary>Folders the user created that are still empty; folders with playlists in them
+    /// re-derive from the files' #ORGZ-FOLDER directives on every load.</summary>
+    private const string PlaylistFoldersKey = "OrgZ.Playlists.Folders";
+
     private void LoadPlaylistSidebarItems()
     {
-        // Remove existing playlist sidebar items (keep Favorites and New Playlist action)
-        var toRemove = PlaylistItems.Where(i => i.PlaylistId != null).ToList();
-        foreach (var item in toRemove)
+        // Rebuild after Favorites (index 0): the folders are derived state, so patching the
+        // tree in place would mean diffing it. Selection is keyed and restored by the caller.
+        while (PlaylistItems.Count > 1)
         {
-            PlaylistItems.Remove(item);
+            PlaylistItems.RemoveAt(PlaylistItems.Count - 1);
         }
 
         var playlists = MediaCache.LoadAllPlaylists();
+
+        // Every folder anything references, saved empties included. SortedSet gives "A" before
+        // "A/B" before "B", which is exactly creation order for nested nodes.
+        var folderPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var saved in Settings.Get<List<string>>(PlaylistFoldersKey, []) ?? [])
+        {
+            var normalized = PlaylistFolderSync.NormalizeFolder(saved);
+            if (normalized.Length > 0)
+            {
+                folderPaths.Add(normalized);
+            }
+        }
+        foreach (var playlist in playlists)
+        {
+            var normalized = PlaylistFolderSync.NormalizeFolder(playlist.Folder);
+            if (normalized.Length > 0)
+            {
+                folderPaths.Add(normalized);
+            }
+        }
+
+        var nodesByPath = new Dictionary<string, SidebarItem>(StringComparer.OrdinalIgnoreCase);
+
+        SidebarItem NodeFor(string path)
+        {
+            if (nodesByPath.TryGetValue(path, out var existing))
+            {
+                return existing;
+            }
+
+            var slash = path.LastIndexOf('/');
+            var node = new SidebarItem
+            {
+                Name = slash < 0 ? path : path[(slash + 1)..],
+                Icon = "fa-solid fa-folder",
+                Category = "PLAYLISTS",
+                IsEnabled = true,
+                IsPlaylistFolder = true,
+                FolderPath = path,
+                ViewConfigKey = $"PlaylistFolder:{path}",
+            };
+            nodesByPath[path] = node;
+
+            if (slash < 0)
+            {
+                PlaylistItems.Add(node);
+            }
+            else
+            {
+                NodeFor(path[..slash]).Children.Add(node);
+            }
+
+            return node;
+        }
+
+        // Folders first at every level (they're added before any playlist), playlists after
+        // in the name order LoadAllPlaylists already gives.
+        foreach (var path in folderPaths)
+        {
+            NodeFor(path);
+        }
 
         foreach (var playlist in playlists)
         {
@@ -44,14 +109,8 @@ internal partial class MainWindowViewModel
             var trackIds = MediaCache.GetPlaylistTrackIds(playlist.Id);
             ListViewConfigs.Register(key, ListViewConfigs.BuildPlaylistConfig(playlist.Id, trackIds));
 
-            // Insert before the "New Playlist..." item
-            var insertIndex = PlaylistItems.Count - 1;
-            if (insertIndex < 0)
-            {
-                insertIndex = 0;
-            }
-
-            PlaylistItems.Insert(insertIndex, new SidebarItem
+            var folder = PlaylistFolderSync.NormalizeFolder(playlist.Folder);
+            var row = new SidebarItem
             {
                 Name = playlist.Name,
                 Icon = "fa-solid fa-list-ul",
@@ -59,12 +118,59 @@ internal partial class MainWindowViewModel
                 IsEnabled = true,
                 ViewConfigKey = key,
                 PlaylistId = playlist.Id,
-            });
+                FolderPath = folder,
+            };
+
+            if (folder.Length == 0)
+            {
+                PlaylistItems.Add(row);
+            }
+            else
+            {
+                NodeFor(folder).Children.Add(row);
+            }
         }
     }
 
+    /// <summary>Depth-first walk of the playlist tree: Favorites, folders, and playlist rows.</summary>
+    internal IEnumerable<SidebarItem> FlattenedPlaylistItems()
+    {
+        static IEnumerable<SidebarItem> Walk(IEnumerable<SidebarItem> items)
+        {
+            foreach (var item in items)
+            {
+                yield return item;
+                foreach (var child in Walk(item.Children))
+                {
+                    yield return child;
+                }
+            }
+        }
+
+        return Walk(PlaylistItems);
+    }
+
+    internal IReadOnlyList<string> PlaylistFolderPaths() =>
+        FlattenedPlaylistItems().Where(i => i.IsPlaylistFolder).Select(i => i.FolderPath).ToList();
+
+    private static List<string> SavedPlaylistFolders() =>
+        Settings.Get<List<string>>(PlaylistFoldersKey, []) ?? [];
+
+    private static void SavePlaylistFolders(IEnumerable<string> folders)
+    {
+        Settings.Set(PlaylistFoldersKey, folders
+            .Select(PlaylistFolderSync.NormalizeFolder)
+            .Where(f => f.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .ToList());
+        Settings.SaveDeferred();
+    }
+
     [RelayCommand]
-    internal async Task CreatePlaylist()
+    internal Task CreatePlaylist() => CreatePlaylistInFolderAsync(null);
+
+    internal async Task CreatePlaylistInFolderAsync(string? folder)
     {
         var dialog = new Views.PlaylistNameDialog();
         var result = await dialog.ShowDialog<string?>(_window);
@@ -74,17 +180,152 @@ internal partial class MainWindowViewModel
             return;
         }
 
-        var id = MediaCache.CreatePlaylist(result.Trim());
+        var id = MediaCache.CreatePlaylist(result.Trim(), folder: PlaylistFolderSync.NormalizeFolder(folder));
         ExportPlaylistFile(id);
         LoadPlaylistSidebarItems();
         PlaylistsChanged?.Invoke();
 
         // Navigate to the new playlist
-        var newItem = PlaylistItems.FirstOrDefault(i => i.PlaylistId == id);
+        var newItem = FlattenedPlaylistItems().FirstOrDefault(i => i.PlaylistId == id);
         if (newItem != null)
         {
             SelectedSidebarItem = newItem;
         }
+    }
+
+    [RelayCommand]
+    internal Task CreatePlaylistFolder() => CreatePlaylistFolderInAsync(null);
+
+    internal async Task CreatePlaylistFolderInAsync(string? parent)
+    {
+        var dialog = new Views.PlaylistNameDialog(null, title: "New Folder", prompt: "Folder name:");
+        var result = await dialog.ShowDialog<string?>(_window);
+
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return;
+        }
+
+        var name = PlaylistFolderSync.NormalizeFolder(result);
+        if (name.Length == 0)
+        {
+            return;
+        }
+
+        var path = PlaylistFolderSync.NormalizeFolder(
+            string.IsNullOrEmpty(parent) ? name : parent + "/" + name);
+
+        var folders = SavedPlaylistFolders();
+        folders.Add(path);
+        SavePlaylistFolders(folders);
+        LoadPlaylistSidebarItems();
+    }
+
+    internal async Task RenamePlaylistFolder(SidebarItem? folderNode)
+    {
+        if (folderNode is not { IsPlaylistFolder: true })
+        {
+            return;
+        }
+
+        var dialog = new Views.PlaylistNameDialog(folderNode.Name, title: "Rename Folder", prompt: "Folder name:");
+        var result = await dialog.ShowDialog<string?>(_window);
+
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return;
+        }
+
+        var oldPath = folderNode.FolderPath;
+        var slash = oldPath.LastIndexOf('/');
+        var newPath = PlaylistFolderSync.NormalizeFolder(slash < 0 ? result : oldPath[..(slash + 1)] + result);
+
+        if (newPath.Length == 0 || string.Equals(newPath, oldPath, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        RewritePlaylistFolderPaths(oldPath, newPath);
+    }
+
+    /// <summary>Deletes the folder (and any subfolders); the playlists inside move to the root.
+    /// The .m3u8 files were never anywhere else, so nothing on disk is deleted.</summary>
+    internal void DeletePlaylistFolder(SidebarItem? folderNode)
+    {
+        if (folderNode is not { IsPlaylistFolder: true })
+        {
+            return;
+        }
+
+        RewritePlaylistFolderPaths(folderNode.FolderPath, null);
+    }
+
+    internal void MovePlaylistToFolder(SidebarItem? playlistItem, string? folder)
+    {
+        if (playlistItem?.PlaylistId is not int id)
+        {
+            return;
+        }
+
+        var target = PlaylistFolderSync.NormalizeFolder(folder);
+        if (string.Equals(target, playlistItem.FolderPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        MediaCache.SetPlaylistFolder(id, target);
+        ExportPlaylistFile(id);
+        LoadPlaylistSidebarItems();
+        PlaylistsChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Renames (<paramref name="newPath"/> set) or dissolves (<paramref name="newPath"/> null) a
+    /// folder subtree, updating every playlist under it, its file, and the saved empty folders.
+    /// </summary>
+    private void RewritePlaylistFolderPaths(string oldPath, string? newPath)
+    {
+        var prefix = oldPath + "/";
+
+        string? Map(string current)
+        {
+            var isSelf = string.Equals(current, oldPath, StringComparison.OrdinalIgnoreCase);
+            if (!isSelf && !current.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return current;
+            }
+
+            if (newPath is null)
+            {
+                return null;
+            }
+
+            return isSelf ? newPath : newPath + current[oldPath.Length..];
+        }
+
+        foreach (var playlist in MediaCache.LoadAllPlaylists())
+        {
+            var folder = PlaylistFolderSync.NormalizeFolder(playlist.Folder);
+            if (folder.Length == 0)
+            {
+                continue;
+            }
+
+            var target = Map(folder) ?? string.Empty;
+            if (!string.Equals(target, folder, StringComparison.Ordinal))
+            {
+                MediaCache.SetPlaylistFolder(playlist.Id, target);
+                ExportPlaylistFile(playlist.Id);
+            }
+        }
+
+        SavePlaylistFolders(SavedPlaylistFolders()
+            .Select(f => Map(PlaylistFolderSync.NormalizeFolder(f)))
+            .Where(f => !string.IsNullOrEmpty(f))
+            .Select(f => f!));
+
+        LoadPlaylistSidebarItems();
+        PlaylistsChanged?.Invoke();
     }
 
     [RelayCommand]
@@ -349,7 +590,7 @@ internal partial class MainWindowViewModel
                 ? PlaylistFolderSync.PathFor(App.FolderPath, playlist.Name)
                 : playlist.SourcePath;
 
-            PlaylistFolderSync.WriteTo(target, App.FolderPath, playlist.Name, tracks);
+            PlaylistFolderSync.WriteTo(target, App.FolderPath, playlist.Name, tracks, playlist.Folder);
 
             // Claim the file, or the next scan discovers it as a playlist OrgZ has never seen
             // and adds a second row for it.

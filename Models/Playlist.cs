@@ -21,6 +21,13 @@ public partial class Playlist : ObservableObject
     /// </summary>
     public string SourcePath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Virtual folder path ("Road Trips" or "Road Trips/Summer"), empty for a root playlist.
+    /// Folders exist only inside OrgZ - the .m3u8 files all live flat in the music root, and
+    /// membership rides in the file as an <c>#ORGZ-FOLDER:</c> directive.
+    /// </summary>
+    public string Folder { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

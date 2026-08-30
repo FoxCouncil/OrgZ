@@ -7,15 +7,29 @@ database to get out of step with it, and nothing is locked inside OrgZ.
 
 ## Making one
 
-Click **New Playlist...** at the bottom of the Playlists section in the sidebar, give it a
-name, and drag tracks onto it. The file appears in your music folder immediately as
-`<name>.m3u8`.
+Right-click in the Playlists section of the sidebar and choose **New Playlist...** - or use
+**File > New Playlist...** - give it a name, and drag tracks onto it. The file appears in
+your music folder immediately as `<name>.m3u8`.
 
 Every change writes straight through - adding tracks, removing them, dragging to reorder,
 renaming the playlist. Rename it in OrgZ and the old file is replaced by one under the new
 name.
 
 ![Naming a new playlist](../assets/screenshots/playlist-name.png)
+
+## Folders
+
+Playlists can be grouped into folders, and folders can hold other folders. Right-click in
+the Playlists section (or a folder) and choose **New Folder...**, then drag playlists in.
+Dragging one onto empty space below the tree moves it back to the top level.
+
+Folders are OrgZ's alone - the `.m3u8` files all stay flat in your music folder, so no
+playlist ever ends up buried fifty directories deep. A playlist remembers where it lives
+with an `#ORGZ-FOLDER:` comment line inside its own file. Other players skip the line;
+copy the file to another machine and it lands in the same folder there.
+
+Deleting a folder never deletes music: its playlists move back to the top level and their
+files stay put.
 
 ## Order
 
@@ -29,7 +43,7 @@ saved order is untouched, and clicking **#** puts the view back.
 
 Drop an `.m3u8` anywhere in your music folder and it becomes a playlist on the next scan.
 OrgZ picks up files created by anything - a DJ tool, a text editor, another player - and
-there is no import step.
+there is no import step. Editing a playlist file outside OrgZ is noticed right away, too.
 
 Tracks are matched against your library by path. Entries pointing at files you do not have
 are skipped, so a playlist exported from a bigger collection still works for the part you

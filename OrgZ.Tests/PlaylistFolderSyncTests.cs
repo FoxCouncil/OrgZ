@@ -97,6 +97,60 @@ public class PlaylistFolderSyncTests : IDisposable
     }
 
     [Fact]
+    public void Write_RoundTripsTheVirtualFolderThroughTheImporter()
+    {
+        var track = Touch(Path.Combine("A", "one.flac"));
+
+        PlaylistFolderSync.Write(_root, "Summer", [Track(track, "A", "One")], folder: "Road Trips/2026");
+
+        var file = Path.Combine(_root, "Summer.m3u8");
+        Assert.Contains("#ORGZ-FOLDER:Road Trips/2026", File.ReadAllLines(file));
+
+        var result = PlaylistImporter.Import(file);
+        Assert.Equal("Road Trips/2026", result.Folder);
+    }
+
+    [Fact]
+    public void Write_WithoutAFolderEmitsNoDirective()
+    {
+        var track = Touch(Path.Combine("A", "one.flac"));
+
+        PlaylistFolderSync.Write(_root, "Rooted", [Track(track, "A", "One")]);
+
+        Assert.DoesNotContain(
+            File.ReadAllLines(Path.Combine(_root, "Rooted.m3u8")),
+            l => l.StartsWith(PlaylistExporter.FolderDirective, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(string.Empty, PlaylistImporter.Import(Path.Combine(_root, "Rooted.m3u8")).Folder);
+    }
+
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("Road Trips", "Road Trips")]
+    [InlineData("A/B", "A/B")]
+    [InlineData(" A / B ", "A/B")]
+    [InlineData("A\\B", "A/B")]
+    [InlineData("/A//B/", "A/B")]
+    public void NormalizeFolder_CanonicalizesSeparatorsAndSegments(string? input, string expected)
+    {
+        Assert.Equal(expected, PlaylistFolderSync.NormalizeFolder(input));
+    }
+
+    [Fact]
+    public void Import_ReadsAHandWrittenFolderDirectiveCaseInsensitively()
+    {
+        var track = Touch(Path.Combine("A", "one.flac"));
+        var file = Path.Combine(_root, "Manual.m3u8");
+        File.WriteAllLines(file, ["#EXTM3U", "#orgz-folder: Chill \\ Deep ", track]);
+
+        var result = PlaylistImporter.Import(file);
+
+        Assert.Equal("Chill/Deep", result.Folder);
+        Assert.Equal([track], result.TrackPaths.Select(Path.GetFullPath));
+    }
+
+    [Fact]
     public void Write_LeavesNoTemporaryFileBehind()
     {
         PlaylistFolderSync.Write(_root, "Clean", [Track(Touch("a.flac"), "A", "One")]);

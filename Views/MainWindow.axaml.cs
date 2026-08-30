@@ -1440,7 +1440,7 @@ public partial class MainWindow : Window
         };
         parent.Items.Add(favorites);
 
-        var playlists = _viewModel.PlaylistItems.Where(p => p.PlaylistId.HasValue).ToList();
+        var playlists = _viewModel.FlattenedPlaylistItems().Where(p => p.PlaylistId.HasValue).ToList();
         if (playlists.Count > 0)
         {
             parent.Items.Add(new Separator());
@@ -1481,7 +1481,7 @@ public partial class MainWindow : Window
         };
         parent.Items.Add(favorites);
 
-        var playlists = _viewModel.PlaylistItems.Where(p => p.PlaylistId.HasValue).ToList();
+        var playlists = _viewModel.FlattenedPlaylistItems().Where(p => p.PlaylistId.HasValue).ToList();
         if (playlists.Count > 0)
         {
             parent.Items.Add(new Separator());

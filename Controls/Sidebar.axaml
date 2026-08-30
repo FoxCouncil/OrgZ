@@ -69,6 +69,23 @@
              this device", not carry a deep hierarchy. -->
         <x:Double x:Key="TreeViewItemIndent">10</x:Double>
 
+        <TreeDataTemplate x:Key="PlaylistTreeTemplate" x:DataType="models:SidebarItem" ItemsSource="{Binding Children}">
+            <StackPanel Orientation="Horizontal" Spacing="10" Margin="0" Background="Transparent">
+                <Border Width="18" Height="18" ClipToBounds="True" VerticalAlignment="Center">
+                    <i:Icon Value="{Binding Icon}" FontSize="14"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding Name}" FontSize="16" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </TreeDataTemplate>
+        <!-- Unlike devices, playlist folders DO collapse - that's their job - so the chevron
+             stays. Leaves hide it on their own (it only shows when a node has items). -->
+        <ControlTheme x:Key="PlaylistTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+            <Setter Property="IsExpanded" Value="True" />
+            <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+            <Setter Property="Padding" Value="16,6,0,6" />
+        </ControlTheme>
         <ControlTheme x:Key="DeviceTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
             <!-- Devices don't collapse. Their children (Podcasts, Audiobooks, playlists) are the
                  point of the device being listed at all, so IsExpanded is pinned True rather than
@@ -192,21 +209,23 @@
                        Foreground="{DynamicResource SystemControlDisabledBaseMediumLowBrush}"
                        Margin="16,8,0,4" />
 
-            <!-- Playlist items -->
-            <ListBox DockPanel.Dock="Top"
-                     x:Name="PlaylistListBox"
-                     ItemsSource="{Binding PlaylistItems}"
-                     SelectedItem="{Binding SelectedSidebarItem, Mode=OneWay}"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Padding="0"
-                     ItemTemplate="{StaticResource SidebarItemTemplate}"
-                     ItemContainerTheme="{StaticResource SidebarItemContainerTheme}"
-                     SelectionChanged="PlaylistListBox_SelectionChanged"
-                     DragDrop.AllowDrop="True" />
+            <!-- Playlist tree: Favorites, then virtual folders, then root playlists. The
+                 folders exist only in OrgZ - every .m3u8 sits flat in the music root. -->
+            <TreeView DockPanel.Dock="Top"
+                      x:Name="PlaylistTreeView"
+                      ItemsSource="{Binding PlaylistItems}"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Padding="0"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ItemTemplate="{StaticResource PlaylistTreeTemplate}"
+                      ItemContainerTheme="{StaticResource PlaylistTreeItemTheme}"
+                      SelectionChanged="PlaylistTreeView_SelectionChanged"
+                      DragDrop.AllowDrop="True" />
 
-            <!-- Fill remaining space -->
-            <Border />
+            <!-- Fill remaining space. Part of the playlist area: right-click makes new
+                 playlists/folders here, and a playlist dragged here goes back to the root. -->
+            <Border x:Name="PlaylistEmptyArea" Background="Transparent" />
         </DockPanel>
     </Border>
 </UserControl>

@@ -30,7 +30,13 @@ internal partial class SidebarItem : ObservableObject
     public MediaKind? Kind { get; init; }
     public string ViewConfigKey { get; init; } = string.Empty;
     public int? PlaylistId { get; init; }
-    public bool IsNewPlaylistAction { get; init; }
+
+    /// <summary>A virtual playlist folder node; <see cref="FolderPath"/> carries its full path.</summary>
+    public bool IsPlaylistFolder { get; init; }
+
+    /// <summary>Full virtual folder path ("A" or "A/B"). On a folder node: the folder itself.
+    /// On a playlist node: the folder it lives in (empty at root).</summary>
+    public string FolderPath { get; init; } = string.Empty;
 
     /// <summary>
     /// True for an indented child row in a flat section (e.g. "Subscriptions" under

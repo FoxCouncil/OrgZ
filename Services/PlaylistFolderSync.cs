@@ -56,6 +56,25 @@ public static class PlaylistFolderSync
         }
     }
 
+    /// <summary>
+    /// Canonical virtual-folder path: forward slashes between levels, no empty segments, each
+    /// segment trimmed. Backslashes count as separators so a hand-typed directive still lands.
+    /// </summary>
+    public static string NormalizeFolder(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return string.Empty;
+        }
+
+        var segments = folder
+            .Split('/', '\\')
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0);
+
+        return string.Join('/', segments);
+    }
+
     public static bool IsFavoritesFile(string path) =>
         string.Equals(Path.GetFileNameWithoutExtension(path), FavoritesName, StringComparison.OrdinalIgnoreCase);
 
@@ -80,14 +99,14 @@ public static class PlaylistFolderSync
     public static string PathFor(string musicRoot, string playlistName) =>
         Path.Combine(musicRoot, SanitizeFileName(playlistName) + Extension);
 
-    public static void Write(string musicRoot, string playlistName, IReadOnlyList<MediaItem> tracks) =>
-        WriteTo(PathFor(musicRoot, playlistName), musicRoot, playlistName, tracks);
+    public static void Write(string musicRoot, string playlistName, IReadOnlyList<MediaItem> tracks, string? folder = null) =>
+        WriteTo(PathFor(musicRoot, playlistName), musicRoot, playlistName, tracks, folder);
 
     /// <summary>
     /// Writes to an explicit path, so a discovered playlist is rewritten where it was found
     /// rather than duplicated into the root.
     /// </summary>
-    public static void WriteTo(string filePath, string musicRoot, string playlistName, IReadOnlyList<MediaItem> tracks)
+    public static void WriteTo(string filePath, string musicRoot, string playlistName, IReadOnlyList<MediaItem> tracks, string? folder = null)
     {
         if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(musicRoot) || !Directory.Exists(musicRoot))
         {
@@ -102,7 +121,7 @@ public static class PlaylistFolderSync
 
         var temp = filePath + TempExtension;
 
-        PlaylistExporter.ExportM3U8(temp, playlistName, tracks, relativeTo: musicRoot);
+        PlaylistExporter.ExportM3U8(temp, playlistName, tracks, relativeTo: musicRoot, folder: NormalizeFolder(folder));
 
         // Identical content is not worth a write. Favorites is regenerated on every library
         // scan, and rewriting it unchanged was enough to keep the watcher and the scanner

@@ -19,10 +19,23 @@ public partial class Sidebar : UserControl
     {
         InitializeComponent();
 
-        DragDrop.SetAllowDrop(PlaylistListBox, true);
-        PlaylistListBox.AddHandler(DragDrop.DragOverEvent, PlaylistListBox_DragOver);
-        PlaylistListBox.AddHandler(DragDrop.DropEvent, PlaylistListBox_Drop);
-        PlaylistListBox.ContextRequested += PlaylistListBox_ContextRequested;
+        DragDrop.SetAllowDrop(PlaylistTreeView, true);
+        PlaylistTreeView.AddHandler(DragDrop.DragOverEvent, PlaylistTree_DragOver);
+        PlaylistTreeView.AddHandler(DragDrop.DropEvent, PlaylistTree_Drop);
+        PlaylistTreeView.ContextRequested += PlaylistTree_ContextRequested;
+
+        // Reordering a playlist into a folder starts on the row itself; tunnel handlers see
+        // the press before the TreeViewItem swallows it for selection.
+        PlaylistTreeView.AddHandler(PointerPressedEvent, PlaylistTree_PointerPressed, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        PlaylistTreeView.AddHandler(PointerMovedEvent, PlaylistTree_PointerMoved, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        PlaylistTreeView.AddHandler(PointerReleasedEvent, (_, _) => _playlistDragCandidate = null, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        // Below the last row is still the playlist area: right-click creates here, and a
+        // dragged playlist dropped here lands back at the root.
+        DragDrop.SetAllowDrop(PlaylistEmptyArea, true);
+        PlaylistEmptyArea.AddHandler(DragDrop.DragOverEvent, PlaylistEmptyArea_DragOver);
+        PlaylistEmptyArea.AddHandler(DragDrop.DropEvent, PlaylistEmptyArea_Drop);
+        PlaylistEmptyArea.ContextRequested += PlaylistEmptyArea_ContextRequested;
         DeviceTreeView.ContextRequested += DeviceTreeView_ContextRequested;
 
         DragDrop.SetAllowDrop(DeviceTreeView, true);
@@ -209,17 +222,74 @@ public partial class Sidebar : UserControl
         menu.Open(listBoxItem);
     }
 
-    private void PlaylistListBox_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    /// <summary>"New Playlist..." / "New Folder..." - the create pair, targeted at
+    /// <paramref name="folderPath"/> (null = the root).</summary>
+    private void AddCreateMenuItems(Avalonia.Controls.ContextMenu menu, MainWindowViewModel vm, string? folderPath)
     {
-        var listBoxItem = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (listBoxItem?.DataContext is not SidebarItem sb || sb.IsFavorites || sb.IsNewPlaylistAction || !sb.PlaylistId.HasValue)
+        var newPlaylist = new Avalonia.Controls.MenuItem { Header = "New Playlist…" };
+        newPlaylist.Click += (_, _) => _ = vm.CreatePlaylistInFolderAsync(folderPath);
+        menu.Items.Add(newPlaylist);
+
+        var newFolder = new Avalonia.Controls.MenuItem { Header = "New Folder…" };
+        newFolder.Click += (_, _) => _ = vm.CreatePlaylistFolderInAsync(folderPath);
+        menu.Items.Add(newFolder);
+    }
+
+    private void PlaylistEmptyArea_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
         {
+            return;
+        }
+
+        var menu = new Avalonia.Controls.ContextMenu();
+        AddCreateMenuItems(menu, vm, null);
+        menu.Open(PlaylistEmptyArea);
+        e.Handled = true;
+    }
+
+    private void PlaylistTree_ContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        var treeItem = (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>();
+
+        // The gap between rows inside the tree counts as empty space too.
+        if (treeItem?.DataContext is not SidebarItem sb)
+        {
+            var background = new Avalonia.Controls.ContextMenu();
+            AddCreateMenuItems(background, vm, null);
+            background.Open(PlaylistTreeView);
             e.Handled = true;
             return;
         }
 
-        if (DataContext is not MainWindowViewModel vm)
+        if (sb.IsPlaylistFolder)
         {
+            var folderMenu = new Avalonia.Controls.ContextMenu();
+            AddCreateMenuItems(folderMenu, vm, sb.FolderPath);
+            folderMenu.Items.Add(new Avalonia.Controls.Separator());
+
+            var renameFolder = new Avalonia.Controls.MenuItem { Header = "Rename…" };
+            renameFolder.Click += (_, _) => _ = vm.RenamePlaylistFolder(sb);
+            folderMenu.Items.Add(renameFolder);
+
+            var deleteFolder = new Avalonia.Controls.MenuItem { Header = "Delete Folder" };
+            deleteFolder.Click += (_, _) => vm.DeletePlaylistFolder(sb);
+            folderMenu.Items.Add(deleteFolder);
+
+            treeItem.ContextMenu = folderMenu;
+            folderMenu.Open(treeItem);
+            e.Handled = true;
+            return;
+        }
+
+        if (sb.IsFavorites || !sb.PlaylistId.HasValue)
+        {
+            e.Handled = true;
             return;
         }
 
@@ -272,35 +342,124 @@ public partial class Sidebar : UserControl
         }
         menu.Items.Add(sendTo);
 
-        listBoxItem.ContextMenu = menu;
-        menu.Open(listBoxItem);
+        treeItem.ContextMenu = menu;
+        menu.Open(treeItem);
     }
 
-    private void PlaylistListBox_DragOver(object? sender, DragEventArgs e)
+    // -- Drag a playlist row into (or out of) a virtual folder --
+
+    internal static readonly DataFormat<string> PlaylistNodeDragFormat = DataFormat.CreateStringApplicationFormat("OrgZ.PlaylistNode");
+
+    /// <summary>The playlist row being dragged; static like the media payload - the DataTransfer
+    /// string only proves the kind, the object crosses inside the process.</summary>
+    private static SidebarItem? _draggedPlaylistNode;
+
+    private SidebarItem? _playlistDragCandidate;
+    private Point _playlistDragOrigin;
+
+    /// <summary>The press that started the candidate drag - DoDragDropAsync wants the press
+    /// event, not a move (same shape as the media grid's _gridPressEvent).</summary>
+    private PointerPressedEventArgs? _playlistPressEvent;
+
+    private void PlaylistTree_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        _playlistDragCandidate = null;
+
+        if (!e.GetCurrentPoint(PlaylistTreeView).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var item = (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>()?.DataContext as SidebarItem;
+        if (item?.PlaylistId is not null)
+        {
+            _playlistDragCandidate = item;
+            _playlistDragOrigin = e.GetPosition(PlaylistTreeView);
+            _playlistPressEvent = e;
+        }
+    }
+
+    private async void PlaylistTree_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_playlistDragCandidate is not { } candidate || _playlistPressEvent is not { } press)
+        {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(PlaylistTreeView).Properties.IsLeftButtonPressed)
+        {
+            _playlistDragCandidate = null;
+            return;
+        }
+
+        var current = e.GetPosition(PlaylistTreeView);
+        var dx = current.X - _playlistDragOrigin.X;
+        var dy = current.Y - _playlistDragOrigin.Y;
+        if ((dx * dx + dy * dy) < 36)
+        {
+            return;
+        }
+
+        _playlistDragCandidate = null;
+        _draggedPlaylistNode = candidate;
+        try
+        {
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.Create(PlaylistNodeDragFormat, "playlist"));
+            await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Move);
+        }
+        finally
+        {
+            _draggedPlaylistNode = null;
+        }
+    }
+
+    private void PlaylistTree_DragOver(object? sender, DragEventArgs e)
+    {
+        var target = (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>()?.DataContext as SidebarItem;
+
+        if (e.DataTransfer.Contains(PlaylistNodeDragFormat) && _draggedPlaylistNode is { } dragged)
+        {
+            // A folder takes the playlist; anywhere else in the tree is "back to the root".
+            var folder = target is { IsPlaylistFolder: true } ? target.FolderPath : string.Empty;
+            e.DragEffects = string.Equals(folder, dragged.FolderPath, StringComparison.OrdinalIgnoreCase)
+                ? DragDropEffects.None
+                : DragDropEffects.Move;
+            e.Handled = true;
+            return;
+        }
+
         if (!e.DataTransfer.Contains(MediaItemDragFormat))
         {
             e.DragEffects = DragDropEffects.None;
             return;
         }
 
-        // Favorites accepts drops too. It has no PlaylistId - it is a per-track flag - so gating
-        // on PlaylistId alone made the star the one playlist row nothing could be dropped on.
-        var item = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (item?.DataContext is SidebarItem sb && (sb.PlaylistId.HasValue || sb.IsFavorites))
-        {
-            e.DragEffects = DragDropEffects.Copy;
-        }
-        else
-        {
-            e.DragEffects = DragDropEffects.None;
-        }
+        // Favorites accepts track drops too. It has no PlaylistId - it is a per-track flag - so
+        // gating on PlaylistId alone made the star the one playlist row nothing could be dropped on.
+        e.DragEffects = target is { } sb && (sb.PlaylistId.HasValue || sb.IsFavorites)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
 
         e.Handled = true;
     }
 
-    private void PlaylistListBox_Drop(object? sender, DragEventArgs e)
+    private void PlaylistTree_Drop(object? sender, DragEventArgs e)
     {
+        if (DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        var target = (e.Source as Visual)?.FindAncestorOfType<TreeViewItem>()?.DataContext as SidebarItem;
+
+        if (e.DataTransfer.Contains(PlaylistNodeDragFormat) && _draggedPlaylistNode is { } dragged)
+        {
+            vm.MovePlaylistToFolder(dragged, target is { IsPlaylistFolder: true } ? target.FolderPath : null);
+            e.Handled = true;
+            return;
+        }
+
         if (!e.DataTransfer.Contains(MediaItemDragFormat))
         {
             return;
@@ -309,30 +468,42 @@ public partial class Sidebar : UserControl
         List<MediaItem> media = MainWindow.DraggedMediaItems.Count > 0
             ? MainWindow.DraggedMediaItems
             : MainWindow.DraggedMediaItem is { } single ? [single] : [];
-        if (media.Count == 0)
+        if (media.Count == 0 || target is null || !(target.PlaylistId.HasValue || target.IsFavorites))
         {
             return;
         }
 
-        var item = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>();
-        if (item?.DataContext is not SidebarItem sb || !(sb.PlaylistId.HasValue || sb.IsFavorites))
+        if (target.IsFavorites)
         {
-            return;
+            vm.FavoriteTracks(media);
         }
-
-        if (DataContext is MainWindowViewModel vm)
+        else
         {
-            if (sb.IsFavorites)
-            {
-                vm.FavoriteTracks(media);
-            }
-            else
-            {
-                vm.AddTracksToPlaylist(sb.PlaylistId!.Value, media);
-            }
+            vm.AddTracksToPlaylist(target.PlaylistId!.Value, media);
         }
 
         e.Handled = true;
+    }
+
+    private void PlaylistEmptyArea_DragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(PlaylistNodeDragFormat)
+            && _draggedPlaylistNode is { } dragged
+            && dragged.FolderPath.Length > 0
+            ? DragDropEffects.Move
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void PlaylistEmptyArea_Drop(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.Contains(PlaylistNodeDragFormat)
+            && _draggedPlaylistNode is { } dragged
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.MovePlaylistToFolder(dragged, null);
+            e.Handled = true;
+        }
     }
 
     /// <summary>
@@ -345,7 +516,7 @@ public partial class Sidebar : UserControl
         _suppressSelectionChange = true;
         if (!ReferenceEquals(owner, LibraryListBox)) { LibraryListBox.SelectedItem = null; }
         if (!ReferenceEquals(owner, DeviceTreeView)) { DeviceTreeView.SelectedItem = null; }
-        if (!ReferenceEquals(owner, PlaylistListBox)) { PlaylistListBox.SelectedItem = null; }
+        if (!ReferenceEquals(owner, PlaylistTreeView)) { PlaylistTreeView.SelectedItem = null; }
         if (!ReferenceEquals(owner, ShareTreeView)) { ShareTreeView.SelectedItem = null; }
         _suppressSelectionChange = false;
 
@@ -439,28 +610,28 @@ public partial class Sidebar : UserControl
         SelectOnly(DeviceTreeView, item);
     }
 
-    private void PlaylistListBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void PlaylistTreeView_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionChange)
         {
             return;
         }
 
-        if (PlaylistListBox.SelectedItem is SidebarItem item)
+        if (PlaylistTreeView.SelectedItem is not SidebarItem item)
         {
-            if (item.IsNewPlaylistAction)
-            {
-                PlaylistListBox.SelectedItem = null;
-
-                if (DataContext is MainWindowViewModel vm2)
-                {
-                    _ = vm2.CreatePlaylist();
-                }
-
-                return;
-            }
-
-            SelectOnly(PlaylistListBox, item);
+            return;
         }
+
+        // A folder organizes; it isn't a view. Clear the stray highlight and leave the
+        // current view (and its chevron) alone.
+        if (item.IsPlaylistFolder)
+        {
+            _suppressSelectionChange = true;
+            PlaylistTreeView.SelectedItem = null;
+            _suppressSelectionChange = false;
+            return;
+        }
+
+        SelectOnly(PlaylistTreeView, item);
     }
 }
