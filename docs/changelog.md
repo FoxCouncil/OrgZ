@@ -1,6 +1,13 @@
 # Changelog
 
-## v0.16.0 (Current)
+## v0.16.1 (Current)
+
+### Playlists
+
+- Playlist rows line up with the rest of the sidebar again, and clicking a folder
+  opens and closes it
+
+## v0.16.0
 
 ### Playlists
 
