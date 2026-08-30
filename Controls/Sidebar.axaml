@@ -79,12 +79,17 @@
                            TextTrimming="CharacterEllipsis" />
             </StackPanel>
         </TreeDataTemplate>
-        <!-- Unlike devices, playlist folders DO collapse - that's their job - so the chevron
-             stays. Leaves hide it on their own (it only shows when a node has items). -->
+        <!-- The chevron chrome is hidden for the same reason the device tree hides it: it
+             reserves leading space on EVERY row, indenting the whole section relative to
+             LIBRARY above. Folders still collapse - clicking the row toggles them. -->
         <ControlTheme x:Key="PlaylistTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
             <Setter Property="IsExpanded" Value="True" />
             <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
             <Setter Property="Padding" Value="16,6,0,6" />
+            <Style Selector="^ /template/ Panel#PART_ExpandCollapseChevronContainer">
+                <Setter Property="IsVisible" Value="False" />
+                <Setter Property="Margin" Value="0" />
+            </Style>
         </ControlTheme>
         <ControlTheme x:Key="DeviceTreeItemTheme" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
             <!-- Devices don't collapse. Their children (Podcasts, Audiobooks, playlists) are the

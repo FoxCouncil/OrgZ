@@ -622,10 +622,16 @@ public partial class Sidebar : UserControl
             return;
         }
 
-        // A folder organizes; it isn't a view. Clear the stray highlight and leave the
-        // current view (and its chevron) alone.
+        // A folder organizes; it isn't a view. Clicking it toggles it open/closed (the
+        // chevron chrome is hidden - see the theme) and the stray highlight is cleared so
+        // the current view keeps its selection.
         if (item.IsPlaylistFolder)
         {
+            if (PlaylistTreeView.TreeContainerFromItem(item) is TreeViewItem container)
+            {
+                container.IsExpanded = !container.IsExpanded;
+            }
+
             _suppressSelectionChange = true;
             PlaylistTreeView.SelectedItem = null;
             _suppressSelectionChange = false;
