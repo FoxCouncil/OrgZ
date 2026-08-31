@@ -11,6 +11,10 @@ namespace OrgZ.Models;
 /// </summary>
 public sealed class SyncPlan
 {
+    /// <summary>Every music track in the library, like iTunes' "Sync entire music library".
+    /// Tracks only - which native playlists exist stays governed by the selections below.</summary>
+    public bool EntireLibrary { get; set; }
+
     public bool Podcasts { get; set; }
     public bool Audiobooks { get; set; }
 
@@ -29,7 +33,7 @@ public sealed class SyncPlan
     /// </summary>
     public bool Automatic { get; set; }
 
-    public bool SyncsAnything => Podcasts || Audiobooks || Favorites || PlaylistIds.Count > 0;
+    public bool SyncsAnything => EntireLibrary || Podcasts || Audiobooks || Favorites || PlaylistIds.Count > 0;
 }
 
 /// <summary>

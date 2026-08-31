@@ -18,6 +18,23 @@ Each device also has a **Playlists** entry beneath it in the sidebar:
 - **Rockbox / other**: playlists are read from `*.m3u` files in the device's
   `/Playlists/` folder.
 
+## The sync plan
+
+Right-click a device and choose **Sync** to run its plan; **Sync Settings...**
+opens the plan itself (Sync also opens it the first time). The plan is
+per-device and remembered, so after setup a sync is one click.
+
+- **Entire music library** - every music track in the library, like iTunes.
+  Playlists below stay selectable alongside it: they decide which named
+  playlists exist on the device, the library option fills the music itself.
+  If the library won't fit in the device's free space, this part is skipped
+  with a message saying how much room it needs - everything else still syncs.
+- **Podcasts**, **Audiobooks**, **Favorites** - each becomes its own section or
+  playlist on models that support it.
+- **Playlists** - each selected one is written as a native device playlist.
+- **Sync automatically** - mirror mode: the device is made to match the plan,
+  removing what is no longer selected. Off (the default) means add-only.
+
 ## Syncing a playlist to a device
 
 Right-click one of your library playlists and choose **Sync**, then the device.

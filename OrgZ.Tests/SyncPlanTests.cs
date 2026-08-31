@@ -50,4 +50,11 @@ public class SyncPlanTests
         };
         Assert.Equal(expected, plan.SyncsAnything);
     }
+
+    [Fact]
+    public void Entire_library_alone_counts_as_syncing_something()
+    {
+        Assert.True(new SyncPlan { EntireLibrary = true }.SyncsAnything);
+        Assert.False(new SyncPlan().EntireLibrary);   // old saved plans deserialize to off
+    }
 }

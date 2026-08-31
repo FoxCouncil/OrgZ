@@ -32,6 +32,10 @@ public partial class SyncSettingsDialog : Window
         // Auto-sync (mirror) vs manually manage (add-only). False = the safe add-only default.
         AutomaticCheck.IsChecked = current.Automatic;
 
+        // Every sync target takes tracks, so this is never hidden. Playlists stay selectable
+        // alongside it - they decide which native playlists exist, not which tracks copy.
+        EntireLibraryCheck.IsChecked = current.EntireLibrary;
+
         // Only offer what the tier actually writes - a component the device can't carry never shows.
         PodcastsCheck.IsVisible = supportsPodcasts;
         PodcastsCheck.IsChecked = current.Podcasts;
@@ -64,6 +68,7 @@ public partial class SyncSettingsDialog : Window
         var plan = new SyncPlan
         {
             Automatic = AutomaticCheck.IsChecked == true,
+            EntireLibrary = EntireLibraryCheck.IsChecked == true,
             Podcasts = PodcastsCheck.IsVisible && PodcastsCheck.IsChecked == true,
             Audiobooks = AudiobooksCheck.IsVisible && AudiobooksCheck.IsChecked == true,
             Favorites = FavoritesCheck.IsVisible && FavoritesCheck.IsChecked == true,

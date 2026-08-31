@@ -76,11 +76,14 @@ internal partial class MainWindowViewModel
     /// playlist referencing all of them. Tier-agnostic - the Nano 5G SQLite, binary iTunesDB, and Rockbox
     /// filesystem paths all live behind <see cref="IPodDevice.AddTrackAsync"/> / <see cref="IPodDevice.CreatePlaylistAsync"/>.
     /// </summary>
-    private async Task SyncPlaylistToDeviceAsync(string name, IReadOnlyList<MediaItem> tracks, ConnectedDevice device)
+    /// <summary>A null <paramref name="name"/> syncs the tracks with NO native playlist - the
+    /// entire-library leg, which only fills the device's master list.</summary>
+    private async Task SyncPlaylistToDeviceAsync(string? name, IReadOnlyList<MediaItem> tracks, ConnectedDevice device)
     {
+        var label = name ?? "Music Library";
         if (tracks.Count == 0)
         {
-            UpdateMainStatus($"“{name}” is empty — nothing to sync.");
+            UpdateMainStatus($"“{label}” is empty — nothing to sync.");
             return;
         }
 
@@ -118,8 +121,8 @@ internal partial class MainWindowViewModel
                     (mount, ids) => Services.DeviceHelper.DeviceHelperClient.RunSyncAsync(mount, progressPath, ids),
                     keepAliveEnabled: true))
             {
-                _log.Information("Sync of {Name} to {Device} handed to the background service ({Count} track(s))", name, device.MountPath, missing.Count);
-                UpdateMainStatus($"Syncing “{name}” to {device.Name} in the background — it keeps going even if OrgZ closes.");
+                _log.Information("Sync of {Name} to {Device} handed to the background service ({Count} track(s))", label, device.MountPath, missing.Count);
+                UpdateMainStatus($"Syncing “{label}” to {device.Name} in the background — it keeps going even if OrgZ closes.");
                 await ReattachToServiceJobsAsync();
                 return;
             }
@@ -181,7 +184,7 @@ internal partial class MainWindowViewModel
 
             // The playlist write is optional garnish: a tier without native playlists still got the
             // songs above, it just has nothing to hang the name on.
-            if (ipod.SupportsPlaylists)
+            if (name is not null && ipod.SupportsPlaylists)
             {
                 SetLcdBusy($"Writing playlist “{name}”", 1);
                 await ipod.CreatePlaylistAsync(name, playlistItems);
@@ -195,8 +198,10 @@ internal partial class MainWindowViewModel
             device.SetSpaceFrom(_allItems.Where(i => i.Source == deviceSource));
             ApplyFilter();
 
-            _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total} nativePlaylist={Native}", name, device.MountPath, matched, added, failed, playlistItems.Count, ipod.SupportsPlaylists);
-            UpdateMainStatus(ipod.SupportsPlaylists
+            _log.Information("Synced playlist {Name} to {Device}: matched={Matched} added={Added} failed={Failed} total={Total} nativePlaylist={Native}", label, device.MountPath, matched, added, failed, playlistItems.Count, name is not null && ipod.SupportsPlaylists);
+            UpdateMainStatus(name is null
+                ? $"Synced your library to {device.Name} — {playlistItems.Count} track(s), {added} new."
+                : ipod.SupportsPlaylists
                 ? $"Synced “{name}” to {device.Name} — {playlistItems.Count} track(s), {added} new."
                 : $"Synced “{name}”'s tracks to {device.Name} — {added} new (no playlists on this device).");
         }
@@ -211,7 +216,7 @@ internal partial class MainWindowViewModel
             {
                 throw;   // a full device sync owns this gesture - let it stop everything
             }
-            _log.Information("Sync of {Name} to {Device} cancelled after {Added} added", name, device.MountPath, added);
+            _log.Information("Sync of {Name} to {Device} cancelled after {Added} added", label, device.MountPath, added);
             UpdateMainStatus($"Sync cancelled — {added} track(s) made it to {device.Name}.");
         }
         catch (Exception ex)
@@ -349,6 +354,18 @@ internal partial class MainWindowViewModel
                 }
 
                 ct.ThrowIfCancellationRequested();
+                if (plan.EntireLibrary && ipod.SupportsTrackAdd)
+                {
+                    var music = _allItems.Where(i => IsLocalLibraryFile(i) && i.Kind == MediaKind.Music).ToList();
+                    if (music.Count > 0 && EntireLibraryFitsOrExplain(dev, music))
+                    {
+                        // No playlist name: the library sync fills the device's master list only;
+                        // native playlists come from the selections below.
+                        await SyncPlaylistToDeviceAsync(null, music, dev);
+                    }
+                }
+
+                ct.ThrowIfCancellationRequested();
                 if (plan.Favorites && ipod.SupportsTrackAdd)
                 {
                     var favorites = FavoriteMusicFiles();
@@ -426,6 +443,60 @@ internal partial class MainWindowViewModel
     /// the keep-set. Untagged tracks (empty key) are never removed - we can't prove they were
     /// deselected. Pure and testable; callers pass the already-kind-filtered device tracks.
     /// </summary>
+    /// <summary>Headroom the preflight refuses to eat into: the device needs working space for
+    /// its own databases and the copy-then-rename staging writes.</summary>
+    internal const long SyncFreeSpaceMarginBytes = 200L * 1024 * 1024;
+
+    /// <summary>
+    /// Pure capacity check: do <paramref name="bytesToAdd"/> more bytes fit in
+    /// <paramref name="freeBytes"/> with the margin intact? Transcoded sizes aren't knowable up
+    /// front, so the source file size stands in - close for copies, conservative for FLAC-&gt;ALAC.
+    /// A non-positive freeBytes means the free space is unknown; the sync proceeds rather than
+    /// refusing on missing data.
+    /// </summary>
+    internal static bool FitsOnDevice(long freeBytes, long bytesToAdd)
+        => freeBytes <= 0 || bytesToAdd <= freeBytes - SyncFreeSpaceMarginBytes;
+
+    /// <summary>Sums the on-disk size of the tracks not already on the device (matched by
+    /// artist/title, the same key every sync path dedups with).</summary>
+    internal static long BytesMissingFromDevice(IEnumerable<MediaItem> tracks, HashSet<string> deviceKeys)
+    {
+        long total = 0;
+        foreach (var t in tracks)
+        {
+            var key = NormalizeMatchKey(t.Artist, t.Title);
+            if (!string.IsNullOrEmpty(key) && deviceKeys.Contains(key))
+            {
+                continue;
+            }
+            total += t.FileSize ?? 0;
+        }
+        return total;
+    }
+
+    /// <summary>True when the whole-library sync fits on the device; otherwise reports how far
+    /// short it falls and skips the leg (podcasts/audiobooks/playlists still run).</summary>
+    private bool EntireLibraryFitsOrExplain(ConnectedDevice dev, IReadOnlyList<MediaItem> music)
+    {
+        var deviceSource = $"device:{dev.MountPath}";
+        var deviceKeys = _allItems
+            .Where(i => i.Source == deviceSource)
+            .Select(i => NormalizeMatchKey(i.Artist, i.Title))
+            .Where(k => !string.IsNullOrEmpty(k))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var needed = BytesMissingFromDevice(music, deviceKeys);
+        if (FitsOnDevice(dev.FreeSpace, needed))
+        {
+            return true;
+        }
+
+        var (needSize, needUnit, _) = Helpers.FormatHelper.ReduceBytes(needed);
+        _log.Warning("Entire-library sync to {Device} skipped: needs ~{Needed} bytes, {Free} free", dev.MountPath, needed, dev.FreeSpace);
+        UpdateMainStatus($"Your library needs ~{needSize:0.#} {needUnit} but {dev.Name} only has {dev.FreeSpaceLabel} free — entire-library sync skipped.");
+        return false;
+    }
+
     internal static List<MediaItem> MirrorRemovals(IEnumerable<MediaItem> deviceTracks, HashSet<string> keep)
         => deviceTracks.Where(i =>
         {
@@ -442,6 +513,13 @@ internal partial class MainWindowViewModel
             if (!string.IsNullOrEmpty(k)) { keep.Add(k); }
         }
 
+        if (plan.EntireLibrary)
+        {
+            foreach (var m in _allItems.Where(i => IsLocalLibraryFile(i) && i.Kind == MediaKind.Music))
+            {
+                Note(m);
+            }
+        }
         if (plan.Favorites)
         {
             foreach (var f in FavoriteMusicFiles())

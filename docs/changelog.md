@@ -1,6 +1,15 @@
 # Changelog
 
-## v0.16.1 (Current)
+## v0.17.0 (Current)
+
+### iPods
+
+- Sync your entire music library. Sync Settings gains an "Entire music library"
+  option - every music track goes to the device, with playlists still choosing
+  which named lists exist on it. If the library won't fit, that part is skipped
+  with a note saying how much space it needs, and the rest of the sync carries on
+
+## v0.16.1
 
 ### Playlists
 

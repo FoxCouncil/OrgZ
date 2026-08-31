@@ -26,6 +26,33 @@ public class SyncMirrorTests
         => items.Select(x => MainWindowViewModel.NormalizeMatchKey(x.Artist, x.Title))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+    // -- Entire-library capacity preflight: the pure pieces --
+
+    [Theory]
+    [InlineData(0, 1_000_000, true)]                                  // free space unknown: proceed
+    [InlineData(-1, 1_000_000, true)]
+    [InlineData(8_000_000_000, 1_000_000_000, true)]                  // plenty of room
+    [InlineData(1_000_000_000, 1_000_000_000, false)]                 // exactly full: margin refused
+    [InlineData(1_000_000_000, 1_000_000_000 - 200L * 1024 * 1024, true)]   // fits with the margin to spare
+    [InlineData(1_000_000_000, 1_000_000_000 - 200L * 1024 * 1024 + 1, false)]  // one byte into the margin
+    public void FitsOnDevice_respects_the_working_space_margin(long free, long needed, bool expected)
+    {
+        Assert.Equal(expected, MainWindowViewModel.FitsOnDevice(free, needed));
+    }
+
+    [Fact]
+    public void BytesMissingFromDevice_only_counts_tracks_the_device_lacks()
+    {
+        var onDevice = new MediaItem { Id = "a", Kind = MediaKind.Music, Artist = "Radiohead", Title = "Creep", FileSize = 5_000_000 };
+        var missing = new MediaItem { Id = "b", Kind = MediaKind.Music, Artist = "Boards of Canada", Title = "Roygbiv", FileSize = 7_000_000 };
+        var untagged = new MediaItem { Id = "c", Kind = MediaKind.Music, FileSize = 3_000_000 };   // no key: always counted
+        var sizeless = new MediaItem { Id = "d", Kind = MediaKind.Music, Artist = "X", Title = "Y" };
+
+        var deviceKeys = Keep(("Radiohead", "Creep"));
+
+        Assert.Equal(10_000_000, MainWindowViewModel.BytesMissingFromDevice([onDevice, missing, untagged, sizeless], deviceKeys));
+    }
+
     [Fact]
     public void Removes_device_music_not_in_the_keep_set()
     {
