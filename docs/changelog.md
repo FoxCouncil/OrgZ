@@ -1,8 +1,20 @@
 # Changelog
 
-## v0.17.7 (Current)
+## v0.18.0 (Current)
 
 ### iPods
+
+- OrgZ now knows each player's hardware limits - the FAT32 file and folder ceilings,
+  how many tracks and how much database a Classic can hold in memory, Rockbox's
+  browser limit - and checks the device against them before and after every sync.
+  Every music track typed, every cover stored, every playlist entry valid, no file
+  at a ceiling: the status line reports the worst finding, the log the full list
+- New tracks are spread across the fifty music folders the way iTunes does it,
+  instead of all landing in one
+- Cover art files roll over to a new file before they can hit the 4 GB filesystem
+  ceiling, the way iTunes does it. A file that reached it silently lost every cover
+  written afterwards
+- New **Hardware Limits** page in the manual listing every limit and its source
 
 - Fixed music synced to an iPod Classic, Nano 3G/4G or similar being missing from
   the Artists, Albums, Genres and Playlists menus. The tracks were on the device

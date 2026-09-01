@@ -63,6 +63,13 @@ The new playlist appears under the device immediately - no reconnect needed.
     ticked, the file copy is handed to the background service, so quitting OrgZ
     mid-sync doesn't abandon it.
 
+## After a sync
+
+OrgZ reads the device back and checks it against the model's
+[hardware limits](hardware-limits.md): every track typed, every cover stored, every playlist
+entry valid, no file or folder at a filesystem ceiling, the database within what the firmware
+can load. The status line reports the worst finding; the log has the full list.
+
 ## Ejecting
 
 Right-click the device and choose **Eject** to safely remove it. OrgZ unmounts

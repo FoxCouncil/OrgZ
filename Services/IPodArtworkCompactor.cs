@@ -49,10 +49,11 @@ public static class IPodArtworkCompactor
     /// distinct cover, assigns the offsets its thumbnails will occupy in the rebuilt .ithmb files.
     /// Entries sharing a cover get the same offsets. Pure, so the packing is testable on its own.
     /// </summary>
-    internal static List<ArtImage> PlanLayout(IReadOnlyList<(ArtImage Image, string CoverKey)> entries)
+    internal static List<ArtImage> PlanLayout(IReadOnlyList<(ArtImage Image, string CoverKey)> entries, long? fileLimit = null)
     {
+        long limit = fileLimit ?? IPodArtworkFiles.MaxFileBytes;
         var thumbsByCover = new Dictionary<string, IReadOnlyList<ArtThumb>>(StringComparer.Ordinal);
-        var nextOffset = new Dictionary<int, long>();   // format id -> bytes already placed
+        var cursor = new Dictionary<int, (int FileIndex, long Offset)>();   // per format: where the next thumbnail lands
         var planned = new List<ArtImage>(entries.Count);
 
         foreach (var (image, coverKey) in entries)
@@ -62,9 +63,14 @@ public static class IPodArtworkCompactor
                 var placed = new List<ArtThumb>(image.Thumbs.Count);
                 foreach (var thumb in image.Thumbs)
                 {
-                    long offset = nextOffset.GetValueOrDefault(thumb.FormatId);
-                    placed.Add(thumb with { IthmbOffset = (int)offset });
-                    nextOffset[thumb.FormatId] = offset + thumb.ImageSize;
+                    var (fileIndex, offset) = cursor.GetValueOrDefault(thumb.FormatId, (1, 0L));
+                    if (offset > 0 && offset + thumb.ImageSize > limit)
+                    {
+                        fileIndex++;   // this file is full: the thumbnail opens the next one
+                        offset = 0;
+                    }
+                    placed.Add(thumb with { IthmbOffset = (int)offset, FileIndex = fileIndex });
+                    cursor[thumb.FormatId] = (fileIndex, offset + thumb.ImageSize);
                 }
                 shared = placed;
                 thumbsByCover[coverKey] = shared;
@@ -80,7 +86,7 @@ public static class IPodArtworkCompactor
     /// Rebuilds a device's artwork storage with one copy of each distinct cover. Reports progress as
     /// (stage, 0..1). Returns what it found; nothing is written when there are no duplicates.
     /// </summary>
-    public static async Task<Result> CompactAsync(string mountPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+    public static async Task<Result> CompactAsync(string mountPath, Action<string, double>? onProgress = null, CancellationToken ct = default, long? fileLimit = null)
     {
         var artDir = Path.Combine(mountPath, "iPod_Control", "Artwork");
         var dbPath = Path.Combine(artDir, "ArtworkDB");
@@ -98,7 +104,7 @@ public static class IPodArtworkCompactor
         long bytesBefore = images.SelectMany(i => i.Thumbs).Sum(t => (long)t.ImageSize);
 
         // ── Pass 1: read every thumbnail and work out which entries share a picture. ──
-        var readers = new Dictionary<int, FileStream>();
+        var readers = new Dictionary<string, FileStream>(StringComparer.OrdinalIgnoreCase);
         var entries = new List<(ArtImage Image, string CoverKey)>(images.Count);
         try
         {
@@ -111,16 +117,16 @@ public static class IPodArtworkCompactor
                 bool readable = true;
                 foreach (var thumb in images[i].Thumbs)
                 {
-                    if (!readers.TryGetValue(thumb.FormatId, out var reader))
+                    if (!readers.TryGetValue(thumb.FileName, out var reader))
                     {
-                        var path = Path.Combine(artDir, $"F{thumb.FormatId}_1.ithmb");
+                        var path = Path.Combine(artDir, thumb.FileName);
                         if (!File.Exists(path))
                         {
                             readable = false;
                             break;
                         }
                         reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
-                        readers[thumb.FormatId] = reader;
+                        readers[thumb.FileName] = reader;
                     }
 
                     if (thumb.IthmbOffset < 0 || thumb.IthmbOffset + thumb.ImageSize > reader.Length)
@@ -152,11 +158,11 @@ public static class IPodArtworkCompactor
             }
         }
 
-        var planned = PlanLayout(entries);
+        var planned = PlanLayout(entries, fileLimit);
         int distinct = entries.Select(e => e.CoverKey).Distinct(StringComparer.Ordinal).Count();
         long bytesAfter = planned
             .SelectMany(p => p.Thumbs)
-            .DistinctBy(t => (t.FormatId, t.IthmbOffset))
+            .DistinctBy(t => (t.FileName, t.IthmbOffset))
             .Sum(t => (long)t.ImageSize);
 
         var result = new Result(entries.Count, distinct, bytesBefore, bytesAfter);
@@ -168,11 +174,11 @@ public static class IPodArtworkCompactor
 
         // ── Pass 2: write the new files beside the old ones. Nothing is replaced until every
         // byte is on disk, so a failure (or an unplugged cable) leaves the device untouched. ──
-        var staged = new Dictionary<int, string>();
-        var sources = new Dictionary<int, FileStream>();
+        var staged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);     // new file name -> staged path
+        var sources = new Dictionary<string, FileStream>(StringComparer.OrdinalIgnoreCase); // old file name -> reader
         try
         {
-            var written = new HashSet<(int FormatId, int Offset)>();
+            var written = new HashSet<(string File, int Offset)>();
             for (int i = 0; i < planned.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
@@ -184,22 +190,22 @@ public static class IPodArtworkCompactor
                 for (int t = 0; t < planned[i].Thumbs.Count; t++)
                 {
                     var target = planned[i].Thumbs[t];
-                    if (!written.Add((target.FormatId, target.IthmbOffset)))
+                    if (!written.Add((target.FileName, target.IthmbOffset)))
                     {
                         continue;   // this cover's bytes are already in the new file
                     }
 
                     var source = original.Thumbs[t];
-                    if (!sources.TryGetValue(source.FormatId, out var reader))
+                    if (!sources.TryGetValue(source.FileName, out var reader))
                     {
-                        reader = new FileStream(Path.Combine(artDir, $"F{source.FormatId}_1.ithmb"), FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
-                        sources[source.FormatId] = reader;
+                        reader = new FileStream(Path.Combine(artDir, source.FileName), FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+                        sources[source.FileName] = reader;
                     }
 
-                    if (!staged.TryGetValue(target.FormatId, out var stagedPath))
+                    if (!staged.TryGetValue(target.FileName, out var stagedPath))
                     {
-                        stagedPath = Path.Combine(artDir, $"F{target.FormatId}_1.ithmb.orgznew");
-                        staged[target.FormatId] = stagedPath;
+                        stagedPath = Path.Combine(artDir, target.FileName + ".orgznew");
+                        staged[target.FileName] = stagedPath;
                         File.Delete(stagedPath);
                     }
 
@@ -211,7 +217,7 @@ public static class IPodArtworkCompactor
                     if (writer.Length != target.IthmbOffset)
                     {
                         throw new InvalidOperationException(
-                            $"Artwork rebuild is out of step for format {target.FormatId}: file is at {writer.Length}, entry expects {target.IthmbOffset}.");
+                            $"Artwork rebuild is out of step for {target.FileName}: file is at {writer.Length}, entry expects {target.IthmbOffset}.");
                     }
                     await writer.WriteAsync(buffer, ct);
                 }
@@ -246,10 +252,17 @@ public static class IPodArtworkCompactor
             File.Copy(dbPath, dbBackup);
         }
 
-        foreach (var (formatId, stagedPath) in staged)
+        foreach (var (fileName, stagedPath) in staged)
         {
-            var live = Path.Combine(artDir, $"F{formatId}_1.ithmb");
-            File.Move(stagedPath, live, overwrite: true);
+            File.Move(stagedPath, Path.Combine(artDir, fileName), overwrite: true);
+        }
+
+        // Files the old layout used that the new one doesn't (a rolled-over _2 that emptied
+        // out after de-duplication) are dead weight now.
+        var oldFiles = images.SelectMany(i => i.Thumbs).Select(t => t.FileName).Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var stale in oldFiles.Where(f => !staged.ContainsKey(f)))
+        {
+            try { File.Delete(Path.Combine(artDir, stale)); } catch { /* best-effort */ }
         }
         AtomicFile.WriteAllBytes(dbPath, dbBytes, backup: null);
 

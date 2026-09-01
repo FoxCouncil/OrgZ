@@ -436,6 +436,16 @@ internal partial class MainWindowViewModel
             // Snapshot the UI-bound _allItems on this (UI) thread before any Task.Run below reads it.
             var itemById = BuildItemLookup();
 
+            // Preflight: measure the device against its limits before writing a byte. Problems that are
+            // already there (a file at the FAT32 ceiling, rows with no media type) are reported now
+            // rather than discovered after hours of copying; the repair pass and the write paths
+            // below deal with the ones they can, and the post-sync check says what's left.
+            var preflight = await Task.Run(() => Services.DeviceLimits.DeviceVerifier.Preflight(dev, 0, 0), ct);
+            if (preflight.Worst != Services.DeviceLimits.FindingLevel.Ok)
+            {
+                UpdateMainStatus($"Before sync, {dev.Name}: {preflight.Summary()}");
+            }
+
             // Block-scoped using (not `using var`): the batch's Dispose - which flushes/regenerates
             // the CDB - runs inside the try, so if it throws on a dead mount the catch below owns it.
             using (var batch = ipod.BeginBatchWrite())
@@ -508,7 +518,16 @@ internal partial class MainWindowViewModel
                 }
             }
 
-            UpdateMainStatus($"Sync to {dev.Name} complete.");
+            // The batch has committed: read the device back and check what a per-track view can't see -
+            // every music row typed, every art claim backed, every playlist entry resolving, no file at
+            // the FAT32 ceiling, no folder at the entry limit, the database within what the model loads.
+            var verified = await Task.Run(() => Services.DeviceLimits.DeviceVerifier.Verify(dev), CancellationToken.None);
+            UpdateMainStatus(verified.Worst switch
+            {
+                Services.DeviceLimits.FindingLevel.Failed => $"Sync to {dev.Name} finished, but a check failed: {verified.Summary()}",
+                Services.DeviceLimits.FindingLevel.Warning => $"Sync to {dev.Name} complete. {verified.Summary()}",
+                _ => $"Sync to {dev.Name} complete - device checks passed.",
+            });
         }
         catch (OperationCanceledException)
         {

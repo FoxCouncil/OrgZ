@@ -274,6 +274,54 @@ public class IPodDeviceConformanceTests
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /// <summary>A synthetic stock iPod: bare mount + the product's own factory-empty iTunesDB.</summary>
+    [Fact]
+    public async Task Binary_tier_at_scale_spreads_folders_and_passes_the_device_checks()
+    {
+        // The August 2026 bugs were invisible on two tracks and obvious on thousands. This runs a
+        // few hundred through the real import path and then holds the device to the same checks a
+        // real sync runs afterwards.
+        var mount = Path.Combine(Path.GetTempPath(), "orgz-conf-" + Guid.NewGuid().ToString("N"));
+        var srcDir = Path.Combine(Path.GetTempPath(), "orgz-confsrc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(srcDir);
+        try
+        {
+            var device = new ConnectedDevice { MountPath = mount, DeviceType = DeviceType.StockIPod, Name = "POD", IpodGeneration = "Classic 7G", FireWireGuid = "000A2700DEADBEEF" };
+            var ipod = NewBinaryIPod(mount, "Classic 7G", "000A2700DEADBEEF");
+
+            const int count = 300;
+            using (ipod.BeginBatchWrite())
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    await ipod.AddTrackAsync(LibraryTrack(srcDir, $"Track {i:000}"), ffmpegPath: "ffmpeg-not-installed");
+                }
+            }
+
+            var library = await ipod.ReadLibraryAsync();
+            Assert.Equal(count, library.Tracks.Count);
+
+            // Spread, not piled: iTunes uses F00-F49 and so do we.
+            var folders = Directory.GetDirectories(Path.Combine(mount, "iPod_Control", "Music")).Select(Path.GetFileName).ToList();
+            Assert.True(folders.Count > 10, $"expected tracks across many folders, got {folders.Count}");
+            Assert.All(folders, f => Assert.Matches(@"^F[0-4]\d$", f!));
+
+            var measured = Services.DeviceLimits.DeviceProbe.Measure(device);
+            Assert.True(measured.DatabaseInspected);
+            Assert.Equal(count, measured.TrackCount);
+            Assert.Equal(0, measured.TracksWithoutMediaType);
+            Assert.Equal(0, measured.PlaylistItemsWithoutTrack);
+            Assert.Equal(count, measured.MusicFolders.Sum(f => f.Entries));
+
+            var report = Services.DeviceLimits.DeviceVerifier.Evaluate(measured, Services.DeviceLimits.DeviceLimitCatalog.For(device));
+            Assert.DoesNotContain(report.Findings, f => f.Level == Services.DeviceLimits.FindingLevel.Failed);
+        }
+        finally
+        {
+            TryDelete(mount);
+            TryDelete(srcDir);
+        }
+    }
+
     private static IPodDevice NewBinaryIPod(string mount, string generation, string? fireWireGuid)
     {
         var iTunesDir = Path.Combine(mount, "iPod_Control", "iTunes");

@@ -4,8 +4,16 @@ using System.Text;
 
 namespace OrgZ.Services;
 
-/// <summary>One on-disk thumbnail: which .ithmb format, its pixel size, and where in that file it lives.</summary>
-public sealed record ArtThumb(int FormatId, int Width, int Height, int IthmbOffset, int ImageSize);
+/// <summary>
+/// One on-disk thumbnail: which .ithmb format, its pixel size, and where it lives. <paramref name="FileIndex"/>
+/// is the N in <c>F{FormatId}_N.ithmb</c>: the device is FAT32, so a format's thumbnails roll into a new
+/// file before the current one reaches the 4 GiB file-size ceiling, exactly as iTunes does.
+/// </summary>
+public sealed record ArtThumb(int FormatId, int Width, int Height, int IthmbOffset, int ImageSize, int FileIndex = 1)
+{
+    /// <summary>The file this thumbnail's bytes are in, relative to iPod_Control/Artwork.</summary>
+    public string FileName => $"F{FormatId}_{FileIndex}.ithmb";
+}
 
 /// <summary>One artwork entry: a track's dbid, its image id, and the thumbnails (one per format).</summary>
 public sealed record ArtImage(ulong Dbid, int ImageId, IReadOnlyList<ArtThumb> Thumbs, int OrigImgSize);
@@ -146,11 +154,43 @@ public static class ArtworkDbWriter
                     Width:       ReadUInt16(mhni.Header, 0x22),
                     Height:      ReadUInt16(mhni.Header, 0x20),
                     IthmbOffset: ReadInt32(mhni.Header, 0x14),
-                    ImageSize:   ReadInt32(mhni.Header, 0x18)));
+                    ImageSize:   ReadInt32(mhni.Header, 0x18),
+                    FileIndex:   ReadFileIndex(mhni)));
             }
             images.Add(new ArtImage(dbid, imageId, thumbs, origSize));
         }
         return images;
+    }
+
+    /// <summary>
+    /// The N in the mhni's ":F####_N.ithmb" filename child. 1 when the name is missing or odd -
+    /// every database written before rollover existed only ever used _1.
+    /// </summary>
+    private static int ReadFileIndex(ITunesDbChunk mhni)
+    {
+        foreach (var mhod in mhni.Children.Where(c => c.Magic == "mhod"))
+        {
+            if (mhod.Body is null || mhod.Body.Length < 16)
+            {
+                continue;
+            }
+            // Body layout (see BuildFileNameMhod): [byteLen u32][encoding u8][3 pad][4 pad][UTF-16LE] - the
+            // string starts at 12, not the 16 an iTunesDB string mhod uses.
+            const int StringStart = 12;
+            int len = ReadInt32(mhod.Body, 0);
+            if (len <= 0 || StringStart + len > mhod.Body.Length)
+            {
+                continue;
+            }
+            var name = Encoding.Unicode.GetString(mhod.Body, StringStart, len);
+            int underscore = name.LastIndexOf('_');
+            int dot = name.LastIndexOf('.');
+            if (underscore > 0 && dot > underscore && int.TryParse(name.AsSpan(underscore + 1, dot - underscore - 1), out var index) && index > 0)
+            {
+                return index;
+            }
+        }
+        return 1;
     }
 
     /// <summary>Next free image id given the current entries (iTunes starts at 100).</summary>
@@ -167,7 +207,7 @@ public static class ArtworkDbWriter
         WriteUInt16(mhni.Header, 0x22, (ushort)t.Width);
         mhni.WriteHeaderInt32(0x28, t.ImageSize);   // image_size is stored twice
         // The filename child is mandatory for the firmware to render the image.
-        mhni.Children.Add(BuildFileNameMhod($":F{t.FormatId}_1.ithmb"));
+        mhni.Children.Add(BuildFileNameMhod(":" + t.FileName));
 
         var container = NewChunk("mhod", MhodLen);
         WriteUInt16(container.Header, 0x0C, MhodTypeThumbnail);

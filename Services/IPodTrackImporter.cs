@@ -226,7 +226,7 @@ public static class IPodTrackImporter
         try
         {
             // --- copy onto the device ---
-            const string folder = "F00";
+            var folder = MusicFolderFor();
             var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
             Directory.CreateDirectory(destDir);
 
@@ -615,7 +615,7 @@ public static class IPodTrackImporter
             return 0;
         }
 
-        const string folder = "F00";
+        var folder = MusicFolderFor();
         var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
         Directory.CreateDirectory(destDir);
 
@@ -1059,8 +1059,20 @@ public static class IPodTrackImporter
             {
                 foreach (var (formatId, w, h, raw) in stagedThumbs)
                 {
-                    var ithmb = Path.Combine(artDir, $"F{formatId}_1.ithmb");
+                    // Newest file for this format, rolling to the next one when this thumbnail would
+                    // push it past the FAT32 ceiling. iTunes does the same; a single ever-growing
+                    // file stopped dead at 4 GiB on a 29k-track library and every cover after that
+                    // was silently lost.
+                    int fileIndex = IPodArtworkFiles.NewestFileIndex(artDir, formatId);
+                    var ithmb = Path.Combine(artDir, IPodArtworkFiles.FileName(formatId, fileIndex));
                     long offset = batch?.IthmbEnd(ithmb) ?? (File.Exists(ithmb) ? new FileInfo(ithmb).Length : 0);
+                    if (IPodArtworkFiles.WouldOverflow(offset, raw.Length))
+                    {
+                        fileIndex++;
+                        ithmb = Path.Combine(artDir, IPodArtworkFiles.FileName(formatId, fileIndex));
+                        offset = batch?.IthmbEnd(ithmb) ?? 0;
+                        _log.Information("Artwork format {Format} rolls over to {File} (previous file at the size ceiling)", formatId, Path.GetFileName(ithmb));
+                    }
 
                     await using (var fs = new FileStream(ithmb, FileMode.Append, FileAccess.Write))
                     {
@@ -1070,7 +1082,7 @@ public static class IPodTrackImporter
 
                     appended.Add((ithmb, offset));
                     batch?.AdvanceIthmb(ithmb, raw.Length);
-                    thumbs.Add(new ArtThumb(formatId, w, h, (int)offset, raw.Length));
+                    thumbs.Add(new ArtThumb(formatId, w, h, (int)offset, raw.Length, fileIndex));
                     totalSize += raw.Length;
                 }
             }
@@ -1215,7 +1227,7 @@ public static class IPodTrackImporter
 
         var itlp = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunes Library.itlp");
         var writer = new Nano5gLibraryWriter(itlp, fireWireGuid);
-        const string folder = "F00";
+        var folder = MusicFolderFor();
         var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
         Directory.CreateDirectory(destDir);
 
@@ -1375,7 +1387,7 @@ public static class IPodTrackImporter
 
         try
         {
-            const string folder = "F00";
+            var folder = MusicFolderFor();
             var destDir = Path.Combine(mountPath, "iPod_Control", "Music", folder);
             Directory.CreateDirectory(destDir);
             var destFile = UniqueTrackPath(destDir, targetExt);
@@ -1649,6 +1661,17 @@ public static class IPodTrackImporter
     /// database still pointed at it - silent, unrecoverable track loss. We spin a fresh name
     /// until the slot is free; callers then copy WITHOUT overwrite.
     /// </summary>
+    /// <summary>iTunes lays tracks out across iPod_Control/Music/F00-F49; the same fifty here.</summary>
+    public const int MusicFolderCount = 50;
+
+    /// <summary>
+    /// The folder a new track goes in, chosen at random like iTunes does. One folder for everything
+    /// worked until a library got big: FAT32 caps a directory at 65,534 entries, and every lookup in a
+    /// folder of tens of thousands of files is slow on the device. Spreading keeps each folder small;
+    /// the database records the full path, so where a track landed never matters afterwards.
+    /// </summary>
+    internal static string MusicFolderFor() => $"F{Random.Shared.Next(MusicFolderCount):00}";
+
     internal static string UniqueTrackPath(string destDir, string ext)
     {
         for (int attempt = 0; attempt < 1000; attempt++)

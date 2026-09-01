@@ -85,6 +85,23 @@ public class IPodArtworkCompactorTests
     }
 
     [Fact]
+    public void PlanLayout_rolls_a_format_into_the_next_file_at_the_ceiling()
+    {
+        // Three distinct covers, 400 bytes each at the big format, with a 1000-byte ceiling: two fit
+        // the first file, the third must open F1060_2 at offset 0. The small format never fills.
+        var planned = IPodArtworkCompactor.PlanLayout(
+        [
+            (Image(10, 101, 0, 0), "A"),
+            (Image(11, 102, 400, 100), "B"),
+            (Image(12, 103, 800, 200), "C"),
+        ], fileLimit: 1000);
+
+        var bigs = planned.Select(p => p.Thumbs.Single(t => t.FormatId == Big)).ToList();
+        Assert.Equal([(1, 0), (1, 400), (2, 0)], bigs.Select(t => (t.FileIndex, t.IthmbOffset)));
+        Assert.All(planned.Select(p => p.Thumbs.Single(t => t.FormatId == Small)), t => Assert.Equal(1, t.FileIndex));
+    }
+
+    [Fact]
     public void PlanLayout_leaves_an_already_compact_device_alone()
     {
         var planned = IPodArtworkCompactor.PlanLayout(
