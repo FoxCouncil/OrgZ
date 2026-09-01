@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.17.6 (Current)
+## v0.17.7 (Current)
 
 ### iPods
 
@@ -12,7 +12,9 @@
 - Album art is written once per cover instead of once per track. An album no
   longer stores the same picture on the device once for every song it has, which
   saves a lot of space and makes art load faster
-
+- Some covers were silently skipped during sync (they decode fine on their own but
+  ffmpeg rejects them while still inside the audio file). They're now extracted
+  first and rendered from that, so those albums get their art
 - Sync your entire music library. Sync Settings gains a "Music" option - every
   music track goes to the device, with playlists still choosing which named lists
   exist on it. If the library won't fit, that part is skipped with a note saying

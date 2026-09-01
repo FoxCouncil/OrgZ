@@ -567,7 +567,7 @@ public static class ITunesDbWriter
 
     /// <summary>Reads a string MHOD of the given type from a chunk's children (UTF-16LE body
     /// after the 16-byte sub-header), or null when absent/malformed.</summary>
-    private static string? ReadMhodString(ITunesDbChunk parent, int mhodType)
+    internal static string? ReadMhodString(ITunesDbChunk parent, int mhodType)
     {
         foreach (var mhod in parent.Children.Where(c => c.Magic == "mhod"))
         {

@@ -813,6 +813,160 @@ public static class IPodTrackImporter
         return healed;
     }
 
+    /// <summary>One track on the device that has no cover stored.</summary>
+    /// <param name="Dbid">Links the track to its ArtworkDB entry.</param>
+    public sealed record MissingArtworkTrack(ulong Dbid, string? Artist, string? Title, string? Album);
+
+    /// <summary>
+    /// Lists the device's tracks that have no artwork: either the track never claimed any, or it
+    /// claims some but the ArtworkDB has no entry for its dbid (which is what a run of failed
+    /// artwork writes leaves behind - the .ithmb had filled up, so the pictures were never stored).
+    /// </summary>
+    public static List<MissingArtworkTrack> FindTracksMissingArtwork(string mountPath)
+    {
+        var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
+        var artPath = Path.Combine(mountPath, "iPod_Control", "Artwork", "ArtworkDB");
+        var missing = new List<MissingArtworkTrack>();
+        if (!File.Exists(dbPath))
+        {
+            return missing;
+        }
+
+        var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+        var withArt = new HashSet<ulong>();
+        if (File.Exists(artPath))
+        {
+            try
+            {
+                foreach (var image in ArtworkDbWriter.ReadImages(ITunesDbChunkTree.Parse(File.ReadAllBytes(artPath))))
+                {
+                    withArt.Add(image.Dbid);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warning(ex, "ArtworkDB at {Path} unreadable; treating every track as missing art", artPath);
+            }
+        }
+
+        foreach (var mhit in TrackMhits(doc))
+        {
+            var dbid = ReadDbid(mhit);
+            if (dbid == 0 || withArt.Contains(dbid))
+            {
+                continue;
+            }
+            missing.Add(new MissingArtworkTrack(
+                dbid,
+                ITunesDbWriter.ReadMhodString(mhit, 4),
+                ITunesDbWriter.ReadMhodString(mhit, 1),
+                ITunesDbWriter.ReadMhodString(mhit, 3)));
+        }
+
+        return missing;
+    }
+
+    /// <summary>
+    /// Adds the missing covers back. <paramref name="findSourceFile"/> maps a device track to the
+    /// library file it came from (the device only stores renamed copies, so the original is where
+    /// the picture comes from); returning null skips that track. Everything rides one batch, so the
+    /// database is written once at the end.
+    /// </summary>
+    public static async Task<(int Filled, int NoSource, int Failed)> BackfillArtworkAsync(
+        string mountPath, string? generation, string? fireWireGuid, string ffmpegPath,
+        Func<MissingArtworkTrack, string?> findSourceFile,
+        Action<int, int>? onProgress = null, CancellationToken ct = default)
+    {
+        var missing = FindTracksMissingArtwork(mountPath);
+        if (missing.Count == 0)
+        {
+            return (0, 0, 0);
+        }
+
+        var coverFormats = IPodCapabilities.CoverFormatsFor(generation);
+        if (coverFormats.Count == 0)
+        {
+            _log.Information("No validated artwork formats for {Generation}; nothing to backfill", generation);
+            return (0, 0, 0);
+        }
+
+        int filled = 0, noSource = 0, failed = 0;
+        using (BeginBinaryBatch(mountPath, generation, fireWireGuid))
+        {
+            var batch = ActiveBatch(mountPath)!;
+            var byDbid = TrackMhits(batch.Doc).ToDictionary(ReadDbid, m => m);
+
+            for (int i = 0; i < missing.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                onProgress?.Invoke(i + 1, missing.Count);
+
+                var track = missing[i];
+                var source = findSourceFile(track);
+                if (string.IsNullOrEmpty(source) || !File.Exists(source))
+                {
+                    noSource++;
+                    continue;
+                }
+
+                try
+                {
+                    var (ok, artSize, _) = await TryWriteArtworkAsync(mountPath, source, ffmpegPath, track.Dbid, coverFormats, ct);
+                    if (!ok)
+                    {
+                        failed++;
+                        continue;
+                    }
+
+                    // The track has to advertise the art or the firmware never looks it up.
+                    if (byDbid.TryGetValue(track.Dbid, out var mhit))
+                    {
+                        mhit.Header[0xA4] = 1;
+                        mhit.WriteHeaderInt32(0x7C, 1);
+                        mhit.WriteHeaderInt32(0x80, artSize);
+                        batch.MarkDbDirty();
+                    }
+                    filled++;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _log.Warning(ex, "Could not restore artwork for {Title}", track.Title);
+                    failed++;
+                }
+            }
+        }
+
+        _log.Information("Artwork backfill on {Mount}: {Filled} restored, {NoSource} without a library file, {Failed} failed",
+            mountPath, filled, noSource, failed);
+        return (filled, noSource, failed);
+    }
+
+    /// <summary>The track dataset's mhits. They hang directly off the mhsd in this chunk model -
+    /// the mhlt list header is a sibling, not their parent.</summary>
+    private static IEnumerable<ITunesDbChunk> TrackMhits(ITunesDbDocument doc)
+        => doc.Root.Children
+            .Where(c => c.Magic == "mhsd" && c.ReadHeaderInt32(0x0C) == 1)
+            .SelectMany(mhsd => mhsd.Children)
+            .Where(c => c.Magic == "mhit");
+
+    private static ulong ReadDbid(ITunesDbChunk mhit)
+    {
+        if (mhit.Header.Length < 0x78)
+        {
+            return 0;
+        }
+        ulong dbid = 0;
+        for (int i = 7; i >= 0; i--)
+        {
+            dbid = (dbid << 8) | mhit.Header[0x70 + i];
+        }
+        return dbid;
+    }
+
     /// <summary>
     /// Extracts the source's embedded cover, renders each thumbnail size in
     /// <paramref name="coverFormats"/> as raw RGB565-LE into
@@ -986,35 +1140,62 @@ public static class IPodTrackImporter
 
     private static async Task<bool> ExtractRgb565Async(string ffmpegPath, string source, int w, int h, string dest, CancellationToken ct)
     {
+        if (await RunFfmpegRenderAsync(ffmpegPath, source, w, h, dest, ct))
+        {
+            return true;
+        }
+
+        // Some covers decode perfectly on their own but not while still inside the audio file -
+        // ffmpeg rejects the packet ("Invalid data found") and produces no frame, which cost a
+        // whole album its artwork. Copying the picture out untouched first, then rendering that,
+        // reads the same bytes by a path the decoder accepts.
+        var lifted = Path.Combine(Path.GetTempPath(), "orgz_cover_" + Guid.NewGuid().ToString("N")[..8] + ".img");
+        try
+        {
+            if (!await RunFfmpegAsync(ffmpegPath, ct, "-y", "-i", source, "-map", "0:v:0", "-frames:v", "1", "-c:v", "copy", "-f", "image2", lifted)
+                || !File.Exists(lifted) || new FileInfo(lifted).Length == 0)
+            {
+                _log.Warning("ffmpeg could not lift the embedded cover out of {Source}", source);
+                return false;
+            }
+
+            return await RunFfmpegRenderAsync(ffmpegPath, lifted, w, h, dest, ct);
+        }
+        finally
+        {
+            try { File.Delete(lifted); } catch { /* best-effort temp cleanup */ }
+        }
+    }
+
+    /// <summary>Renders <paramref name="source"/>'s first video stream to a raw RGB565 thumbnail.</summary>
+    private static Task<bool> RunFfmpegRenderAsync(string ffmpegPath, string source, int w, int h, string dest, CancellationToken ct)
+        => RunFfmpegAsync(ffmpegPath, ct,
+            "-y", "-i", source,
+            "-map", "0:v:0",            // embedded cover (attached picture)
+            "-frames:v", "1",
+            "-vf", $"scale={w}:{h}",
+            "-pix_fmt", "rgb565le",
+            "-f", "rawvideo",
+            dest);
+
+    /// <summary>Runs ffmpeg with the given arguments; true when it exits cleanly.</summary>
+    private static async Task<bool> RunFfmpegAsync(string ffmpegPath, CancellationToken ct, params string[] args)
+    {
         var psi = new ProcessStartInfo(ffmpegPath)
         {
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var a in new[]
-                 {
-                     "-y", "-i", source,
-                     "-map", "0:v:0",            // embedded cover (attached picture)
-                     "-frames:v", "1",
-                     "-vf", $"scale={w}:{h}",
-                     "-pix_fmt", "rgb565le",
-                     "-f", "rawvideo",
-                     dest,
-                 })
+        foreach (var a in args)
         {
             psi.ArgumentList.Add(a);
         }
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg (artwork).");
-        var stderr = await proc.StandardError.ReadToEndAsync(ct);
+        _ = await proc.StandardError.ReadToEndAsync(ct);
         await proc.WaitForExitAsync(ct);
-        if (proc.ExitCode != 0)
-        {
-            _log.Warning("ffmpeg artwork extract failed ({W}x{H}, exit {Code})", w, h, proc.ExitCode);
-            return false;
-        }
-        return true;
+        return proc.ExitCode == 0;
     }
 
     /// <summary>
