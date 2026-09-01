@@ -395,6 +395,37 @@ public static class ITunesDbWriter
         }
     }
 
+    /// <summary>
+    /// Retro-fits <see cref="ITunesMediaType.Audio"/> onto every track that never declared a media
+    /// type, and returns how many were healed. Tracks OrgZ wrote before the media_type fix are
+    /// invisible in a 6G+ iPod's browse menus; re-syncing can't repair them (they're already on the
+    /// device, so dedup skips them), and re-copying tens of thousands of files to fix four bytes
+    /// each would be absurd. Podcasts/audiobooks carry a non-zero type already and are left alone.
+    /// </summary>
+    public static int RepairMissingMediaTypes(ITunesDbDocument doc)
+    {
+        var tracks = FindMhsd(doc, type: 1);
+        if (tracks is null)
+        {
+            return 0;
+        }
+
+        int healed = 0;
+        foreach (var mhit in tracks.Children.Where(c => c.Magic == "mhit"))
+        {
+            if (mhit.Header.Length < ITunesMediaType.MhitOffset + 4)
+            {
+                continue;   // a short/foreign mhit - not ours to reinterpret
+            }
+            if (mhit.ReadHeaderInt32(ITunesMediaType.MhitOffset) == 0)
+            {
+                mhit.WriteHeaderInt32(ITunesMediaType.MhitOffset, ITunesMediaType.Audio);
+                healed++;
+            }
+        }
+        return healed;
+    }
+
     /// <summary>Next free playlist id = max existing MHYP id + 1 (master is usually 1).</summary>
     public static uint NextPlaylistId(ITunesDbDocument doc)
     {
@@ -731,6 +762,13 @@ public static class ITunesDbWriter
             mhit.WriteHeaderInt32(0x7C, 1);                     // artwork_count (low 16 bits)
             mhit.WriteHeaderInt32(0x80, t.ArtworkSize);         // artwork_size
         }
+
+        // EVERY track states its media type. Leaving it 0 ("unknown") is why a Classic 7G
+        // could hold 29k tracks and still show empty Artists/Albums/Genres/Playlists menus:
+        // the 6G+ firmware builds those browse lists by filtering on media_type == audio, so
+        // a 0 track exists in the database but belongs to no menu. libgpod sets
+        // ITDB_MEDIATYPE_AUDIO for music for the same reason.
+        mhit.WriteHeaderInt32(ITunesMediaType.MhitOffset, ITunesMediaType.Audio);
 
         // Podcast episode: mark the mediatype + bookmark/unplayed flags and write the
         // podcast MHODs. Audiobooks get their own mediatype + bookmark cluster.

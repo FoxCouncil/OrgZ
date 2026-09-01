@@ -142,6 +142,16 @@
                     </StackPanel>
                 </Button>
                 <Button Padding="10,6" Cursor="Hand"
+                        ToolTip.Tip="Sync settings for this iPod"
+                        Command="{Binding ((vm:MainWindowViewModel)DataContext).SyncSelectedDeviceSettingsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsVisible="{Binding ((vm:MainWindowViewModel)DataContext).CanSyncToDevice, RelativeSource={RelativeSource AncestorType=Window}}"
+                        IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsBusy, RelativeSource={RelativeSource AncestorType=Window}}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <i:Icon Value="fa-solid fa-sliders" FontSize="13" VerticalAlignment="Center" />
+                        <TextBlock Text="Sync Settings" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Padding="10,6" Cursor="Hand"
                         ToolTip.Tip="Eject this iPod"
                         Command="{Binding ((vm:MainWindowViewModel)DataContext).EjectSelectedDeviceCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                         IsEnabled="{Binding !((vm:MainWindowViewModel)DataContext).IsBusy, RelativeSource={RelativeSource AncestorType=Window}}">

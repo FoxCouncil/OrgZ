@@ -37,6 +37,47 @@ public class ITunesDbWriterTests
                .Children.Single(c => c.Magic == "mhyp" && c.Header[0x14] == 1);
 
     [Fact]
+    public void AddTrack_declares_the_audio_media_type()
+    {
+        // media_type 0 ("unknown") is why a Classic 7G held 29k tracks and still showed empty
+        // Artists/Albums/Genres/Playlists menus - the 6G+ firmware builds those by filtering on
+        // media_type == audio. Music must say so; podcasts and audiobooks keep their own types.
+        var doc = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(doc, Sample(1));
+        Assert.Equal(ITunesMediaType.Audio,
+            TracksMhsd(doc).Children.Single(c => c.Magic == "mhit").ReadHeaderInt32(ITunesMediaType.MhitOffset));
+
+        var book = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(book, Sample(1) with { IsAudiobook = true });
+        Assert.Equal(ITunesMediaType.Audiobook,
+            TracksMhsd(book).Children.Single(c => c.Magic == "mhit").ReadHeaderInt32(ITunesMediaType.MhitOffset));
+    }
+
+    [Fact]
+    public void RepairMissingMediaTypes_heals_only_the_untyped_tracks()
+    {
+        // Tracks an older OrgZ wrote are already on the device; re-syncing skips them (dedup), so
+        // the next sync repairs them in place rather than re-copying tens of thousands of files.
+        var doc = ITunesDbWriter.CreateEmpty();
+        ITunesDbWriter.AddTrack(doc, Sample(1));
+        ITunesDbWriter.AddTrack(doc, Sample(2));
+        ITunesDbWriter.AddTrack(doc, Sample(3) with { IsAudiobook = true });
+
+        var mhits = TracksMhsd(doc).Children.Where(c => c.Magic == "mhit").ToList();
+        mhits[0].WriteHeaderInt32(ITunesMediaType.MhitOffset, 0);   // as an older build left it
+        mhits[1].WriteHeaderInt32(ITunesMediaType.MhitOffset, 0);
+
+        Assert.Equal(2, ITunesDbWriter.RepairMissingMediaTypes(doc));
+
+        Assert.Equal(ITunesMediaType.Audio, mhits[0].ReadHeaderInt32(ITunesMediaType.MhitOffset));
+        Assert.Equal(ITunesMediaType.Audio, mhits[1].ReadHeaderInt32(ITunesMediaType.MhitOffset));
+        Assert.Equal(ITunesMediaType.Audiobook, mhits[2].ReadHeaderInt32(ITunesMediaType.MhitOffset));
+
+        // Idempotent: a healthy database is left alone (and stays uncommitted by the caller).
+        Assert.Equal(0, ITunesDbWriter.RepairMissingMediaTypes(doc));
+    }
+
+    [Fact]
     public void AddTrack_writes_soundcheck_from_replaygain()
     {
         // iTunes Sound Check units: 1000·10^(−gain/10). A quiet track (−6.5 dB gain means it plays

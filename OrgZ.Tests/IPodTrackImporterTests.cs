@@ -51,4 +51,30 @@ public class IPodTrackImporterTests
     [InlineData(-1, 44100)]
     public void TargetSampleRate_caps_at_48k(int source, int expected)
         => Assert.Equal(expected, IPodTrackImporter.TargetSampleRate(source));
+
+    // -- Batch nesting: a device plan opens the outer batch, each leg opens an inner one. --
+
+    [Fact]
+    public void Binary_batch_nests_and_only_the_outermost_dispose_closes_it()
+    {
+        var mount = Path.Combine(Path.GetTempPath(), $"orgz-batch-{Guid.NewGuid():N}");
+
+        using (var outer = IPodTrackImporter.BeginBinaryBatch(mount, "Classic 7G", "000A2700DEADBEEF"))
+        {
+            var ambient = IPodTrackImporter.ActiveBatch(mount);
+            Assert.NotNull(ambient);
+
+            // The regression: this second open threw "a batch is already open" and killed
+            // every plan leg on a binary-tier iPod.
+            using (IPodTrackImporter.BeginBinaryBatch(mount, "Classic 7G", "000A2700DEADBEEF"))
+            {
+                Assert.Same(ambient, IPodTrackImporter.ActiveBatch(mount));
+            }
+
+            // The inner dispose released only its nesting level - the ambient batch is still open.
+            Assert.Same(ambient, IPodTrackImporter.ActiveBatch(mount));
+        }
+
+        Assert.Null(IPodTrackImporter.ActiveBatch(mount));
+    }
 }

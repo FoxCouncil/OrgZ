@@ -1,13 +1,33 @@
 # Changelog
 
-## v0.17.0 (Current)
+## v0.17.6 (Current)
 
 ### iPods
 
-- Sync your entire music library. Sync Settings gains an "Entire music library"
-  option - every music track goes to the device, with playlists still choosing
-  which named lists exist on it. If the library won't fit, that part is skipped
-  with a note saying how much space it needs, and the rest of the sync carries on
+- Fixed music synced to an iPod Classic, Nano 3G/4G or similar being missing from
+  the Artists, Albums, Genres and Playlists menus. The tracks were on the device
+  and playable, but were not marked as music, and those menus only list music.
+  Playlists looked empty for the same reason. Tracks already on a device are
+  repaired automatically at the start of the next sync - nothing is re-copied
+- Album art is written once per cover instead of once per track. An album no
+  longer stores the same picture on the device once for every song it has, which
+  saves a lot of space and makes art load faster
+
+- Sync your entire music library. Sync Settings gains a "Music" option - every
+  music track goes to the device, with playlists still choosing which named lists
+  exist on it. If the library won't fit, that part is skipped with a note saying
+  how much space it needs, and the rest of the sync carries on
+- Sync Settings sits on the device's header bar next to Sync
+- Syncing a device that's mid-eject now says so instead of doing nothing
+- Running a sync plan against a classic (binary-database) iPod no longer fails
+  instantly with a batching error
+- The "No music on this device yet" line clears as soon as the first synced
+  track lands, instead of waiting for a view switch
+- The device capacity bar fills as tracks land during a sync, instead of sitting
+  at 0 B until the end
+- Syncing is much faster on libraries that need transcoding: several tracks are
+  converted in parallel while the previous ones copy to the device, so the copy
+  is all that paces a big sync
 
 ## v0.16.1
 

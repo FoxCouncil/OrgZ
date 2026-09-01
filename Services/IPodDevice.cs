@@ -23,7 +23,7 @@ public sealed record DeviceLibrary(IReadOnlyList<MediaItem> Tracks, IReadOnlyLis
 /// </summary>
 public abstract class IPodDevice
 {
-    protected ConnectedDevice Device { get; }
+    protected internal ConnectedDevice Device { get; }
     protected IPodDevice(ConnectedDevice device) => Device = device;
 
     public string Name => Device.Name;
@@ -96,8 +96,18 @@ public abstract class IPodDevice
     /// <paramref name="onProgress"/>, when set, receives ("transcode"|"copy", 0..1) - each phase runs
     /// its own 0..1 so progress UI can show a true bar per stage.
     /// </summary>
-    public virtual Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+    public virtual Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default, string? preparedFile = null)
         => throw new NotImplementedException($"AddTrack is not implemented for {GetType().Name} ({Generation ?? "?"}).");
+
+    /// <summary>
+    /// The host-side half of <see cref="AddTrackAsync"/>: transcode (if this tier would) into a
+    /// temp file and return its path, or null when the source is device-compatible as-is. No
+    /// device or database access, so a sync runs several in parallel ahead of the serial USB
+    /// writer. Hand the result to <see cref="AddTrackAsync"/>'s <c>preparedFile</c>, which takes
+    /// ownership; an unconsumed result is the caller's to delete.
+    /// </summary>
+    public virtual Task<string?> PrepareTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
+        => Task.FromResult<string?>(null);
 
     /// <summary>
     /// Writes (or idempotently replaces) a native user playlist named <paramref name="name"/> referencing
@@ -122,6 +132,13 @@ public abstract class IPodDevice
     /// </summary>
     public virtual Task<DeviceLibrary> ReadLibraryAsync(Action<IReadOnlyList<MediaItem>>? onBatch = null, Action<string>? onProgress = null, CancellationToken ct = default)
         => throw new NotImplementedException($"ReadLibrary is not implemented for {GetType().Name} ({Generation ?? "?"}).");
+
+    /// <summary>
+    /// Repairs database rows earlier OrgZ versions wrote wrong, so a device already carrying them
+    /// heals on its next sync instead of needing an erase. Returns how many rows changed; the base
+    /// tier has nothing to repair.
+    /// </summary>
+    public virtual Task<int> RepairLibraryAsync(CancellationToken ct = default) => Task.FromResult(0);
 
     /// <summary>
     /// Opens a batch scope around a run of consecutive writes, letting a tier defer expensive
@@ -323,12 +340,15 @@ public sealed class Nano5gIPod : IPodDevice
             new Nano5gLibraryWriter(itlp, Device.FireWireGuid).RemoveTrack(pid, musicRoot);
         }, ct);
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default, string? preparedFile = null)
         => Task.Run(async () =>
         {
-            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, onProgress, ct);
+            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, onProgress, preparedFile, ct);
             return DeviceItemFromImport(libraryTrack, r);
         }, ct);
+
+    public override Task<string?> PrepareTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
+        => IPodTrackImporter.PrepareCompatibleFileAsync(libraryTrack.FilePath!, ffmpegPath, Generation, ct);
 
     public override Task CreatePlaylistAsync(string name, IReadOnlyList<MediaItem> deviceTracks, CancellationToken ct = default)
         => Task.Run(() =>
@@ -395,6 +415,9 @@ public sealed class BinaryIPod : IPodDevice
     /// </summary>
     public override IDisposable? BeginBatchWrite()
         => IPodTrackImporter.BeginBinaryBatch(MountPath, Generation, Device.FireWireGuid);
+
+    public override Task<int> RepairLibraryAsync(CancellationToken ct = default)
+        => Task.Run(() => IPodTrackImporter.RepairMissingMediaTypes(MountPath, Generation, Device.FireWireGuid), ct);
 
     /// <summary>Mirrors <see cref="IPodTrackImporter.ImportAsync"/>'s decision: non-native formats
     /// transcode, and on the ALAC-less 1G/2G an ALAC-in-.m4a source re-encodes to AAC too.</summary>
@@ -493,12 +516,15 @@ public sealed class BinaryIPod : IPodDevice
             return removed;
         }, ct);
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default, string? preparedFile = null)
         => Task.Run(async () =>
         {
-            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, onProgress, ct);
+            var r = await IPodTrackImporter.ImportAsync(MountPath, libraryTrack.FilePath!, ffmpegPath, Generation, Device.FireWireGuid, onProgress, preparedFile, ct);
             return DeviceItemFromImport(libraryTrack, r);
         }, ct);
+
+    public override Task<string?> PrepareTrackAsync(MediaItem libraryTrack, string ffmpegPath, CancellationToken ct = default)
+        => IPodTrackImporter.PrepareCompatibleFileAsync(libraryTrack.FilePath!, ffmpegPath, Generation, ct);
 
     public override Task CreatePlaylistAsync(string name, IReadOnlyList<MediaItem> deviceTracks, CancellationToken ct = default)
         => Task.Run(() =>
@@ -641,7 +667,7 @@ public sealed class RockboxIPod : IPodDevice
             File.Delete(item.FilePath);
         }, ct);
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default, string? preparedFile = null)
         => Task.Run(async () =>
         {
             // Rockbox plays straight off disk: copy into /Music/{Artist}/{Album}/ (no transcode) and hand
@@ -932,7 +958,7 @@ public sealed class ShuffleIPod : IPodDevice
         return dest;
     }
 
-    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default)
+    public override Task<MediaItem> AddTrackAsync(MediaItem libraryTrack, string ffmpegPath, Action<string, double>? onProgress = null, CancellationToken ct = default, string? preparedFile = null)
         => Task.Run(async () =>
         {
             // Stage into Music/F00 (copy or transcode - the firmware only plays MP3/AAC/ALAC/WAV), then

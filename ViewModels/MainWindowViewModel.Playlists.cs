@@ -900,7 +900,7 @@ internal partial class MainWindowViewModel
     /// LCD Cancel X trips the token, the tier aborts mid-transcode/mid-copy and deletes its torn
     /// output, and nothing joins the live view.
     /// </summary>
-    private async Task<MediaItem> AddTrackToDeviceCoreAsync(IPodDevice ipod, MediaItem track, string ffmpeg, CancellationToken ct, int index = 0, int count = 1)
+    private async Task<MediaItem> AddTrackToDeviceCoreAsync(IPodDevice ipod, MediaItem track, string ffmpeg, CancellationToken ct, int index = 0, int count = 1, string? preparedFile = null)
     {
         var prefix = count > 1 ? $"({index}/{count}) " : string.Empty;
         var title = track.Title ?? track.FileName ?? "track";
@@ -923,9 +923,13 @@ internal partial class MainWindowViewModel
 
         SetLcdBusy(prefix + (ipod.WillTranscode(track) ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), 0);
         var deviceItem = await ipod.AddTrackAsync(track, ffmpeg,
-            (stage, f) => SetLcdBusy(prefix + (stage == "transcode" ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), f), ct);
+            (stage, f) => SetLcdBusy(prefix + (stage == "transcode" ? $"Transcoding “{title}”…" : $"Copying “{title}”…"), f), ct, preparedFile);
         _allItems.Add(deviceItem);
         AddToLiveView(deviceItem);
+
+        // Nudge the capacity bar per landed track - a long sync otherwise reads "Audio 0 B"
+        // until the end-of-sync SetSpaceFrom, which stays the authority.
+        ipod.Device.AdjustSpaceFor(deviceItem, deviceItem.FileSize ?? 0);
         return deviceItem;
     }
 
@@ -2143,7 +2147,19 @@ internal partial class MainWindowViewModel
             FilteredItemsView?.Refresh();
             UpdateViewStats(_activeViewConfig, FilteredItems);
             RestoreScrollAnchor?.Invoke(scrollAnchor);
+            NotifyLiveViewCountChanged();
         }
+    }
+
+    /// <summary>
+    /// The in-place live-view mutations above change FilteredItems' COUNT without reassigning the
+    /// property, so count-derived bindings never hear about it - the "No music on this device yet"
+    /// line sat over the first synced tracks until a view swap rebuilt the list.
+    /// </summary>
+    private void NotifyLiveViewCountChanged()
+    {
+        OnPropertyChanged(nameof(ShowEmptyView));
+        OnPropertyChanged(nameof(ShowNoSearchResults));
     }
 
     /// <summary>In-place REMOVE twin of <see cref="MoveWithinLiveView"/> - same reasoning, same
@@ -2160,6 +2176,7 @@ internal partial class MainWindowViewModel
                 UpdateViewStats(_activeViewConfig, FilteredItems);
             }
             RestoreScrollAnchor?.Invoke(scrollAnchor);
+            NotifyLiveViewCountChanged();
         }
     }
 

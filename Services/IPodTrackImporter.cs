@@ -57,6 +57,54 @@ public static class IPodTrackImporter
     internal static int TargetSampleRate(int sourceSampleRate)
         => sourceSampleRate is > 0 and <= 48000 ? sourceSampleRate : 44100;
 
+    /// <summary>
+    /// The host-side half of an import: produce the iPod-compatible file for this source, or null
+    /// when the source is used as-is. Pure CPU + temp-file work with no device or database access,
+    /// so a sync can run several of these in parallel while the single USB writer drains them.
+    /// The caller owns the returned temp file (ImportAsync deletes it when handed over).
+    /// </summary>
+    public static async Task<string?> PrepareCompatibleFileAsync(string sourceFile, string ffmpegPath, string? generation, CancellationToken ct = default)
+    {
+        var ext = Path.GetExtension(sourceFile);
+        bool compatible = IsNativelyCompatible(ext);
+        bool supportsAlac = generation is not ("1G" or "2G");
+
+        if (compatible && !supportsAlac
+            && (ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) || ext.Equals(".m4b", StringComparison.OrdinalIgnoreCase))
+            && IsAlacFile(sourceFile))
+        {
+            compatible = false;
+        }
+
+        if (compatible)
+        {
+            return null;
+        }
+
+        int srcLengthMs = 0, srcSampleRate = 0;
+        try
+        {
+            using var tf = TagLib.File.Create(sourceFile);
+            srcLengthMs   = (int)tf.Properties.Duration.TotalMilliseconds;
+            srcSampleRate = tf.Properties.AudioSampleRate;
+        }
+        catch
+        {
+            // Unknown length only degrades the progress bar; the transcode itself doesn't need it.
+        }
+
+        var produced = Path.Combine(Path.GetTempPath(), "orgz_alac_" + Guid.NewGuid().ToString("N")[..8] + ".m4a");
+        if (supportsAlac)
+        {
+            await TranscodeToAlacAsync(ffmpegPath, sourceFile, produced, TargetSampleRate(srcSampleRate), srcLengthMs, null, ct);
+        }
+        else
+        {
+            await TranscodeToAacAsync(ffmpegPath, sourceFile, produced, TargetSampleRate(srcSampleRate), srcLengthMs, null, ct);
+        }
+        return produced;
+    }
+
     public static async Task<IPodImportResult> ImportAsync(
         string mountPath,
         string sourceFile,
@@ -64,6 +112,7 @@ public static class IPodTrackImporter
         string? generation = null,
         string? fireWireGuid = null,
         Action<string, double>? onProgress = null,   // ("transcode"|"copy", 0..1) - each phase runs its own 0..1
+        string? preparedFile = null,                 // a PrepareCompatibleFileAsync product; ownership transfers here
         CancellationToken ct = default)
     {
         if (!File.Exists(sourceFile))
@@ -120,7 +169,7 @@ public static class IPodTrackImporter
         if (IPodCapabilities.ChecksumFor(generation) == IPodChecksum.Hash72)
         {
             return await ImportToNano5gAsync(mountPath, sourceFile, ffmpegPath, generation, fireWireGuid,
-                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, isAudiobook, onProgress, ct);
+                title, artist, album, genre, year, trackNo, srcLengthMs, srcSampleRate, isAudiobook, onProgress, preparedFile, ct);
         }
 
         // --- produce an iPod-compatible file ---
@@ -149,7 +198,13 @@ public static class IPodTrackImporter
 
         string producedFile;
         bool producedIsTemp = false;
-        if (compatible)
+        if (preparedFile is not null)
+        {
+            // The pipelined sync already transcoded on a worker; just consume it.
+            producedFile = preparedFile;
+            producedIsTemp = true;
+        }
+        else if (compatible)
         {
             producedFile = sourceFile;
         }
@@ -309,22 +364,55 @@ public static class IPodTrackImporter
         }
     }
 
-    /// <summary>Opens the ambient batch for a mount. One at a time per mount - a second opener is a bug.</summary>
+    /// <summary>
+    /// Opens (or joins) the ambient batch for a mount. Re-entrant like the Nano 5G's CDB batch:
+    /// a device plan opens the outer scope and each leg (playlist, entire-library, podcasts)
+    /// opens its own inner one, so the inner scopes must fold into the ambient batch and only
+    /// the outermost dispose commits. Throwing on nesting made every plan leg on a binary-tier
+    /// iPod die instantly with "a batch is already open".
+    /// </summary>
     public static IDisposable BeginBinaryBatch(string mountPath, string? generation, string? fireWireGuid)
     {
-        var batch = new BinaryBatch(mountPath, generation, fireWireGuid);
         lock (_batchGate)
         {
-            if (!_batches.TryAdd(mountPath, batch))
+            if (_batches.TryGetValue(mountPath, out var existing))
             {
-                throw new InvalidOperationException($"A binary iTunesDB batch is already open for {mountPath}.");
+                existing.Depth++;
+                return new NestedBatchScope(existing);
+            }
+
+            var batch = new BinaryBatch(mountPath, generation, fireWireGuid);
+            _batches.Add(mountPath, batch);
+            return batch;
+        }
+    }
+
+    /// <summary>An inner join on an already-open batch: disposing it only releases the nesting
+    /// level; the data commits when the outermost <see cref="BinaryBatch"/> disposes.</summary>
+    private sealed class NestedBatchScope(BinaryBatch owner) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+            lock (_batchGate)
+            {
+                owner.Depth--;
             }
         }
-        return batch;
     }
 
     internal sealed class BinaryBatch(string mountPath, string? generation, string? fireWireGuid) : IDisposable
     {
+        /// <summary>Open inner scopes on top of this batch (guarded by _batchGate). The outer
+        /// dispose warns if any are still open - a leak means a leg outlived its plan.</summary>
+        internal int Depth;
+
         private ITunesDbDocument? _doc;
         private bool _dbDirty;
         private readonly List<uint> _trackIds = [];
@@ -394,6 +482,21 @@ public static class IPodTrackImporter
         }
 
         /// <summary>
+        /// Cover-image identity -> the .ithmb slices already written for it. An album's twelve
+        /// tracks share one cover, and every one of them used to render and append its own full
+        /// set of thumbnails: on a 29k-track sync that is ~8 GB of duplicate .ithmb bytes (276 KB
+        /// per track on a Classic) and an ArtworkDB the firmware then has to crawl - which is what
+        /// made album art crawl. A repeat cover now just points a new mhii at the same bytes.
+        /// </summary>
+        private readonly Dictionary<string, IReadOnlyList<ArtThumb>> _thumbsByCover = new(StringComparer.Ordinal);
+
+        internal IReadOnlyList<ArtThumb>? ThumbsForCover(string coverHash)
+            => _thumbsByCover.GetValueOrDefault(coverHash);
+
+        internal void RememberCover(string coverHash, IReadOnlyList<ArtThumb> thumbs)
+            => _thumbsByCover[coverHash] = thumbs;
+
+        /// <summary>
         /// Batched counterpart of the artwork GC: the removed track's entry leaves the
         /// list this batch rebuilds the ArtworkDB from. Its .ithmb bytes stay orphaned
         /// (a mid-batch compaction would invalidate the offsets of this batch's own
@@ -425,6 +528,10 @@ public static class IPodTrackImporter
         {
             lock (_batchGate)
             {
+                if (Depth > 0)
+                {
+                    _log.Warning("Outer binary batch for {Mount} disposed with {Depth} inner scope(s) still open", mountPath, Depth);
+                }
                 _batches.Remove(mountPath);
             }
 
@@ -669,6 +776,44 @@ public static class IPodTrackImporter
     }
 
     /// <summary>
+    /// Heals a device whose tracks predate the media_type fix (they'd stay invisible in the
+    /// iPod's Artists/Albums/Genres menus forever otherwise). Joins the ambient batch when a sync
+    /// has one open, so the repair rides that batch's single commit; standalone otherwise.
+    /// Returns the number of tracks healed.
+    /// </summary>
+    public static int RepairMissingMediaTypes(string mountPath, string? generation, string? fireWireGuid)
+    {
+        var dbPath = Path.Combine(mountPath, "iPod_Control", "iTunes", "iTunesDB");
+        if (!File.Exists(dbPath))
+        {
+            return 0;
+        }
+
+        var batch = ActiveBatch(mountPath);
+        var doc = batch?.Doc ?? ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
+
+        int healed = ITunesDbWriter.RepairMissingMediaTypes(doc);
+        if (healed == 0)
+        {
+            return 0;
+        }
+
+        if (batch is not null)
+        {
+            batch.MarkDbDirty();
+        }
+        else
+        {
+            CommitDb(doc, dbPath, mountPath, generation, fireWireGuid,
+                verify: (tracks, _) => tracks.Count > 0,
+                failureMessage: "Re-parse of the repaired iTunesDB produced no tracks; aborting write.");
+        }
+
+        _log.Information("Repaired media_type on {Count} track(s) at {Mount}", healed, mountPath);
+        return healed;
+    }
+
+    /// <summary>
     /// Extracts the source's embedded cover, renders each thumbnail size in
     /// <paramref name="coverFormats"/> as raw RGB565-LE into
     /// iPod_Control/Artwork/F{id}_1.ithmb, and writes an ArtworkDB linking
@@ -690,6 +835,17 @@ public static class IPodTrackImporter
             Directory.CreateDirectory(artDir);
             var dbPath = Path.Combine(artDir, "ArtworkDB");
             var batch = ActiveBatch(mountPath);
+
+            // Same cover as a track earlier in this sync? Reuse its .ithmb bytes: no ffmpeg
+            // renders, no appends, just another mhii pointing at the same offsets.
+            var coverHash = batch is null ? null : EmbeddedCoverHash(sourceFile);
+            if (coverHash is not null && batch!.ThumbsForCover(coverHash) is { } shared)
+            {
+                int sharedSize = shared.Sum(t => t.ImageSize);
+                int sharedId = ArtworkDbWriter.NextImageId(batch.ArtImages());
+                batch.RecordArtImage(new ArtImage(dbid, sharedId, shared, sharedSize));
+                return (true, sharedSize, sharedId);
+            }
 
             // ── Stage phase: extract and validate every format before touching any
             // .ithmb. The old per-format append meant a failure on format 2 left
@@ -777,6 +933,10 @@ public static class IPodTrackImporter
 
             if (batch is not null)
             {
+                if (coverHash is not null)
+                {
+                    batch.RememberCover(coverHash, thumbs);
+                }
                 batch.RecordArtImage(image);
                 _log.Information("Staged ArtworkDB image {ImageId} (+{Count} thumbnails, {Bytes}B) into the open batch", imageId, thumbs.Count, totalSize);
                 return (true, totalSize, imageId);
@@ -797,6 +957,30 @@ public static class IPodTrackImporter
         {
             _log.Warning(ex, "Artwork generation failed; importing without art");
             return (false, 0, 0);
+        }
+    }
+
+    /// <summary>
+    /// Identity of a file's embedded cover: SHA-256 of the first picture's bytes, or null when
+    /// there is none (or the tags won't read). Null simply disables sharing for that track, so a
+    /// file ffmpeg can decode but TagLib can't still gets its own artwork the slow way.
+    /// </summary>
+    private static string? EmbeddedCoverHash(string sourceFile)
+    {
+        try
+        {
+            using var tf = TagLib.File.Create(sourceFile);
+            var picture = tf.Tag.Pictures?.FirstOrDefault();
+            var data = picture?.Data?.Data;
+            if (data is null || data.Length == 0)
+            {
+                return null;
+            }
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data));
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -970,7 +1154,7 @@ public static class IPodTrackImporter
         string mountPath, string sourceFile, string ffmpegPath, string? generation, string? fireWireGuid,
         string? title, string? artist, string? album, string? genre,
         int year, int trackNo, int srcLengthMs, int srcSampleRate, bool isAudiobook,
-        Action<string, double>? onProgress, CancellationToken ct)
+        Action<string, double>? onProgress, string? preparedFile, CancellationToken ct)
     {
         // The Nano 5G plays MP3 and MP4-container AAC/ALAC. Pass those through; transcode anything
         // else (FLAC/WAV/AIFF) to ALAC so it stays lossless - never down to MP3.
@@ -990,6 +1174,13 @@ public static class IPodTrackImporter
         else if (passthrough)   // .m4a/.m4b/.aac - already an MP4-container codec the iPod plays
         {
             audioFormat = 502; extFourCc = 0x4D344120; kindString = "MPEG-4 audio file"; targetExt = ".m4a";
+        }
+        else if (preparedFile is not null)   // a pipeline worker already made the ALAC
+        {
+            audioFormat = 502; extFourCc = 0x4D344120; kindString = "Apple Lossless audio file"; targetExt = ".m4a";
+            recordedSampleRate = TargetSampleRate(srcSampleRate);
+            produced = preparedFile;
+            producedIsTemp = true;
         }
         else                     // FLAC/WAV/AIFF/etc → ALAC (lossless)
         {

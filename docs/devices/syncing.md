@@ -20,11 +20,12 @@ Each device also has a **Playlists** entry beneath it in the sidebar:
 
 ## The sync plan
 
-Right-click a device and choose **Sync** to run its plan; **Sync Settings...**
-opens the plan itself (Sync also opens it the first time). The plan is
-per-device and remembered, so after setup a sync is one click.
+**Sync** runs the device's plan and **Sync Settings** opens the plan itself -
+both live on the device's header bar and its sidebar right-click menu (Sync
+opens the settings on first use). The plan is per-device and remembered, so
+after setup a sync is one click.
 
-- **Entire music library** - every music track in the library, like iTunes.
+- **Music** - every music track in the library, like iTunes' entire-library sync.
   Playlists below stay selectable alongside it: they decide which named
   playlists exist on the device, the library option fills the music itself.
   If the library won't fit in the device's free space, this part is skipped

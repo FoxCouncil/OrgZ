@@ -123,11 +123,22 @@ public class BinaryIPodTests
     }
 
     [Fact]
-    public void A_second_batch_on_the_same_mount_is_refused()
+    public void A_second_batch_on_the_same_mount_joins_the_first()
     {
+        // Refusing used to be the contract, but a device plan (outer batch) runs legs that each
+        // open their own scope - the refusal made every plan leg on a binary iPod fail instantly.
+        // Now an inner open joins the ambient batch and only the outermost dispose closes it.
         var mount = Path.Combine(Path.GetTempPath(), "orgz-binbatch2-" + Guid.NewGuid().ToString("N"));
-        using var open = IPodTrackImporter.BeginBinaryBatch(mount, null, null);
-        Assert.Throws<InvalidOperationException>(() => IPodTrackImporter.BeginBinaryBatch(mount, null, null));
+        using (var open = IPodTrackImporter.BeginBinaryBatch(mount, null, null))
+        {
+            var ambient = IPodTrackImporter.ActiveBatch(mount);
+            using (IPodTrackImporter.BeginBinaryBatch(mount, null, null))
+            {
+                Assert.Same(ambient, IPodTrackImporter.ActiveBatch(mount));
+            }
+            Assert.Same(ambient, IPodTrackImporter.ActiveBatch(mount));
+        }
+        Assert.Null(IPodTrackImporter.ActiveBatch(mount));
     }
 
     private static NewTrack Track(uint id) => new()

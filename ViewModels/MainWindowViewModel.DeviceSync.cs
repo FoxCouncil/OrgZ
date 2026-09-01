@@ -136,12 +136,40 @@ internal partial class MainWindowViewModel
         var playlistItems = new List<MediaItem>(tracks.Count);   // matched-or-imported device items, in order
         int matched = 0, added = 0, failed = 0;
 
+        // The pipeline: the USB copy is the only genuinely serial resource, so the host-side
+        // work (ReplayGain analysis + transcode) runs a bounded window of workers AHEAD of the
+        // device writer. On an all-FLAC library this turns per-track time from
+        // transcode+copy into just copy.
+        using var prepareGate = new SemaphoreSlim(SyncPrepareWorkers);
+        var prepareTasks = new Task<string?>?[tracks.Count];
+        int nextPrepare = 0;
+
+        bool NeedsAdd(MediaItem t)
+        {
+            var k = NormalizeMatchKey(t.Artist, t.Title);
+            return (string.IsNullOrEmpty(k) || !deviceByAT.ContainsKey(k))
+                && !string.IsNullOrEmpty(t.FilePath) && File.Exists(t.FilePath);
+        }
+
+        void StartPreparesThrough(int upTo)
+        {
+            for (; nextPrepare < tracks.Count && nextPrepare <= upTo; nextPrepare++)
+            {
+                var t = tracks[nextPrepare];
+                prepareTasks[nextPrepare] = NeedsAdd(t)
+                    ? PrepareTrackForDeviceAsync(ipod, t, ffmpeg ?? "ffmpeg", prepareGate, ct)
+                    : null;
+            }
+        }
+
         BeginLcdBusy($"Syncing to {device.Name}");
         try
         {
             for (int i = 0; i < tracks.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
+                StartPreparesThrough(i + SyncPrepareWorkers * 2);
+
                 var t = tracks[i];
                 var key = NormalizeMatchKey(t.Artist, t.Title);
                 if (!string.IsNullOrEmpty(key) && deviceByAT.TryGetValue(key, out var existing))
@@ -157,7 +185,8 @@ internal partial class MainWindowViewModel
                 }
                 try
                 {
-                    var deviceItem = await AddTrackToDeviceCoreAsync(ipod, t, ffmpeg ?? "ffmpeg", ct, i + 1, tracks.Count);
+                    var preparedFile = prepareTasks[i] is { } prep ? await prep : null;
+                    var deviceItem = await AddTrackToDeviceCoreAsync(ipod, t, ffmpeg ?? "ffmpeg", ct, i + 1, tracks.Count, preparedFile);
                     playlistItems.Add(deviceItem);
                     added++;
                 }
@@ -226,8 +255,70 @@ internal partial class MainWindowViewModel
         }
         finally
         {
+            // Prepared-but-unconsumed temps (cancel or failure mid-run) are ours to delete -
+            // consumed ones were deleted by the import. Still-running prepares clean up via a
+            // continuation once their ffmpeg exits (they share this sync's token).
+            foreach (var task in prepareTasks)
+            {
+                if (task is null)
+                {
+                    continue;
+                }
+                if (task.IsCompleted)
+                {
+                    if (task.Status == TaskStatus.RanToCompletion && task.Result is { } temp)
+                    {
+                        try { File.Delete(temp); } catch { /* best-effort temp cleanup */ }
+                    }
+                }
+                else
+                {
+                    _ = task.ContinueWith(static t =>
+                    {
+                        _ = t.Exception;   // observe, so a faulted prepare never trips the unobserved handler
+                        if (t.Status == TaskStatus.RanToCompletion && t.Result is { } temp)
+                        {
+                            try { File.Delete(temp); } catch { /* best-effort temp cleanup */ }
+                        }
+                    }, TaskScheduler.Default);
+                }
+            }
+
             EndSyncScope(owns);
             EndLcdBusy();
+        }
+    }
+
+    /// <summary>Workers for the host-side prepare stage of a sync. ffmpeg saturates cores
+    /// quickly, and past the USB copy rate more workers only pile up temp files.</summary>
+    internal static int SyncPrepareWorkers { get; } = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
+
+    /// <summary>
+    /// One pipeline worker: ReplayGain-analyze the LIBRARY file if it never was (permanent, same
+    /// as the serial path did), then the tier's host-side transcode. Gated so at most
+    /// <see cref="SyncPrepareWorkers"/> ffmpeg processes run at once.
+    /// </summary>
+    private async Task<string?> PrepareTrackForDeviceAsync(IPodDevice ipod, MediaItem track, string ffmpeg, SemaphoreSlim gate, CancellationToken ct)
+    {
+        await gate.WaitAsync(ct);
+        try
+        {
+            if (track.ReplayGainTrackGainDb is null && !string.IsNullOrEmpty(track.FilePath) && File.Exists(track.FilePath)
+                && track.Source?.StartsWith("device:", StringComparison.Ordinal) != true)
+            {
+                var gain = await ReplayGainService.ComputeAndTagAsync(track.FilePath, ffmpeg, ct);
+                if (gain is { } g)
+                {
+                    track.ReplayGainTrackGainDb = g;
+                    FireAndForget(Task.Run(() => MediaCache.UpdateReplayGain(track.Id, g), CancellationToken.None), "replay-gain persist");
+                }
+            }
+
+            return await ipod.PrepareTrackAsync(track, ffmpeg, ct);
+        }
+        finally
+        {
+            gate.Release();
         }
     }
 
@@ -260,6 +351,10 @@ internal partial class MainWindowViewModel
     [RelayCommand]
     private async Task SyncSelectedDevice() => await SyncDeviceAsync(SelectedSidebarItem);
 
+    /// <summary>Header Sync Settings button: opens the plan without waiting for a first sync.</summary>
+    [RelayCommand]
+    private async Task SyncSelectedDeviceSettings() => await SyncDeviceAsync(SelectedSidebarItem, forceSettings: true);
+
     /// <summary>
     /// The one Sync gesture (device right-click > Sync). First run - or any device with no saved
     /// plan - opens the settings dialog; after that, runs the saved plan straight. Passing
@@ -270,6 +365,9 @@ internal partial class MainWindowViewModel
         var dev = DeviceForSidebarItem(item);
         if (dev is null)
         {
+            // A limbo device (ejected by iTunes/AMDS but still on the USB tree) lands here -
+            // saying nothing made the button look broken.
+            UpdateMainStatus("No device selected to sync — if it was just ejected, replug it.");
             return;
         }
 
@@ -342,6 +440,15 @@ internal partial class MainWindowViewModel
             // the CDB - runs inside the try, so if it throws on a dead mount the catch below owns it.
             using (var batch = ipod.BeginBatchWrite())
             {
+                // Heal rows written by older OrgZ builds before adding anything - it rides this
+                // batch's single commit, so an already-full iPod is fixed without re-copying.
+                var healed = await ipod.RepairLibraryAsync(ct);
+                if (healed > 0)
+                {
+                    UpdateMainStatus($"Repaired {healed} track(s) already on {dev.Name} so they show in its menus.");
+                }
+
+                ct.ThrowIfCancellationRequested();
                 if (plan.Podcasts && ipod.SupportsPodcasts)
                 {
                     await SyncPodcastsToDeviceAsync(dev, ipod);
@@ -357,7 +464,12 @@ internal partial class MainWindowViewModel
                 if (plan.EntireLibrary && ipod.SupportsTrackAdd)
                 {
                     var music = _allItems.Where(i => IsLocalLibraryFile(i) && i.Kind == MediaKind.Music).ToList();
-                    if (music.Count > 0 && EntireLibraryFitsOrExplain(dev, music))
+                    _log.Information("Entire-library sync leg for {Device}: {Count} local music track(s)", dev.MountPath, music.Count);
+                    if (music.Count == 0)
+                    {
+                        UpdateMainStatus("No local music in the library to sync.");
+                    }
+                    else if (EntireLibraryFitsOrExplain(dev, music))
                     {
                         // No playlist name: the library sync fills the device's master list only;
                         // native playlists come from the selections below.

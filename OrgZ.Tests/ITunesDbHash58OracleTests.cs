@@ -41,7 +41,7 @@ public class ITunesDbHash58OracleTests
     // fixture. Reproduce with: python OrgZ.Tests/oracle/hash58_independent.py \
     //   OrgZ.Tests/Fixtures/itunesdb-write/orgz-emitted.iTunesDB 000A27001597690A
     private const string Guid = "000A27001597690A";
-    private const string IndependentReference = "a986963f9d5808bad66a167a48460cc723878ccb";
+    private const string IndependentReference = "d308f4eceb6fb3e1681001d4c1b0376470ffbe05";
 
     private static string FixturePath =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", "itunesdb-write", "orgz-emitted.iTunesDB");
