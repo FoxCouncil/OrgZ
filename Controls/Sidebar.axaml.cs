@@ -547,10 +547,25 @@ public partial class Sidebar : UserControl
             return;
         }
 
-        if (ShareTreeView.SelectedItem is SidebarItem item)
+        if (ShareTreeView.SelectedItem is not SidebarItem item)
         {
-            SelectOnly(ShareTreeView, item);
+            return;
         }
+
+        // A folder under a share organizes, same as at home: toggle it, keep the current view.
+        if (item.IsPlaylistFolder)
+        {
+            if (ShareTreeView.TreeContainerFromItem(item) is TreeViewItem container)
+            {
+                container.IsExpanded = !container.IsExpanded;
+            }
+            _suppressSelectionChange = true;
+            ShareTreeView.SelectedItem = null;
+            _suppressSelectionChange = false;
+            return;
+        }
+
+        SelectOnly(ShareTreeView, item);
     }
 
     /// <summary>Right-click on a share's remote playlist offers Import; the share row itself has no verbs.</summary>

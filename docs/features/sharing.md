@@ -45,7 +45,8 @@ share is never mounted back into your own sidebar.
 - Click the share to browse its tracks. Double-click one to play it; audio
   streams from the other machine, nothing is copied.
 - The remote's playlists (and its Favorites) hang under the share, the way a
-  device's playlists do.
+  device's playlists do - in the same folders their owner keeps them in. Click a
+  folder to open or close it.
 - Shared tracks are kept out of your **Music** view - they're the share's, not
   yours.
 - Ratings and the row tick aren't offered on a share's tracks: a read-only

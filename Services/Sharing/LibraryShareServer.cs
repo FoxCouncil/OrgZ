@@ -22,7 +22,9 @@ public sealed class LibraryShareServer : IDisposable
     /// <summary>One playlist as served on the wire. Type distinguishes the synthetic
     /// Favorites ("favorites") from ordinary playlists ("playlist") - clients key UI
     /// off the TYPE, never the display name.</summary>
-    public sealed record ServedPlaylist(string Name, List<string> TrackIds, string Type = "playlist");
+    /// <param name="Folder">The playlist's virtual folder ("A/B"), empty at the root - so the remote
+    /// client shows the same folder tree the owner sees.</param>
+    public sealed record ServedPlaylist(string Name, List<string> TrackIds, string Type = "playlist", string Folder = "");
 
     private TlsHttpServer? _server;
     private readonly Func<List<MediaItem>> _loadLibrary;
@@ -58,7 +60,7 @@ public sealed class LibraryShareServer : IDisposable
         {
             playlists.Add(new ServedPlaylist(favorites.Name, favorites.TrackIds, "favorites"));
         }
-        playlists.AddRange(MediaCache.LoadAllPlaylists().Select(p => new ServedPlaylist(p.Name, MediaCache.GetPlaylistTrackIds(p.Id))));
+        playlists.AddRange(MediaCache.LoadAllPlaylists().Select(p => new ServedPlaylist(p.Name, MediaCache.GetPlaylistTrackIds(p.Id), Folder: PlaylistFolderSync.NormalizeFolder(p.Folder))));
         return playlists;
     }
 
@@ -468,11 +470,12 @@ public sealed class LibraryShareServer : IDisposable
         });
     }
 
-    /// <summary>The playlists payload: name, ordered track ids, and the playlist type.</summary>
+    /// <summary>The playlists payload: name, ordered track ids, the playlist type, and its folder
+    /// (empty at the root). A client from before folders ignores the extra field.</summary>
     internal static string BuildPlaylistsJson(IReadOnlyList<ServedPlaylist> playlists)
         => JsonSerializer.Serialize(new
         {
-            playlists = playlists.Select(p => new { name = p.Name, trackIds = p.TrackIds, type = p.Type }).ToList(),
+            playlists = playlists.Select(p => new { name = p.Name, trackIds = p.TrackIds, type = p.Type, folder = p.Folder }).ToList(),
         });
 
     /// <summary>The track's audio extension, lowercased, or empty when it isn't one we serve.</summary>

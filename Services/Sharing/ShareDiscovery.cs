@@ -230,7 +230,7 @@ public static class ShareDiscovery
     /// order, and the server's playlist type ("favorites" for the synthetic Favorites,
     /// "playlist" otherwise - which is also the fallback for older servers).
     /// </summary>
-    public sealed record SharePlaylist(string Name, List<string> TrackIds, string Type = "playlist")
+    public sealed record SharePlaylist(string Name, List<string> TrackIds, string Type = "playlist", string Folder = "")
     {
         public bool IsFavorites => Type == "favorites";
     }
@@ -281,7 +281,9 @@ public static class ShareDiscovery
                     .ToList();
 
                 var type = playlist.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "playlist";
-                result.Add(new SharePlaylist(name, trackIds, type));
+                // Older servers send no folder; the playlist simply sits at the share's root.
+                var folder = playlist.TryGetProperty("folder", out var f) && f.ValueKind == JsonValueKind.String ? PlaylistFolderSync.NormalizeFolder(f.GetString()) : string.Empty;
+                result.Add(new SharePlaylist(name, trackIds, type, folder));
             }
         }
         catch (JsonException ex)

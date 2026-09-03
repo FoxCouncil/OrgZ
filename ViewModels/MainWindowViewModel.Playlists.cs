@@ -1133,16 +1133,47 @@ internal partial class MainWindowViewModel
             ViewConfigKey = viewKey,
         };
 
-        // The remote's playlists hang under the share the way a device's do. Each is an
-        // ordered-ids view over the mounted tracks; Import (sidebar context menu) copies
-        // it - files and all - into the local library.
+        // The remote's playlists hang under the share the way a device's do - in the same
+        // folders their owner keeps them in. Each is an ordered-ids view over the mounted
+        // tracks; Import (sidebar context menu) copies it - files and all - into the local
+        // library, folder included.
+        var folderNodes = new Dictionary<string, SidebarItem>(StringComparer.OrdinalIgnoreCase);
+
+        SidebarItem FolderNode(string path)
+        {
+            if (folderNodes.TryGetValue(path, out var existing))
+            {
+                return existing;
+            }
+            var slash = path.LastIndexOf('/');
+            var folder = new SidebarItem
+            {
+                Name = slash < 0 ? path : path[(slash + 1)..],
+                Icon = "fa-solid fa-folder",
+                Category = "SHARES",
+                IsEnabled = true,
+                IsPlaylistFolder = true,
+                FolderPath = path,
+                ViewConfigKey = $"ShareFolder:{share.Key}:{path}",
+            };
+            folderNodes[path] = folder;
+            (slash < 0 ? node : FolderNode(path[..slash])).Children.Add(folder);
+            return folder;
+        }
+
+        // Folders first at each level, then playlists - the order the local tree uses.
+        foreach (var path in playlists.Select(p => p.Folder).Where(f => f.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            FolderNode(path);
+        }
+
         for (var i = 0; i < playlists.Count; i++)
         {
             var playlistKey = $"SharePlaylist:{share.Key}:{i}";
             ListViewConfigs.Register(playlistKey, ListViewConfigs.BuildSharePlaylistConfig(playlistKey, playlists[i].TrackIds));
             _sharePlaylists[playlistKey] = playlists[i];
 
-            node.Children.Add(new SidebarItem
+            var row = new SidebarItem
             {
                 Name = playlists[i].Name,
                 // The remote's Favorites wears the same star it wears at home, keyed
@@ -1152,7 +1183,9 @@ internal partial class MainWindowViewModel
                 Category = "SHARES",
                 IsEnabled = true,
                 ViewConfigKey = playlistKey,
-            });
+                FolderPath = playlists[i].Folder,
+            };
+            (playlists[i].Folder.Length == 0 ? node : FolderNode(playlists[i].Folder)).Children.Add(row);
         }
 
         ShareItems.Add(node);
@@ -1316,7 +1349,7 @@ internal partial class MainWindowViewModel
 
         var imported = await ImportShareTracksToLibraryAsync(tracks);
 
-        var playlistId = MediaCache.CreatePlaylist(playlist.Name, "Share");
+        var playlistId = MediaCache.CreatePlaylist(playlist.Name, "Share", folder: playlist.Folder);
         foreach (var shareId in playlist.TrackIds)
         {
             if (imported.TryGetValue(shareId, out var localId))

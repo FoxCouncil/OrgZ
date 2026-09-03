@@ -1,6 +1,14 @@
 # Changelog
 
-## v0.17.9 (Current)
+## v0.17.10 (Current)
+
+### Library sharing
+
+- Playlist folders now show up on the other machine. A shared library's
+  playlists appear in the same folders their owner keeps them in, and importing
+  one keeps its folder
+
+## v0.17.9
 
 ### iPods
 

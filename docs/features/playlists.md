@@ -31,6 +31,9 @@ copy the file to another machine and it lands in the same folder there.
 Deleting a folder never deletes music: its playlists move back to the top level and their
 files stay put.
 
+Folders travel with [library sharing](sharing.md): another copy of OrgZ sees your
+playlists in the same folders, and importing one keeps its folder.
+
 ## Order
 
 The **#** column is the playlist's own running order, and it is what a playlist plays in
