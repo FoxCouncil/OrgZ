@@ -260,8 +260,9 @@ public static class IPodTrackImporter
             int bitrate = lengthMs > 0 ? (int)(fileSize * 8L / lengthMs) : 0;
 
             // --- album art (best-effort): cover -> RGB565 .ithmb + ArtworkDB ---
-            // The track's dbid ties the iTunesDB MHIT to the ArtworkDB mhii.
-            ulong dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue);
+            // The track's dbid ties the iTunesDB MHIT to the ArtworkDB mhii - and identifies the
+            // library file it came from, so a later sync knows this copy is already here.
+            ulong dbid = DeviceTrackIdentity.DbidFor(sourceFile);
             var coverFormats = IPodCapabilities.CoverFormatsFor(generation);
             var (hasArt, artSize, _) = await TryWriteArtworkAsync(mountPath, sourceFile, ffmpegPath, dbid, coverFormats, ct);
 
@@ -488,13 +489,22 @@ public static class IPodTrackImporter
         /// per track on a Classic) and an ArtworkDB the firmware then has to crawl - which is what
         /// made album art crawl. A repeat cover now just points a new mhii at the same bytes.
         /// </summary>
-        private readonly Dictionary<string, IReadOnlyList<ArtThumb>> _thumbsByCover = new(StringComparer.Ordinal);
+        private Dictionary<string, IReadOnlyList<ArtThumb>>? _thumbsByCover;
+        private readonly Dictionary<string, IReadOnlyList<ArtThumb>> _coversWrittenThisBatch = new(StringComparer.Ordinal);
+
+        /// <summary>Seeded from the device's own index on first use, so a cover stored by an earlier
+        /// sync is reused rather than rendered and appended again.</summary>
+        private Dictionary<string, IReadOnlyList<ArtThumb>> ThumbsByCover
+            => _thumbsByCover ??= IPodArtworkIndex.LoadCovers(mountPath);
 
         internal IReadOnlyList<ArtThumb>? ThumbsForCover(string coverHash)
-            => _thumbsByCover.GetValueOrDefault(coverHash);
+            => ThumbsByCover.GetValueOrDefault(coverHash);
 
         internal void RememberCover(string coverHash, IReadOnlyList<ArtThumb> thumbs)
-            => _thumbsByCover[coverHash] = thumbs;
+        {
+            ThumbsByCover[coverHash] = thumbs;
+            _coversWrittenThisBatch[coverHash] = thumbs;
+        }
 
         /// <summary>
         /// Batched counterpart of the artwork GC: the removed track's entry leaves the
@@ -556,6 +566,10 @@ public static class IPodTrackImporter
                     ITunesDbChunkTree.Parse(bytes);   // sanity: must re-parse
                     AtomicFile.WriteAllBytes(ArtworkDbPath, bytes, backup: ArtworkDbPath + ".orgzbak");
                     _log.Information("Committed batched ArtworkDB: {Count} image(s), {Bytes} bytes", _artImages.Count, bytes.Length);
+
+                    // Only now are the covers this batch wrote really on the device, so only now
+                    // does the index learn about them.
+                    IPodArtworkIndex.Merge(mountPath, _coversWrittenThisBatch);
                 }
 
                 // Only a COMMITTED database may lose its audio files (see DeferFileDelete).
@@ -697,7 +711,7 @@ public static class IPodTrackImporter
 
                 // Episode artwork: the feed's cover first (podcasts rarely embed art), else the
                 // audio file's embedded cover. The dbid ties the MHIT to the ArtworkDB mhii.
-                ulong dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue);
+                ulong dbid = DeviceTrackIdentity.DbidFor(ep.LocalFile);
                 var artSource = !string.IsNullOrEmpty(ep.CoverImagePath) && File.Exists(ep.CoverImagePath)
                     ? ep.CoverImagePath
                     : ep.LocalFile;
@@ -815,7 +829,7 @@ public static class IPodTrackImporter
 
     /// <summary>One track on the device that has no cover stored.</summary>
     /// <param name="Dbid">Links the track to its ArtworkDB entry.</param>
-    public sealed record MissingArtworkTrack(ulong Dbid, string? Artist, string? Title, string? Album);
+    public sealed record MissingArtworkTrack(ulong Dbid, string? Artist, string? Title, string? Album, int LengthMs);
 
     /// <summary>
     /// Lists the device's tracks that have no artwork: either the track never claimed any, or it
@@ -860,7 +874,8 @@ public static class IPodTrackImporter
                 dbid,
                 ITunesDbWriter.ReadMhodString(mhit, 4),
                 ITunesDbWriter.ReadMhodString(mhit, 1),
-                ITunesDbWriter.ReadMhodString(mhit, 3)));
+                ITunesDbWriter.ReadMhodString(mhit, 3),
+                mhit.Header.Length >= 0x2C ? mhit.ReadHeaderInt32(0x28) : 0));
         }
 
         return missing;

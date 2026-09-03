@@ -58,6 +58,7 @@ public static class DeviceVerifier
         new FileSystemIsFat32(),
         new TracksHaveAMediaType(),
         new ArtworkClaimsHaveEntries(),
+        new ArtworkStoredOncePerCover(),
         new PlaylistItemsResolve(),
         new ArtworkFilesUnderCeiling(),
         new MusicFoldersUnderLimit(),
@@ -179,6 +180,31 @@ public static class DeviceVerifier
             return m.ArtworkClaimsWithoutEntry == 0
                 ? Ok(Id, $"{m.ArtworkEntries} artwork entries, every claim backed")
                 : new Finding(Id, FindingLevel.Failed, $"{m.ArtworkClaimsWithoutEntry} track(s) claim cover art that isn't stored on the device.");
+        }
+    }
+
+    private sealed class ArtworkStoredOncePerCover : IDeviceInvariant
+    {
+        public const string CheckId = "artwork-stored-once-per-cover";
+        /// <summary>Below this many entries the waste is small and a library of singles is plausible.</summary>
+        public const int MinimumEntries = 200;
+
+        public string Id => CheckId;
+        public Finding Evaluate(DeviceMeasurements m, IReadOnlyList<DeviceLimit> limits)
+        {
+            if (!m.DatabaseInspected || m.ArtworkEntries < MinimumEntries)
+            {
+                return NotApplicable(Id);
+            }
+            if (m.ArtworkDistinctSlots < m.ArtworkEntries)
+            {
+                return Ok(Id, $"{m.ArtworkEntries:N0} entries share {m.ArtworkDistinctSlots:N0} stored covers");
+            }
+            if (m.ArtworkCompactedEntries == m.ArtworkEntries)
+            {
+                return Ok(Id, "every track has its own cover (checked)");   // a library of singles, already tidied
+            }
+            return new Finding(Id, FindingLevel.Warning, $"{m.ArtworkEntries:N0} tracks each store their own copy of their cover; tidying would reclaim the duplicates.");
         }
     }
 

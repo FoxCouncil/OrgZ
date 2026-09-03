@@ -300,6 +300,16 @@ public class IPodDeviceConformanceTests
             var library = await ipod.ReadLibraryAsync();
             Assert.Equal(count, library.Tracks.Count);
 
+            // Every device track carries the id of the library file it came from, so the same files
+            // offered again are recognised - and a live take of one of them is not.
+            var onDevice = new DeviceTrackIdentity.DeviceMatcher(library.Tracks);
+            var again = LibraryTrack(srcDir, "Track 007");
+            Assert.NotNull(onDevice.Match(again));
+            Assert.Equal(DeviceTrackIdentity.DbidFor(again.FilePath!), onDevice.Match(again)!.Dbid);
+            var liveFile = LibraryTrack(srcDir, "Track 007 (Live)").FilePath!;
+            var liveTake = new MediaItem { Id = liveFile, Kind = MediaKind.Music, FilePath = liveFile, Title = "Track 007", Artist = "Initial D", Album = "Live at the Den" };
+            Assert.Null(onDevice.Match(liveTake));
+
             // Spread, not piled: iTunes uses F00-F49 and so do we.
             var folders = Directory.GetDirectories(Path.Combine(mount, "iPod_Control", "Music")).Select(Path.GetFileName).ToList();
             Assert.True(folders.Count > 10, $"expected tracks across many folders, got {folders.Count}");

@@ -10,6 +10,7 @@ After a sync finishes, OrgZ reads the device back and checks:
 
 - every music track is marked as music (a 6G+ iPod hides untyped tracks from its menus)
 - every track that claims cover art actually has it stored
+- cover art is stored once per picture, not once per track
 - every playlist entry points at a track that exists
 - no artwork file is at the filesystem's size ceiling
 - no music folder is near the filesystem's entry limit

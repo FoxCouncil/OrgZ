@@ -257,6 +257,18 @@ public static class IPodArtworkCompactor
             File.Move(stagedPath, Path.Combine(artDir, fileName), overwrite: true);
         }
 
+        // The device's cover index pointed at the old layout; move its entries with the bytes.
+        var movedTo = new Dictionary<(string File, int Offset), ArtThumb>();
+        for (int i = 0; i < planned.Count; i++)
+        {
+            var original = entries[i].Image;
+            for (int t = 0; t < planned[i].Thumbs.Count; t++)
+            {
+                movedTo.TryAdd((original.Thumbs[t].FileName, original.Thumbs[t].IthmbOffset), planned[i].Thumbs[t]);
+            }
+        }
+        IPodArtworkIndex.Remap(mountPath, movedTo, compactedEntries: planned.Count);
+
         // Files the old layout used that the new one doesn't (a rolled-over _2 that emptied
         // out after de-duplication) are dead weight now.
         var oldFiles = images.SelectMany(i => i.Thumbs).Select(t => t.FileName).Distinct(StringComparer.OrdinalIgnoreCase);

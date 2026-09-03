@@ -50,9 +50,14 @@ Rockbox players take the file as-is). It then writes the playlist into whatever
 database that generation uses - the Nano 5G's SQLite, the binary iTunesDB, or an
 `.m3u8` in the device's `/Playlists/` folder for Rockbox.
 
-Tracks already on the device are matched by **artist + title** and reused rather
-than copied twice. A track whose file is missing locally is skipped and counted
-as a failure; the rest still go through.
+OrgZ knows which library file each track on the device came from, so a track is
+never copied twice and a live recording is never mistaken for the studio version
+of the same song. Tracks put there by iTunes or an older OrgZ are matched on
+artist, title, album and length instead. A track whose file is missing locally is
+skipped and counted as a failure; the rest still go through.
+
+Cover art is stored once per picture. The device remembers which covers it
+already has, so later syncs reuse them instead of writing another copy.
 
 ![Syncing a playlist to a connected device](../assets/screenshots/device-sync.png)
 
@@ -69,6 +74,12 @@ OrgZ reads the device back and checks it against the model's
 [hardware limits](hardware-limits.md): every track typed, every cover stored, every playlist
 entry valid, no file or folder at a filesystem ceiling, the database within what the firmware
 can load. The status line reports the worst finding; the log has the full list.
+
+Two problems the checks can find, the sync fixes on the spot: tracks whose cover
+art was lost get it rendered back from your library files, and a device where an
+older version stored one copy of the cover per track gets tidied so each picture
+is kept once. The checks run again afterwards, so the status line describes the
+device as it was left.
 
 ## Ejecting
 

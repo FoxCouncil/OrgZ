@@ -33,6 +33,13 @@ public sealed record DeviceMeasurements
     public int ArtworkClaimsWithoutEntry { get; init; }
     public int ArtworkEntries { get; init; }
 
+    /// <summary>Distinct places in the thumbnail files the entries point at. Equal to
+    /// <see cref="ArtworkEntries"/> means no two tracks share a stored picture.</summary>
+    public int ArtworkDistinctSlots { get; init; }
+
+    /// <summary>The entry count recorded when the device was last de-duplicated, or null if never.</summary>
+    public int? ArtworkCompactedEntries { get; init; }
+
     /// <summary>Playlist entries pointing at a track id that does not exist.</summary>
     public int PlaylistItemsWithoutTrack { get; init; }
 }
@@ -94,6 +101,8 @@ public static class DeviceProbe
                 TracksWithoutMediaType = facts.NoMediaType,
                 ArtworkClaimsWithoutEntry = facts.ArtClaimsWithoutEntry,
                 ArtworkEntries = facts.ArtEntries,
+                ArtworkDistinctSlots = facts.ArtDistinctSlots,
+                ArtworkCompactedEntries = IPodArtworkIndex.Load(mount).CompactedEntries,
                 PlaylistItemsWithoutTrack = facts.DanglingPlaylistItems,
             };
         }
@@ -144,13 +153,14 @@ public static class DeviceProbe
         return result;
     }
 
-    private sealed record DatabaseFacts(int Tracks, int Playlists, int NoMediaType, int ArtClaimsWithoutEntry, int ArtEntries, int DanglingPlaylistItems);
+    private sealed record DatabaseFacts(int Tracks, int Playlists, int NoMediaType, int ArtClaimsWithoutEntry, int ArtEntries, int ArtDistinctSlots, int DanglingPlaylistItems);
 
     private static DatabaseFacts InspectBinaryDatabase(string mount, string dbPath)
     {
         var doc = ITunesDbChunkTree.Parse(File.ReadAllBytes(dbPath));
 
         var artDbids = new HashSet<ulong>();
+        var artSlots = new HashSet<(string, int)>();
         var artPath = Path.Combine(mount, "iPod_Control", "Artwork", "ArtworkDB");
         int artEntries = 0;
         if (File.Exists(artPath))
@@ -161,6 +171,10 @@ public static class DeviceProbe
                 {
                     artDbids.Add(image.Dbid);
                     artEntries++;
+                    foreach (var thumb in image.Thumbs.Take(1))   // one format is enough to tell sharing
+                    {
+                        artSlots.Add((thumb.FileName, thumb.IthmbOffset));
+                    }
                 }
             }
             catch (Exception ex)
@@ -215,6 +229,6 @@ public static class DeviceProbe
             }
         }
 
-        return new DatabaseFacts(tracks, playlists, noMediaType, claimsWithoutEntry, artEntries, dangling);
+        return new DatabaseFacts(tracks, playlists, noMediaType, claimsWithoutEntry, artEntries, artSlots.Count, dangling);
     }
 }

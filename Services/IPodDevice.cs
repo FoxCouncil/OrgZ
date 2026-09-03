@@ -141,6 +141,21 @@ public abstract class IPodDevice
     public virtual Task<int> RepairLibraryAsync(CancellationToken ct = default) => Task.FromResult(0);
 
     /// <summary>
+    /// Puts cover art back on tracks that claim some but have none stored (what a thumbnail file at
+    /// the FAT32 ceiling left behind). <paramref name="findSourceFile"/> maps a device track to the
+    /// library file its picture comes from. Returns how many were restored; the base tier restores none.
+    /// </summary>
+    public virtual Task<int> RestoreArtworkAsync(string ffmpegPath, Func<IPodTrackImporter.MissingArtworkTrack, string?> findSourceFile, CancellationToken ct = default)
+        => Task.FromResult(0);
+
+    /// <summary>
+    /// Rewrites the device's cover art so each picture is stored once (older builds stored one copy
+    /// per track). Returns the bytes freed; the base tier has nothing to compact.
+    /// </summary>
+    public virtual Task<long> CompactArtworkAsync(Action<string, double>? onProgress = null, CancellationToken ct = default)
+        => Task.FromResult(0L);
+
+    /// <summary>
     /// Opens a batch scope around a run of consecutive writes, letting a tier defer expensive
     /// per-operation work until the scope closes - the Nano 5G defers its full-CDB regeneration so
     /// an M-track sync rebuilds once instead of M times. Null when the tier has nothing to defer.
@@ -418,6 +433,15 @@ public sealed class BinaryIPod : IPodDevice
 
     public override Task<int> RepairLibraryAsync(CancellationToken ct = default)
         => Task.Run(() => IPodTrackImporter.RepairMissingMediaTypes(MountPath, Generation, Device.FireWireGuid), ct);
+
+    public override async Task<int> RestoreArtworkAsync(string ffmpegPath, Func<IPodTrackImporter.MissingArtworkTrack, string?> findSourceFile, CancellationToken ct = default)
+    {
+        var (filled, _, _) = await IPodTrackImporter.BackfillArtworkAsync(MountPath, Generation, Device.FireWireGuid, ffmpegPath, findSourceFile, null, ct);
+        return filled;
+    }
+
+    public override async Task<long> CompactArtworkAsync(Action<string, double>? onProgress = null, CancellationToken ct = default)
+        => (await IPodArtworkCompactor.CompactAsync(MountPath, onProgress, ct)).BytesSaved;
 
     /// <summary>Mirrors <see cref="IPodTrackImporter.ImportAsync"/>'s decision: non-native formats
     /// transcode, and on the ALAC-less 1G/2G an ALAC-in-.m4a source re-encodes to AAC too.</summary>
@@ -1163,7 +1187,10 @@ public sealed class ShuffleIPod : IPodDevice
                 DiscNumber = (int)(meta.Disc ?? 0),
                 TotalDiscs = (int)(meta.TotalDiscs ?? 0),
                 DateAddedUtc = DateTime.UtcNow,
-                Dbid = (ulong)Random.Shared.NextInt64(1, long.MaxValue),
+                Dbid = DeviceTrackIdentity.DbidFor(
+                    string.Equals(abs, justAddedDest, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(justAddedMeta.FilePath)
+                        ? justAddedMeta.FilePath
+                        : abs),
                 ReplayGainDb = meta.ReplayGainTrackGainDb,   // -> mhit soundcheck (0x4C)
             });
             changed = true;

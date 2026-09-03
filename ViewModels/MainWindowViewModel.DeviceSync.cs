@@ -97,10 +97,7 @@ internal partial class MainWindowViewModel
 
         var ipod = IPodDevice.For(device);
         var deviceSource = $"device:{device.MountPath}";
-        var deviceByAT = _allItems
-            .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
-            .GroupBy(i => NormalizeMatchKey(i.Artist, i.Title), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var onDevice = new DeviceTrackIdentity.DeviceMatcher(_allItems.Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath)));
 
         // Opt-in (Settings > Services > Keep Running After OrgZ Closes): offer the tracks the
         // device is missing to the background service, which owns the copy from there - it
@@ -110,11 +107,7 @@ internal partial class MainWindowViewModel
         // (_deviceSyncCts held) never hand off - the plan owns the whole gesture.
         if (_deviceSyncCts == null && Settings.Get("OrgZ.Services.KeepAlive.IPodSync", false))
         {
-            var missing = tracks.Where(t =>
-            {
-                var key = NormalizeMatchKey(t.Artist, t.Title);
-                return string.IsNullOrEmpty(key) || !deviceByAT.ContainsKey(key);
-            }).ToList();
+            var missing = tracks.Where(t => !onDevice.Contains(t)).ToList();
 
             var progressPath = Path.Combine(Path.GetTempPath(), $"orgz-sync-{Guid.NewGuid():N}.jsonl");
             if (await TryHandOffSyncToServiceAsync(device.MountPath, missing,
@@ -145,11 +138,7 @@ internal partial class MainWindowViewModel
         int nextPrepare = 0;
 
         bool NeedsAdd(MediaItem t)
-        {
-            var k = NormalizeMatchKey(t.Artist, t.Title);
-            return (string.IsNullOrEmpty(k) || !deviceByAT.ContainsKey(k))
-                && !string.IsNullOrEmpty(t.FilePath) && File.Exists(t.FilePath);
-        }
+            => !onDevice.Contains(t) && !string.IsNullOrEmpty(t.FilePath) && File.Exists(t.FilePath);
 
         void StartPreparesThrough(int upTo)
         {
@@ -171,8 +160,7 @@ internal partial class MainWindowViewModel
                 StartPreparesThrough(i + SyncPrepareWorkers * 2);
 
                 var t = tracks[i];
-                var key = NormalizeMatchKey(t.Artist, t.Title);
-                if (!string.IsNullOrEmpty(key) && deviceByAT.TryGetValue(key, out var existing))
+                if (onDevice.Match(t) is { } existing)
                 {
                     playlistItems.Add(existing);
                     matched++;
@@ -287,6 +275,56 @@ internal partial class MainWindowViewModel
             EndSyncScope(owns);
             EndLcdBusy();
         }
+    }
+
+    /// <summary>
+    /// The checks found something the device can fix in place: covers claimed but not stored get
+    /// rendered back from the library files; art stored once per track gets de-duplicated. Each
+    /// repair runs only when its check fired, and the device is checked again afterwards so the
+    /// status line reports the state it was left in, not the state before.
+    /// </summary>
+    private async Task<Services.DeviceLimits.VerificationReport> RepairWhatTheChecksFoundAsync(
+        ConnectedDevice dev, IPodDevice ipod, Services.DeviceLimits.VerificationReport report, CancellationToken ct)
+    {
+        bool repaired = false;
+
+        if (report.Findings.Any(f => f.Id == "artwork-claims-have-entries" && f.Level == Services.DeviceLimits.FindingLevel.Failed))
+        {
+            var ffmpeg = ResolveFfmpeg();
+            if (ffmpeg is not null)
+            {
+                var library = _allItems.Where(i => IsLocalLibraryFile(i) && !string.IsNullOrEmpty(i.FilePath)).ToList();
+                var byDbid = library.ToDictionary(i => DeviceTrackIdentity.DbidFor(i.FilePath!), i => i.FilePath!);
+                var byKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var item in library)
+                {
+                    var key = DeviceTrackIdentity.StrictKey(item);
+                    if (key.Length > 0)
+                    {
+                        byKey.TryAdd(key, item.FilePath!);
+                    }
+                }
+
+                SetLcdBusy($"Restoring cover art on {dev.Name}", 0);
+                var restored = await ipod.RestoreArtworkAsync(ffmpeg, missing =>
+                    byDbid.TryGetValue(missing.Dbid, out var path) ? path
+                    : byKey.GetValueOrDefault(DeviceTrackIdentity.StrictKey(missing.Artist, missing.Title, missing.Album, TimeSpan.FromMilliseconds(missing.LengthMs))), ct);
+                _log.Information("Restored cover art on {Count} track(s) on {Device}", restored, dev.MountPath);
+                repaired |= restored > 0;
+            }
+        }
+
+        if (report.Findings.Any(f => f.Id == "artwork-stored-once-per-cover" && f.Level == Services.DeviceLimits.FindingLevel.Warning))
+        {
+            var freed = await ipod.CompactArtworkAsync((stage, f) => SetLcdBusy($"{stage} on {dev.Name}", f), ct);
+            _log.Information("Compacted cover art on {Device}: {Bytes} bytes freed", dev.MountPath, freed);
+            IPodArtworkReader.Invalidate(dev.MountPath);
+            repaired = true;
+        }
+
+        return repaired
+            ? await Task.Run(() => Services.DeviceLimits.DeviceVerifier.Verify(dev), CancellationToken.None)
+            : report;
     }
 
     /// <summary>Workers for the host-side prepare stage of a sync. ffmpeg saturates cores
@@ -522,6 +560,7 @@ internal partial class MainWindowViewModel
             // every music row typed, every art claim backed, every playlist entry resolving, no file at
             // the FAT32 ceiling, no folder at the entry limit, the database within what the model loads.
             var verified = await Task.Run(() => Services.DeviceLimits.DeviceVerifier.Verify(dev), CancellationToken.None);
+            verified = await RepairWhatTheChecksFoundAsync(dev, ipod, verified, ct);
             UpdateMainStatus(verified.Worst switch
             {
                 Services.DeviceLimits.FindingLevel.Failed => $"Sync to {dev.Name} finished, but a check failed: {verified.Summary()}",
@@ -588,19 +627,16 @@ internal partial class MainWindowViewModel
     internal static bool FitsOnDevice(long freeBytes, long bytesToAdd)
         => freeBytes <= 0 || bytesToAdd <= freeBytes - SyncFreeSpaceMarginBytes;
 
-    /// <summary>Sums the on-disk size of the tracks not already on the device (matched by
-    /// artist/title, the same key every sync path dedups with).</summary>
-    internal static long BytesMissingFromDevice(IEnumerable<MediaItem> tracks, HashSet<string> deviceKeys)
+    /// <summary>Sums the on-disk size of the tracks not already on the device.</summary>
+    internal static long BytesMissingFromDevice(IEnumerable<MediaItem> tracks, DeviceTrackIdentity.DeviceMatcher onDevice)
     {
         long total = 0;
         foreach (var t in tracks)
         {
-            var key = NormalizeMatchKey(t.Artist, t.Title);
-            if (!string.IsNullOrEmpty(key) && deviceKeys.Contains(key))
+            if (!onDevice.Contains(t))
             {
-                continue;
+                total += t.FileSize ?? 0;
             }
-            total += t.FileSize ?? 0;
         }
         return total;
     }
@@ -610,13 +646,7 @@ internal partial class MainWindowViewModel
     private bool EntireLibraryFitsOrExplain(ConnectedDevice dev, IReadOnlyList<MediaItem> music)
     {
         var deviceSource = $"device:{dev.MountPath}";
-        var deviceKeys = _allItems
-            .Where(i => i.Source == deviceSource)
-            .Select(i => NormalizeMatchKey(i.Artist, i.Title))
-            .Where(k => !string.IsNullOrEmpty(k))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var needed = BytesMissingFromDevice(music, deviceKeys);
+        var needed = BytesMissingFromDevice(music, new DeviceTrackIdentity.DeviceMatcher(_allItems.Where(i => i.Source == deviceSource)));
         if (FitsOnDevice(dev.FreeSpace, needed))
         {
             return true;
@@ -628,21 +658,13 @@ internal partial class MainWindowViewModel
         return false;
     }
 
-    internal static List<MediaItem> MirrorRemovals(IEnumerable<MediaItem> deviceTracks, HashSet<string> keep)
-        => deviceTracks.Where(i =>
-        {
-            var k = NormalizeMatchKey(i.Artist, i.Title);
-            return !string.IsNullOrEmpty(k) && !keep.Contains(k);
-        }).ToList();
+    internal static List<MediaItem> MirrorRemovals(IEnumerable<MediaItem> deviceTracks, DeviceTrackIdentity.KeepSet keep)
+        => deviceTracks.Where(i => DeviceTrackIdentity.KeepSet.IsIdentifiable(i) && !keep.Covers(i)).ToList();
 
     private async Task MirrorRemoveAsync(ConnectedDevice dev, IPodDevice ipod, SyncPlan plan)
     {
-        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Note(MediaItem t)
-        {
-            var k = NormalizeMatchKey(t.Artist, t.Title);
-            if (!string.IsNullOrEmpty(k)) { keep.Add(k); }
-        }
+        var keep = new DeviceTrackIdentity.KeepSet();
+        void Note(MediaItem t) => keep.Add(t);
 
         if (plan.EntireLibrary)
         {
@@ -779,11 +801,7 @@ internal partial class MainWindowViewModel
         }
 
         var deviceSource = $"device:{dev.MountPath}";
-        var present = _allItems
-            .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
-            .Select(i => NormalizeMatchKey(i.Artist, i.Title))
-            .Where(k => !string.IsNullOrEmpty(k))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var present = new DeviceTrackIdentity.DeviceMatcher(_allItems.Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath)));
 
         BeginLcdBusy($"Syncing audiobooks to {dev.Name}");
         var (ct, owns) = BeginSyncScope();
@@ -794,7 +812,7 @@ internal partial class MainWindowViewModel
             {
                 ct.ThrowIfCancellationRequested();
                 var b = books[i];
-                if (present.Contains(NormalizeMatchKey(b.Artist, b.Title)))
+                if (present.Contains(b))
                 {
                     skipped++;
                     continue;

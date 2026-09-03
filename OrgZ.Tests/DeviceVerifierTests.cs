@@ -70,6 +70,26 @@ public class DeviceVerifierTests
     }
 
     [Fact]
+    public void Covers_stored_once_per_track_warn_unless_the_library_is_singles_that_were_already_checked()
+    {
+        // Sharing exists: fine.
+        var shared = Healthy() with { ArtworkEntries = 29_277, ArtworkDistinctSlots = 1_304 };
+        Assert.Equal(FindingLevel.Ok, Only(DeviceVerifier.Evaluate(shared, ClassicLimits), "artwork-stored-once-per-cover").Level);
+
+        // No sharing at all across thousands of tracks: the old per-track layout.
+        var perTrack = Healthy() with { ArtworkEntries = 29_277, ArtworkDistinctSlots = 29_277 };
+        Assert.Equal(FindingLevel.Warning, Only(DeviceVerifier.Evaluate(perTrack, ClassicLimits), "artwork-stored-once-per-cover").Level);
+
+        // ...unless a tidy-up already looked at exactly these entries and found nothing to share.
+        var singles = perTrack with { ArtworkCompactedEntries = 29_277 };
+        Assert.Equal(FindingLevel.Ok, Only(DeviceVerifier.Evaluate(singles, ClassicLimits), "artwork-stored-once-per-cover").Level);
+
+        // Too few entries to say anything.
+        var small = Healthy() with { ArtworkEntries = 50, ArtworkDistinctSlots = 50 };
+        Assert.Equal(FindingLevel.Ok, Only(DeviceVerifier.Evaluate(small, ClassicLimits), "artwork-stored-once-per-cover").Level);
+    }
+
+    [Fact]
     public void Art_claims_with_no_stored_cover_fail()
     {
         var finding = Only(DeviceVerifier.Evaluate(Healthy() with { ArtworkClaimsWithoutEntry = 10_485 }, ClassicLimits), "artwork-claims-have-entries");

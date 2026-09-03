@@ -1,8 +1,19 @@
 # Changelog
 
-## v0.17.8 (Current)
+## v0.17.9 (Current)
 
 ### iPods
+
+- A track on the device is now tied to the library file it came from, so a
+  re-sync never copies it twice and a live recording is no longer mistaken for the
+  studio version with the same name. Tracks put there by iTunes or an older OrgZ
+  are matched on artist, title, album and length
+- The device remembers which covers it already holds, so a later sync reuses them
+  instead of writing another copy for every album it touches
+- When the post-sync checks find lost cover art or covers stored once per track,
+  the sync repairs it there and then and checks again
+
+## v0.17.8
 
 - OrgZ now knows each player's hardware limits - the FAT32 file and folder ceilings,
   how many tracks and how much database a Classic can hold in memory, Rockbox's

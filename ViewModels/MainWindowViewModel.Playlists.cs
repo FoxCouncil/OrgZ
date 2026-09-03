@@ -785,42 +785,26 @@ internal partial class MainWindowViewModel
         => _allItems.Where(i => i.IsFavorite && i.Kind == MediaKind.Music && !string.IsNullOrEmpty(i.FilePath)).ToList();
 
     internal bool IsItemAlreadyOnDevice(MediaItem item, ConnectedDevice device)
-    {
-        var key = NormalizeMatchKey(item.Artist, item.Title);
-        if (string.IsNullOrEmpty(key))
-        {
-            return false;
-        }
+        => DeviceMatcherFor(device).Contains(item);
 
-        return DeviceMatchKeys(device).Contains(key);
-    }
+    // Per-device "already here" matchers. Building the Sync submenu asks this once per device per
+    // SELECTED ROW, and the old scan walked all of _allItems for each of those questions - so
+    // opening a context menu over a big library with a device attached was O(rows x devices)
+    // string work. Keyed by mount + the library's version counter, so a stale one can't outlive
+    // an edit.
+    private readonly Dictionary<string, (int Version, DeviceTrackIdentity.DeviceMatcher Matcher)> _deviceMatchers = new(StringComparer.Ordinal);
 
-    // Per-device "artist+title already here" sets. Building the Sync submenu asks this once
-    // per device per SELECTED ROW, and the old scan walked all of _allItems (re-normalizing
-    // every device row's artist+title) for each of those questions - so opening a context
-    // menu over a big library with a device attached was O(rows x devices) string work.
-    // Keyed by mount + the library's version counter, so a stale set can't outlive an edit.
-    private readonly Dictionary<string, (int Version, HashSet<string> Keys)> _deviceMatchKeys = new(StringComparer.Ordinal);
-
-    private HashSet<string> DeviceMatchKeys(ConnectedDevice device)
+    private DeviceTrackIdentity.DeviceMatcher DeviceMatcherFor(ConnectedDevice device)
     {
         var source = $"device:{device.MountPath}";
-        if (_deviceMatchKeys.TryGetValue(source, out var cached) && cached.Version == _dataVersion)
+        if (_deviceMatchers.TryGetValue(source, out var cached) && cached.Version == _dataVersion)
         {
-            return cached.Keys;
+            return cached.Matcher;
         }
 
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var i in _allItems)
-        {
-            if (i.Source == source && NormalizeMatchKey(i.Artist, i.Title) is { Length: > 0 } k)
-            {
-                keys.Add(k);
-            }
-        }
-
-        _deviceMatchKeys[source] = (_dataVersion, keys);
-        return keys;
+        var matcher = new DeviceTrackIdentity.DeviceMatcher(_allItems.Where(i => i.Source == source));
+        _deviceMatchers[source] = (_dataVersion, matcher);
+        return matcher;
     }
 
     /// <summary>
@@ -843,11 +827,7 @@ internal partial class MainWindowViewModel
         }
 
         var deviceSource = $"device:{device.MountPath}";
-        var already = _allItems
-            .Where(i => i.Source == deviceSource && !string.IsNullOrEmpty(i.FilePath))
-            .Select(i => NormalizeMatchKey(i.Artist, i.Title))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (already.Contains(NormalizeMatchKey(item.Artist, item.Title)))
+        if (DeviceMatcherFor(device).Contains(item))
         {
             UpdateMainStatus($"“{item.Title}” is already on {device.Name}.");
             return;

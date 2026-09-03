@@ -22,9 +22,25 @@ public class SyncMirrorTests
         FilePath = "X:/Music/x.mp3",
     };
 
-    private static HashSet<string> Keep(params (string Artist, string Title)[] items)
-        => items.Select(x => MainWindowViewModel.NormalizeMatchKey(x.Artist, x.Title))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    /// <summary>A library track the plan keeps. No file path on purpose: these tests exercise the
+    /// strict-key fallback (the device tracks here carry no library ids either).</summary>
+    private static MediaItem LibraryTrack(string artist, string title) => new()
+    {
+        Id = $"lib|{artist}|{title}",
+        Kind = MediaKind.Music,
+        Artist = artist,
+        Title = title,
+    };
+
+    private static DeviceTrackIdentity.KeepSet Keep(params (string Artist, string Title)[] items)
+    {
+        var keep = new DeviceTrackIdentity.KeepSet();
+        foreach (var (artist, title) in items)
+        {
+            keep.Add(LibraryTrack(artist, title));
+        }
+        return keep;
+    }
 
     // -- Entire-library capacity preflight: the pure pieces --
 
@@ -48,9 +64,9 @@ public class SyncMirrorTests
         var untagged = new MediaItem { Id = "c", Kind = MediaKind.Music, FileSize = 3_000_000 };   // no key: always counted
         var sizeless = new MediaItem { Id = "d", Kind = MediaKind.Music, Artist = "X", Title = "Y" };
 
-        var deviceKeys = Keep(("Radiohead", "Creep"));
+        var device = new DeviceTrackIdentity.DeviceMatcher([Track("Radiohead", "Creep")]);
 
-        Assert.Equal(10_000_000, MainWindowViewModel.BytesMissingFromDevice([onDevice, missing, untagged, sizeless], deviceKeys));
+        Assert.Equal(10_000_000, MainWindowViewModel.BytesMissingFromDevice([onDevice, missing, untagged, sizeless], device));
     }
 
     [Fact]
@@ -83,7 +99,7 @@ public class SyncMirrorTests
     [Fact]
     public void Empty_keep_set_removes_every_tagged_track()
     {
-        var removals = MainWindowViewModel.MirrorRemovals([Track("A", "1"), Track("B", "2")], []);
+        var removals = MainWindowViewModel.MirrorRemovals([Track("A", "1"), Track("B", "2")], new DeviceTrackIdentity.KeepSet());
         Assert.Equal(2, removals.Count);
     }
 }

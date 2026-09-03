@@ -21,7 +21,7 @@ a type-100 position MHOD produced an *empty on-device song list* even though the
 From the repo root, build the oracle and run the whole test project against it:
 
 ```sh
-docker run --rm -v "$PWD:/src:ro" -w /work mcr.microsoft.com/dotnet/sdk:10.0 bash -lc '
+docker run --rm -e TZ=UTC -v "$PWD:/src:ro" -w /work mcr.microsoft.com/dotnet/sdk:10.0 bash -lc '
   apt-get update -qq && apt-get install -y -qq libgpod-dev gcc pkg-config >/dev/null
   cp -r /src/* /work/
   gcc OrgZ.Tests/oracle/gpod_dump.c -o /tmp/gpod_dump $(pkg-config --cflags --libs libgpod-1.0)
@@ -29,6 +29,11 @@ docker run --rm -v "$PWD:/src:ro" -w /work mcr.microsoft.com/dotnet/sdk:10.0 bas
     --filter FullyQualifiedName~ITunesDbWriterOracle --nologo
 '
 ```
+
+`TZ=UTC` matters: libgpod converts the database's timestamps into the *host's* time zone as it
+reads them, so `time_added` in a golden is whatever zone the dump ran in. The committed goldens are
+UTC (`1577836800` is the scenarios' 2020-01-01T00:00:00Z); a dump run in another zone fails on that
+one field and nothing else.
 
 ## Regenerate the golden after an intentional writer change
 
